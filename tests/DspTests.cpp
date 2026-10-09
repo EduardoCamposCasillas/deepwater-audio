@@ -23,6 +23,7 @@
 #include "synth/Effects.h"
 #include "synth/VoiceManager.h"
 #include "synth/WavetableBank.h"
+#include "gui/ModulationTargets.h"
 
 namespace
 {
@@ -3259,20 +3260,105 @@ void testEffectsCpuCost()
     measure ("Los cuatro a la vez", settings);
 }
 
+// --- Fase 9: arrastrar para modular (la lógica sin JUCE) ---------------------------------------------
+
+void testModulationTargets()
+{
+    std::printf ("Fase 9: perillas destino de la matriz\n");
+    using undertow::synth::ModDestination;
+    namespace gui = undertow::gui;
+    namespace id = undertow::params;
+
+    // Cada destino con perilla aparece una sola vez y cada perilla es destino de uno solo.
+    for (size_t i = 0; i < gui::modulationTargets.size(); ++i)
+        for (size_t j = i + 1; j < gui::modulationTargets.size(); ++j)
+        {
+            CHECK (gui::modulationTargets[i].destination != gui::modulationTargets[j].destination);
+            CHECK (std::string_view (gui::modulationTargets[i].parameterId) != gui::modulationTargets[j].parameterId);
+        }
+
+    // Todos los destinos tienen perilla, salvo None, Volume y Global Pitch (no hay una perilla que los represente).
+    for (int d = 0; d < undertow::synth::numModDestinations; ++d)
+    {
+        const auto destination = static_cast<ModDestination> (d);
+        const bool withoutKnob = destination == ModDestination::none || destination == ModDestination::volume
+                                 || destination == ModDestination::globalPitch;
+        CHECK (gui::targetForDestination (destination).has_value() != withoutKnob);
+    }
+
+    const auto cutoff = gui::targetForParameter (id::filter1Cutoff);
+    CHECK (cutoff.has_value() && cutoff->destination == ModDestination::filterCutoff);
+    // 10 octavas de modulación sobre una perilla de 9.97 octavas.
+    CHECK (cutoff.has_value() && std::abs (cutoff->scale * std::log2 (1000.0f) - 10.0f) < 1.0e-4f);
+
+    // Pitch se dibuja sobre Semi (24 semitonos de recorrido): 100 % = ±24 st = toda la perilla.
+    const auto pitch = gui::targetForParameter (id::oscillators[1].semitones);
+    CHECK (pitch.has_value() && pitch->destination == ModDestination::oscBPitch && pitch->scale == 1.0f);
+
+    CHECK (! gui::targetForParameter (id::master).has_value());
+    CHECK (! gui::targetForParameter (id::oscillators[0].fine).has_value());
+}
+
+void testModulationRings()
+{
+    std::printf ("Fase 9: anillos de modulación y reparto de rutas\n");
+    using undertow::synth::ModDestination;
+    using undertow::synth::ModSource;
+    namespace gui = undertow::gui;
+    const auto near = [] (float a, float b) { return std::abs (a - b) < 1.0e-6f; };
+
+    // Unipolar (envolvente): de la perilla hacia el lado del amount.
+    auto r = gui::modulationRange (0.3f, 0.5f, 1.0f, false);
+    CHECK (near (r.from, 0.3f) && near (r.to, 0.8f));
+    r = gui::modulationRange (0.3f, -0.2f, 1.0f, false);
+    CHECK (near (r.from, 0.1f) && near (r.to, 0.3f));
+    // Bipolar (LFO): a los dos lados, también con amount negativo (el LFO invertido recorre lo mismo).
+    r = gui::modulationRange (0.5f, -0.25f, 1.0f, true);
+    CHECK (near (r.from, 0.25f) && near (r.to, 0.75f));
+    // Se recorta a la perilla.
+    r = gui::modulationRange (0.9f, 1.0f, 1.0f, true);
+    CHECK (near (r.from, 0.0f) && near (r.to, 1.0f));
+
+    CHECK (gui::isBipolar (ModSource::lfo1) && gui::isBipolar (ModSource::lfo2) && gui::isBipolar (ModSource::key));
+    CHECK (! gui::isBipolar (ModSource::env1) && ! gui::isBipolar (ModSource::velocity) && ! gui::isBipolar (ModSource::modWheel));
+
+    gui::ModSlots slots {};
+    // Matriz vacía: la primera ruta.
+    CHECK (gui::findSlotFor (slots, ModSource::lfo1, ModDestination::filterCutoff) == 0);
+
+    slots[0] = { ModSource::lfo1, ModDestination::filterCutoff, 0.4f };
+    slots[1] = { ModSource::none, ModDestination::oscAPosition, 0.0f }; // a medio configurar en la matriz
+    // La misma conexión otra vez: la ruta que ya existe (no se duplica).
+    CHECK (gui::findSlotFor (slots, ModSource::lfo1, ModDestination::filterCutoff) == 0);
+    // Una conexión nueva respeta la ruta a medio configurar y usa la primera vacía.
+    CHECK (gui::findSlotFor (slots, ModSource::env2, ModDestination::filterCutoff) == 2);
+
+    for (size_t s = 2; s < slots.size(); ++s)
+        slots[s] = { ModSource::env2, static_cast<ModDestination> (s), 0.1f };
+    // Sin rutas vacías: la de medio configurar; y si tampoco hay, −1.
+    CHECK (gui::findSlotFor (slots, ModSource::velocity, ModDestination::volume) == 1);
+    slots[1].source = ModSource::key;
+    CHECK (gui::findSlotFor (slots, ModSource::velocity, ModDestination::volume) == -1);
+
+    const auto routes = gui::routesTo (slots, ModDestination::filterCutoff);
+    CHECK (routes.size() == 2 && routes[0] == 0 && routes[1] == 3); // ruta 3 = env2 → destino 3 (Filter Cutoff)
+}
+
 } // namespace
 
 
 int main (int argc, char** argv)
 {
-    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 (solo los tests de esa fase, para iterar rápido).
-    bool onlyPhase7 = false, onlyPhase8 = false;
+    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 (solo los tests de esa fase).
+    bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false;
     for (int i = 1; i < argc; ++i)
     {
         verbose = verbose || std::string_view (argv[i]) == "--verbose";
         onlyPhase7 = onlyPhase7 || std::string_view (argv[i]) == "--fase7";
         onlyPhase8 = onlyPhase8 || std::string_view (argv[i]) == "--fase8";
+        onlyPhase9 = onlyPhase9 || std::string_view (argv[i]) == "--fase9";
     }
-    const bool all = ! onlyPhase7 && ! onlyPhase8;
+    const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9;
     if (all)
     {
         testSegmentTimesAreExactAtEverySampleRate();
@@ -3369,6 +3455,12 @@ int main (int argc, char** argv)
         testReverb();
         testEffectsChain();
         testEffectsCpuCost();
+    }
+
+    if (all || onlyPhase9)
+    {
+        testModulationTargets();
+        testModulationRings();
     }
 
     if (failures == 0)

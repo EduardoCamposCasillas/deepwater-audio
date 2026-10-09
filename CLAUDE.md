@@ -99,7 +99,7 @@ Source/
       ring mod, y modos de warp (bend, sync, PWM, mirror, quantize/bitcrush). Todo modulable desde la matriz
       y con control de aliasing (oversampling o técnicas band-limited donde haga falta).
 - [x] Fase 8 — Efectos internos: distorsión (con oversampling), chorus, delay, reverb.
-- [ ] Fase 9 — GUI profesional: visualización del wavetable (mostrando el warp aplicado), arrastrar para modular, escalable.
+- [x] Fase 9 — GUI profesional: visualización del wavetable (mostrando el warp aplicado), arrastrar para modular, escalable.
 - [ ] Fase 10 — Presets: guardado/carga, navegador, librería inicial de sonidos.
 - [ ] Fase 11 — Pulido: optimización de CPU (SIMD), pluginval estricto, comparación contra referencias.
 
@@ -312,4 +312,33 @@ Fase 8 COMPLETADA (2026-09-25). Probada por el usuario en FL Studio: suena bien.
   en Fase 11). Los efectos no son destinos de la matriz (es por voz). La distorsión añade ~1 ms de retardo (no se
   informa como latencia al host). Orden de efectos fijo.
 
-Siguiente: Fase 9 (GUI profesional), pendiente de que el usuario la inicie.
+Fase 9 COMPLETADA (2026-10-08). Probada por el usuario en FL Studio. El audio no cambia.
+- Escalado: todo vive en `Content` (858 × 666 px de diseño, `DragAndDropContainer`) dibujado con
+  `AffineTransform::scale (zoom)`. Ventana redimensionable con proporción fija, zoom 70–200 % (menú en la cabecera o
+  esquina). Zoom inicial: propiedad `uiZoom` del estado (se guarda con el proyecto) → preferencia en
+  `%APPDATA%\Undertow\Undertow Synth.settings` → el mayor ≤ 100 % que cabe en pantalla (en la del usuario, 85 %).
+  OJO: `setResizeLimits` redimensiona la ventana: el zoom se calcula antes y `rememberZoom` evita guardar ese tamaño.
+- `gui/Theme.h` (paleta y un color por fuente de modulación) y `gui/UndertowLookAndFeel.h` (perillas con arco de
+  valor —desde el centro si el rango es bipolar—, grupos como paneles, interruptores, combos, etiquetas sin recuadro;
+  `upperCase` propio porque `String::toUpperCase` deja la "ó" en minúscula en Windows).
+- Arrastrar para modular: `gui/ModSourceBar.h` (9 fichas arrastrables + línea de mensajes), `gui/ModKnob.h` (Slider +
+  DragAndDropTarget: anillo por ruta en el color de la fuente, punto blanco en vivo, arrastrar el anillo = amount con
+  gesto de automatización, Shift fino, clic derecho = elegir/quitar rutas + menú del host, doble clic = valor por
+  defecto), `gui/ModulationRouter.h` (escribe las rutas de la matriz con begin/end gesture; orden amount → destino →
+  fuente para que el audio nunca vea una ruta a medias) y `gui/ModulationTargets.h` (sin JUCE: perilla ↔ destino,
+  escala del anillo —Cutoff 10/9.97, Pitch sobre Semi—, fuentes bipolares = LFO y Key, `findSlotFor`: la misma ruta si
+  ya existe → ruta vacía → a medio configurar → −1). Amount inicial al soltar: 25 %. Volume y Global Pitch no tienen
+  perilla (solo desde la matriz). Las pestañas se abren solas al pasar por encima arrastrando una fuente.
+- `gui/WavetableView.h` (reemplaza a WavetableDisplay y WarpDisplay): vista 3D (hasta 32 frames apilados + el frame que
+  suena, relleno) o 2D (original gris + deformada naranja), con el warp aplicado (`dsp::warpedValue`) y la modulación en
+  vivo; arrastrar = Position. Osciladores en 3D, Warp y FM en 2D.
+- Procesador: `getModulationDisplay (destino)` = suma de la matriz en la nota más reciente (`VoiceManager::
+  getNewestPlayingVoice`), 20 atómicos por bloque; nullopt sin notas.
+- Tests (2 nuevos; `UndertowTests --fase9`): tabla de destinos (única, todos con perilla salvo None/Volume/Global
+  Pitch, escalas), rangos del anillo uni/bipolares con recorte, reparto de rutas. Todos los tests pasan.
+- Release con 0 warnings; pluginval strictness 10 (con tests de editor): SUCCESS. Revisado con capturas del Standalone
+  (5 páginas, arrastre LFO 1 → Position, ajuste del anillo, menú de zoom).
+- Pendiente para más adelante: modular el amount de una ruta con otra fuente, macros, ver los LFO/envolventes como
+  fuentes arrastrables también desde sus paneles, accesibilidad con teclado del anillo.
+
+Siguiente: Fase 10 (presets), pendiente de que el usuario la inicie.

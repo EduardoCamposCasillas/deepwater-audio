@@ -55,6 +55,9 @@ public:
     [[nodiscard]] int getNumActiveVoices() const noexcept;
     [[nodiscard]] const Voice& getVoice (int index) const noexcept { return voices[static_cast<size_t> (index)]; }
 
+    // La nota más reciente que suena (la que muestra la GUI), o nullptr si no suena ninguna.
+    [[nodiscard]] const Voice* getNewestPlayingVoice() const noexcept;
+
     // Fase del LFO para dibujarla en la GUI: la de la nota más reciente que suena, o la del reloj común.
     [[nodiscard]] double getLfoDisplayPhase (int lfo) const noexcept;
     // Ciclos por muestra del LFO con los ajustes y el tempo actuales.

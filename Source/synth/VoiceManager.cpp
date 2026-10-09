@@ -226,14 +226,18 @@ void VoiceManager::render (float* left, float* right, int numSamples) noexcept
         freeClocks[l].advance (lfoIncrements[l], numSamples);
 }
 
-double VoiceManager::getLfoDisplayPhase (int lfo) const noexcept
+const Voice* VoiceManager::getNewestPlayingVoice() const noexcept
 {
     const Voice* newest = nullptr;
     for (const auto& voice : voices)
         if (voice.isPlaying() && (newest == nullptr || voice.getNoteOrder() > newest->getNoteOrder()))
             newest = &voice;
+    return newest;
+}
 
-    if (newest != nullptr)
+double VoiceManager::getLfoDisplayPhase (int lfo) const noexcept
+{
+    if (const Voice* newest = getNewestPlayingVoice())
         return newest->getLfoPhase (lfo);
 
     const auto l = static_cast<size_t> (lfo);

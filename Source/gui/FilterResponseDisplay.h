@@ -4,6 +4,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "gui/Theme.h"
+
 #include "dsp/Filter.h"
 
 namespace undertow::gui
@@ -29,7 +31,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto bounds = getLocalBounds().toFloat();
-        g.setColour (juce::Colour (0xff0b0e11));
+        g.setColour (theme::display);
         g.fillRoundedRectangle (bounds, 6.0f);
 
         const auto area = bounds.reduced (8.0f, 10.0f);
@@ -73,7 +75,7 @@ public:
         }
 
         // Filtro apagado: línea plana y tenue (todo pasa sin cambios).
-        g.setColour (juce::Colour (0xffffb74d).withAlpha (enabled ? 1.0f : 0.3f));
+        g.setColour (theme::warm.withAlpha (enabled ? 1.0f : 0.3f));
         g.strokePath (path, juce::PathStrokeType (2.0f));
     }
 

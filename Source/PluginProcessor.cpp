@@ -753,6 +753,14 @@ void UndertowAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     for (size_t l = 0; l < lfoDisplayPhases.size(); ++l)
         lfoDisplayPhases[l].store (static_cast<float> (voiceManager.getLfoDisplayPhase (static_cast<int> (l))),
                                    std::memory_order_relaxed);
+
+    // Para la GUI: lo que la matriz suma a cada destino en la nota más reciente (20 atómicos, sin locks).
+    const auto* newest = voiceManager.getNewestPlayingVoice();
+    if (newest != nullptr)
+        for (size_t d = 0; d < modulationDisplay.size(); ++d)
+            modulationDisplay[d].store (newest->getModulation (static_cast<undertow::synth::ModDestination> (d)),
+                                        std::memory_order_relaxed);
+    modulationDisplayActive.store (newest != nullptr, std::memory_order_relaxed);
 }
 
 void UndertowAudioProcessor::handleMidiMessage (const juce::MidiMessage& message) noexcept

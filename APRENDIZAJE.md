@@ -493,7 +493,7 @@ Inténtalo primero; las pistas vendrán después.
 | **LFO → Cutoff** | El brillo sube y baja cíclicamente: lento = "wah" que respira; 1/8 o 1/16 = wobble de dubstep. | Los agudos aparecen y desaparecen al ritmo del LFO. |
 | **LFO → Pitch** (1–4 %) | Vibrato: como un cantante o un violinista. Mucho amount = sirena. | En el EQ, cada armónico se mueve de lado a lado. |
 | **LFO → Volume** | Trémolo (seno) o "trance gate" (cuadrado, sincronizado): el sonido se corta en ritmo. | En Wave Candy el volumen late como un corazón. |
-| **LFO → Position** | El timbre cambia solo: con *Vowels*, el sinte "habla" (a-e-i-o-u). | La forma de onda del visor no cambia (muestra la perilla), pero en el osciloscopio sí. |
+| **LFO → Position** | El timbre cambia solo: con *Vowels*, el sinte "habla" (a-e-i-o-u). | La forma de onda del visor no cambiaba (mostraba la perilla; desde la Fase 9 sí sigue a la nota), pero en el osciloscopio sí. |
 | **Forma del LFO** | Sine: suave. Triangle: parejo. Saw: rampa y salto (sube-sube-¡cae!). Square: dos estados. S&H: saltos al azar. | La curva azul del visor y el punto blanco que la recorre. |
 | **Rate / Division** | Más rápido = más nervioso. Sync hace que el movimiento sea parte del ritmo. | El punto blanco del visor va más rápido. |
 | **Free / Retrigger** | Retrigger: cada nota empieza su ciclo igual. Free: todas las notas pulsan juntas, pegadas al compás. | Con Retrigger el punto vuelve al inicio con cada nota. |
@@ -1216,3 +1216,164 @@ Inténtalo primero; las pistas vendrán después.
 
 ### Retos completados
 - [ ] Reto Fase 8 — lead de synthwave
+
+---
+
+## Fase 9 — GUI profesional: ver la modulación y arrastrar para modular
+
+### Conceptos aprendidos
+**Esta fase no añade sonidos nuevos: añade ojos.** La matriz de la Fase 5 ya podía hacer todo esto, pero había que
+pensarlo en abstracto ("LFO 1 → Filter Cutoff, 30 %"). Ahora la modulación **se ve** en la perilla que mueve.
+Diseñar sonido es, en gran parte, decidir **qué se mueve, cuánto y con qué forma**. Cuando el movimiento se ve, se
+aprende muy rápido a relacionar lo que se oye con lo que lo causa. Serum y Vital se hicieron famosos por esto.
+
+**Arrastrar para modular = rellenar una ruta de la matriz.** Al soltar una fuente (barra *MOD* de abajo) sobre una
+perilla, el plugin busca una ruta libre de las 8 y la configura: fuente, destino y un amount inicial del 25 %. No hay un
+sistema aparte: la pestaña *Modulación* muestra la misma ruta, se guarda en el proyecto y se puede automatizar. Soltar
+la misma fuente dos veces sobre la misma perilla no duplica la ruta. Si las 8 están ocupadas, la barra lo avisa.
+
+**El anillo de color = el recorrido de la modulación.** Alrededor de la perilla, el arco de color va desde el valor de
+la perilla hasta donde la empuja la fuente con amount al máximo. Aquí entra una idea clave:
+- **Fuentes unipolares** (Env 1/2/3, Velocity, Mod Wheel, Aftertouch) van de 0 a 1. Solo **empujan hacia un lado**: con
+  amount positivo, por encima de la perilla; con amount negativo, por debajo. El anillo sale de la perilla hacia un lado.
+- **Fuentes bipolares** (LFO 1/2, Key) van de −1 a +1. **Oscilan alrededor** del valor de la perilla, por encima y por
+  debajo. El anillo se abre a los dos lados. Un amount negativo invierte el LFO, pero recorre el mismo tramo.
+
+Por eso, con un LFO en Cutoff, la perilla es el **centro** del vaivén; con una envolvente, la perilla es el **punto de
+partida** (el reposo) y el amount dice hasta dónde llega el golpe. Mucha gente se confunde aquí: si una envolvente
+"no hace nada", casi siempre la perilla ya está al máximo y no le queda sitio para subir.
+
+**El punto blanco = el valor real, en vivo.** Mientras suena una nota, un punto recorre el anillo: es el valor que el
+destino tiene **ahora** en la nota más reciente (perilla + todas sus rutas). Es la forma más directa de ver una
+envolvente: con Env 2 en Cutoff, el punto salta y vuelve a caer en cada nota.
+
+**El visor 3D del wavetable.** Una wavetable son muchos ciclos de onda (frames) uno detrás de otro. El visor los apila
+en profundidad: el frame 1 delante y el último al fondo. El frame que suena se resalta, con el **warp ya aplicado**:
+lo que ves es la forma exacta que lee el oscilador. Si Position o el amount del warp están modulados, el visor sigue a
+la nota: con un LFO en Position verás la onda "viajar" por la tabla. Clic en **3D / 2D** cambia la vista; en 2D se ve
+la onda original en gris y la deformada en naranja. Arrastrar sobre el visor mueve Position.
+
+**Escalado vectorial.** Toda la interfaz se dibuja con formas (líneas, arcos, texto), no con imágenes. Se diseña una
+sola vez a un tamaño fijo y se dibuja con una **transformación de escala**. Por eso el zoom de 70 a 200 % se ve nítido
+y no hay que rehacer el diseño para cada pantalla. Al abrir el plugin por primera vez se elige el mayor zoom que cabe
+en tu pantalla; después recuerda el que uses, en el proyecto y para las instancias nuevas.
+
+### Qué hace cada control al sonido
+| Control | Qué hace | Qué se ve |
+|---|---|---|
+| **Ficha de la barra MOD** (ENV 1…AFTERT.) | Se arrastra sobre una perilla para conectarla. El número de la ficha = cuántas rutas usa esa fuente. | Mientras arrastras, las perillas que aceptan modulación muestran un círculo tenue; la que está debajo, en el color de la fuente. |
+| **Anillo de color** | El tramo que recorre la modulación. Arrástralo **hacia arriba o a la derecha** para subir el amount (abajo o a la izquierda para bajarlo); con **Shift**, ajuste fino. | Mientras arrastras, el valor del amount reemplaza al número de la perilla. |
+| **Punto blanco** | — (solo informa) | El valor modulado en vivo de la nota más reciente. |
+| **Clic derecho en una perilla modulada** | Elegir qué ruta ajusta el anillo (si hay varias), quitar una ruta o todas. También las opciones del host (en FL, p. ej., crear un clip de automatización). | La ruta seleccionada se dibuja más gruesa y brillante. |
+| **Doble clic en una perilla** | La devuelve a su valor por defecto. | — |
+| **Visor 3D / 2D** | Arrastrar = mover Position. Clic en *3D / 2D* = cambiar la vista. | El frame que suena, con el warp aplicado y la modulación en vivo. |
+| **Pasar por una pestaña arrastrando una fuente** | La pestaña se abre sola: puedes llevar un LFO de la barra a una perilla de *Warp y FM* o del *Filtro*. | — |
+| **Zoom** (botón "85 %" arriba a la derecha, o la esquina inferior derecha) | Tamaño de la ventana, de 70 a 200 %. | — |
+
+Perillas que aceptan modulación: **Position, Semi (= Pitch), Level y Detune** de Osc A y B; **Warp Amount** y **FM/RM
+Amount**; **Level** del sub y del ruido; **Cutoff, Resonance y Drive** del filtro. *Volume* y *Global Pitch* no tienen
+perilla propia: se siguen conectando desde la pestaña *Modulación*.
+
+### Ejercicio de escucha guiado
+Montaje de siempre: **Fruity Parametric EQ 2** (espectro) y **Wave Candy** (osciloscopio) en el canal del Mixer.
+
+1. **Ver un LFO.** Osc A: tabla *Vowels*, Position **0 %**. LFO 1: *Sine*, Retrigger, Sync, **1 bar**. Arrastra la
+   ficha **LFO 1** sobre la perilla **Position** de Osc A. Aparece un anillo cian del 0 % al 25 %. Mantén **C4 (131 Hz)**:
+   el punto blanco va y viene, el visor 3D recorre las primeras vocales y se oye "a… e… a…".
+2. **Profundidad.** Arrastra el anillo hacia arriba hasta que marque **+100 %**: ahora recorre toda la tabla
+   (a-e-i-o-u). Fíjate en que, con Position en 0 %, el LFO pasa la mitad del tiempo "pegado" en 0 % (el anillo se recorta
+   por abajo). Sube **Position a 50 %** y baja el anillo a **+50 %**: el vaivén queda centrado y recorre toda la tabla
+   sin quedarse pegado. Esta es la diferencia entre la perilla (el centro) y el amount (el radio).
+3. **Unipolar vs bipolar.** Quita la ruta (clic derecho en Position → *Quitar LFO 1*). Enciende el filtro: Low Pass
+   24 dB, Cutoff **400 Hz**. Env 2: Attack 1 ms, Decay **400 ms**, Sustain 0 %. Arrastra **ENV 2** al **Cutoff**: el
+   anillo sale **solo hacia arriba**. Toca notas cortas: el punto salta arriba y cae, y se oye un "piu". Ahora arrastra
+   también **LFO 2** (Sine, 1/4) al Cutoff: su anillo se abre **a los dos lados**. Con clic derecho elige qué ruta
+   ajustas; el punto blanco muestra la suma de las dos.
+4. **Envolvente sin sitio.** Con Env 2 → Cutoff al +40 %, sube el Cutoff a **18 kHz**. La envolvente casi no se oye: no
+   le queda recorrido por encima (el anillo es diminuto). Baja el Cutoff a 300 Hz y vuelve a sonar. Regla práctica: con
+   una envolvente, la perilla marca el **reposo**.
+5. **Warp en el visor.** Osc A *Basic Shapes* **0 %** (seno). Pestaña *Warp y FM*: Warp **Sync**, Amount **0 %**.
+   Arrastra **ENV 2** sobre el **Amount del warp** y sube el anillo a **+60 %**. En la vista 2D verás el seno
+   "comprimirse" en cada nota y volver; en la vista 3D de *Osciladores*, el frame resaltado hace lo mismo. Es el clásico
+   "barrido de sync" de los leads de los 80, ahora visible.
+6. **Llevar una fuente a otra página.** Desde *Osciladores*, arrastra **LFO 1** y pásalo por encima de la pestaña
+   *Filtro y Amp* sin soltar: la página cambia sola y puedes soltarlo en Resonance.
+7. **Zoom.** Prueba 70 %, 100 % y 150 % (botón de arriba a la derecha) y arrastra la esquina: todo debe verse nítido,
+   sin textos cortados. Cierra y vuelve a abrir la ventana: debe recordar el zoom.
+8. **Artefactos a buscar.**
+   - Arrastrar el anillo con notas sonando: el cambio debe ser **suave**, sin clics ni "escalones" (el amount se
+     suaviza 5 ms en el audio).
+   - Quitar una ruta con amount alto mientras suena: sin clic (la ruta se apaga en 5 ms).
+   - Todo lo que hagas arrastrando debe aparecer igual en la pestaña *Modulación* (y al revés: si cambias una ruta allí,
+     el anillo cambia).
+   - Guarda el proyecto de FL, ciérralo y ábrelo: las rutas y el zoom deben seguir ahí.
+   - Un proyecto de la Fase 8 debe sonar **exactamente igual**: esta fase no cambia el audio.
+
+### Recetas
+**1. Pad que habla (ambient / chill, 80 BPM)** — todo conectado arrastrando
+1. Osc A: *Vowels*, Position **50 %**, Unison **4**, Detune **20 %**, Width **80 %**.
+2. Filtro **On**, Low Pass **12 dB**, Cutoff **1.5 kHz**, Resonance **20 %**, Key Track **30 %**.
+3. Env 1: Attack **800 ms**, Decay 1 s, Sustain **80 %**, Release **2 s**. Voices 8.
+4. LFO 1: *Triangle*, **Free**, Sync, **2 bars**. Arrástralo a **Position** y deja el anillo en **+45 %**.
+5. LFO 2: *Sine*, Free, Sync, **4 bars**. Arrástralo a **Cutoff**, anillo **+8 %** (menos de una octava hacia cada lado).
+6. Arrastra **VEL** a **Cutoff**, anillo **+15 %**: las notas tocadas fuerte "abren" un poco más.
+7. Chorus On (Rate 0.4 Hz, Depth 40 %, Mix 40 %) y Reverb On (Size 80 %, Decay **6 s**, Damping 60 %, Mix 35 %).
+8. Piano Roll: acordes de 4 compases (**Dm9 – Bbmaj7**) entre C4 y C6.
+9. *Por qué funciona:*
+   - El LFO 1 en Free recorre las vocales **lento y sin reiniciarse**: cada acorde "dice" algo distinto.
+   - LFO 1 y LFO 2 tienen periodos distintos (2 y 4 compases): el movimiento nunca se repite exactamente igual.
+   - Position al 50 % + anillo de 45 % = el LFO recorre casi toda la tabla sin quedarse pegado en un extremo.
+   - La velocity en el cutoff da expresión sin cambiar el volumen.
+
+**2. Wobble bass (dubstep, 140 BPM)**
+1. Osc A: *Basic Shapes* **67 %** (sierra), Unison **3**, Detune **12 %**, Width **30 %**. Sub **On**, *Sine*,
+   Octave −1, Level **70 %**. Voices **1**.
+2. Filtro **On**, Low Pass **24 dB**, Cutoff **250 Hz**, Resonance **45 %**, Drive **30 %**.
+3. LFO 1: *Sine*, **Retrigger**, Sync, **1/8**. Arrástralo a **Cutoff**, anillo **+35 %**.
+4. Pestaña *Warp y FM*: Osc A Warp **Bend +**, Amount **10 %**. Arrastra **LFO 1** también al **Amount del warp**,
+   anillo **+40 %**: el "wob" cambia de forma además de abrirse.
+5. Arrastra **M.WHEEL** al **Cutoff**, anillo **+25 %**: con la rueda (o una automatización de CC 1) el bajo se abre más
+   en los momentos fuertes.
+6. Distorsión On: **Soft Clip**, Drive **45 %**, Tone **60 %**, Mix **80 %**.
+7. Piano Roll: notas largas en **F3 (87 Hz)** y **G#3 (104 Hz)**. Cambia LFO 1 a **1/16** o **1/8 T** en algunos compases
+   (automatiza *LFO 1 Division* en FL) para variar el ritmo del wobble.
+8. *Por qué funciona:*
+   - Retrigger: el wobble empieza igual en cada nota, siempre "a tempo".
+   - El mismo LFO mueve el cutoff **y** la forma de onda: el movimiento es de timbre, no solo de brillo.
+   - El sub no pasa por el wobble (es mono y grave): el bajo mantiene el peso aunque el filtro se cierre.
+   - Mira el punto blanco del Cutoff: la velocidad del vaivén es exactamente una corchea.
+
+### Reto sin receta
+**Un bajo "reese" de drum & bass** (referencias: Ed Rush & Optical – "Wormhole", Noisia, Phace).
+
+Tu reto, a **174 BPM**: una nota larga de 2 compases en **E3 (82 Hz)** donde:
+- el bajo suene grueso y "ronroneante", con un movimiento lento que no sea un wobble rítmico,
+- ese movimiento evolucione durante los 2 compases (que el compás 2 no suene igual al 1),
+- el grave se mantenga firme y centrado (en mono no debe desaparecer),
+- y al menos **tres** rutas estén conectadas arrastrando fuentes (comprueba en el visor y en los anillos qué se mueve).
+
+Pista para empezar: el "reese" clásico nace de dos ondas casi iguales que se desafinan entre sí y "laten".
+Inténtalo primero; las pistas vendrán después.
+
+### Vocabulario
+- **Fuente / destino de modulación.** Lo que se mueve solo (LFO, envolvente) y el parámetro al que mueve. *Ejemplo:* el
+  "wah" automático de un bajo de funk = una envolvente (fuente) moviendo el cutoff (destino).
+- **Profundidad (depth / amount).** Cuánto mueve la fuente a su destino; en Undertow, el tamaño del anillo. *Ejemplo:*
+  un vibrato de cantante es un LFO de poca profundidad en el pitch; una sirena, uno de mucha.
+- **Unipolar.** Fuente que va de 0 a 1 y solo empuja hacia un lado. *Ejemplo:* el "piu" de un pluck (la envolvente abre
+  el filtro y vuelve al reposo).
+- **Bipolar.** Fuente que va de −1 a +1 y oscila alrededor del valor de la perilla. *Ejemplo:* el vaivén del filtro en
+  un wobble de dubstep (Skrillex, Excision).
+- **Arrastrar para modular (drag-and-drop modulation).** Conectar fuentes soltándolas sobre los controles. *Ejemplo:* la
+  forma de trabajar de Serum, Vital y Bitwig; viene de los cables de los sintes modulares.
+- **Barrido de wavetable (wavetable scanning).** Recorrer los frames de una tabla con Position, a mano o con modulación.
+  *Ejemplo:* los pads "que evolucionan" del PPG Wave (Tangerine Dream, Depeche Mode).
+- **Formantes.** Las "montañas" del espectro que hacen que una voz suene a "a" o a "u". *Ejemplo:* la tabla *Vowels*;
+  la voz robótica de un talk box o de un vocoder (Daft Punk – "Around the World").
+- **Wobble.** Un LFO sincronizado al tempo abriendo y cerrando el filtro de un bajo. *Ejemplo:* el dubstep de 2010
+  (Rusko, Caspa, Skrillex).
+- **Reese.** Bajo de dos ondas desafinadas que laten entre sí. *Ejemplo:* Kevin Saunderson (como Reese) – "Just Want
+  Another Chance" (1988), de donde viene el nombre; omnipresente en drum & bass.
+
+### Retos completados
+- [ ] Reto Fase 9 — bajo reese

@@ -2,21 +2,30 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "gui/FilterResponseDisplay.h"
 #include "gui/LfoDisplay.h"
-#include "gui/WarpDisplay.h"
-#include "gui/WavetableDisplay.h"
+#include "gui/ModKnob.h"
+#include "gui/ModSourceBar.h"
+#include "gui/ModulationRouter.h"
+#include "gui/UndertowLookAndFeel.h"
+#include "gui/WavetableView.h"
 #include "synth/Modulation.h"
 #include "synth/SourceSettings.h"
 
 class UndertowAudioProcessor;
 
-// GUI funcional: osciladores, warp y FM, sub, ruido, filtro, envolventes, LFOs, matriz de modulación, voz y efectos.
-// La GUI profesional (escalable, arrastrar para modular) llega en la Fase 9.
+// Fase 9: GUI escalable con aspecto propio, visor 3D del wavetable con el warp aplicado y "arrastrar para modular".
+//
+// Escalado: toda la interfaz vive en 'content', que siempre mide lo mismo (baseWidth × baseHeight) y se dibuja con
+// una transformación de escala. Así el diseño se hace una sola vez en píxeles fijos y cualquier zoom (70–200 %) se ve
+// nítido, porque todo se dibuja con vectores. El zoom se guarda en el proyecto y como preferencia para instancias nuevas.
 class UndertowAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -31,6 +40,11 @@ private:
 
     void timerCallback() override;
     void showPage (Page page);
+    void layoutContent();
+    void setZoom (float zoom);
+    void showZoomMenu();
+    void showMessage (const juce::String& message);
+    [[nodiscard]] float initialZoom() const;
 
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
@@ -38,30 +52,82 @@ private:
 
     struct Knob
     {
-        juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
+        undertow::gui::ModKnob slider;
         juce::Label label;
         std::unique_ptr<SliderAttachment> attachment;
     };
 
-    // Crea la perilla, su etiqueta y su attachment con el parámetro.
+    // Crea la perilla, su etiqueta y su attachment con el parámetro. Si el parámetro es un destino de la matriz,
+    // la perilla acepta fuentes de modulación arrastradas.
     void setUpKnob (Knob& knob, juce::Component& page, const char* parameterId, const juce::String& name, int width);
     // Rellena las opciones desde el propio parámetro (así la GUI nunca se desincroniza de la lista guardada).
     void setUpComboBox (juce::ComboBox& box, juce::Component& page, const char* parameterId,
                         std::unique_ptr<ComboBoxAttachment>& attachment);
     static void layoutKnob (Knob& knob, juce::Rectangle<int> column);
+    static void styleCaption (juce::Label& label); // título pequeño sobre perillas y selectores
+
+    // El contenedor escalado. Es también el "contenedor de arrastre": las fuentes se arrastran dentro de él.
+    class Content final : public juce::Component, public juce::DragAndDropContainer
+    {
+    public:
+        std::function<void (std::optional<undertow::synth::ModSource>)> onModulationDrag;
+        void paint (juce::Graphics&) override;
+
+    private:
+        void dragOperationStarted (const juce::DragAndDropTarget::SourceDetails& details) override
+        {
+            if (onModulationDrag)
+                onModulationDrag (undertow::gui::ModKnob::sourceFromDescription (details.description));
+        }
+        void dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&) override
+        {
+            if (onModulationDrag)
+                onModulationDrag (std::nullopt);
+        }
+    };
+
+    // Pestaña que se abre sola al pasar por encima arrastrando una fuente (para soltarla en otra página).
+    class TabButton final : public juce::TextButton, public juce::DragAndDropTarget
+    {
+    public:
+        using juce::TextButton::TextButton;
+        bool isInterestedInDragSource (const SourceDetails& details) override
+        {
+            return undertow::gui::ModKnob::sourceFromDescription (details.description).has_value();
+        }
+        void itemDragEnter (const SourceDetails&) override
+        {
+            if (! getToggleState())
+                triggerClick();
+        }
+        void itemDropped (const SourceDetails&) override {}
+    };
 
     static constexpr size_t numEnvelopeKnobs = 4;
     static constexpr size_t numVoiceKnobs = 3;
 
     UndertowAudioProcessor& processor;
 
-    // Cuatro páginas del mismo tamaño que la ventana de la Fase 4 (cabe en pantallas pequeñas con escalado).
+    // Va primero: los componentes que lo usan se destruyen antes que él.
+    undertow::gui::UndertowLookAndFeel lookAndFeel;
+    undertow::gui::ModulationRouter router;
+    std::unique_ptr<juce::PropertiesFile> settings; // preferencias del usuario (zoom para instancias nuevas)
+    float zoom = 1.0f;
+    bool rememberZoom = false; // hasta terminar el constructor los cambios de tamaño no son una elección del usuario
+
+    Content content;
+    juce::TooltipWindow tooltipWindow { &content, 700 };
+
     juce::Component oscillatorPage, warpPage, soundPage, modulationPage, effectsPage;
-    juce::TextButton oscillatorTab { "Osciladores" };
-    juce::TextButton warpTab { "Warp y FM" };
-    juce::TextButton soundTab { "Filtro y Amp" };
-    juce::TextButton modulationTab;
-    juce::TextButton effectsTab { "Efectos" };
+    TabButton oscillatorTab { "Osciladores" };
+    TabButton warpTab { "Warp y FM" };
+    TabButton soundTab { "Filtro y Amp" };
+    TabButton modulationTab;
+    TabButton effectsTab { "Efectos" };
+    juce::TextButton zoomButton;
+    undertow::gui::ModSourceBar modBar;
+    std::vector<undertow::gui::ModKnob*> modulationKnobs; // las que son destino de la matriz
+    juce::uint32 messageExpiry = 0;
     std::array<Knob, numEnvelopeKnobs + numVoiceKnobs> knobs;
 
     // --- Fase 6: osciladores A y B, sub y ruido ---
@@ -75,7 +141,8 @@ private:
         juce::ComboBox tableBox;
         std::unique_ptr<ComboBoxAttachment> tableAttachment;
         std::array<Knob, numOscillatorKnobs> knobs;
-        undertow::gui::WavetableDisplay display;
+        undertow::gui::WavetableView view { undertow::gui::WavetableView::View::stack };
+        std::atomic<float>* onParam = nullptr;
         std::atomic<float>* tableParam = nullptr;
         std::atomic<float>* positionParam = nullptr;
     };
@@ -85,7 +152,7 @@ private:
     struct WarpControls
     {
         juce::GroupComponent group;
-        undertow::gui::WarpDisplay display;
+        undertow::gui::WavetableView view { undertow::gui::WavetableView::View::single };
         juce::Label warpLabel, fmLabel;
         juce::ComboBox warpBox, fmBox;
         std::unique_ptr<ComboBoxAttachment> warpAttachment, fmAttachment;

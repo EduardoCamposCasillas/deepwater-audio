@@ -6,6 +6,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "gui/Theme.h"
+
 #include "dsp/Lfo.h"
 
 namespace undertow::gui
@@ -30,7 +32,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto bounds = getLocalBounds().toFloat();
-        g.setColour (juce::Colour (0xff0b0e11));
+        g.setColour (theme::display);
         g.fillRoundedRectangle (bounds, 6.0f);
 
         const auto area = bounds.reduced (10.0f, 12.0f);
@@ -54,7 +56,7 @@ public:
                 path.lineTo (x, y);
         }
 
-        const auto colour = juce::Colour (0xff4dd0e1);
+        const auto colour = theme::accent;
         g.setColour (colour);
         g.strokePath (path, juce::PathStrokeType (2.0f));
 

@@ -14,22 +14,64 @@ constexpr int headerHeight = 32;
 constexpr int lfoOptionsWidth = 130;
 constexpr int lfoRateWidth = 84;
 constexpr int matrixRowHeight = 30;
-constexpr int oscillatorColumnWidth = 150; // On, tabla y visor de la forma de onda
-constexpr int oscillatorKnobWidth = 72;    // 9 perillas por oscilador: un poco más estrechas que las demás
+constexpr int oscillatorColumnWidth = 150; // On (y forma) del sub y del ruido
+constexpr int oscillatorViewWidth = 214;   // On, tabla y visor 3D de cada oscilador
+constexpr int oscillatorKnobWidth = 64;    // 9 perillas por oscilador: más estrechas que las demás
+constexpr int smallKnobWidth = 72;         // sub, ruido, distorsión y chorus
 constexpr int tabWidth = 96;
 constexpr int effectColumnWidth = 130;     // On (y selectores) de cada efecto
 constexpr int chorusColumnWidth = 80;      // el chorus solo tiene On: deja sitio a sus 4 perillas
+constexpr int modBarHeight = 40;
+constexpr int zoomButtonWidth = 56;
+constexpr int voicesLabelWidth = 104;
 
 // El ancho lo marca la fila del filtro: opciones + 4 perillas + un visor de 280 px (igual que en la Fase 4).
 constexpr int pageWidth = 2 * groupPadding + wavetableColumnWidth + 4 * knobWidth + filterDisplayWidth;
 constexpr int pageHeight = 3 * rowHeight + 2 * groupPadding;
+
+// Tamaño del diseño (zoom 100 %). La ventana real es este tamaño × zoom.
+constexpr int baseWidth = pageWidth + 2 * groupPadding;
+constexpr int baseHeight = headerHeight + pageHeight + modBarHeight + 4 * groupPadding;
+
+constexpr float minZoom = 0.7f;
+constexpr float maxZoom = 2.0f;
+constexpr std::array<int, 9> zoomSteps { 70, 80, 90, 100, 115, 130, 150, 175, 200 };
+constexpr const char* zoomPropertyId = "uiZoom"; // propiedad del estado (se guarda con el proyecto de FL)
+constexpr juce::uint32 messageSeconds = 8;
+
+std::unique_ptr<juce::PropertiesFile> openSettings()
+{
+    // %APPDATA%\Undertow\Undertow Synth.settings (en Windows). Solo guarda preferencias de la interfaz.
+    juce::PropertiesFile::Options options;
+    options.applicationName = "Undertow Synth";
+    options.filenameSuffix = ".settings";
+    options.folderName = "Undertow";
+    options.osxLibrarySubFolder = "Application Support";
+    return std::make_unique<juce::PropertiesFile> (options);
+}
 } // namespace
 
 UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p)
+    : AudioProcessorEditor (p), processor (p), router (p.getParameters()), settings (openSettings())
 {
     namespace id = undertow::params;
     auto& apvts = processor.getParameters();
+    setLookAndFeel (&lookAndFeel);
+
+    addAndMakeVisible (content);
+    content.setSize (baseWidth, baseHeight);
+    content.onModulationDrag = [this] (std::optional<undertow::synth::ModSource> source) {
+        for (auto* knob : modulationKnobs)
+            knob->setDragInProgress (source);
+
+        // Al soltar sobre una perilla, ella deja su propio mensaje; si se soltó fuera, se quita la pista.
+        const auto hint = juce::String::fromUTF8 ("Suelta la fuente sobre una perilla resaltada. Pasa por encima de una "
+                                                  "pesta\xc3\xb1" "a para cambiar de p\xc3\xa1gina.");
+        if (source.has_value())
+            showMessage (hint);
+        else if (modBar.getMessage() == hint)
+            showMessage ({});
+    };
 
     struct KnobInfo
     {
@@ -53,19 +95,24 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     {
         tab->setClickingTogglesState (true);
         tab->setRadioGroupId (1);
-        tab->setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff2b7a8c)); // la pestaña activa se resalta
-        addAndMakeVisible (tab);
+        content.addAndMakeVisible (tab);
     }
     oscillatorTab.onClick = [this] { showPage (Page::oscillators); };
     warpTab.onClick = [this] { showPage (Page::warp); };
     soundTab.onClick = [this] { showPage (Page::sound); };
     modulationTab.onClick = [this] { showPage (Page::modulation); };
     effectsTab.onClick = [this] { showPage (Page::effects); };
-    addChildComponent (oscillatorPage);
-    addChildComponent (warpPage);
-    addChildComponent (soundPage);
-    addChildComponent (modulationPage);
-    addChildComponent (effectsPage);
+    content.addChildComponent (oscillatorPage);
+    content.addChildComponent (warpPage);
+    content.addChildComponent (soundPage);
+    content.addChildComponent (modulationPage);
+    content.addChildComponent (effectsPage);
+    content.addAndMakeVisible (modBar);
+
+    zoomButton.setTooltip (juce::String::fromUTF8 ("Tama\xc3\xb1o de la ventana. Tambi\xc3\xa9n puedes arrastrar la esquina "
+                                                   "inferior derecha."));
+    zoomButton.onClick = [this] { showZoomMenu(); };
+    content.addAndMakeVisible (zoomButton);
 
     // ================= Página "Osciladores": Osc A, Osc B, sub y ruido =================
     for (size_t o = 0; o < oscillators.size(); ++o)
@@ -78,7 +125,9 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
         oscillatorPage.addAndMakeVisible (osc.onButton);
         osc.onAttachment = std::make_unique<ButtonAttachment> (apvts, ids.on, osc.onButton);
         setUpComboBox (osc.tableBox, oscillatorPage, ids.wavetable, osc.tableAttachment);
-        oscillatorPage.addAndMakeVisible (osc.display);
+        oscillatorPage.addAndMakeVisible (osc.view);
+        osc.view.setPositionParameter (apvts.getParameter (ids.position));
+        osc.onParam = apvts.getRawParameterValue (ids.on);
         osc.tableParam = apvts.getRawParameterValue (ids.wavetable);
         osc.positionParam = apvts.getRawParameterValue (ids.position);
 
@@ -102,14 +151,14 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     oscillatorPage.addAndMakeVisible (subOnButton);
     subOnAttachment = std::make_unique<ButtonAttachment> (apvts, id::subOn, subOnButton);
     setUpComboBox (subShapeBox, oscillatorPage, id::subShape, subShapeAttachment);
-    setUpKnob (subKnobs[0], oscillatorPage, id::subOctave, "Octave", oscillatorKnobWidth);
-    setUpKnob (subKnobs[1], oscillatorPage, id::subLevel, "Level", oscillatorKnobWidth);
+    setUpKnob (subKnobs[0], oscillatorPage, id::subOctave, "Octave", smallKnobWidth);
+    setUpKnob (subKnobs[1], oscillatorPage, id::subLevel, "Level", smallKnobWidth);
 
     oscillatorPage.addAndMakeVisible (noiseGroup);
     oscillatorPage.addAndMakeVisible (noiseOnButton);
     noiseOnAttachment = std::make_unique<ButtonAttachment> (apvts, id::noiseOn, noiseOnButton);
-    setUpKnob (noiseKnobs[0], oscillatorPage, id::noiseLevel, "Level", oscillatorKnobWidth);
-    setUpKnob (noiseKnobs[1], oscillatorPage, id::noiseColor, "Color", oscillatorKnobWidth);
+    setUpKnob (noiseKnobs[0], oscillatorPage, id::noiseLevel, "Level", smallKnobWidth);
+    setUpKnob (noiseKnobs[1], oscillatorPage, id::noiseColor, "Color", smallKnobWidth);
 
     // ================= Página "Warp y FM": una columna por oscilador =================
     for (size_t o = 0; o < warps.size(); ++o)
@@ -118,13 +167,14 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
         const auto& ids = id::oscillatorWarps[o];
         warp.group.setText (o == 0 ? "Oscilador A" : "Oscilador B");
         warpPage.addAndMakeVisible (warp.group);
-        warpPage.addAndMakeVisible (warp.display);
+        warpPage.addAndMakeVisible (warp.view);
+        warp.view.setPositionParameter (apvts.getParameter (id::oscillators[o].position));
 
         warp.warpLabel.setText ("Warp", juce::dontSendNotification);
         warp.fmLabel.setText ("FM / RM", juce::dontSendNotification);
         for (auto* label : { &warp.warpLabel, &warp.fmLabel })
         {
-            label->setJustificationType (juce::Justification::centred);
+            styleCaption (*label);
             warpPage.addAndMakeVisible (label);
         }
         setUpComboBox (warp.warpBox, warpPage, ids.warpMode, warp.warpAttachment);
@@ -176,7 +226,7 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
         // Rate (Hz) y Division (tempo) ocupan el mismo sitio: el timer muestra uno u otro según Sync.
         setUpKnob (lfo.rateKnob, modulationPage, ids.rate, "Rate", lfoRateWidth);
         lfo.divisionLabel.setText ("Division", juce::dontSendNotification);
-        lfo.divisionLabel.setJustificationType (juce::Justification::centred);
+        styleCaption (lfo.divisionLabel);
         modulationPage.addChildComponent (lfo.divisionLabel);
 
         modulationPage.addAndMakeVisible (lfo.display);
@@ -213,6 +263,7 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
 
         slot.arrow.setText (juce::String::fromUTF8 ("\xe2\x86\x92") /* → */, juce::dontSendNotification);
         slot.arrow.setJustificationType (juce::Justification::centred);
+        slot.arrow.setBorderSize ({}); // la flecha ocupa 14 px: con el margen por defecto no cabría
         modulationPage.addAndMakeVisible (slot.arrow);
 
         slot.amount.setTextBoxStyle (juce::Slider::TextBoxRight, false, 46, 22);
@@ -237,12 +288,12 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     const std::array<KnobInfo, 3> distortionInfos { { { id::distortionDrive, "Drive" }, { id::distortionTone, "Tone" },
                                                       { id::distortionMix, "Mix" } } };
     for (size_t k = 0; k < distortionKnobs.size(); ++k)
-        setUpKnob (distortionKnobs[k], effectsPage, distortionInfos[k].parameterId, distortionInfos[k].name, oscillatorKnobWidth);
+        setUpKnob (distortionKnobs[k], effectsPage, distortionInfos[k].parameterId, distortionInfos[k].name, smallKnobWidth);
 
     const std::array<KnobInfo, 4> chorusInfos { { { id::chorusRate, "Rate" }, { id::chorusDepth, "Depth" },
                                                   { id::chorusFeedback, "Feedback" }, { id::chorusMix, "Mix" } } };
     for (size_t k = 0; k < chorusKnobs.size(); ++k)
-        setUpKnob (chorusKnobs[k], effectsPage, chorusInfos[k].parameterId, chorusInfos[k].name, oscillatorKnobWidth);
+        setUpKnob (chorusKnobs[k], effectsPage, chorusInfos[k].parameterId, chorusInfos[k].name, smallKnobWidth);
 
     // Delay: como en los LFO, Time (ms) y Division (tempo) ocupan el mismo sitio y el timer muestra uno u otro.
     effectsPage.addAndMakeVisible (delaySyncButton);
@@ -251,7 +302,7 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     delayPingPongAttachment = std::make_unique<ButtonAttachment> (apvts, id::delayPingPong, delayPingPongButton);
     setUpKnob (delayTimeKnob, effectsPage, id::delayTime, "Time", knobWidth);
     delayDivisionLabel.setText ("Division", juce::dontSendNotification);
-    delayDivisionLabel.setJustificationType (juce::Justification::centred);
+    styleCaption (delayDivisionLabel);
     effectsPage.addChildComponent (delayDivisionLabel);
     setUpComboBox (delayDivisionBox, effectsPage, id::delayDivision, delayDivisionAttachment);
     delaySyncParam = apvts.getRawParameterValue (id::delaySync);
@@ -267,11 +318,24 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
         setUpKnob (reverbKnobs[k], effectsPage, reverbInfos[k].parameterId, reverbInfos[k].name, knobWidth);
 
     activeVoicesLabel.setJustificationType (juce::Justification::centredRight);
-    activeVoicesLabel.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
-    addAndMakeVisible (activeVoicesLabel);
+    activeVoicesLabel.setColour (juce::Label::textColourId, undertow::gui::theme::dimText);
+    content.addAndMakeVisible (activeVoicesLabel);
 
-    // Mismo tamaño que la ventana de la Fase 4: cabe en un portátil con el escalado de Windows al 150 %.
-    setSize (pageWidth + 2 * groupPadding, pageHeight + headerHeight + 3 * groupPadding);
+    layoutContent();
+
+    // El zoom se decide ANTES de poner los límites: setResizeLimits ya redimensiona la ventana (aún de 0 × 0) y eso
+    // no debe guardarse como el zoom elegido.
+    const float startZoom = initialZoom();
+
+    // Ventana redimensionable (esquina inferior derecha) con la proporción del diseño fija.
+    setResizable (true, true);
+    setResizeLimits (juce::roundToInt (baseWidth * minZoom), juce::roundToInt (baseHeight * minZoom),
+                     juce::roundToInt (baseWidth * maxZoom), juce::roundToInt (baseHeight * maxZoom));
+    if (auto* windowConstrainer = getConstrainer())
+        windowConstrainer->setFixedAspectRatio (static_cast<double> (baseWidth) / baseHeight);
+    rememberZoom = true;
+    setZoom (startZoom);
+    resized(); // por si el tamaño ya era ese (setSize no llamaría a resized y el zoom no se guardaría)
 
     oscillatorTab.setToggleState (true, juce::dontSendNotification);
     showPage (Page::oscillators);
@@ -282,6 +346,54 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
 UndertowAudioProcessorEditor::~UndertowAudioProcessorEditor()
 {
     stopTimer();
+    if (settings != nullptr)
+        settings->saveIfNeeded();
+    setLookAndFeel (nullptr);
+}
+
+float UndertowAudioProcessorEditor::initialZoom() const
+{
+    // 1.º el zoom guardado en el proyecto; 2.º el último que usó el usuario; 3.º el mayor (≤ 100 %) que cabe en pantalla.
+    const auto saved = processor.getParameters().state.getProperty (zoomPropertyId);
+    if (! saved.isVoid())
+        return static_cast<float> (saved);
+    if (settings != nullptr && settings->containsKey (zoomPropertyId))
+        return static_cast<float> (settings->getDoubleValue (zoomPropertyId, 1.0));
+
+    float zoomThatFits = 1.0f;
+    if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+    {
+        const auto area = display->userBounds.toFloat();
+        zoomThatFits = juce::jmin (1.0f, 0.92f * area.getWidth() / baseWidth, 0.85f * area.getHeight() / baseHeight);
+    }
+    return std::floor (zoomThatFits * 20.0f) / 20.0f; // en pasos de 5 %
+}
+
+void UndertowAudioProcessorEditor::setZoom (float newZoom)
+{
+    newZoom = juce::jlimit (minZoom, maxZoom, newZoom);
+    setSize (juce::roundToInt (baseWidth * newZoom), juce::roundToInt (baseHeight * newZoom));
+}
+
+void UndertowAudioProcessorEditor::showZoomMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Zoom");
+    const int current = juce::roundToInt (zoom * 100.0f);
+    for (const int step : zoomSteps)
+        menu.addItem (step, juce::String (step) + " %", true, step == current);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&zoomButton),
+                        [safeThis = juce::Component::SafePointer<UndertowAudioProcessorEditor> (this)] (int result) {
+                            if (safeThis != nullptr && result > 0)
+                                safeThis->setZoom (static_cast<float> (result) / 100.0f);
+                        });
+}
+
+void UndertowAudioProcessorEditor::showMessage (const juce::String& message)
+{
+    modBar.setMessage (message);
+    messageExpiry = juce::Time::getApproximateMillisecondCounter() + messageSeconds * 1000;
 }
 
 void UndertowAudioProcessorEditor::showPage (Page page)
@@ -296,16 +408,35 @@ void UndertowAudioProcessorEditor::showPage (Page page)
 void UndertowAudioProcessorEditor::setUpKnob (Knob& knob, juce::Component& page, const char* parameterId,
                                               const juce::String& name, int width)
 {
-    knob.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, width - 10, 20);
+    knob.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, width - 6, 20);
     page.addAndMakeVisible (knob.slider);
 
     knob.label.setText (name, juce::dontSendNotification);
-    knob.label.setJustificationType (juce::Justification::centred);
+    styleCaption (knob.label);
     page.addAndMakeVisible (knob.label);
 
     // El attachment sincroniza la perilla con el parámetro en ambos sentidos
     // (y con la automatización de FL) sin que la GUI toque el hilo de audio.
     knob.attachment = std::make_unique<SliderAttachment> (processor.getParameters(), parameterId, knob.slider);
+
+    auto* parameter = processor.getParameters().getParameter (parameterId);
+    knob.slider.setParameter (parameter);
+    knob.slider.setName (parameter->getName (64)); // "Osc A Level" en vez de "Level": los mensajes son más claros
+    // Doble clic = valor por defecto del parámetro.
+    knob.slider.setDoubleClickReturnValue (true, parameter->convertFrom0to1 (parameter->getDefaultValue()));
+
+    if (const auto target = undertow::gui::targetForParameter (parameterId))
+    {
+        knob.slider.setModulationTarget (*target, router, [this] (const juce::String& message) { showMessage (message); });
+        modulationKnobs.push_back (&knob.slider);
+    }
+}
+
+void UndertowAudioProcessorEditor::styleCaption (juce::Label& label)
+{
+    label.setJustificationType (juce::Justification::centred);
+    label.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    label.setColour (juce::Label::textColourId, undertow::gui::theme::dimText);
 }
 
 void UndertowAudioProcessorEditor::setUpComboBox (juce::ComboBox& box, juce::Component& page, const char* parameterId,
@@ -335,17 +466,47 @@ void UndertowAudioProcessorEditor::timerCallback()
         activeVoicesLabel.setText ("Voces sonando: " + juce::String (count), juce::dontSendNotification);
     }
 
-    // Se lee el valor del parámetro (no el de la perilla) para que el visor siga también la automatización.
-    const auto& bank = processor.getWavetableBank();
-    for (auto& osc : oscillators)
-        osc.display.setWavetable (&bank.get (static_cast<int> (osc.tableParam->load())), osc.positionParam->load());
-    for (size_t o = 0; o < warps.size(); ++o)
+    // --- Modulación: anillos de las perillas, fuentes en uso y mensajes ---
+    namespace synth = undertow::synth;
+    const auto slots = router.read();
+    for (auto* knob : modulationKnobs)
+        knob->updateModulation (slots, processor.getModulationDisplay (knob->getModulationDestination()));
+    modBar.setUsage (slots);
+    if (messageExpiry != 0 && juce::Time::getApproximateMillisecondCounter() > messageExpiry)
     {
-        const auto& osc = oscillators[o];
+        messageExpiry = 0;
+        modBar.setMessage ({});
+    }
+    for (size_t s = 0; s < modSlots.size(); ++s)
+        modSlots[s].number.setColour (juce::Label::textColourId, slots[s].isRouted()
+                                                                     ? undertow::gui::theme::sourceColour (slots[s].source)
+                                                                     : undertow::gui::theme::dimText.withAlpha (0.6f));
+
+    // --- Visores del wavetable ---
+    // Se lee el valor del parámetro (no el de la perilla) para que el visor siga también la automatización, y se le
+    // suma la modulación de la nota más reciente: con un LFO en Position se ve la onda moverse.
+    const auto& bank = processor.getWavetableBank();
+    constexpr std::array<std::array<synth::ModDestination, 2>, synth::numOscillators> viewDestinations { {
+        { synth::ModDestination::oscAPosition, synth::ModDestination::oscAWarp },
+        { synth::ModDestination::oscBPosition, synth::ModDestination::oscBWarp },
+    } };
+    for (size_t o = 0; o < oscillators.size(); ++o)
+    {
+        auto& osc = oscillators[o];
         auto& warp = warps[o];
-        warp.display.setState (&bank.get (static_cast<int> (osc.tableParam->load())), osc.positionParam->load(),
-                               static_cast<undertow::dsp::WarpMode> (static_cast<int> (warp.warpModeParam->load())),
-                               warp.warpAmountParam->load());
+        const auto positionModulation = processor.getModulationDisplay (viewDestinations[o][0]);
+        const auto warpModulation = processor.getModulationDisplay (viewDestinations[o][1]);
+
+        undertow::gui::WavetableView::State state;
+        state.table = &bank.get (static_cast<int> (osc.tableParam->load()));
+        state.position = juce::jlimit (0.0f, 1.0f, osc.positionParam->load() + positionModulation.value_or (0.0f));
+        state.warpMode = static_cast<undertow::dsp::WarpMode> (static_cast<int> (warp.warpModeParam->load()));
+        state.warpAmount = juce::jlimit (0.0f, 1.0f, warp.warpAmountParam->load() + warpModulation.value_or (0.0f));
+        state.enabled = osc.onParam->load() >= 0.5f;
+        state.modulated = std::abs (positionModulation.value_or (0.0f)) > 1.0e-4f
+                          || std::abs (warpModulation.value_or (0.0f)) > 1.0e-4f;
+        osc.view.setState (state);
+        warp.view.setState (state);
     }
 
     const auto filter = processor.readFilterSettings();
@@ -373,19 +534,49 @@ void UndertowAudioProcessorEditor::timerCallback()
 
 void UndertowAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff101418));
+    g.fillAll (undertow::gui::theme::background);
+}
 
-    g.setColour (juce::Colours::white);
-    g.setFont (juce::FontOptions (22.0f, juce::Font::bold));
-    g.drawText ("Undertow Synth", getLocalBounds().removeFromTop (44).reduced (groupPadding, 0),
-                juce::Justification::centredLeft);
+void UndertowAudioProcessorEditor::Content::paint (juce::Graphics& g)
+{
+    namespace theme = undertow::gui::theme;
+    g.setGradientFill (juce::ColourGradient (theme::background.brighter (0.04f), 0.0f, 0.0f, theme::background, 0.0f,
+                                             static_cast<float> (getHeight()), false));
+    g.fillAll();
+
+    const auto title = getLocalBounds().withHeight (headerHeight).translated (groupPadding, groupPadding);
+    g.setColour (theme::text);
+    g.setFont (juce::FontOptions (21.0f, juce::Font::bold));
+    g.drawText ("UNDERTOW", title, juce::Justification::centredLeft);
+    g.setColour (theme::accent);
+    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    const juce::Font titleFont (juce::FontOptions (21.0f, juce::Font::bold));
+    const auto titleWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (titleFont, "UNDERTOW"));
+    g.drawText ("SYNTH", title.withTrimmedLeft (titleWidth + 6), juce::Justification::centredLeft);
 }
 
 void UndertowAudioProcessorEditor::resized()
 {
-    auto area = getLocalBounds().reduced (groupPadding);
+    // El contenido siempre mide lo mismo: solo cambia la escala con la que se dibuja.
+    zoom = static_cast<float> (getWidth()) / static_cast<float> (baseWidth);
+    content.setTransform (juce::AffineTransform::scale (zoom));
+    zoomButton.setButtonText (juce::String (juce::roundToInt (zoom * 100.0f)) + " %");
+
+    // Se recuerda en el proyecto y como preferencia para la próxima instancia.
+    if (! rememberZoom)
+        return;
+    processor.getParameters().state.setProperty (zoomPropertyId, zoom, nullptr);
+    if (settings != nullptr)
+        settings->setValue (zoomPropertyId, zoom);
+}
+
+void UndertowAudioProcessorEditor::layoutContent()
+{
+    auto area = content.getLocalBounds().reduced (groupPadding);
     auto header = area.removeFromTop (headerHeight);
-    activeVoicesLabel.setBounds (header.removeFromRight (140));
+    activeVoicesLabel.setBounds (header.removeFromRight (voicesLabelWidth));
+    header.removeFromRight (8);
+    zoomButton.setBounds (header.removeFromRight (zoomButtonWidth).reduced (0, 4));
     header.removeFromRight (groupPadding);
     effectsTab.setBounds (header.removeFromRight (tabWidth).reduced (0, 2));
     modulationTab.setBounds (header.removeFromRight (tabWidth).reduced (0, 2));
@@ -393,6 +584,9 @@ void UndertowAudioProcessorEditor::resized()
     warpTab.setBounds (header.removeFromRight (tabWidth).reduced (0, 2));
     oscillatorTab.setBounds (header.removeFromRight (tabWidth).reduced (0, 2));
     area.removeFromTop (groupPadding);
+
+    modBar.setBounds (area.removeFromBottom (modBarHeight));
+    area.removeFromBottom (groupPadding);
 
     oscillatorPage.setBounds (area);
     warpPage.setBounds (area);
@@ -408,7 +602,7 @@ void UndertowAudioProcessorEditor::resized()
     {
         auto page = oscillatorPage.getLocalBounds();
 
-        // Filas 1 y 2: Osc A y Osc B. Columna con On, tabla y visor; después sus 9 perillas.
+        // Filas 1 y 2: Osc A y Osc B. Columna con On y tabla en una línea y el visor 3D debajo; después 9 perillas.
         for (auto& osc : oscillators)
         {
             auto groupArea = page.removeFromTop (rowHeight);
@@ -416,12 +610,13 @@ void UndertowAudioProcessorEditor::resized()
             osc.group.setBounds (groupArea);
             auto inner = innerOf (groupArea);
 
-            auto column = inner.removeFromLeft (oscillatorColumnWidth);
+            auto column = inner.removeFromLeft (oscillatorViewWidth);
             inner.removeFromLeft (8);
-            osc.onButton.setBounds (column.removeFromTop (24));
-            osc.tableBox.setBounds (column.removeFromTop (26));
+            auto line = column.removeFromTop (24);
+            osc.onButton.setBounds (line.removeFromLeft (56));
+            osc.tableBox.setBounds (line);
             column.removeFromTop (6);
-            osc.display.setBounds (column);
+            osc.view.setBounds (column);
 
             for (auto& knob : osc.knobs)
                 layoutKnob (knob, inner.removeFromLeft (oscillatorKnobWidth));
@@ -442,9 +637,9 @@ void UndertowAudioProcessorEditor::resized()
             if (box != nullptr)
                 box->setBounds (column.removeFromTop (26));
 
-            inner.removeFromLeft ((inner.getWidth() - 2 * oscillatorKnobWidth) / 2); // perillas centradas
+            inner.removeFromLeft ((inner.getWidth() - 2 * smallKnobWidth) / 2); // perillas centradas
             for (auto& knob : groupKnobs)
-                layoutKnob (knob, inner.removeFromLeft (oscillatorKnobWidth));
+                layoutKnob (knob, inner.removeFromLeft (smallKnobWidth));
         };
         layoutSmallGroup (subGroup, subOnButton, &subShapeBox, subKnobs);
         layoutSmallGroup (noiseGroup, noiseOnButton, nullptr, noiseKnobs);
@@ -464,7 +659,7 @@ void UndertowAudioProcessorEditor::resized()
 
             auto controls = inner.removeFromBottom (knobHeight + 20 + 28 + 26);
             inner.removeFromBottom (groupPadding);
-            warp.display.setBounds (inner);
+            warp.view.setBounds (inner);
 
             const int columnWidth = controls.getWidth() / 2;
             const auto layoutColumn = [] (juce::Rectangle<int> column, juce::Label& label, juce::ComboBox& box, Knob& knob) {
@@ -610,13 +805,13 @@ void UndertowAudioProcessorEditor::resized()
             auto [inner, column] = startGroup (distortionGroup, row.removeFromLeft (halfWidth), effectColumnWidth - 20);
             distortionModeBox.setBounds (column.removeFromTop (26).withTrimmedRight (8));
             for (auto& knob : distortionKnobs)
-                layoutKnob (knob, inner.removeFromLeft (oscillatorKnobWidth));
+                layoutKnob (knob, inner.removeFromLeft (smallKnobWidth));
         }
         row.removeFromLeft (groupPadding);
         {
             auto [inner, column] = startGroup (chorusGroup, row, chorusColumnWidth);
             for (auto& knob : chorusKnobs)
-                layoutKnob (knob, inner.removeFromLeft (oscillatorKnobWidth));
+                layoutKnob (knob, inner.removeFromLeft (smallKnobWidth));
         }
 
         {

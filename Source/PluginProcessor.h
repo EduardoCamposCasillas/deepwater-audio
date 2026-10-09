@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <optional>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -64,6 +65,15 @@ public:
     float getLfoDisplayPhase (int lfo) const noexcept
     {
         return lfoDisplayPhases[static_cast<size_t> (lfo)].load (std::memory_order_relaxed);
+    }
+
+    // Fase 9: modulación total de un destino en la nota más reciente (en unidades de amount, como la suma de la
+    // matriz). La GUI la usa para el punto en vivo de los anillos y para mover los visores. Sin notas: nullopt.
+    std::optional<float> getModulationDisplay (undertow::synth::ModDestination destination) const noexcept
+    {
+        if (! modulationDisplayActive.load (std::memory_order_relaxed))
+            return std::nullopt;
+        return modulationDisplay[static_cast<size_t> (destination)].load (std::memory_order_relaxed);
     }
 
 private:
@@ -186,6 +196,8 @@ private:
     std::atomic<int> activeVoiceCount { 0 };
     std::atomic<double> currentSampleRate { 48000.0 };
     std::array<std::atomic<float>, undertow::synth::numLfos> lfoDisplayPhases {};
+    std::array<std::atomic<float>, undertow::synth::numModDestinations> modulationDisplay {};
+    std::atomic<bool> modulationDisplayActive { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UndertowAudioProcessor)
 };
