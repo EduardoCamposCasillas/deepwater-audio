@@ -6,8 +6,8 @@ llegar al nivel de sintes como Serum o Vital.
 
 ![Interfaz de Undertow Synth](docs/screenshot.png)
 
-> **Estado:** en desarrollo (fases 1–8 de 11 completadas). Ya suena y es usable en un DAW, con efectos incluidos, pero
-> todavía no tiene presets y la interfaz es funcional (la definitiva llega en la fase 9). Ver la
+> **Estado:** en desarrollo (fases 1–9 de 11 completadas). Ya suena y es usable en un DAW, con efectos y una interfaz
+> escalable con modulación por arrastre, pero todavía no tiene presets (llegan en la fase 10). Ver la
 > [hoja de ruta](#hoja-de-ruta).
 
 ## Qué tiene hoy
@@ -33,8 +33,12 @@ llegar al nivel de sintes como Serum o Vital.
 - **MIDI y host:** rueda de modulación (CC1) y aftertouch como fuentes de modulación; tempo y posición de la canción
   del DAW para los LFOs y el delay sincronizados. Informa al DAW de la cola (release, reverb y delay) para que no se
   corte al exportar.
-- **Interfaz en 5 pestañas** (Osciladores, Warp y FM, Filtro y Amp, Modulación, Efectos) con visores de la forma de
-  onda, del warp aplicado, de la curva del filtro y de los LFOs.
+- **Interfaz escalable en 5 pestañas** (Osciladores, Warp y FM, Filtro y Amp, Modulación, Efectos), dibujada con
+  vectores: zoom de 70 a 200 % nítido a cualquier tamaño, recordado en el proyecto.
+- **Arrastrar para modular:** las fuentes de modulación se sueltan sobre las perillas. Cada ruta se dibuja como un
+  anillo del color de su fuente y un punto muestra el valor modulado en vivo.
+- **Visor 3D del wavetable** con todos los frames apilados y el frame que suena, con el warp aplicado y la modulación
+  en vivo (o en 2D: original y deformada). Visores de la curva del filtro y de los LFOs.
 - Correcto a 44.1, 48, 88.2 y 96 kHz y con cualquier tamaño de buffer, en estéreo o mono. Validado con
   [pluginval](https://github.com/Tracktion/pluginval) en strictness 10.
 
@@ -90,7 +94,7 @@ ecos y de la reverb, y coste de CPU, a las 4 frecuencias de muestreo. El ejecuta
 rápido:
 
 ```bash
-build/Release/UndertowTests.exe --fase8     # solo los tests de efectos (--fase7: warp y FM)
+build/Release/UndertowTests.exe --fase8     # solo los tests de efectos (--fase7: warp y FM; --fase9: interfaz)
 build/Release/UndertowTests.exe --verbose   # detalle de cada medición
 ```
 
@@ -112,6 +116,25 @@ build/Release/UndertowTests.exe --verbose   # detalle de cada medición
 
 En otros DAWs (Ableton, Reaper, Bitwig…) funciona igual: hay que reescanear la carpeta VST3.
 
+### La interfaz
+
+- **Zoom:** botón con el porcentaje (arriba a la derecha) o arrastrando la esquina inferior derecha. La primera vez
+  elige el mayor tamaño que cabe en tu pantalla; después recuerda el último que uses.
+- **Perillas:** arrastra arriba/abajo para moverlas; doble clic = valor por defecto; clic derecho = rutas de
+  modulación y opciones del DAW (en FL, *Create automation clip*).
+- **Arrastrar para modular:** arrastra una ficha de la barra **MOD** (Env 1–3, LFO 1–2, Velocity, Key, Mod Wheel,
+  Aftertouch) sobre una perilla. Se crea una ruta de la matriz con amount 25 %. Si pasas por encima de una pestaña
+  mientras arrastras, se abre sola.
+  - El **anillo de color** es el tramo que recorre la modulación. Arrástralo para cambiar el amount (Shift = fino).
+    Las fuentes unipolares (envolventes, velocity, controladores) lo abren hacia un lado; las bipolares (LFOs, Key),
+    hacia los dos.
+  - El **punto blanco** es el valor real del destino en la nota más reciente.
+  - Aceptan modulación: Position, Semi (pitch), Level y Detune de cada oscilador, Warp y FM/RM Amount, Level del sub
+    y del ruido, y Cutoff, Resonance y Drive del filtro. *Volume* y *Global Pitch* se conectan desde la matriz.
+- **Visor del wavetable:** arrastra sobre él para mover Position; clic en **3D / 2D** para cambiar la vista.
+
+![Filtro con una envolvente conectada al Cutoff](docs/screenshot-modulacion.png)
+
 ### Controles
 
 **Pestaña Osciladores: Oscilador A y Oscilador B** (B viene apagado)
@@ -132,7 +155,7 @@ En otros DAWs (Ableton, Reaper, Bitwig…) funciona igual: hay que reescanear la
 | Sub: forma, Octave, Level | Un oscilador simple por debajo de la nota (mono, siempre al centro) para dar peso en los graves. |
 | Ruido: Level, Color | Ruido para aire, ataques o texturas. Color 0 % = grave y oscuro, 50 % = blanco, 100 % = solo agudos. |
 
-**Pestaña Warp y FM** (una columna por oscilador; el dibujo muestra la onda original en gris y la deformada en naranja)
+**Pestaña Warp y FM** (una columna por oscilador; el visor en 2D muestra la onda original en gris y la deformada en naranja)
 | Control | Qué hace |
 |---|---|
 | Warp | Deforma la lectura de la onda. **Sync:** el ciclo se reinicia con la nota, con un pico de timbre que sube con el Amount. **Bend + / −:** acelera los bordes o el centro del ciclo. **PWM:** comprime la onda en una parte del ciclo. **Mirror:** ida y vuelta. **Quantize:** escalones en el tiempo. **Bitcrush:** escalones en la amplitud. |
@@ -168,7 +191,7 @@ oscilador trabaja a doble frecuencia de muestreo y gasta más CPU.
 | LFO 1 / LFO 2 | Forma (Sine, Triangle, Saw Up/Down, Square, Sample & Hold) y modo: *Retrigger* reinicia el ciclo en cada nota, *Free* usa un reloj común (con Sync, ligado al compás) y *One Shot* hace un solo ciclo. |
 | Sync / Rate / Division | Sin Sync, la velocidad va en Hz (0.02–40 Hz). Con Sync, en figuras musicales (de 8 compases a 1/32, con tresillos y puntillos). |
 | Env 2 / Env 3 | Envolventes ADSR que no mueven el volumen, sino lo que se les conecte. |
-| Matriz (8 rutas) | Fuente → destino con un amount de −100 % a +100 %. El 100 % recorre toda la perilla del destino (Cutoff: 10 octavas; Pitch: ±24 semitonos). Doble clic en la barra = 0 %. |
+| Matriz (8 rutas) | Fuente → destino con un amount de −100 % a +100 %. El 100 % recorre toda la perilla del destino (Cutoff: 10 octavas; Pitch: ±24 semitonos). Doble clic en la barra = 0 %. Es la misma matriz que rellena "arrastrar para modular": el número de cada ruta toma el color de su fuente. |
 
 **Pestaña Efectos** (orden fijo de la señal: distorsión → chorus → delay → reverb; todos apagados por defecto)
 | Control | Qué hace |
@@ -189,7 +212,7 @@ Resonance **25 %**, Drive **30 %**, Key Track **50 %** · Attack **2 ms**, Decay
 Release **60 ms**. Toca corcheas entre C3 y C4 (notación de FL).
 
 Para darle el "squelch" de un acid: Resonance **75 %** y, en la pestaña Modulación, Env 2 (Attack 1 ms, Decay 180 ms,
-Sustain 0 %) con la ruta **Env 2 → Filter Cutoff +40 %**. Para terminarlo, en la pestaña Efectos: Distorsión **Tube**,
+Sustain 0 %) y arrastra la ficha **ENV 2** sobre el Cutoff; sube su anillo a **+40 %**. Para terminarlo, en la pestaña Efectos: Distorsión **Tube**,
 Drive **40 %**, Tone **60 %**, y un Delay con Sync en **1/8 D**, Feedback **30 %**, Mix **15 %**.
 
 ![Pestaña Efectos](docs/screenshot-efectos.png)
@@ -202,11 +225,12 @@ diseño sonoro del proyecto. Explica qué se oye con cada control y por qué.
 ```
 Source/
   PluginProcessor.*   parámetros, estado y processBlock
-  PluginEditor.*      interfaz
+  PluginEditor.*      interfaz (contenido a tamaño fijo dibujado con una escala: zoom)
   dsp/                oscilador con unison, warp y FM, wavetables, oversampling halfband, ruido, filtro, envolvente, LFO,
                       FFT y efectos: distorsión, chorus, delay y reverb (sin JUCE)
   synth/              voces, gestión de polifonía, matriz de modulación, banco de wavetables y cadena de efectos
-  gui/                visores propios (forma de onda, warp, curva del filtro y LFO)
+  gui/                aspecto propio (LookAndFeel), perillas con anillos de modulación, barra de fuentes,
+                      visor 3D/2D del wavetable, curva del filtro y LFO
 tests/                tests de DSP (ejecutable independiente, sin JUCE)
 APRENDIZAJE.md        cuaderno de diseño sonoro: conceptos, recetas, ejercicios y vocabulario de cada fase
 ```
@@ -223,7 +247,7 @@ El DSP no depende de JUCE: se puede probar aislado. Dentro del hilo de audio no 
 - [x] 6 — Segundo oscilador, sub, ruido y unison
 - [x] 7 — FM, ring mod y modos de warp
 - [x] 8 — Efectos: distorsión, chorus, delay y reverb
-- [ ] 9 — Interfaz profesional
+- [x] 9 — Interfaz profesional: escalable, visor 3D del wavetable y arrastrar para modular
 - [ ] 10 — Presets y librería de sonidos
 - [ ] 11 — Optimización y pulido
 
