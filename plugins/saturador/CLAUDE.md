@@ -1,32 +1,33 @@
-# CLAUDE.md — Saturador (JUCE / C++ moderno)
+# CLAUDE.md — Saturador
+
+Plugin 2 de la suite. Las reglas generales (modo de trabajo, stack, reglas del hilo de audio, estilo, git) están en
+el `CLAUDE.md` de la raíz del repositorio; aquí solo va lo propio del saturador.
 
 ## Objetivo del proyecto
 Construir un saturador de calidad profesional (referencia de nivel: Soundtoys Decapitator y FabFilter Saturn 2),
 con nombre, diseño y código propios. Se usa principalmente en FL Studio sobre Windows, en bajos, voces,
 baterías, buses y master.
 
-Es el segundo plugin del dueño del proyecto, que ya construyó un sintetizador wavetable con JUCE.
+Es el segundo plugin del dueño del proyecto, que ya construyó un sintetizador wavetable con JUCE (Undertow).
 Sigue APRENDIENDO programación de audio, DSP y ahora también MEZCLA: el objetivo es doble,
 un plugin de nivel profesional y que él entienda cada parte y sepa cuándo y cómo usar saturación.
 
-## Modo de trabajo (muy importante)
-- Trabajar SIEMPRE por fases pequeñas. Una fase a la vez.
-- Antes de implementar un concepto de DSP nuevo, explicarlo en español en 1–3 párrafos:
-  qué problema resuelve, la idea matemática básica y cómo se traduce a código.
-- Al terminar cada fase: compilar, confirmar que no hay warnings y explicar cómo probarla en FL Studio.
-- NO avanzar a la siguiente fase hasta que yo confirme que la probé en FL Studio.
-- Si hay varias formas de resolver algo, explicar brevemente las opciones y por qué se elige una.
-- Comentarios en el código en español, educativos pero concisos (explicar el "por qué", no el "qué").
-- Al terminar cada fase, actualizar la sección "Estado actual" de este archivo.
-- Nunca copiar código de proyectos GPL/AGPL de terceros ni intentar replicar algoritmos propietarios.
-  Se pueden estudiar ideas publicadas (papers, blogs, libros), no copiar código.
+## Requisitos propios (además de las reglas del hilo de audio del raíz)
+- Cambiar el factor de oversampling no debe causar clics ni crasheos (todos los buffers para el factor máximo se
+  reservan en `prepareToPlay`; la latencia informada al host cambia con el factor).
+- Es un efecto: funciona en mono y en estéreo, y con el bypass del host y el propio sin clics.
 
 ## Librería DSP compartida
-El sintetizador ya tiene piezas probadas (oversampling, filtros, suavizado de parámetros, utilidades).
-- En la Fase 1, mover el DSP reutilizable a una librería compartida (repo o carpeta común) que usen
-  ambos plugins, sin romper el sintetizador.
-- Todo DSP nuevo que sirva para futuros plugins (EQ, compresor, delay, reverb) va en esa librería.
-- La librería no depende de la GUI y tiene tests para las piezas críticas.
+`libs/dsp` (`deepwater::dsp`) ya existe: se creó al migrar Undertow al monorepo. Lo que el saturador va a usar:
+- `Halfband.h`: decimador e interpolador halfband ×2 (100 dB). El oversampling 2x–16x de la Fase 2 se construye
+  encadenando etapas ×2 (la latencia total es la suma de las etapas: hay que informarla al host).
+- `Svf.h`: SVF TPT/ZDF para los filtros pre/post y el tono (Fase 4); base de los crossovers (Fase 6).
+- `Smoothing.h`: suavizado de gain, drive y mix; fundidos de bypass.
+- `FastMath.h` (`fastTanh`), `Fft.h` (analizador fuera del hilo de audio), `Simd.h`.
+
+Todo DSP nuevo que sirva para futuros plugins (EQ, compresor, delay, reverb) va en la librería, con tests. Candidatos
+que hoy están en Undertow y podrían moverse cuando haga falta: el ADAA de `Distortion.h` (Fase 2/3) y el LFO
+(`Lfo.h`, Fase 7). Moverlos exige el null test de Undertow (ver el `CLAUDE.md` raíz).
 
 ## Aprendizaje de mezcla y diseño sonoro (igual de importante que el código)
 Al terminar cada fase:
@@ -41,32 +42,17 @@ Al terminar cada fase:
    (ej. armónicos pares/impares, headroom, clipping suave/duro, aliasing, crossover).
 6. **Errores comunes**: cuándo NO usar saturación o cuándo es demasiada.
 
-Actualizar el archivo `APRENDIZAJE.md` del proyecto al final de cada fase (conceptos, recetas de uso,
-vocabulario, retos completados). Los presets de fábrica incluyen notas de para qué sirven y por qué.
-
-## Stack técnico
-- C++20, MSVC (Visual Studio 2026 o 2022), JUCE 8 vía CMake FetchContent fijado a un tag estable, CMake >= 3.22.
-- Formatos: VST3 + Standalone.
-- Validación con pluginval antes de cerrar fases que toquen parámetros, estado o procesamiento.
-- Reportar latencia correctamente al host (`setLatencySamples`) cuando el oversampling o los filtros la agreguen.
-
-## Reglas del hilo de audio (NO negociables)
-- Nada de reservar/liberar memoria, locks, I/O, logging ni llamadas al sistema dentro de `processBlock`.
-- Buffers reservados en `prepareToPlay`; cambiar el factor de oversampling no debe causar clics ni crasheos.
-- Parámetros suavizados (`SmoothedValue`); `juce::ScopedNoDenormals` al inicio de `processBlock`.
-- Correcto a 44.1, 48, 88.2 y 96 kHz, con cualquier tamaño de buffer, en mono y estéreo.
-- Bypass sin clics y con la misma latencia que el procesamiento activo.
-
-## Estilo de código
-- C++ moderno: RAII, `std::unique_ptr`, `std::array`, `constexpr`, `noexcept` en código de audio.
-- Nada de `new`/`delete` manuales. DSP separado de JUCE en clases puras y testeables.
-- Nombres en inglés para el código; comentarios en español.
+Actualizar el archivo `APRENDIZAJE.md` de esta carpeta (`plugins/saturador/`) al final de cada fase (conceptos,
+recetas de uso, vocabulario, retos completados). Los presets de fábrica incluyen notas de para qué sirven y por qué.
 
 ## Hoja de ruta
-- [ ] Fase 1 — Proyecto base y librería compartida: passthrough con input/output gain, medidores de nivel,
-      DSP del synth movido a la librería compartida (el synth sigue compilando y sonando igual).
-- [ ] Fase 2 — Waveshaping básico + oversampling seleccionable (2x a 16x), filtro DC, comparación con
-      y sin oversampling en el analizador para escuchar y ver el aliasing.
+- [ ] Fase 1 — Proyecto base: `plugins/saturador/` con su `CMakeLists.txt` (VST3 + Standalone, efecto mono/estéreo),
+      añadido al CMake raíz y enlazado a `deepwater::dsp`. Passthrough con input y output gain (dB, suavizados con
+      `Smoothing.h`), medidores de nivel de entrada y salida (pico y RMS) en una GUI funcional y bypass sin clics.
+      Tests de lo que no dependa de JUCE y pluginval. Decidir antes: el nombre del plugin y su `PLUGIN_CODE`
+      (único en la suite; el fabricante, compartido).
+- [ ] Fase 2 — Waveshaping básico + oversampling seleccionable (2x a 16x, etapas halfband de la librería), filtro DC,
+      comparación con y sin oversampling en el analizador para escuchar y ver el aliasing.
 - [ ] Fase 3 — Modos de saturación con carácter: cinta (suave, compresión, realce de graves),
       bulbo (asimétrico, armónicos pares), transistor (más duro, impares), clip duro, rectificador y wavefold.
       Cada modo con su propia curva y comportamiento según el nivel de entrada.
@@ -83,4 +69,5 @@ vocabulario, retos completados). Los presets de fábrica incluyen notas de para 
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 1 sin empezar.
+Fase 1 sin empezar. La librería compartida ya existe (migración al monorepo, 2026-10-09); la carpeta tiene solo este
+archivo y `APRENDIZAJE.md`, todavía sin `CMakeLists.txt` ni código (el CMake raíz aún no la incluye).
