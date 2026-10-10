@@ -55,6 +55,8 @@ para que funcionen también como material de estudio.
 cmake -B build -G "Visual Studio 17 2022" -A x64    # VS Community 2022 detectado en esta máquina
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure   # tests de DSP/voces (UndertowTests, sin JUCE)
+build/Release/UndertowTests.exe --cpu                   # tabla de CPU (Fase 11)
+tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,88200,96000     --block-sizes 1,7,64,256,512,1024,4096 --repeat 3 --randomise --validate "<ruta al .vst3>"   # validación completa
 ```
 - CMake está en `C:\Program Files\CMake\bin` y no está en el PATH: usar la ruta completa o agregarlo.
 - El VST3 queda en `build/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3`.
@@ -101,7 +103,7 @@ Source/
 - [x] Fase 8 — Efectos internos: distorsión (con oversampling), chorus, delay, reverb.
 - [x] Fase 9 — GUI profesional: visualización del wavetable (mostrando el warp aplicado), arrastrar para modular, escalable.
 - [x] Fase 10 — Presets: guardado/carga, navegador, librería inicial de sonidos.
-- [ ] Fase 11 — Pulido: optimización de CPU (SIMD), pluginval estricto, comparación contra referencias.
+- [x] Fase 11 — Pulido: optimización de CPU (SIMD), pluginval estricto, comparación contra referencias.
 
 ## Estado actual
 Fase 1 COMPLETADA (2026-09-24): CMake + JUCE 9.0.2, VST3 + Standalone, seno monofónico (prioridad a la última
@@ -374,4 +376,48 @@ Fase 10 COMPLETADA (2026-10-08). Probada por el usuario en FL Studio. El audio n
   Revisado con capturas del Standalone (barra, navegador, notas, guardar, borrar, menú, páginas).
 - Pendiente para más adelante: favoritos/etiquetas, arrastrar un .uwpreset a la ventana, preset aleatorio, A/B.
 
-Siguiente: Fase 11 (pulido), pendiente de que el usuario la inicie.
+Fase 11 COMPLETADA (2026-10-09). Probada por el usuario en FL Studio. El sonido no cambia (medido).
+- `dsp/Simd.h`: `simd::Float4` (SSE2, 4 floats; versión escalar con la misma interfaz si no hay SSE2), `transpose`,
+  `readPositions` (fases double → índice + fracción, mismo redondeo que el escalar), `advancePhases` (máscara, sin if).
+  Solo SSE2: lo tiene todo x64 (AVX no está garantizado y colgaría el plugin).
+- `WavetableOscillator`: unison de 4 en 4 copias (`FrameReader::read4`, `interpolate4` = Catmull-Rom con las mismas
+  operaciones en el mismo orden: cada copia idéntica bit a bit). Una sola copia → camino escalar. Ganancias en
+  estructura de arrays (`UnisonGains`: left/right/mono[16]); `increments[k]` = phaseIncrement × ratios (0 en copias
+  que no suenan: el último grupo SIMD va completo). `CachedReader` (current/currentFast/previous/previousFast): el
+  TableReader solo se rehace si cambian tabla, posición o mipmap (antes ~20 ns por muestra). Camino de warp: 1) fases
+  por copia (escalar) → 2) lecturas en lote SIMD (`readCopies`: principal + extra para Mirror/Quantize) → 3) saltos y
+  quiebres (escalar); valores fijos por muestra (pendiente en 0, final/principio del Sync, este perezoso) una vez y no
+  por copia; Bend/FM sola suman con SIMD; `Correction::used` evita acumular ceros. Tono/detune perezosos
+  (`incrementPending`: un recálculo por muestra como mucho; ratios solo si cambia el detune o N). `mipFor` solo hace
+  log2 dentro de la franja de fundido. `wrapPhase` sin std::floor (mismo resultado).
+- `HalfbandDecimator.h`: decimador e interpolador = producto escalar SIMD (`dotProduct`) con una ventana simétrica de
+  pesos (`HalfbandDesign::window`, múltiplo de 4); el decimador guarda las primeras y segundas de cada pareja aparte
+  (polifásico).
+- `Distortion.h`: `AntiderivativeCache` (F(x₋₁) = la F(x) de la muestra anterior; mismo resultado). `dsp/FastMath.h`:
+  `fastTanh` (fracción continua de Lambert, error 6·10⁻⁷ = −124 dB) para el drive del filtro. `Filter`: con las
+  perillas quietas (`settled`) no se recorre el suavizado. Probado y DESCARTADO: exp2/tan rápidas en el cutoff (sin
+  mejora medida en la voz).
+- `PluginProcessor::setStateInformation`: los parámetros discretos (on/off, listas) se llevan a su valor exacto tras
+  replaceState. Bug desde la Fase 2 encontrado por pluginval con `--randomise`: un on/off con valor crudo 0.34 (Off)
+  no se tocaba si el estado restaurado también decía Off.
+- CPU antes → ahora (48 kHz, mejor de 5, `UndertowTests --cpu`): Init 8 notas 2.5 → 2.0 %; supersaw 7 copias 5.5 →
+  3.9 %; doble supersaw + sub + 4 rutas 20.2 → 11.5 %; pad 16 notas 2 × 16 copias 55 → 29 %; Sync 7 copias 20 → 13 %;
+  FM 10.8 → 8.6 %; peor caso (2 × 16 copias, Mirror, FM/RM, 16 notas) 283 → 144 %; distorsión 2.6 → 2.0 %; los 4
+  efectos 3.4 → 2.7 %. Presets de fábrica: media 3.3 → 3.2 % (máx. ~7 %): su coste es el fijo de cada voz.
+- Verificación de "mismo sonido": 37 escenarios renderizados antes/después (scratch, no en el repo): peor −125 dB bajo
+  el pico (orden de la suma); camino de warp idéntico bit a bit. Huellas de los 22 presets de fábrica
+  (`tests/reference/factory-presets.txt`, 24 bandas 40 Hz–20 kHz, generadas con el código de la Fase 10): diferencia
+  0.005 dB (redondeo a 2 decimales). Tolerancia del test: 0.05 dB en bandas a menos de 60 dB de la más fuerte.
+- Tests: `UndertowTests --cpu` (tabla, sin tests). `UndertowPresetTests`: cuenta new/delete dentro de processBlock
+  (operator new reemplazado en ese ejecutable) = 0 con los 22 presets, bloques de 1/7/64/256/4096 y cambiando de preset;
+  CPU por preset (`--verbose`); huellas (`--update-references` las reescribe: revisar el diff); restaurar el estado deja
+  on/off y listas exactos. UndertowTests enlaza con /STACK:8 MB (los tests crean VoiceManagers de ~350 KB en la pila).
+  `stdout` sin buffer en UndertowTests (si se cae, se ve en qué test).
+- Release con 0 warnings (build limpio); ctest 2/2; pluginval strictness 10 estándar: SUCCESS; ampliado (4 sample rates,
+  bloques 1–4096, `--repeat 3 --randomise`): SUCCESS.
+- Límites conocidos / pendiente: el coste fijo por voz (~30 ns por muestra fuera del oscilador: envolventes, mezcla,
+  suavizados) no se vectorizó; procesar 4 voces a la vez (como Vital) sería el siguiente paso grande. El drive del filtro
+  sigue sin oversampling ni ADAA. La latencia de la distorsión (~1 ms) sigue sin informarse al host. Las mediciones de
+  CPU son de este equipo (laptop; varían ±10 % entre ejecuciones aunque se tome el mínimo).
+
+Siguiente: todas las fases de la hoja de ruta están hechas. Próximos pasos posibles, a decidir con el usuario.

@@ -798,6 +798,16 @@ void UndertowAudioProcessor::setStateInformation (const void* data, int sizeInBy
         if (xml->hasTagName (parameters.state.getType()))
         {
             parameters.replaceState (juce::ValueTree::fromXml (*xml));
+
+            // Fase 11 (encontrado con pluginval en orden aleatorio): un parámetro on/off o de lista puede tener un
+            // valor "crudo" intermedio que puso el host (0.34 = Off). Si el estado restaurado dice lo mismo (Off), el
+            // valor del árbol no cambia, replaceState no lo toca y el parámetro se queda en 0.34 en vez de 0. Suena
+            // igual, pero el host ve un valor que no corresponde al estado. Se lleva cada uno a su valor exacto.
+            for (auto* parameter : juce::AudioProcessor::getParameters())
+                if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter); ranged != nullptr && ranged->isDiscrete())
+                    if (const float exact = ranged->convertTo0to1 (ranged->convertFrom0to1 (ranged->getValue())); exact != ranged->getValue())
+                        ranged->setValueNotifyingHost (exact);
+
             presetManager.stateRestored();
         }
 }

@@ -4,21 +4,94 @@
 //   UndertowPresetTests            todos los tests
 //   UndertowPresetTests --verbose  además, la tabla de niveles de cada preset de fábrica
 //   UndertowPresetTests --verbose --user "C:\ruta"   mide también los presets de esa carpeta (p. ej. los tuyos)
+//   UndertowPresetTests --update-references   reescribe tests/reference/factory-presets.txt (ver "Huellas")
+//
+// Fase 11: además comprueba que processBlock no reserva memoria (operator new contado, abajo), mide la CPU de cada
+// preset de fábrica y compara su sonido con una huella de referencia guardada en el repositorio.
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
+#include <new>
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
 #include <juce_events/juce_events.h>
 
 #include "Parameters.h"
 #include "PluginProcessor.h"
 #include "presets/PresetManager.h"
+
+// --- Reservas de memoria en el hilo de audio -------------------------------------------------------------------------
+//
+// Regla del proyecto: processBlock no puede reservar ni liberar memoria (el reparto de memoria del sistema puede
+// bloquearse esperando a otro hilo, y un bloqueo en el hilo de audio es un corte en el sonido). No hay forma de verlo
+// escuchando: casi siempre es rápido. Así que este programa REEMPLAZA operator new / delete (C++ lo permite una vez
+// por ejecutable) por versiones que, mientras 'countingAllocations' está activo, cuentan cada llamada.
+namespace allocation
+{
+std::atomic<bool> counting { false };
+std::atomic<int> count { 0 };
+
+void note (void* p) noexcept
+{
+    if (p != nullptr && counting.load (std::memory_order_relaxed))
+        count.fetch_add (1, std::memory_order_relaxed);
+}
+
+void* allocate (std::size_t size)
+{
+    note (reinterpret_cast<void*> (1));
+    if (void* p = std::malloc (size == 0 ? 1 : size))
+        return p;
+    throw std::bad_alloc();
+}
+
+void* allocateAligned (std::size_t size, std::align_val_t alignment)
+{
+    note (reinterpret_cast<void*> (1));
+    if (void* p = _aligned_malloc (size == 0 ? 1 : size, static_cast<std::size_t> (alignment)))
+        return p;
+    throw std::bad_alloc();
+}
+
+// Cuenta las reservas (y liberaciones) que ocurren dentro de su vida.
+struct Scope
+{
+    Scope() { counting = true; }
+    ~Scope() { counting = false; }
+};
+} // namespace allocation
+
+void* operator new (std::size_t size) { return allocation::allocate (size); }
+void* operator new[] (std::size_t size) { return allocation::allocate (size); }
+void* operator new (std::size_t size, const std::nothrow_t&) noexcept
+{
+    allocation::note (reinterpret_cast<void*> (1));
+    return std::malloc (size == 0 ? 1 : size);
+}
+void* operator new[] (std::size_t size, const std::nothrow_t&) noexcept
+{
+    allocation::note (reinterpret_cast<void*> (1));
+    return std::malloc (size == 0 ? 1 : size);
+}
+void* operator new (std::size_t size, std::align_val_t alignment) { return allocation::allocateAligned (size, alignment); }
+void* operator new[] (std::size_t size, std::align_val_t alignment) { return allocation::allocateAligned (size, alignment); }
+void operator delete (void* p) noexcept { allocation::note (p); std::free (p); }
+void operator delete[] (void* p) noexcept { allocation::note (p); std::free (p); }
+void operator delete (void* p, std::size_t) noexcept { allocation::note (p); std::free (p); }
+void operator delete[] (void* p, std::size_t) noexcept { allocation::note (p); std::free (p); }
+void operator delete (void* p, std::align_val_t) noexcept { allocation::note (p); _aligned_free (p); }
+void operator delete[] (void* p, std::align_val_t) noexcept { allocation::note (p); _aligned_free (p); }
+void operator delete (void* p, std::size_t, std::align_val_t) noexcept { allocation::note (p); _aligned_free (p); }
+void operator delete[] (void* p, std::size_t, std::align_val_t) noexcept { allocation::note (p); _aligned_free (p); }
 
 namespace
 {
@@ -28,6 +101,7 @@ using undertow::presets::PresetManager;
 int failures = 0;
 bool verbose = false;
 juce::File measuredUserFolder; // --user: presets del usuario que también se miden
+bool updateReferences = false;  // --update-references
 
 void check (bool condition, const juce::String& message)
 {
@@ -123,12 +197,18 @@ struct RenderStats
     float peak = 0.0f;
     float loudestRms = 0.0f; // RMS máximo en ventanas de 300 ms (≈ "volumen momentáneo")
     bool finite = true;
+    int allocations = 0;          // reservas o liberaciones de memoria dentro de processBlock (debe ser 0)
+    double processSeconds = 0.0;  // tiempo total dentro de processBlock
+    double audioSeconds = 0.0;    // duración del audio generado
+    std::vector<float> mono;      // (L + R) / 2, solo si se pidió
+
+    // Fracción de un núcleo que hace falta para generar el audio en tiempo real.
+    [[nodiscard]] double cpu() const { return processSeconds / audioSeconds; }
 };
 
 RenderStats render (UndertowAudioProcessor& processor, const std::vector<Note>& notes, double sampleRate, double seconds,
-                    const std::function<void (int block)>& beforeBlock = {})
+                    const std::function<void (int block)>& beforeBlock = {}, bool keepAudio = false, int blockSize = 256)
 {
-    constexpr int blockSize = 256;
     processor.setPlayConfigDetails (0, 2, sampleRate, blockSize);
     processor.prepareToPlay (sampleRate, blockSize);
 
@@ -158,12 +238,21 @@ RenderStats render (UndertowAudioProcessor& processor, const std::vector<Note>& 
         if (beforeBlock)
             beforeBlock (block);
 
-        processor.processBlock (buffer, midi);
+        allocation::count = 0;
+        const auto started = std::chrono::steady_clock::now();
+        {
+            const allocation::Scope countAllocations;
+            processor.processBlock (buffer, midi);
+        }
+        stats.processSeconds += std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count();
+        stats.allocations += allocation::count.load();
 
         for (int i = 0; i < count; ++i)
         {
             const float l = buffer.getSample (0, i);
             const float r = buffer.getSample (1, i);
+            if (keepAudio)
+                stats.mono.push_back (0.5f * (l + r));
             if (! std::isfinite (l) || ! std::isfinite (r))
             {
                 stats.finite = false;
@@ -180,12 +269,97 @@ RenderStats render (UndertowAudioProcessor& processor, const std::vector<Note>& 
         }
     }
     processor.releaseResources();
+    stats.audioSeconds = total / sampleRate;
     return stats;
 }
 
 float toDb (float gain)
 {
     return 20.0f * std::log10 (std::max (gain, 1.0e-9f));
+}
+
+// --- Huellas: cómo suena cada preset de fábrica ------------------------------------------------------------------
+//
+// Una "huella" resume el sonido de un render: la energía media en 24 bandas de 1/3 de octava (más o menos) entre 40 Hz
+// y 20 kHz, en dB. Se guarda en tests/reference/factory-presets.txt y cada ejecución la compara con la de ahora. Sirve
+// para cambios que NO deberían cambiar el sonido (optimizaciones, refactors): si una banda se mueve más de 0.05 dB, el
+// test lo dice. Si el cambio de sonido es intencionado, se regeneran con --update-references (y se revisa el diff).
+constexpr int fingerprintBands = 24;
+using Fingerprint = std::array<float, fingerprintBands>;
+
+Fingerprint fingerprintOf (const std::vector<float>& audio, double sampleRate)
+{
+    constexpr int order = 12, size = 1 << order;
+    juce::dsp::FFT fft (order);
+    juce::dsp::WindowingFunction<float> window (size, juce::dsp::WindowingFunction<float>::hann, false);
+
+    std::vector<double> power (size / 2, 0.0);
+    std::vector<float> frame (2 * size);
+    int frames = 0;
+    for (size_t start = 0; start + size <= audio.size(); start += size / 2, ++frames)
+    {
+        std::fill (frame.begin(), frame.end(), 0.0f);
+        std::copy_n (audio.begin() + static_cast<std::ptrdiff_t> (start), size, frame.begin());
+        window.multiplyWithWindowingTable (frame.data(), size);
+        fft.performFrequencyOnlyForwardTransform (frame.data());
+        for (size_t k = 0; k < power.size(); ++k)
+            power[k] += static_cast<double> (frame[k]) * frame[k];
+    }
+
+    Fingerprint bands {};
+    const double lowest = 40.0, highest = 20000.0;
+    for (int b = 0; b < fingerprintBands; ++b)
+    {
+        const double from = lowest * std::pow (highest / lowest, static_cast<double> (b) / fingerprintBands);
+        const double to = lowest * std::pow (highest / lowest, static_cast<double> (b + 1) / fingerprintBands);
+        double sum = 0.0;
+        for (size_t k = 1; k < power.size(); ++k)
+        {
+            const double hz = static_cast<double> (k) * sampleRate / size;
+            if (hz >= from && hz < to)
+                sum += power[k];
+        }
+        bands[static_cast<size_t> (b)] = static_cast<float> (10.0 * std::log10 (std::max (sum / std::max (frames, 1), 1.0e-20)));
+    }
+    return bands;
+}
+
+juce::File referenceFile()
+{
+    return juce::File (UNDERTOW_SOURCE_DIR).getChildFile ("tests/reference/factory-presets.txt");
+}
+
+// Formato: una línea por preset, "nombre<TAB>banda1 banda2 ... banda24" (dB con 2 decimales).
+std::map<juce::String, Fingerprint> readReferences()
+{
+    std::map<juce::String, Fingerprint> references;
+    juce::StringArray lines;
+    lines.addLines (referenceFile().loadFileAsString());
+    for (const auto& line : lines)
+    {
+        if (line.startsWith ("#") || ! line.contains ("\t"))
+            continue;
+        const auto values = juce::StringArray::fromTokens (line.fromFirstOccurrenceOf ("\t", false, false), " ", "");
+        if (values.size() != fingerprintBands)
+            continue;
+        Fingerprint bands {};
+        for (int b = 0; b < fingerprintBands; ++b)
+            bands[static_cast<size_t> (b)] = values[b].getFloatValue();
+        references[line.upToFirstOccurrenceOf ("\t", false, false)] = bands;
+    }
+    return references;
+}
+
+// Diferencia máxima entre dos huellas, contando solo las bandas que suenan: las que están a menos de 60 dB de la más
+// fuerte. (Una banda casi vacía cambia mucho en dB por diferencias de redondeo inaudibles.)
+float fingerprintDifference (const Fingerprint& a, const Fingerprint& b)
+{
+    const float loudest = *std::max_element (a.begin(), a.end());
+    float worst = 0.0f;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (a[i] > loudest - 60.0f)
+            worst = std::max (worst, std::abs (a[i] - b[i]));
+    return worst;
 }
 
 } // namespace
@@ -196,6 +370,7 @@ int main (int argc, char* argv[])
     {
         const juce::String argument (argv[i]);
         verbose = verbose || argument == "--verbose";
+        updateReferences = updateReferences || argument == "--update-references";
         if (argument == "--user" && i + 1 < argc)
             measuredUserFolder = juce::File (juce::String (argv[++i]));
         if (argument == "--notes")
@@ -388,6 +563,25 @@ int main (int argc, char* argv[])
         check (static_cast<int> (valueOf (*processor, id::filter1Type)) == 0, "opcion desconocida → defecto");
     });
 
+    runTest ("Restaurar el estado deja los on/off y las listas en su valor exacto (encontrado con pluginval)", [] {
+        TemporaryFolder temp;
+        auto processor = makeProcessor (temp.folder);
+        auto* on = processor->getParameters().getParameter (id::filter1On);
+        auto* type = processor->getParameters().getParameter (id::filter1Type);
+
+        // El host puede dejar valores intermedios: 0.34 en un on/off es "Off"; 0.2 en una lista de 3 es la opción 0.
+        on->setValueNotifyingHost (0.34f);
+        type->setValueNotifyingHost (0.2f);
+        juce::MemoryBlock state;
+        processor->getStateInformation (state);
+        on->setValueNotifyingHost (0.3f); // sigue siendo Off: el valor del estado no cambia al restaurar
+        type->setValueNotifyingHost (0.1f);
+        processor->setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+
+        check (on->getValue() == 0.0f, "on/off restaurado a " + juce::String (on->getValue()) + " (debe ser 0)");
+        check (type->getValue() == 0.0f, "lista restaurada a " + juce::String (type->getValue()) + " (debe ser 0)");
+    });
+
     runTest ("Proyecto de FL: el nombre y el estado 'modificado' se guardan con el proyecto", [] {
         TemporaryFolder temp;
         auto processor = makeProcessor (temp.folder);
@@ -437,8 +631,11 @@ int main (int argc, char* argv[])
         auto& manager = processor->getPresetManager();
 
         if (verbose)
-            std::printf ("    %-24s %-6s %9s %9s\n", "preset", "cat.", "pico dB", "RMS dB");
+            std::printf ("    %-24s %-6s %9s %9s %8s\n", "preset", "cat.", "pico dB", "RMS dB", "CPU");
         float quietest = 0.0f, loudest = -200.0f;
+        double cpuSum = 0.0, cpuMax = 0.0;
+        juce::String heaviest;
+        int measured = 0;
         for (const auto& preset : manager.getPresets())
         {
             manager.load (preset);
@@ -451,10 +648,19 @@ int main (int argc, char* argv[])
             const float peakDb = toDb (stats.peak);
             const float rmsDb = toDb (stats.loudestRms);
             if (verbose)
-                std::printf ("    %-24s %-6s %9.1f %9.1f%s\n", preset.name.toRawUTF8(), preset.category.toRawUTF8(), peakDb,
-                             rmsDb, preset.factory ? "" : "   (usuario)");
+                std::printf ("    %-24s %-6s %9.1f %9.1f %7.1f%%%s\n", preset.name.toRawUTF8(), preset.category.toRawUTF8(),
+                             peakDb, rmsDb, 100.0 * stats.cpu(), preset.factory ? "" : "   (usuario)");
+            check (stats.allocations == 0,
+                   preset.name + ": processBlock reservo o libero memoria " + juce::String (stats.allocations) + " veces");
             if (! preset.factory)
                 continue; // los del usuario solo se miden
+            cpuSum += stats.cpu();
+            ++measured;
+            if (stats.cpu() > cpuMax)
+            {
+                cpuMax = stats.cpu();
+                heaviest = preset.name;
+            }
             check (stats.finite, preset.name + ": NaN o infinito");
             check (peakDb < -0.5f, preset.name + ": pico " + juce::String (peakDb, 1) + " dBFS (debe quedar por debajo de -0.5)");
             if (preset.category == "Pluck")
@@ -471,6 +677,80 @@ int main (int argc, char* argv[])
             }
         }
         std::printf ("    RMS de los presets (sin Init): de %.1f a %.1f dBFS\n", quietest, loudest);
+        std::printf ("    CPU a 48 kHz (bloques de 256, este equipo): media %.1f %% de un nucleo, maximo %.1f %% (%s)\n",
+                     100.0 * cpuSum / std::max (measured, 1), 100.0 * cpuMax, heaviest.toRawUTF8());
+    });
+
+    runTest ("Huellas: cada preset de fabrica suena como su referencia (tests/reference)", [] {
+        TemporaryFolder temp;
+        auto processor = makeProcessor (temp.folder);
+        auto& manager = processor->getPresetManager();
+        const auto references = readReferences();
+
+        juce::String written = "# Huellas de los presets de fabrica (UndertowPresetTests --update-references).\n"
+                               "# Energia en 24 bandas de 40 Hz a 20 kHz (dB) de la frase de su categoria a 48 kHz.\n";
+        float worst = 0.0f;
+        for (const auto& preset : manager.getPresets())
+        {
+            if (! preset.factory)
+                continue;
+            manager.load (preset);
+            const auto notes = phraseFor (preset.category);
+            double length = 0.0;
+            for (const auto& n : notes)
+                length = std::max (length, n.end);
+            const auto stats = render (*processor, notes, 48000.0, length + 1.0, {}, true);
+            const auto bands = fingerprintOf (stats.mono, 48000.0);
+
+            juce::StringArray values;
+            for (const float band : bands)
+                values.add (juce::String (band, 2));
+            written << preset.name << "\t" << values.joinIntoString (" ") << "\n";
+
+            if (updateReferences)
+                continue;
+            const auto reference = references.find (preset.name);
+            check (reference != references.end(), preset.name + ": no tiene huella de referencia (--update-references)");
+            if (reference == references.end())
+                continue;
+            const float difference = fingerprintDifference (reference->second, bands);
+            worst = std::max (worst, difference);
+            if (verbose)
+                std::printf ("    %-24s diferencia maxima %.3f dB\n", preset.name.toRawUTF8(), difference);
+            check (difference <= 0.05f, preset.name + ": suena distinto a su referencia (" + juce::String (difference, 2)
+                                            + " dB en alguna banda)");
+        }
+
+        if (updateReferences)
+        {
+            referenceFile().getParentDirectory().createDirectory();
+            check (referenceFile().replaceWithText (written, false, false, "\n"), "no se pudo escribir " + referenceFile().getFullPathName());
+            std::printf ("    huellas escritas en %s\n", referenceFile().getFullPathName().toRawUTF8());
+        }
+        else
+        {
+            std::printf ("    peor diferencia con la referencia: %.3f dB\n", worst);
+        }
+    });
+
+    runTest ("Tiempo real: cualquier tamano de bloque (1 a 4096 muestras), sin reservar memoria ni NaN", [] {
+        TemporaryFolder temp;
+        auto processor = makeProcessor (temp.folder);
+        auto& manager = processor->getPresetManager();
+        const std::vector<Note> chord { { 48, 0.0, 1.0 }, { 60, 0.1, 1.0 }, { 64, 0.2, 1.0 }, { 67, 0.3, 1.2 } };
+        for (const auto& preset : manager.getPresets())
+        {
+            if (! preset.factory)
+                continue;
+            manager.load (preset);
+            for (const int blockSize : { 1, 7, 64, 4096 })
+            {
+                const auto stats = render (*processor, chord, 48000.0, 1.5, {}, false, blockSize);
+                check (stats.finite && stats.allocations == 0,
+                       preset.name + " con bloques de " + juce::String (blockSize) + ": " + juce::String (stats.allocations)
+                           + " reservas de memoria" + (stats.finite ? "" : ", NaN"));
+            }
+        }
     });
 
     runTest ("Otros sample rates y cambiar de preset con notas sonando: sin NaN ni picos", [] {

@@ -26,9 +26,13 @@ inline constexpr std::array<const char*, 8> warpModeNames { "None",   "Sync",   
                                                             "PWM",    "Mirror", "Quantize", "Bitcrush" };
 
 // Fase en [0, 1). Protege la lectura de la tabla: un 1.0 exacto se saldría del ciclo.
+// Se llama por copia y por muestra: en vez de std::floor (una llamada a la biblioteca en x64 sin SSE4.1) se trunca con
+// una conversión a entero y se corrige el caso negativo. Da exactamente el mismo resultado que phase − floor(phase).
 [[nodiscard]] inline double wrapPhase (double phase) noexcept
 {
-    const double wrapped = phase - std::floor (phase);
+    double wrapped = phase - static_cast<double> (static_cast<long long> (phase));
+    if (wrapped < 0.0)
+        wrapped += 1.0;
     return wrapped >= 1.0 ? 0.0 : wrapped;
 }
 

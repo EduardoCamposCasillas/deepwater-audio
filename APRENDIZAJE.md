@@ -1590,3 +1590,213 @@ Inténtalo primero; las pistas vendrán después.
 
 ### Retos completados
 - [ ] Reto Fase 10 — pluck de tropical house
+
+## Fase 11 — Pulido: menos CPU con el mismo sonido
+
+Esta fase no añade perillas. El sinte suena **igual** (está medido, ver abajo), pero gasta casi la mitad de CPU en los
+sonidos grandes. Además, ahora hay pruebas automáticas de que nunca rompe las reglas del tiempo real.
+
+### Conceptos aprendidos
+**El presupuesto del tiempo real.** FL le pide al plugin bloques de audio, por ejemplo de 256 muestras. A 48 kHz, 256
+muestras duran **5.3 ms**: el plugin tiene que generarlas en menos de ese tiempo, cada vez y sin excepción. Si un
+bloque llega tarde, la tarjeta de sonido no tiene nada que reproducir y se oye un **chasquido** (un *dropout*). Por eso
+la CPU se mide en "**% de un núcleo**": 25 % significa que generar 1 s de audio cuesta 0.25 s de un núcleo del
+procesador. Con un buffer más pequeño (menos latencia al tocar en vivo) hay menos margen, y los picos importan más.
+
+**Medir antes de optimizar.** La regla de oro es no adivinar dónde se va el tiempo, sino medirlo. En esta fase hubo
+sorpresas:
+- En el oscilador, *preparar* la lectura de la tabla (buscar los dos frames y sus punteros) costaba **más que leerla**:
+  unos 20 ns por muestra. Ahora se guarda la preparación de la muestra anterior y solo se rehace si algo cambió (es
+  una *caché*).
+- En el filtro, cambiar `tan` y `exp2` por aproximaciones rápidas **no se notó** dentro de la voz: el tiempo no se iba
+  ahí. Así que se deshizo el cambio. Una optimización que no mejora la medición solo añade complicación.
+- Las mediciones varían de una ejecución a otra (el antivirus, el navegador, el turbo del procesador). Por eso cada
+  medida se repite 5 veces y se queda la **más rápida**: los demás programas solo pueden hacerla más lenta.
+
+**SIMD: una instrucción, cuatro números.** El procesador tiene registros de 128 bits que guardan 4 números a la vez, e
+instrucciones que suman o multiplican los 4 de golpe (SSE2). El unison es el caso perfecto: hasta 16 copias de la
+misma onda que hacen exactamente las mismas cuentas, cada una con su fase. Ahora se leen de **4 en 4**:
+1. Las fases de 4 copias se convierten en 4 posiciones de lectura (las 4 a la vez).
+2. Para cada copia se cargan sus 4 muestras vecinas de la tabla (las que necesita la interpolación cúbica): una "fila"
+   por copia. Después se **transpone** esa tabla de 4 × 4 para tener juntas "la muestra −1 de las 4 copias", "la 0 de
+   las 4", etc.
+3. La fórmula de Catmull-Rom se calcula una sola vez para las 4 copias.
+4. Las ganancias (izquierda/derecha) de 4 copias se cargan juntas, porque ahora se guardan "una fila por canal"
+   (*estructura de arrays*) y no "una ficha por copia".
+
+En SIMD no hay un `if` distinto para cada copia: las 4 siguen siempre el mismo camino. Por eso "si la fase pasó de 1,
+réstale 1" se hace con una **máscara**: la comparación da todo-unos o todo-ceros en cada copia, y un AND con 1.0 deja
+1.0 (o 0.0) para restar.
+
+Se usa SSE2 (4 floats) y no AVX (8 floats) porque **todos** los procesadores x64 tienen SSE2. Un plugin compilado para
+AVX se cuelga en un procesador sin AVX, y ese es el peor error que puede tener un plugin.
+
+El decimador y el interpolador *halfband* (los del oversampling) también usan SIMD ahora: un filtro FIR es un
+**producto escalar** (multiplicar dos listas y sumar los resultados), justo lo que mejor hace SIMD.
+
+**Hacer menos trabajo (la otra mitad de la optimización).**
+- **Caché:** en la distorsión con ADAA, la primitiva F(x₋₁) es la misma F(x) de la muestra anterior. Guardarla ahorra
+  la mitad de las `exp` y `log`, que eran casi todo su coste.
+- **Trabajo perezoso:** con un vibrato o un LFO en el detune, el oscilador recalculaba su frecuencia y su mipmap hasta
+  dos veces por muestra. Ahora marca "hay que recalcular" y lo hace una sola vez antes de la muestra siguiente. Además,
+  las razones del unison solo se recalculan si cambia el detune, no con cada vibrato.
+- **Atajos:** un filtro con las perillas quietas ya no revisa sus 7 valores suavizados en cada muestra. Y el mipmap
+  solo calcula un `log2` cuando la nota está en la franja de fundido entre dos niveles.
+
+**Aproximaciones: cuándo se aceptan.** La saturación del filtro (drive) usa ahora una `tanh` rápida, una fracción
+continua (un cociente de dos polinomios), en vez de la función de la biblioteca. Su error máximo es 6·10⁻⁷, es decir,
+**−124 dB** respecto a la señal: muy por debajo de lo que se puede oír (y del ruido de un archivo de 24 bits). Una
+aproximación se acepta cuando su error medido queda muy por debajo de lo audible **y** ahorra tiempo medido.
+
+**"Suena igual": demostrado, no supuesto.** Optimizar no puede cambiar el sonido. Se comprobó de tres formas:
+1. Antes de tocar nada se grabaron ~1.7 millones de muestras de 37 escenarios (unison de 1 a 16, los 7 warps, FM y
+   cambios en mitad de la nota). Después de optimizar, la mayor diferencia es de **−125 dB** bajo el pico: el redondeo
+   de sumar las copias en otro orden. El camino de warp sale **idéntico bit a bit**.
+2. **Huellas de referencia:** el test de presets guarda cómo suena cada preset de fábrica (la energía en 24 bandas de
+   frecuencia) en `tests/reference/factory-presets.txt`. Se generaron con el código **anterior** a esta fase. Con el
+   código nuevo, la mayor diferencia es de **0.005 dB** (lo que se pierde al guardar con 2 decimales). Desde ahora,
+   si un cambio futuro altera un preset sin querer, el test fallará.
+3. Los ~100 tests de DSP de las fases anteriores (afinación, aliasing, clics, filtros…) siguen pasando con los mismos
+   números.
+
+**Las reglas del tiempo real, vigiladas por un test.** "Nada de reservar memoria en `processBlock`" era una regla
+escrita; ahora también es una prueba. El programa de tests de presets **reemplaza `new` y `delete`** por versiones que
+cuentan cada llamada mientras se ejecuta `processBlock`. El contador da **0** con los 22 presets, con bloques de **1, 7,
+64, 256 y 4096** muestras y también al cambiar de preset con notas sonando. ¿Por qué hace falta contarlo? Pedir
+memoria al sistema puede bloquearse esperando a otro hilo, y un bloqueo en el hilo de audio es un chasquido. En las
+pruebas normales no se oye, porque casi siempre es rápido.
+
+**pluginval, más estricto, y lo que encontró.** Además del nivel 10 de siempre, ahora se valida con 4 frecuencias de
+muestreo (44.1, 48, 88.2 y 96 kHz), con bloques de 1 a 4096 muestras (incluido 7, que no es potencia de 2) y con **3
+pasadas en orden aleatorio**. El orden aleatorio destapó un fallo que existía desde la Fase 2:
+- El host puede dejar un parámetro on/off en un valor intermedio, por ejemplo 0.34 (que significa Off).
+- Si se restauraba un estado que también decía Off, el valor guardado "no cambiaba" y JUCE no tocaba el parámetro.
+  Se quedaba en 0.34 en vez de 0.
+
+Sonaba igual, pero el host veía un valor que no correspondía al proyecto guardado. Ahora, al restaurar, cada parámetro
+on/off o de lista se lleva a su valor exacto, y un test lo comprueba. Esa es la razón de probar en otro orden: los
+tests que siempre corren igual nunca encuentran los errores que dependen de lo que pasó antes.
+
+**El resultado (48 kHz, este equipo, "% de un núcleo"; `UndertowTests --cpu`):**
+
+| Escenario | Notas | Antes | Ahora |
+|---|---|---|---|
+| Init: 1 oscilador | 8 | 2.5 % | 2.0 % |
+| Bajo: A + sub, filtro con drive, Env 2 → Cutoff | 8 | 6.6 % | 5.5 % |
+| Supersaw: A con 7 copias, filtro | 8 | 5.5 % | 3.9 % |
+| Doble supersaw: A y B con 7 copias + sub, 4 rutas | 8 | 20.2 % | 11.5 % |
+| Pad: A y B con 16 copias, sub, ruido, 4 rutas | 16 | 55 % | 29 % |
+| Sync con 7 copias | 8 | 20 % | 13 % |
+| FM de 2 operadores | 8 | 10.8 % | 8.6 % |
+| Peor caso: 2 × 16 copias, Mirror y FM/RM, 4 rutas | 16 | 283 % | 144 % |
+| Distorsión (oversampling ×4) | — | 2.6 % | 2.0 % |
+| Los cuatro efectos | — | 3.4 % | 2.7 % |
+
+Los presets de fábrica casi no cambian (de media, 3.3 % → 3.2 %): usan pocas copias de unison, y su coste está
+repartido en cosas pequeñas de cada voz (envolventes, mezcla, filtro). La mejora se nota justo donde más hacía falta:
+en los sonidos grandes.
+
+### Qué cuesta cada control (diseñar pensando en la CPU)
+Esta fase no tiene controles nuevos. Lo útil para diseñar es saber **qué cuesta** cada cosa, para gastar la CPU donde
+se oye:
+
+| Control | Coste | ¿Se oye la diferencia? |
+|---|---|---|
+| **Voices** (polifonía) y **Release** largo | Cada nota que suena (también durante su release) es una voz entera. Un release de 3 s con acordes rápidos puede tener 16 voces sonando a la vez. | Un release largo se oye en los pads; en un bajo, casi nunca. |
+| **Unison** (copias) | Crece con las copias, pero en grupos de 4: 4 copias cuestan casi lo mismo que 2, y 8 casi lo mismo que 5. | De 1 a 5–7 copias el cambio es enorme; de 9 a 16 es sutil (más "ruido" que "ancho"). |
+| **Warp o FM/RM** (cualquier modo ≠ None/Off) | El oscilador se calcula al doble de frecuencia (oversampling ×2): cuesta ~2× por copia. | Es el precio de que no haya aliasing. |
+| **Modular Pitch, Detune o Position** | El oscilador recalcula su frecuencia o sus frames en cada muestra. | Sí, es movimiento y vale la pena. Pero no dejes rutas conectadas con amount 0. |
+| **Filtro** | Fijo por voz. El **Drive** añade una tanh por muestra. | El drive se oye; si no lo usas, déjalo en 0. |
+| **Efectos** (distorsión, chorus, delay, reverb) | **Globales**: cuestan lo mismo con 1 nota que con 16. La distorsión es el más caro (2 %, por su oversampling ×4). | El chorus (0.1 %) da "ancho" mucho más barato que subir el unison en cada voz. |
+
+Regla práctica: **lo que se repite en cada voz se multiplica por el número de notas; lo global se paga una sola vez.**
+
+### Ejercicio de escucha guiado
+Montaje: un acorde de 4 notas largas en el Piano Roll (**C5–E5–G5–B5**, 2 compases, en bucle). Fíjate en el medidor
+de CPU de la barra de herramientas de FL (el gráfico pequeño de arriba).
+
+1. **Unison: dónde deja de valer la pena.** Desde *Init*, pon Osc A en *Basic Shapes* con Position **67 %** (la
+   sierra). Sube el Unison **1 → 3 → 5 → 7 → 9 → 16**, con Detune 40 % y Width 80 %. El salto de 1 a 3 y de 3 a 7 es
+   enorme: de una nota "fina" a un coro. De 9 a 16 casi no cambia; el sonido se vuelve más "lavado". El CPU de FL
+   sube, pero mucho menos que antes de esta fase.
+2. **Global contra por voz.** Con 7 copias, compara dos formas de ensanchar: (a) subir el unison a **16**; (b) dejarlo
+   en 7 y encender el **Chorus** (Rate 0.5 Hz, Depth 40 %, Mix 35 %). Iguala el volumen con el Master. (b) suena igual
+   de ancho (o más), y su coste no depende del número de notas.
+3. **Comparar contra una referencia (A/B a ciegas).** Si tienes **Vital** (es gratis) o Serum, monta en él una
+   supersaw parecida: 7 voces, detune moderado, sin efectos. En FL pon los dos sintes en dos canales con el **mismo
+   patrón** y un **Fruity dB Meter** (o Wave Candy) en cada canal del Mixer. Iguala el volumen con los faders hasta
+   que los dos marquen lo mismo. Después alterna el mute de los dos canales **sin mirar cuál es cuál** (pídele a
+   alguien que lo haga, o cierra los ojos y pulsa varias veces). Fíjate en:
+   - el **brillo** en notas agudas (C7–C8): un sinte con aliasing suena "metálico", con un silbido que no sigue a la
+     nota;
+   - el **carácter del detune**: ¿el batido es regular o "nervioso"?
+   - el **ancho estéreo**: escucha también en mono (con *Fruity Stereo Shaper* o el botón de mono del Mixer).
+   Anota qué te gusta de cada uno. Así se compara contra una referencia: mismo volumen, mismo patrón y sin mirar.
+4. **El mismo sonido de siempre.** Abre un proyecto de la Fase 10: debe sonar **exactamente igual**.
+5. **Artefactos a buscar.**
+   - Baja el buffer de FL (*Options > Audio settings*, a 256 o 128 muestras) y toca un pad de 16 copias con acordes de
+     8 notas: **no debe haber chasquidos**.
+   - Mueve cualquier perilla mientras suena: igual que antes, sin clics ni zipper.
+   - Ningún cambio de timbre en los presets de fábrica. Los tests lo garantizan, pero tu oído es la última prueba.
+
+### Recetas
+**1. Supersaw eficiente para trance (138 BPM): el mismo muro con la mitad de CPU**
+1. Desde *Init*: Osc A en *Basic Shapes* con Position **67 %** (sierra), **Unison 7**, Detune **35 %**, Width **85 %**.
+2. Osc B **On**, la misma sierra, **Octave +1**, **Unison 5**, Detune 25 %, Level 50 %. La octava de arriba añade
+   brillo. Bastan 5 copias porque suena más bajo y más agudo, y el oído separa menos sus copias.
+3. Filtro low-pass 12 dB a **8 kHz**, Key Track 30 %: quita la aspereza de arriba sin apagar el sonido.
+4. Env 1: Attack 5 ms, Sustain 100 %, Release 300 ms.
+5. **Chorus** con Mix 25 % (anchura barata y global) y **Reverb** con Size 60 %, Decay 2.5 s y Mix 20 %.
+6. Piano Roll: acordes de 2 compases, **A5–C6–E6** y **F5–A5–C6**.
+7. *Por qué funciona:* las copias que de verdad "hacen" la supersaw son las primeras 5–7. El ancho extra que antes se
+   buscaba con 16 copias por oscilador lo da el chorus, que se calcula una sola vez para todas las notas.
+
+**2. Pad grande y barato: pocas copias, mucho espacio**
+1. Desde *Init*: Osc A con *Vowels*, Position 30 %, **Unison 3**, Detune 20 %, Width 100 %.
+2. Env 1: Attack **800 ms**, Release **2 s**. **Voices 8** (para acordes no hace falta más).
+3. Arrastra **LFO 1** (Triangle, Sync, división **2 bars**) a la perilla Position de Osc A y deja el anillo en
+   **+25 %**. El movimiento lo da el LFO, no el número de copias.
+4. **Chorus**: Rate 0.3 Hz, Depth 50 %, Mix 40 %. **Reverb**: Size 80 %, Decay **6 s**, Damping 50 %, Mix 35 %.
+5. Acordes largos de 4 notas entre C5 y C6.
+6. *Por qué funciona:* el "tamaño" de un pad lo ponen sobre todo el espacio (la reverb) y el movimiento lento, no la
+   cantidad de copias. Con 3 copias por voz y los efectos globales, un acorde de 8 notas cuesta poco.
+
+### Reto sin receta
+**"Mismo sonido, mitad de CPU".** Elige el preset de fábrica más caro (*Pad con Aire*, *Campana FM* o *E-Piano FM*), o
+el sonido tuyo que más CPU gaste. El objetivo es doble:
+- reducir su CPU **a la mitad o menos**. Mídelo con el medidor de FL tocando el mismo acorde de 8 notas, o con
+  `UndertowPresetTests --verbose --user "<tu carpeta de presets>"`, que muestra la CPU de cada uno de tus presets;
+- y que, en una **prueba a ciegas** (el original y tu versión en dos canales, con el volumen igualado, alternando el
+  mute sin mirar), **no seas capaz de decir cuál es cuál**.
+
+Guárdalo como preset, con notas que expliquen qué quitaste y por qué no se nota.
+
+Pista para empezar: repasa la tabla "Qué cuesta cada control". ¿Qué partes de ese preset se repiten en cada voz y
+podrían ser globales, o usar menos copias, sin que el oído lo note?
+Inténtalo primero; las pistas vendrán después.
+
+### Vocabulario
+- **CPU / núcleo.** El procesador tiene varios núcleos; el audio de un plugin suele correr en uno. *Ejemplo:* el
+  medidor de CPU de FL sube con un sinte pesado y, si llega al tope, el audio se corta.
+- **Tiempo real.** Generar el audio al menos tan rápido como se reproduce, en cada bloque. *Ejemplo:* tocar un teclado
+  MIDI y oírlo al instante exige tiempo real; exportar un proyecto no, por eso la exportación puede ir más lenta.
+- **Buffer (tamaño de bloque) y latencia.** Cuántas muestras pide el host de golpe. Más grande = más margen, pero más
+  retardo al tocar. *Ejemplo:* en *Audio settings* de FL, un buffer de 10 ms se nota al tocar en vivo; uno de 2 ms no.
+- **Dropout / underrun (chasquido).** Un bloque que no llegó a tiempo: se oye un clic o un corte. *Ejemplo:* el
+  crujido que aparece cuando el medidor de CPU de FL se pone en rojo.
+- **SIMD.** Una instrucción que opera sobre varios números a la vez (SSE2: 4 floats). *Ejemplo:* los sintes modernos
+  como Vital o Serum calculan así varias voces o copias de unison a la vez.
+- **Profiling (perfilar).** Medir dónde se va el tiempo antes de optimizar. *Ejemplo:* el monitor de rendimiento de
+  plugins de FL, si tu versión lo tiene, es un "profiler" a escala de proyecto: dice qué plugin gasta más.
+- **Optimización.** Hacer lo mismo con menos trabajo. *Ejemplo:* congelar una pista en FL (convertirla en audio) es
+  la optimización del productor: el sinte deja de calcularse.
+- **Regresión.** Un cambio que rompe algo que antes funcionaba. *Ejemplo:* la actualización de un plugin que cambia
+  el sonido de tus presets; las huellas de referencia existen para detectarlo.
+- **Prueba a ciegas (blind test).** Comparar sin saber cuál es cuál, para que lo que esperas no decida por ti.
+  *Ejemplo:* las comparaciones de convertidores o de compresores "analógicos" contra sus emulaciones se hacen a
+  ciegas.
+- **Aproximación.** Una fórmula más barata que se parece a la exacta. *Ejemplo:* casi todos los saturadores usan
+  versiones rápidas de tanh o exp; lo importante es que el error quede por debajo de lo audible.
+
+### Retos completados
+- [ ] Reto Fase 11 — mismo sonido, mitad de CPU

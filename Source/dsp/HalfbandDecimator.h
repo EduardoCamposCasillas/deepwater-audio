@@ -5,6 +5,8 @@
 #include <cmath>
 #include <numbers>
 
+#include "dsp/Simd.h"
+
 namespace undertow::dsp
 {
 
@@ -27,6 +29,10 @@ namespace undertow::dsp
 
 // Coeficientes de un halfband para una frecuencia "baja" dada (la del host, o la intermedia de un oversampling
 // ×4). Los comparten el decimador y el interpolador (Fase 8).
+//
+// Fase 11 (SIMD): las dos operaciones acaban siendo la misma cuenta, un producto escalar entre las últimas H + 1
+// muestras de una señal (H = halfLength) y una "ventana" de pesos simétrica (los coeficientes impares, en espejo
+// alrededor del centro). Escrito así, las muestras y los pesos están seguidos en memoria y se multiplican de 4 en 4.
 struct HalfbandDesign
 {
     // Hasta dónde se conserva todo intacto: 20 kHz, o un poco menos si el host trabaja por debajo de 44.1 kHz.
@@ -56,8 +62,20 @@ struct HalfbandDesign
             const int j = 2 * i + 1;
             const double ideal = std::sin (std::numbers::pi * j / 2.0) / (std::numbers::pi * j);
             const double ratio = static_cast<double> (j) / static_cast<double> (halfLength);
-            const double window = besselI0 (beta * std::sqrt (1.0 - ratio * ratio)) / besselI0 (beta);
-            coefficients[static_cast<size_t> (i)] = static_cast<float> (ideal * window);
+            const double taper = besselI0 (beta * std::sqrt (1.0 - ratio * ratio)) / besselI0 (beta);
+            coefficients[static_cast<size_t> (i)] = static_cast<float> (ideal * taper);
+        }
+
+        // Ventana para el producto escalar. Peso de la muestra que está 'b' posiciones antes de la más nueva
+        // (b = 0..H): las de los dos lados del centro llevan el mismo coeficiente. Se guarda empezando por la más
+        // antigua y con ceros delante hasta un múltiplo de 4 (los grupos SIMD van completos).
+        windowLength = (halfLength + 1 + 3) & ~3;
+        window.fill (0.0f);
+        const int half = (halfLength - 1) / 2;
+        for (int b = 0; b <= halfLength; ++b)
+        {
+            const int i = b <= half ? half - b : b - (half + 1);
+            window[static_cast<size_t> (windowLength - 1 - b)] = coefficients[static_cast<size_t> (i)];
         }
     }
 
@@ -79,10 +97,24 @@ struct HalfbandDesign
     // 44.1 kHz es el caso más exigente (transición de 20 a 24.1 kHz): unos 69 taps a cada lado del central.
     static constexpr int maxHalfLength = 75;
 
+    // Muestras que mira el producto escalar: H + 1 redondeado a múltiplo de 4.
+    static constexpr int maxWindowLength = (maxHalfLength + 1 + 3) & ~3;
+
     std::array<float, (maxHalfLength + 1) / 2> coefficients {};
+    std::array<float, maxWindowLength> window {}; // ver design: el primero es el peso de la muestra más antigua
     int numCoefficients = 1;
     int halfLength = 1; // distancia (impar) del tap no nulo más lejano al central
+    int windowLength = 4;
 };
+
+// Suma de a[i]·b[i] para i < n (n múltiplo de 4): 4 multiplicaciones-suma por instrucción.
+[[nodiscard]] inline float dotProduct (const float* a, const float* b, int n) noexcept
+{
+    simd::Float4 sum;
+    for (int i = 0; i < n; i += 4)
+        sum += simd::Float4::load (a + i) * simd::Float4::load (b + i);
+    return sum.sum();
+}
 
 class HalfbandDecimator
 {
@@ -101,32 +133,34 @@ public:
 
     void reset() noexcept
     {
-        history.fill (0.0f);
+        firsts.fill (0.0f);
+        seconds.fill (0.0f);
         writeIndex = 0;
     }
 
     // Recibe dos muestras a la frecuencia sobremuestreada (la primera es la más antigua) y devuelve una.
+    //
+    // Las muestras se guardan en dos historias, una con las "primeras" de cada pareja y otra con las "segundas"
+    // (descomposición polifásica). Como H es impar, el tap central cae siempre en una primera, y todos los taps no
+    // nulos (los impares) en segundas: la salida es 0.5 · centro + el producto escalar con la historia de segundas.
     [[nodiscard]] float process (float first, float second) noexcept
     {
-        push (first);
-        push (second);
+        firsts[writeIndex] = firsts[writeIndex + bufferSize] = first;
+        seconds[writeIndex] = seconds[writeIndex + bufferSize] = second;
+        writeIndex = (writeIndex + 1) & (bufferSize - 1);
 
-        // Doble escritura en el buffer circular: las últimas N muestras están siempre seguidas en memoria.
-        const float* newest = history.data() + writeIndex + bufferSize - 1;
-        const float* centre = newest - filter.halfLength;
-        float sum = 0.5f * centre[0];
-        for (int i = 0; i < filter.numCoefficients; ++i)
-        {
-            const int j = 2 * i + 1;
-            sum += filter.coefficients[static_cast<size_t> (i)] * (centre[-j] + centre[j]);
-        }
-        return sum;
+        // Doble escritura en el buffer circular: las últimas muestras están siempre seguidas en memoria.
+        const size_t newest = writeIndex + bufferSize - 1;
+        const float centre = firsts[newest - static_cast<size_t> ((filter.halfLength - 1) / 2)];
+        const float* window = seconds.data() + newest - static_cast<size_t> (filter.windowLength - 1);
+        return 0.5f * centre + dotProduct (window, filter.window.data(), filter.windowLength);
     }
 
     // Para pasar de mono a estéreo sin salto: el canal derecho empieza con la historia del izquierdo.
     void copyStateFrom (const HalfbandDecimator& other) noexcept
     {
-        history = other.history;
+        firsts = other.firsts;
+        seconds = other.seconds;
         writeIndex = other.writeIndex;
     }
 
@@ -137,18 +171,11 @@ public:
     static constexpr double attenuationDb = HalfbandDesign::attenuationDb;
 
 private:
-    void push (float sample) noexcept
-    {
-        history[static_cast<size_t> (writeIndex)] = sample;
-        history[static_cast<size_t> (writeIndex + bufferSize)] = sample;
-        writeIndex = (writeIndex + 1) & (bufferSize - 1);
-    }
-
-    static constexpr int bufferSize = 256; // potencia de 2 mayor que la longitud del filtro
+    static constexpr size_t bufferSize = 128; // potencia de 2 mayor que la ventana
 
     HalfbandDesign filter;
-    std::array<float, 2 * bufferSize> history {};
-    int writeIndex = 0;
+    std::array<float, 2 * bufferSize> firsts {}, seconds {};
+    size_t writeIndex = 0;
 };
 
 // Interpolador ×2 (Fase 8): lo contrario del decimador. Para calcular a 2·sr una señal que llega a sr, se
@@ -183,24 +210,18 @@ public:
         writeIndex = (writeIndex + 1) & (bufferSize - 1);
 
         // newest[-a] = x[n − a]. Con H = halfLength (impar), la muestra nueva combina las parejas
-        // x[n − (H ± j)/2] y la original es x[n − (H − 1)/2].
+        // x[n − (H ± j)/2]: las H + 1 últimas muestras, cada una con su peso de la ventana (producto escalar).
+        // La original es x[n − (H − 1)/2].
         const float* newest = history.data() + writeIndex + bufferSize - 1;
-        const int h = filter.halfLength;
-        float sum = 0.0f;
-        for (int i = 0; i < filter.numCoefficients; ++i)
-        {
-            const int j = 2 * i + 1;
-            sum += filter.coefficients[static_cast<size_t> (i)] * (newest[-(h + j) / 2] + newest[-(h - j) / 2]);
-        }
-        first = 2.0f * sum;
-        second = newest[-(h - 1) / 2];
+        first = 2.0f * dotProduct (newest - (filter.windowLength - 1), filter.window.data(), filter.windowLength);
+        second = newest[-(filter.halfLength - 1) / 2];
     }
 
     // Retardo en muestras de ENTRADA: H muestras a la frecuencia doble.
     [[nodiscard]] double getLatency() const noexcept { return 0.5 * filter.halfLength; }
 
 private:
-    static constexpr int bufferSize = 128; // potencia de 2 mayor que H + 1
+    static constexpr int bufferSize = 128; // potencia de 2 mayor que la ventana
 
     HalfbandDesign filter;
     std::array<float, 2 * bufferSize> history {};

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <numbers>
 
+#include "dsp/Simd.h"
 #include "dsp/Warp.h"
 #include "dsp/Wavetable.h"
 
@@ -25,6 +26,8 @@ namespace undertow::dsp
 //     así que una copia extra cuesta un par de interpolaciones y no un oscilador entero.
 //  5) Warp y FM (Fase 7): la fase se deforma (Warp.h) y/o se desplaza con otra señal (FM) antes de leer la
 //     tabla. Eso va por un camino aparte (renderWarped); sin warp ni FM el oscilador es el de la Fase 6.
+//  6) SIMD (Fase 11): las copias del unison se leen de 4 en 4 con instrucciones SSE2 (ver Simd.h). Cada copia
+//     da exactamente el mismo valor que con el código escalar; solo cambia el orden de la suma final.
 class WavetableOscillator
 {
 public:
@@ -32,6 +35,7 @@ public:
 
     // Anchura de la zona de fundido entre mipmaps: 1/6 de octava (2 semitonos) antes de cada límite.
     static constexpr double mipBlendOctaves = 1.0 / 6.0;
+    static constexpr double mipBlendRatio = 1.122462048309373; // 2^(1/6): la misma franja como razón de frecuencias
 
     // Detune al 100 %: las copias de los extremos quedan a ±100 cents (±1 semitono) de la nota.
     static constexpr double maxDetuneCents = 100.0;
@@ -58,13 +62,15 @@ public:
     }
 
     // Desplazamiento de tono en semitonos: afinación del oscilador (octava, semitonos, fine) más la modulación
-    // (vibrato, caídas de pitch). La voz la llama en cada muestra: si el valor no cambió no se recalcula nada.
+    // (vibrato, caídas de pitch). La voz la llama en cada muestra: si el valor no cambió no se recalcula nada, y si
+    // cambió, el recálculo espera a la próxima muestra (así un cambio de tono y uno de detune en la misma muestra
+    // se calculan juntos, una sola vez).
     void setPitchOffset (float semitones) noexcept
     {
         if (semitones == pitchOffset)
             return;
         pitchOffset = semitones;
-        updateIncrement();
+        incrementPending = true;
     }
 
     // Modulación de Position (fracción del recorrido, -1..1). Se suma DESPUÉS del suavizado de la perilla:
@@ -235,6 +241,18 @@ private:
             return first + (interpolate (b + index, fraction) - first) * frameFraction;
         }
 
+        // Lo mismo para 4 copias a la vez (fases consecutivas en memoria).
+        [[nodiscard]] simd::Float4 read4 (const double* phase) const noexcept
+        {
+            std::array<int, 4> index;
+            const simd::Float4 fraction = simd::readPositions (phase, size, index.data());
+
+            const simd::Float4 first = interpolate4 (a, index, fraction);
+            if (b == nullptr)
+                return first;
+            return first + (interpolate4 (b, index, fraction) - first) * frameFraction;
+        }
+
         // Pendiente de la onda en 'phase' (cuánto sube por ciclo). La usa polyBLAMP.
         [[nodiscard]] float slope (double phase) const noexcept
         {
@@ -254,6 +272,8 @@ private:
     {
         int level = 0;
         float blend = 0.0f;
+
+        bool operator== (const Mip&) const = default;
     };
 
     // Cerca del límite entre dos mipmaps se mezclan los dos niveles (ver mipFor).
@@ -268,6 +288,14 @@ private:
             if (mipBlend <= 0.0f)
                 return value;
             return value + (poor.read (phase) - value) * mipBlend;
+        }
+
+        [[nodiscard]] simd::Float4 read4 (const double* phase) const noexcept
+        {
+            const simd::Float4 value = rich.read4 (phase);
+            if (mipBlend <= 0.0f)
+                return value;
+            return value + (poor.read4 (phase) - value) * mipBlend;
         }
 
         [[nodiscard]] float slope (double phase) const noexcept
@@ -309,6 +337,29 @@ private:
         return reader;
     }
 
+    // Construir un TableReader (buscar los frames, sus punteros y la mezcla) costaba más que leer la tabla: ~20 ns
+    // por muestra. Casi siempre se pide el mismo (posición quieta, mismo mipmap), así que se guarda el último y solo se
+    // rehace si cambia algo de lo que depende. Con Position modulada se rehace en cada muestra, como antes.
+    struct CachedReader
+    {
+        const Wavetable* table = nullptr;
+        float position = -1.0f;
+        Mip mip { -1, 0.0f };
+        TableReader reader;
+
+        [[nodiscard]] const TableReader& get (const Wavetable& wavetable, float framePosition, Mip level) noexcept
+        {
+            if (&wavetable != table || framePosition != position || level != mip)
+            {
+                table = &wavetable;
+                position = framePosition;
+                mip = level;
+                reader = makeTableReader (wavetable, framePosition, level);
+            }
+            return reader;
+        }
+    };
+
     template <bool stereo>
     void render (float& left, float& right) noexcept
     {
@@ -321,38 +372,66 @@ private:
 
         smoothUnison();
 
-        const TableReader current = makeTableReader (*table, framePosition, mip);
-        TableReader previous;
+        const TableReader& current = readers.current.get (*table, framePosition, mip);
+        const TableReader* previous = nullptr;
         float oldWeight = 0.0f;
         if (crossfadeRemaining > 0)
         {
-            previous = makeTableReader (*previousTable, framePosition, mip);
+            previous = &readers.previous.get (*previousTable, framePosition, mip);
             oldWeight = static_cast<float> (crossfadeRemaining) / static_cast<float> (crossfadeLength);
             if (--crossfadeRemaining == 0)
                 previousTable = nullptr;
         }
 
-        for (int k = 0; k < activeCount; ++k)
+        // Una sola copia (el caso más común: sub, bajos, leads sin unison): el camino escalar, que para una lectura
+        // es más rápido que preparar un grupo SIMD de 4.
+        if (activeCount == 1)
         {
-            const auto v = static_cast<size_t> (k);
-            float value = current.read (phases[v]);
+            float value = current.read (phases[0]);
             if (oldWeight > 0.0f)
-                value += (previous.read (phases[v]) - value) * oldWeight;
+                value += (previous->read (phases[0]) - value) * oldWeight;
 
             if constexpr (stereo)
             {
-                left += gains[v].left * value;
-                right += gains[v].right * value;
+                left += gains.left[0] * value;
+                right += gains.right[0] * value;
             }
             else
             {
-                left += gains[v].mono * value;
+                left += gains.mono[0] * value;
             }
 
-            phases[v] += phaseIncrement * ratios[v];
-            if (phases[v] >= 1.0)
-                phases[v] -= 1.0;
+            phases[0] += increments[0];
+            if (phases[0] >= 1.0)
+                phases[0] -= 1.0;
+            return;
         }
+
+        // De 4 en 4 copias. Las del último grupo que no suenan (k >= activeCount) tienen ganancia 0 e incremento 0:
+        // se leen (su fase es válida) pero no suman nada ni avanzan.
+        simd::Float4 sumLeft, sumRight;
+        for (int k = 0; k < activeCount; k += 4)
+        {
+            const auto v = static_cast<size_t> (k);
+            simd::Float4 value = current.read4 (&phases[v]);
+            if (oldWeight > 0.0f)
+                value = value + (previous->read4 (&phases[v]) - value) * oldWeight;
+
+            if constexpr (stereo)
+            {
+                sumLeft += simd::Float4::load (&gains.left[v]) * value;
+                sumRight += simd::Float4::load (&gains.right[v]) * value;
+            }
+            else
+            {
+                sumLeft += simd::Float4::load (&gains.mono[v]) * value;
+            }
+
+            simd::advancePhases (&phases[v], &increments[v]);
+        }
+        left += sumLeft.sum();
+        if constexpr (stereo)
+            right += sumRight.sum();
     }
 
     // --- Camino de la Fase 7: warp y FM ------------------------------------------------------------------
@@ -397,61 +476,193 @@ private:
         updateWarpMips (readSpeedPeak * sampleRate);
 
         const bool mirror = warp.mode == WarpMode::mirror;
-        const TableReader current = makeTableReader (*table, framePosition, warpMip);
-        TableReader currentFast, previous, previousFast;
-        if (mirror)
-            currentFast = makeTableReader (*table, framePosition, warpFastMip);
+        const TableReader& current = readers.current.get (*table, framePosition, warpMip);
+        const TableReader& currentFast = mirror ? readers.currentFast.get (*table, framePosition, warpFastMip) : current;
+        const TableReader* previous = &current;
+        const TableReader* previousFast = &current;
         float oldWeight = 0.0f;
         if (crossfadeRemaining > 0)
         {
-            previous = makeTableReader (*previousTable, framePosition, warpMip);
+            previous = &readers.previous.get (*previousTable, framePosition, warpMip);
             if (mirror)
-                previousFast = makeTableReader (*previousTable, framePosition, warpFastMip);
+                previousFast = &readers.previousFast.get (*previousTable, framePosition, warpFastMip);
             oldWeight = static_cast<float> (crossfadeRemaining) / static_cast<float> (crossfadeLength);
             if (--crossfadeRemaining == 0)
                 previousTable = nullptr;
         }
 
-        // Lectura (y pendiente) con el fundido entre tablas, si lo hay.
+        // Lectura y pendiente en una sola fase, con el fundido entre tablas si lo hay. Solo para lo que no es "una
+        // lectura por copia": los valores fijos de esta muestra (principio y final del ciclo) y la pendiente del Bitcrush.
         const auto mix = [oldWeight] (float now, float before) noexcept { return now + (before - now) * oldWeight; };
         const auto read = [&] (double phase) noexcept {
             const float value = current.read (phase);
-            return oldWeight > 0.0f ? mix (value, previous.read (phase)) : value;
-        };
-        const auto readFast = [&] (double phase) noexcept {
-            const float value = currentFast.read (phase);
-            return oldWeight > 0.0f ? mix (value, previousFast.read (phase)) : value;
+            return oldWeight > 0.0f ? mix (value, previous->read (phase)) : value;
         };
         const auto slope = [&] (double phase) noexcept {
             const float value = current.slope (phase);
-            return oldWeight > 0.0f ? mix (value, previous.slope (phase)) : value;
+            return oldWeight > 0.0f ? mix (value, previous->slope (phase)) : value;
         };
         const auto slopeFast = [&] (double phase) noexcept {
             const float value = currentFast.slope (phase);
-            return oldWeight > 0.0f ? mix (value, previousFast.slope (phase)) : value;
+            return oldWeight > 0.0f ? mix (value, previousFast->slope (phase)) : value;
         };
 
+        // --- 1) Qué fase lee cada copia (escalar: cada modo deforma la fase a su manera) ---
+        // 'mainPhases' es la lectura principal; 'extraPhases', la segunda que necesitan Mirror (la lectura rápida, en
+        // espejo) y Quantize (la onda sin escalonar, para mezclarla con el primer 10 % de la perilla).
+        const bool needsMain = ! (mirror && warp.amount >= 1.0f);
+        const bool needsExtra = mirror || (warp.mode == WarpMode::quantize && warp.wet < 1.0f);
+        const int paddedCount = (activeCount + 3) & ~3; // múltiplo de 4: los grupos SIMD van completos
+        std::array<double, maxUnison> masters, mainPhases, extraPhases;
+        for (int k = 0; k < paddedCount; ++k)
+        {
+            const auto v = static_cast<size_t> (k);
+            if (k >= activeCount)
+            {
+                mainPhases[v] = extraPhases[v] = 0.0; // relleno: una fase válida que no suma nada
+                continue;
+            }
+
+            const double master = wrapPhase (phases[v] + static_cast<double> (phaseModulation));
+            masters[v] = master;
+            switch (warp.mode)
+            {
+                case WarpMode::mirror:
+                    mainPhases[v] = master;
+                    extraPhases[v] = mirrorPhase (master);
+                    break;
+                case WarpMode::quantize:
+                    mainPhases[v] = quantizedPhase (warp, master);
+                    extraPhases[v] = master;
+                    break;
+                case WarpMode::bitcrush:
+                    mainPhases[v] = master;
+                    break;
+                case WarpMode::none:
+                case WarpMode::sync:
+                case WarpMode::bendPlus:
+                case WarpMode::bendMinus:
+                case WarpMode::pwm:
+                    mainPhases[v] = warpPhase (warp, master);
+                    break;
+            }
+        }
+
+        // --- 2) Las lecturas de la tabla, de 4 en 4 copias (SIMD) ---
+        const auto readCopies = [&] (const TableReader& now, const TableReader* before, const std::array<double, maxUnison>& at,
+                                     std::array<float, maxUnison>& out) noexcept {
+            if (activeCount == 1)
+            {
+                out[0] = now.read (at[0]);
+                if (oldWeight > 0.0f)
+                    out[0] = mix (out[0], before->read (at[0]));
+                return;
+            }
+            for (int k = 0; k < activeCount; k += 4)
+            {
+                const auto v = static_cast<size_t> (k);
+                simd::Float4 value = now.read4 (&at[v]);
+                if (oldWeight > 0.0f)
+                    value = value + (before->read4 (&at[v]) - value) * oldWeight;
+                value.store (&out[v]);
+            }
+        };
+        std::array<float, maxUnison> mainValues, extraValues;
+        if (needsMain)
+            readCopies (current, previous, mainPhases, mainValues);
+        if (needsExtra)
+            readCopies (mirror ? currentFast : current, mirror ? previousFast : previous, extraPhases, extraValues);
+
+        // Bend y la FM sola no tienen saltos ni quiebres: la suma es la del camino normal, de 4 en 4.
+        if (! warp.needsCorrection())
+        {
+            warpStateFresh = false;
+            if (activeCount == 1)
+            {
+                if constexpr (stereo)
+                {
+                    left += gains.left[0] * mainValues[0];
+                    right += gains.right[0] * mainValues[0];
+                }
+                else
+                {
+                    left += gains.mono[0] * mainValues[0];
+                }
+                phases[0] += increments[0];
+                if (phases[0] >= 1.0)
+                    phases[0] -= 1.0;
+                return;
+            }
+
+            simd::Float4 sumLeft, sumRight;
+            for (int k = 0; k < activeCount; k += 4)
+            {
+                const auto v = static_cast<size_t> (k);
+                const auto value = simd::Float4::load (&mainValues[v]);
+                if constexpr (stereo)
+                {
+                    sumLeft += simd::Float4::load (&gains.left[v]) * value;
+                    sumRight += simd::Float4::load (&gains.right[v]) * value;
+                }
+                else
+                {
+                    sumLeft += simd::Float4::load (&gains.mono[v]) * value;
+                }
+                simd::advancePhases (&phases[v], &increments[v]);
+            }
+            left += sumLeft.sum();
+            if constexpr (stereo)
+                right += sumRight.sum();
+            return;
+        }
+
+        // --- 3) Cada copia: su valor y la corrección de sus saltos y quiebres (escalar) ---
         const bool corrected = warp.needsCorrection() && ! warpStateFresh;
         Correction left4, right4; // las correcciones de esta muestra, ya con la ganancia de cada canal
         float sumLeft = 0.0f, sumRight = 0.0f;
+
+        // Lo que no depende de la copia se lee una vez por muestra, no una vez por copia: la pendiente al principio
+        // de la onda (PWM, Mirror) y, solo cuando alguna copia da la vuelta, el final y el principio del ciclo del
+        // esclavo (Sync).
+        float startSlope = 0.0f;
+        if (corrected && warp.mode == WarpMode::pwm)
+            startSlope = slope (0.0);
+        else if (corrected && mirror)
+            startSlope = slopeFast (0.0);
+
+        bool syncValuesReady = false;
+        float syncEnd = 0.0f, syncStart = 0.0f, syncSlopeChange = 0.0f;
+        const auto readSyncValues = [&] () noexcept {
+            if (syncValuesReady)
+                return;
+            const double endPhase = wrapPhase (warp.syncRatio);
+            syncEnd = read (endPhase);
+            syncStart = read (0.0);
+            syncSlopeChange = slope (0.0) - slope (endPhase);
+            syncValuesReady = true;
+        };
 
         // Suma una copia (con su corrección) a los dos canales y avanza su fase.
         const auto finishCopy = [&] (size_t v, float value, const Correction& correction) noexcept {
             value += correction.now;
             if constexpr (stereo)
             {
-                sumLeft += gains[v].left * value;
-                sumRight += gains[v].right * value;
-                left4.accumulate (correction, gains[v].left);
-                right4.accumulate (correction, gains[v].right);
+                sumLeft += gains.left[v] * value;
+                sumRight += gains.right[v] * value;
+                if (correction.used)
+                {
+                    left4.accumulate (correction, gains.left[v]);
+                    right4.accumulate (correction, gains.right[v]);
+                }
             }
             else
             {
-                sumLeft += gains[v].mono * value;
-                left4.accumulate (correction, gains[v].mono);
+                sumLeft += gains.mono[v] * value;
+                if (correction.used)
+                    left4.accumulate (correction, gains.mono[v]);
             }
 
-            phases[v] += phaseIncrement * ratios[v];
+            phases[v] += increments[v];
             if (phases[v] >= 1.0)
                 phases[v] -= 1.0;
         };
@@ -459,18 +670,14 @@ private:
         for (int k = 0; k < activeCount; ++k)
         {
             const auto v = static_cast<size_t> (k);
-            const double master = wrapPhase (phases[v] + static_cast<double> (phaseModulation));
+            const double master = masters[v];
 
-            // Bend y la FM sola no tienen saltos ni quiebres: solo la lectura deformada.
-            if (! warp.needsCorrection())
-            {
-                finishCopy (v, warpedValue (warp, master, read, readFast), {});
-                continue;
-            }
-
-            float value = warp.mode == WarpMode::quantize || warp.mode == WarpMode::bitcrush
-                              ? 0.0f
-                              : warpedValue (warp, master, read, readFast);
+            // El valor "ingenuo" (como warpedValue). Quantize y Bitcrush lo calculan abajo, junto con sus escalones.
+            float value = 0.0f;
+            if (mirror)
+                value = warp.amount >= 1.0f ? extraValues[v] : mainValues[v] + warp.amount * (extraValues[v] - mainValues[v]);
+            else if (warp.mode == WarpMode::sync || warp.mode == WarpMode::pwm)
+                value = mainValues[v];
 
             // Cuánto avanzó el maestro desde la muestra anterior (con FM puede ser negativo: la fase retrocede) y si
             // en ese tramo cruzó el final del ciclo.
@@ -500,14 +707,13 @@ private:
                         // Al completar el ciclo, el esclavo pasa de su final (fase = ratio) a su principio (fase 0):
                         // salta de valor y de pendiente. (Con un ratio entero no hay salto: el esclavo también
                         // estaba terminando un ciclo.) La pendiente por muestra es la de la tabla × la velocidad.
-                        const double endPhase = wrapPhase (warp.syncRatio);
-                        const float end = read (endPhase), start = read (0.0);
+                        readSyncValues();
                         const auto speed = static_cast<float> (warp.syncRatio * step);
-                        const float slopeChange = (slope (0.0) - slope (endPhase)) * speed;
+                        const float slopeChange = syncSlopeChange * speed;
                         if (wrappedForward)
-                            correct (start - end, slopeChange, crossing (1.0));
+                            correct (syncStart - syncEnd, slopeChange, crossing (1.0));
                         else
-                            correct (end - start, -slopeChange, crossing (0.0));
+                            correct (syncEnd - syncStart, -slopeChange, crossing (0.0));
                     }
                     break;
 
@@ -516,7 +722,7 @@ private:
                     {
                         // Quiebres al entrar en la zona comprimida (principio del ciclo) y al salir (en 'pulseWidth').
                         const double width = warp.pulseWidth;
-                        const auto inside = static_cast<float> (slope (0.0) * step / width); // pendiente dentro
+                        const auto inside = static_cast<float> (startSlope * step / width); // pendiente dentro
                         if (step > 0.0)
                         {
                             if (before < width && before + step >= width)
@@ -539,7 +745,7 @@ private:
                     {
                         // La lectura en espejo da la vuelta en la mitad del ciclo (pico) y al final (valle): su
                         // pendiente pasa de +2 a −2 veces la de la tabla y al revés.
-                        const auto turn = static_cast<float> (4.0 * warp.amount * slopeFast (0.0) * std::abs (step));
+                        const auto turn = static_cast<float> (4.0 * warp.amount * startSlope * std::abs (step));
                         const bool crossedMiddle = step > 0.0 ? before < 0.5 && before + step >= 0.5
                                                               : before >= 0.5 && before + step < 0.5;
                         if (crossedMiddle)
@@ -551,11 +757,11 @@ private:
 
                 case WarpMode::quantize:
                 {
-                    const float stepped = read (quantizedPhase (warp, master));
+                    const float stepped = mainValues[v];
                     value = stepped;
                     if (warp.wet < 1.0f)
                     {
-                        const float original = read (master);
+                        const float original = extraValues[v];
                         value = original + warp.wet * (stepped - original);
                     }
                     if (corrected && stepped != previousStep[v])
@@ -575,7 +781,7 @@ private:
 
                 case WarpMode::bitcrush:
                 {
-                    const float original = read (master);
+                    const float original = mainValues[v];
                     const float crushed = crush (warp, original);
                     value = original + warp.wet * (crushed - original);
                     // Pendiente de la onda por muestra: sirve para saber CUÁNDO cruzó cada umbral (ver abajo).
@@ -606,13 +812,6 @@ private:
             finishCopy (v, value, correction);
         }
         warpStateFresh = false;
-
-        if (! warp.needsCorrection())
-        {
-            left += sumLeft;
-            right += sumRight;
-            return;
-        }
 
         // Salida retrasada dos muestras. Sale la de hace dos (ya con todas sus correcciones); las otras avanzan.
         if constexpr (! stereo)
@@ -684,9 +883,11 @@ private:
     struct Correction
     {
         float twoBefore = 0.0f, before = 0.0f, now = 0.0f, after = 0.0f;
+        bool used = false; // casi todas las muestras no tienen ningún salto: no hay nada que acumular
 
         void add (float jump, float bend, float a) noexcept
         {
+            used = true;
             const float b = 1.0f - a;
             const float a2 = a * a, a3 = a2 * a, a4 = a3 * a, a5 = a4 * a;
             const float b2 = b * b, b3 = b2 * b, b4 = b3 * b, b5 = b4 * b;
@@ -744,6 +945,23 @@ private:
         return ((c3 * t + c2) * t + c1) * t + p[0];
     }
 
+    // Catmull-Rom de 4 copias a la vez: se cargan las 4 muestras vecinas de cada copia (una fila por copia), se
+    // transpone (columnas = "la muestra −1 de las 4 copias", etc.) y el polinomio se evalúa como en interpolate,
+    // con las mismas operaciones en el mismo orden: el resultado de cada copia es idéntico bit a bit.
+    [[nodiscard]] static simd::Float4 interpolate4 (const float* frame, const std::array<int, 4>& index, simd::Float4 t) noexcept
+    {
+        auto pm1 = simd::Float4::load (frame + index[0] - 1);
+        auto p0 = simd::Float4::load (frame + index[1] - 1);
+        auto p1 = simd::Float4::load (frame + index[2] - 1);
+        auto p2 = simd::Float4::load (frame + index[3] - 1);
+        simd::transpose (pm1, p0, p1, p2);
+
+        const simd::Float4 c1 = simd::Float4 (0.5f) * (p1 - pm1);
+        const simd::Float4 c2 = pm1 - simd::Float4 (2.5f) * p0 + simd::Float4 (2.0f) * p1 - simd::Float4 (0.5f) * p2;
+        const simd::Float4 c3 = simd::Float4 (0.5f) * (p2 - pm1) + simd::Float4 (1.5f) * (p0 - p1);
+        return ((c3 * t + c2) * t + c1) * t + p0;
+    }
+
     // Derivada del mismo polinomio (en unidades por muestra de la tabla).
     [[nodiscard]] static float derivative (const float* p, float t) noexcept
     {
@@ -772,6 +990,8 @@ private:
                 detune = targetDetune;
         }
         if (std::clamp (detune + detuneModulation, 0.0f, 1.0f) != appliedDetune)
+            incrementPending = true;
+        if (incrementPending)
             updateIncrement();
 
         // Ganancias de cada copia: se deslizan 5 ms hacia su objetivo. Así cambiar el número de copias, el
@@ -780,22 +1000,23 @@ private:
             return;
 
         gainsSettled = true;
-        for (size_t k = 0; k < gains.size(); ++k)
+        for (size_t k = 0; k < maxUnison; ++k)
         {
-            auto& g = gains[k];
-            const auto& t = targetGains[k];
-            g.left += (t.left - g.left) * unisonSmoothingCoef;
-            g.right += (t.right - g.right) * unisonSmoothingCoef;
-            if (std::abs (t.left - g.left) < 1.0e-6f && std::abs (t.right - g.right) < 1.0e-6f)
+            float& gLeft = gains.left[k];
+            float& gRight = gains.right[k];
+            const float tLeft = targetGains.left[k], tRight = targetGains.right[k];
+            gLeft += (tLeft - gLeft) * unisonSmoothingCoef;
+            gRight += (tRight - gRight) * unisonSmoothingCoef;
+            if (std::abs (tLeft - gLeft) < 1.0e-6f && std::abs (tRight - gRight) < 1.0e-6f)
             {
-                g.left = t.left;
-                g.right = t.right;
+                gLeft = tLeft;
+                gRight = tRight;
             }
             else
             {
                 gainsSettled = false;
             }
-            g.mono = 0.5f * (g.left + g.right);
+            gains.mono[k] = 0.5f * (gLeft + gRight);
         }
         updateActiveCount();
     }
@@ -818,10 +1039,12 @@ private:
 
         for (int k = 0; k < maxUnison; ++k)
         {
-            auto& t = targetGains[static_cast<size_t> (k)];
+            const auto v = static_cast<size_t> (k);
+            float& tLeft = targetGains.left[v];
+            float& tRight = targetGains.right[v];
             if (k >= numVoices)
             {
-                t = {};
+                tLeft = tRight = targetGains.mono[v] = 0.0f;
                 continue;
             }
 
@@ -829,12 +1052,12 @@ private:
             const float side = pair % 2 == 0 ? 1.0f : -1.0f;
             const float voicePan = std::clamp (panPosition + stereoWidth * side * spreadPosition (k), -1.0f, 1.0f);
             const float angle = (voicePan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
-            t.left = level * std::numbers::sqrt2_v<float> * std::cos (angle);
-            t.right = level * std::numbers::sqrt2_v<float> * std::sin (angle);
+            tLeft = level * std::numbers::sqrt2_v<float> * std::cos (angle);
+            tRight = level * std::numbers::sqrt2_v<float> * std::sin (angle);
             if (voicePan == 0.0f)
-                t.left = t.right = level; // exacto en el centro (cos(π/4)·√2 no da 1 exacto en float)
-            t.mono = 0.5f * (t.left + t.right);
-            stereoTarget = stereoTarget || t.left != t.right;
+                tLeft = tRight = level; // exacto en el centro (cos(π/4)·√2 no da 1 exacto en float)
+            targetGains.mono[v] = 0.5f * (tLeft + tRight);
+            stereoTarget = stereoTarget || tLeft != tRight;
         }
         gainsSettled = false;
     }
@@ -845,13 +1068,22 @@ private:
         activeCount = numVoices;
         for (int k = maxUnison - 1; k >= numVoices; --k)
         {
-            const auto& g = gains[static_cast<size_t> (k)];
-            if (g.left != 0.0f || g.right != 0.0f)
+            const auto v = static_cast<size_t> (k);
+            if (gains.left[v] != 0.0f || gains.right[v] != 0.0f)
             {
                 activeCount = k + 1;
                 break;
             }
         }
+        updateCopyIncrements();
+    }
+
+    // Avance de fase de cada copia por muestra. Las que no suenan, 0: el bucle SIMD procesa grupos de 4 completos
+    // y así las del final del último grupo no se mueven (igual que si no se hubieran procesado).
+    void updateCopyIncrements() noexcept
+    {
+        for (size_t k = 0; k < maxUnison; ++k)
+            increments[k] = static_cast<int> (k) < activeCount ? phaseIncrement * ratios[k] : 0.0;
     }
 
     // Fase inicial al azar (0..1) a partir de (semilla, copia): repetible y sin estado.
@@ -873,6 +1105,7 @@ private:
 
     void updateIncrement() noexcept
     {
+        incrementPending = false;
         frequencyHz = pitchOffset == 0.0f ? baseFrequencyHz
                                           : baseFrequencyHz * std::exp2 (static_cast<double> (pitchOffset) / 12.0);
 
@@ -886,28 +1119,35 @@ private:
         // perilla queda para el "chorus" sutil, donde el oído distingue diferencias de un par de cents.
         // Las copias están a distancias iguales EN CENTS, así que sus razones de frecuencia forman una
         // progresión geométrica: bastan dos exp2 en vez de una por copia.
-        appliedDetune = std::clamp (detune + detuneModulation, 0.0f, 1.0f);
-        const double spreadSemitones = maxDetuneCents / 100.0 * appliedDetune * appliedDetune;
-        highestRatio = lowestRatio = 1.0;
-        if (numVoices == 1 || spreadSemitones == 0.0)
+        // Las razones solo dependen del detune y del número de copias: con un vibrato (solo cambia el tono) no se tocan.
+        const float newDetune = std::clamp (detune + detuneModulation, 0.0f, 1.0f);
+        if (newDetune != appliedDetune || numVoices != ratiosVoices)
         {
-            ratios.fill (1.0);
-        }
-        else
-        {
-            const double lowest = std::exp2 (-spreadSemitones / 12.0);
-            const double step = std::exp2 (2.0 * spreadSemitones / 12.0 / (numVoices - 1));
-            double ratio = lowest;
-            for (int k = 0; k < numVoices; ++k, ratio *= step)
-                ratios[static_cast<size_t> (k)] = ratio;
-            highestRatio = 1.0 / lowest;
-            lowestRatio = lowest;
+            appliedDetune = newDetune;
+            ratiosVoices = numVoices;
+            const double spreadSemitones = maxDetuneCents / 100.0 * appliedDetune * appliedDetune;
+            highestRatio = lowestRatio = 1.0;
+            if (numVoices == 1 || spreadSemitones == 0.0)
+            {
+                ratios.fill (1.0);
+            }
+            else
+            {
+                const double lowest = std::exp2 (-spreadSemitones / 12.0);
+                const double step = std::exp2 (2.0 * spreadSemitones / 12.0 / (numVoices - 1));
+                double ratio = lowest;
+                for (int k = 0; k < numVoices; ++k, ratio *= step)
+                    ratios[static_cast<size_t> (k)] = ratio;
+                highestRatio = 1.0 / lowest;
+                lowestRatio = lowest;
+            }
         }
 
         // Con unison el mipmap se elige para la copia MÁS AGUDA: ninguna copia produce alias (las graves pierden,
         // como mucho, algo de brillo por encima de ~20 kHz). Solo se recalcula cuando cambia el tono o el detune.
         mip = mipFor (frequencyHz * highestRatio);
         warpMipKey = -1.0;
+        updateCopyIncrements();
     }
 
     // Nivel de mipmap para leer la tabla a 'highestHz' (la frecuencia de la lectura más rápida): el primero (el
@@ -926,17 +1166,21 @@ private:
         // se mezcla con el nivel siguiente de 0 % a 100 %: al llegar al límite ya suena solo el nivel siguiente
         // y el cambio es continuo. Se mezcla hacia el nivel MÁS POBRE (nunca hacia uno que se reflejaría),
         // así que no añade aliasing: el precio es un poco menos de brillo dentro de esa franja.
-        if (result.level < Wavetable::numLevels - 1)
+        // (Fuera de esa franja la mezcla es 0 y no hace falta el log2: con un vibrato esto se calcula en cada muestra.)
+        const double headroom = allowedHarmonics / Wavetable::maxHarmonicsAtLevel (result.level);
+        if (result.level < Wavetable::numLevels - 1 && headroom < mipBlendRatio)
         {
-            const double headroomOctaves = std::log2 (allowedHarmonics / Wavetable::maxHarmonicsAtLevel (result.level));
+            const double headroomOctaves = std::log2 (headroom);
             result.blend = static_cast<float> (std::clamp (1.0 - headroomOctaves / mipBlendOctaves, 0.0, 1.0));
         }
         return result;
     }
 
-    struct Gains
+    // Ganancias de las copias, una fila por canal ("estructura de arrays"): así las de 4 copias seguidas se cargan
+    // en un registro SIMD con una sola instrucción. Por defecto solo suena la primera copia, en el centro.
+    struct UnisonGains
     {
-        float left = 0.0f, right = 0.0f, mono = 0.0f;
+        std::array<float, maxUnison> left { 1.0f }, right { 1.0f }, mono { 1.0f };
     };
 
     static constexpr double audibleLimitHz = 20000.0;
@@ -949,6 +1193,10 @@ private:
 
     const Wavetable* table = nullptr;
     const Wavetable* previousTable = nullptr;
+    struct
+    {
+        CachedReader current, currentFast, previous, previousFast; // "fast" = la lectura rápida del Mirror
+    } readers;
     int crossfadeRemaining = 0;
     int crossfadeLength = 1;
 
@@ -970,6 +1218,8 @@ private:
     int numVoices = 1;
     int activeCount = 1;
     float targetDetune = 0.0f, detune = 0.0f, detuneModulation = 0.0f, appliedDetune = 0.0f;
+    int ratiosVoices = 1;          // número de copias con el que se calcularon 'ratios'
+    bool incrementPending = false; // el tono o el detune cambiaron: recalcular antes de la próxima muestra
     float stereoWidth = 0.0f;
     float panPosition = 0.0f;
     float unisonSmoothingCoef = 1.0f;
@@ -981,8 +1231,8 @@ private:
         r.fill (1.0);
         return r;
     }();
-    std::array<Gains, maxUnison> gains { { { 1.0f, 1.0f, 1.0f } } };
-    std::array<Gains, maxUnison> targetGains { { { 1.0f, 1.0f, 1.0f } } };
+    std::array<double, maxUnison> increments {}; // phaseIncrement × ratios (0 en las copias que no suenan)
+    UnisonGains gains, targetGains;
 
     // Fase 7: warp y FM. Sin warp ni FM no se usa nada de esto (el camino normal es el de la Fase 6).
     Warp warp;

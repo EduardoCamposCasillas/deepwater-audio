@@ -95,6 +95,9 @@ if(UNDERTOW_BUILD_TESTS)
 
     if(MSVC)
         target_compile_options(UndertowTests PRIVATE /W4 /permissive- /utf-8)
+        # Los tests crean VoiceManagers en la pila (~350 KB cada uno, con 32 voces); el 1 MB por defecto se queda
+        # corto en las funciones que crean varios. En el plugin el VoiceManager vive dentro del procesador (heap).
+        target_link_options(UndertowTests PRIVATE /STACK:8388608)
     else()
         target_compile_options(UndertowTests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
@@ -112,6 +115,7 @@ if(UNDERTOW_BUILD_TESTS)
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
             "JucePlugin_Name=\"Undertow Synth\""
+            "UNDERTOW_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\""   # para encontrar tests/reference
     )
     target_link_libraries(UndertowPresetTests
         PRIVATE

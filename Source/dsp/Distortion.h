@@ -72,17 +72,33 @@ namespace distortion_detail
         return 0.5 * x * x;
     }
 
+    // La última primitiva calculada (Fase 11). En la muestra siguiente, F(x₋₁) es justo la F(x) de esta: guardarla
+    // ahorra la mitad de las exp/log, que son casi todo el coste de la distorsión. Solo vale si el punto es el mismo
+    // (con el drive moviéndose, g·u₋₁ cambia y se recalcula).
+    struct AntiderivativeCache
+    {
+        DistortionMode mode = DistortionMode::softClip;
+        double x = 0.0;
+        double value = 0.0;
+        bool valid = false;
+    };
+
     // Promedio de f(g·u) entre la entrada anterior y la actual. Se trabaja con la señal ANTES del drive (u) para
     // que el estado del ADAA no dependa del modo ni de la ganancia: así se pueden fundir dos modos con drives
     // distintos. La primitiva de f(g·u) es F(g·u) / g.
-    [[nodiscard]] inline double adaa (DistortionMode mode, double gain, double u, double previous) noexcept
+    [[nodiscard]] inline double adaa (DistortionMode mode, double gain, double u, double previous, AntiderivativeCache& cache) noexcept
     {
         const double x = gain * u;
         const double xPrevious = gain * previous;
         const double dx = x - xPrevious;
         if (std::abs (dx) < 1.0e-5)
             return shape (mode, 0.5 * (x + xPrevious));
-        return (antiderivative (mode, x) - antiderivative (mode, xPrevious)) / dx;
+
+        const bool cached = cache.valid && cache.mode == mode && cache.x == xPrevious;
+        const double fPrevious = cached ? cache.value : antiderivative (mode, xPrevious);
+        const double f = antiderivative (mode, x);
+        cache = { mode, x, f, true };
+        return (f - fPrevious) / dx;
     }
 } // namespace distortion_detail
 
@@ -137,6 +153,7 @@ public:
             channel.down1.reset();
             channel.tone.reset();
             channel.previousInput = 0.0;
+            channel.currentCurve = channel.previousCurve = {};
             channel.dcIn = channel.dcOut = 0.0f;
         }
         snapToTargets();
@@ -191,6 +208,7 @@ private:
         HalfbandDecimator down2, down1;
         SvfStage tone;
         double previousInput = 0.0; // entrada anterior (antes del drive), para el ADAA
+        distortion_detail::AntiderivativeCache currentCurve, previousCurve; // la del modo actual y la del anterior
         float dcIn = 0.0f, dcOut = 0.0f;
     };
 
@@ -273,10 +291,10 @@ private:
     [[nodiscard]] float processInternal (Channel& c, float dry) noexcept
     {
         namespace d = distortion_detail;
-        double shaped = current.makeup * d::adaa (mode, current.gain, dry, c.previousInput);
+        double shaped = current.makeup * d::adaa (mode, current.gain, dry, c.previousInput, c.currentCurve);
         if (modeFade < 1.0f)
         {
-            const double old = previous.makeup * d::adaa (previousMode, previous.gain, dry, c.previousInput);
+            const double old = previous.makeup * d::adaa (previousMode, previous.gain, dry, c.previousInput, c.previousCurve);
             shaped = old + (shaped - old) * modeFade;
         }
         c.previousInput = dry;

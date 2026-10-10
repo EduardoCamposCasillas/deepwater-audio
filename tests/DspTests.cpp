@@ -8,6 +8,8 @@
 #include <complex>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
+#include <memory>
 #include <numbers>
 #include <random>
 #include <string_view>
@@ -3344,15 +3346,172 @@ void testModulationRings()
     CHECK (routes.size() == 2 && routes[0] == 0 && routes[1] == 3); // ruta 3 = env2 → destino 3 (Filter Cutoff)
 }
 
+// --- Fase 11: tabla de CPU (UndertowTests --cpu) ---------------------------------------------------------------
+//
+// Cada escenario se mide 5 veces (1 s de audio cada vez) y se queda la más rápida: los demás programas del equipo
+// solo pueden hacer una medida más LENTA, así que el mínimo es lo más parecido al coste propio del sinte.
+// Resultado en "% de un núcleo": cuánto de un núcleo del procesador hace falta para generar el audio en tiempo real.
+
+double bestOfFive (const std::function<double()>& measureOnce)
+{
+    double best = 1.0e9;
+    for (int run = 0; run < 5; ++run)
+        best = std::min (best, measureOnce());
+    return best;
+}
+
+double voiceScenarioCpu (const SourceSettings& sources, const undertow::synth::FilterSettings& filter,
+                         const ModulationSettings& modulation, int notes)
+{
+    return bestOfFive ([&] {
+        auto manager = std::make_unique<VoiceManager>();
+        manager->prepare (48000.0);
+        manager->setPolyphony (16);
+        manager->setSourceSettings (sources);
+        manager->setEnvelopeParameters ({ 0.001f, 0.1f, 1.0f, 0.1f });
+        manager->setFilterSettings (filter);
+        manager->setModulationSettings (modulation);
+        for (int n = 0; n < notes; ++n)
+            manager->noteOn (36 + 3 * n, 0.8f);
+
+        constexpr int blockSize = 256;
+        std::vector<float> left (blockSize), right (blockSize);
+        const auto start = std::chrono::steady_clock::now();
+        for (int b = 0; b < 48000 / blockSize; ++b)
+        {
+            std::fill (left.begin(), left.end(), 0.0f);
+            std::fill (right.begin(), right.end(), 0.0f);
+            manager->render (left.data(), right.data(), blockSize);
+        }
+        return std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+    });
+}
+
+void printCpuTable()
+{
+    std::printf ("Tabla de CPU (48 kHz, estéreo, bloques de 256; la mejor de 5 mediciones)\n");
+
+    SourceSettings basic;
+    basic.subTable = &factoryBank().get (0);
+    for (auto& osc : basic.oscillators)
+    {
+        osc.table = &factoryBank().get (0);
+        osc.position = 2.0f / 3.0f; // sierra
+    }
+    const undertow::synth::FilterSettings noFilter {};
+    const undertow::synth::FilterSettings filter { true, { FilterType::lowPass, FilterSlope::db24, 900.0f, 0.4f, 0.0f }, 0.5f };
+    auto drivenFilter = filter;
+    drivenFilter.parameters.drive = 0.3f;
+
+    ModulationSettings none;
+    ModulationSettings envelopeToCutoff;
+    envelopeToCutoff.envelope2 = { 0.005f, 0.4f, 0.3f, 0.2f };
+    envelopeToCutoff.slots[0] = { ModSource::env2, ModDestination::filterCutoff, 0.4f };
+    auto fourRoutes = envelopeToCutoff;
+    fourRoutes.lfos[0] = { LfoShape::sine, LfoMode::retrigger, false, 5.0f, 5 };
+    fourRoutes.slots[1] = { ModSource::lfo1, ModDestination::oscADetune, 0.2f };
+    fourRoutes.slots[2] = { ModSource::lfo1, ModDestination::oscBPosition, 0.3f };
+    fourRoutes.slots[3] = { ModSource::lfo1, ModDestination::globalPitch, 0.005f };
+
+    const auto row = [] (const char* label, int notes, double seconds) {
+        std::printf ("  %-62s %2d notas %6.1f %%\n", label, notes, 100.0 * seconds);
+    };
+
+    row ("Init: 1 oscilador, sin filtro", 8, voiceScenarioCpu (basic, noFilter, none, 8));
+
+    auto bass = basic;
+    bass.sub.enabled = true;
+    row ("Bajo: Osc A + sub, filtro 24 dB con drive, Env 2 -> Cutoff", 8, voiceScenarioCpu (bass, drivenFilter, envelopeToCutoff, 8));
+
+    auto supersaw = basic;
+    supersaw.oscillators[0].unison = 7;
+    supersaw.oscillators[0].detune = 0.4f;
+    row ("Supersaw: Osc A con 7 copias, filtro", 8, voiceScenarioCpu (supersaw, filter, none, 8));
+
+    supersaw.oscillators[1].enabled = true;
+    supersaw.oscillators[1].unison = 7;
+    supersaw.sub.enabled = true;
+    row ("Doble supersaw: A y B con 7 copias + sub, filtro, 4 rutas", 8, voiceScenarioCpu (supersaw, filter, fourRoutes, 8));
+
+    auto pad = basic;
+    for (auto& osc : pad.oscillators)
+    {
+        osc.enabled = true;
+        osc.unison = 16;
+        osc.detune = 0.3f;
+    }
+    pad.sub.enabled = true;
+    pad.noise.enabled = true;
+    row ("Pad: A y B con 16 copias, sub, ruido, filtro, 4 rutas", 16, voiceScenarioCpu (pad, filter, fourRoutes, 16));
+
+    auto sync = basic;
+    sync.oscillators[0].warpMode = WarpMode::sync;
+    sync.oscillators[0].warpAmount = 0.6f;
+    row ("Sync: Osc A sin unison, filtro", 8, voiceScenarioCpu (sync, filter, none, 8));
+
+    auto fm = basic;
+    fm.oscillators[0].position = 0.0f;
+    fm.oscillators[0].fmMode = FmMode::fmOther;
+    fm.oscillators[0].fmAmount = 0.5f;
+    fm.oscillators[1].enabled = false;
+    row ("FM de 2 operadores (B modula a A), filtro", 8, voiceScenarioCpu (fm, filter, none, 8));
+
+    sync.oscillators[0].unison = 7;
+    sync.oscillators[0].detune = 0.4f;
+    row ("Sync con 7 copias de unison, filtro", 8, voiceScenarioCpu (sync, filter, none, 8));
+
+    auto worst = pad;
+    for (auto& osc : worst.oscillators)
+    {
+        osc.warpMode = WarpMode::mirror;
+        osc.warpAmount = 0.5f;
+        osc.fmAmount = 0.3f;
+    }
+    worst.oscillators[0].fmMode = FmMode::fmOther;
+    worst.oscillators[1].fmMode = FmMode::rmSub;
+    row ("Peor caso: A y B con 16 copias, Mirror y FM/RM, 4 rutas", 16, voiceScenarioCpu (worst, filter, fourRoutes, 16));
+
+    // Efectos (globales: no dependen del número de notas).
+    const auto effectCpu = [] (const EffectsSettings& settings) {
+        return bestOfFive ([&] {
+            auto chain = std::make_unique<EffectsChain>();
+            chain->prepare (48000.0);
+            chain->setSettings (settings, 120.0);
+            chain->snapSwitches();
+            auto left = noiseSignal (48000, 13), right = noiseSignal (48000, 14);
+            const auto start = std::chrono::steady_clock::now();
+            for (int i = 0; i < 48000; i += 256)
+                chain->process (left.data() + i, right.data() + i, std::min (256, 48000 - i));
+            return std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+        });
+    };
+    const auto effectRow = [] (const char* label, double seconds) { std::printf ("  %-71s %6.1f %%\n", label, 100.0 * seconds); };
+    EffectsSettings effects;
+    effects.distortion.enabled = true;
+    effectRow ("Efecto: distorsión (oversampling x4)", effectCpu (effects));
+    effects.distortion.enabled = false;
+    effects.reverb.enabled = true;
+    effectRow ("Efecto: reverb", effectCpu (effects));
+    effects.distortion.enabled = effects.chorus.enabled = effects.delay.enabled = true;
+    effectRow ("Efectos: los cuatro a la vez", effectCpu (effects));
+}
+
 } // namespace
 
 
 int main (int argc, char** argv)
 {
-    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 (solo los tests de esa fase).
+    std::setvbuf (stdout, nullptr, _IONBF, 0); // sin buffer: si el programa se cae, se ve en qué test fue
+    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 (solo los tests de esa fase);
+    // --cpu (solo la tabla de CPU de la Fase 11, sin tests).
     bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false;
     for (int i = 1; i < argc; ++i)
     {
+        if (std::string_view (argv[i]) == "--cpu")
+        {
+            printCpuTable();
+            return 0;
+        }
         verbose = verbose || std::string_view (argv[i]) == "--verbose";
         onlyPhase7 = onlyPhase7 || std::string_view (argv[i]) == "--fase7";
         onlyPhase8 = onlyPhase8 || std::string_view (argv[i]) == "--fase8";

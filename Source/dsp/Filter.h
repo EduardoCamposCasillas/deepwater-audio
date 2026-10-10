@@ -6,6 +6,8 @@
 #include <complex>
 #include <numbers>
 
+#include "dsp/FastMath.h"
+
 namespace undertow::dsp
 {
 
@@ -144,6 +146,7 @@ public:
         target.lowPass = parameters.type == FilterType::lowPass ? 1.0f : 0.0f;
         target.bandPass = parameters.type == FilterType::bandPass ? 1.0f : 0.0f;
         target.highPass = parameters.type == FilterType::highPass ? 1.0f : 0.0f;
+        settled = false;
     }
 
     // Desplazamientos de la matriz de modulación: cutoff en octavas; resonancia y drive en fracción del
@@ -214,7 +217,7 @@ private:
         // Añade armónicos ANTES del filtro: con low-pass, el propio filtro recorta los más agudos.
         float x = input;
         if (driveMix > 0.0f)
-            x += driveMix * (std::tanh (driveGain * x) - x);
+            x += driveMix * (fastTanh (driveGain * x) - x);
 
         const auto out1 = channel.stage1.process (x, coefficients1);
         const float y1 = mix (out1, coefficients1.k);
@@ -246,6 +249,11 @@ private:
 
     void smoothParameters() noexcept
     {
+        // Con las perillas quietas (lo normal) y sin modulación nueva no hay nada que hacer: se evita comprobar los
+        // 7 valores suavizados en cada muestra (Fase 11).
+        if (settled && modulation == appliedModulation)
+            return;
+
         // tan() y pow() son caros: cada grupo de coeficientes solo se recalcula si algo de lo que depende
         // se movió (perilla suavizándose o modulación distinta). Con todo quieto, el filtro cuesta unas
         // pocas multiplicaciones por muestra.
@@ -256,6 +264,8 @@ private:
         approach (current.lowPass, target.lowPass, smoothingCoef);
         approach (current.highPass, target.highPass, smoothingCoef);
         bool driveMoved = approach (current.drive, target.drive, smoothingCoef);
+        settled = ! cutoffMoved && ! shapeMoved && ! driveMoved && current.lowPass == target.lowPass
+                  && current.highPass == target.highPass;
 
         if (modulation != appliedModulation)
         {
@@ -278,6 +288,7 @@ private:
     void snapToTargets() noexcept
     {
         current = target;
+        settled = true;
         appliedModulation = modulation;
         updateCutoff();
         updateShape();
@@ -336,6 +347,7 @@ private:
     SvfStage::Coefficients coefficients1, coefficients2;
     double sampleRate = 44100.0;
     float smoothingCoef = 1.0f;
+    bool settled = false; // perillas en su valor final: no hay nada que suavizar
     float minLog2Cutoff = 2.3f, maxLog2Cutoff = 14.2f;
 
     // Valores derivados (se recalculan solo cuando cambia algo de lo que dependen).
