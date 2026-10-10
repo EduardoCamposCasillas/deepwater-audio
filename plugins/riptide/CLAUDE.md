@@ -95,7 +95,7 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 1 IMPLEMENTADA (2026-10-10), pendiente de probar en FL Studio.
+Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Nombre decidido con el usuario: Riptide (`Rpt1`). `COMPANY_NAME "Deepwater"` en Riptide y también en Undertow (antes
   "Undertow"): FL agrupa la suite bajo un fabricante. Los códigos no cambian, así que los proyectos guardados siguen
   encontrando a Undertow (quizá haga falta volver a escanear en FL para ver el nombre nuevo).
@@ -124,4 +124,4 @@ Fase 1 IMPLEMENTADA (2026-10-10), pendiente de probar en FL Studio.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 2 (waveshaping + oversampling) cuando el usuario confirme la Fase 1 en FL.
+Siguiente: Fase 2 (waveshaping + oversampling).

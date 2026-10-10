@@ -13,7 +13,7 @@ que usa y un cuaderno (`APRENDIZAJE.md`) con ejercicios de escucha, recetas y vo
 | # | Plugin | Qué es | Referencia de nivel | Estado |
 |---|--------|--------|---------------------|--------|
 | 1 | [Undertow](plugins/undertow) | Sintetizador wavetable: FM, warp, unison, matriz de modulación, efectos y 43 presets con notas | Serum 2, Vital | ✅ Terminado |
-| 2 | [Riptide](plugins/riptide) | Saturador con modos cinta/bulbo/transistor, multibanda y auto gain | Decapitator, Saturn 2 | 🔨 En curso (Fase 1) |
+| 2 | [Riptide](plugins/riptide) | Saturador con modos cinta/bulbo/transistor, multibanda y auto gain | Decapitator, Saturn 2 | 🔨 En curso (Fase 1 de 10 terminada) |
 | 3 | EQ paramétrico | EQ con analizador de espectro | FabFilter Pro-Q | Pendiente |
 | 4 | Compresor | Estilos limpio y FET/1176 | FabFilter Pro-C 2, 1176 | Pendiente |
 | 5 | Delay | Sync, ping-pong, filtros y modulación en el feedback | Valhalla Delay | Pendiente |
