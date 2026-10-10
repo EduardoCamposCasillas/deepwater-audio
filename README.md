@@ -6,9 +6,9 @@ llegar al nivel de sintes como Serum o Vital.
 
 ![Interfaz de Undertow Synth](docs/screenshot.png)
 
-> **Estado:** en desarrollo (fases 1–10 de 11 completadas). Ya suena y es usable en un DAW: tiene efectos, una interfaz
-> escalable con modulación por arrastre y una librería de 22 presets que explican cómo se construyó cada sonido. Falta
-> la fase de optimización y pulido. Ver la [hoja de ruta](#hoja-de-ruta).
+> **Estado:** las 11 fases de la hoja de ruta están completadas. Es usable en un DAW: tiene efectos, una interfaz
+> escalable con modulación por arrastre, una librería de 22 presets que explican cómo se construyó cada sonido y un
+> motor optimizado con SIMD. Ver la [hoja de ruta](#hoja-de-ruta) y los [límites conocidos](#límites-conocidos).
 
 ## Qué tiene hoy
 
@@ -43,8 +43,11 @@ llegar al nivel de sintes como Serum o Vital.
   (bajos, leads, pads, plucks, keys y FX) con el volumen igualado. Cada uno trae notas que explican cómo se construyó y
   qué perilla probar: la librería es también material de estudio. El proyecto del DAW recuerda qué preset cargaste y si
   lo modificaste.
-- Correcto a 44.1, 48, 88.2 y 96 kHz y con cualquier tamaño de buffer, en estéreo o mono. Validado con
-  [pluginval](https://github.com/Tracktion/pluginval) en strictness 10.
+- **Optimizado con SIMD (SSE2):** el unison y los filtros de oversampling procesan 4 valores por instrucción. Un pad
+  de 16 notas con los dos osciladores a 16 copias gasta la mitad que antes (ver [Rendimiento](#rendimiento)).
+- Correcto a 44.1, 48, 88.2 y 96 kHz y con cualquier tamaño de buffer (de 1 a 4096 muestras), en estéreo o mono.
+  Validado con [pluginval](https://github.com/Tracktion/pluginval) en strictness 10, con las 4 frecuencias de muestreo,
+  7 tamaños de bloque y parámetros aleatorios.
 
 ### Cómo fluye la señal
 
@@ -99,16 +102,34 @@ Hay dos ejecutables de tests:
   tiempos de los ecos y de la reverb, y coste de CPU, a las 4 frecuencias de muestreo.
 - `UndertowPresetTests` (`tests/PresetTests.cpp`, con JUCE) valida cada preset de fábrica, guardar y cargar, el estado
   del proyecto, y renderiza los 22 presets para comprobar que no hay NaN ni picos y que los volúmenes están igualados.
+  Además:
+  - compara la **huella espectral** de cada preset (24 bandas de 40 Hz a 20 kHz) con la guardada en
+    [`tests/reference/factory-presets.txt`](tests/reference/factory-presets.txt): si un cambio en el código altera el
+    sonido de un preset sin querer, el test falla;
+  - cuenta las reservas de memoria dentro de `processBlock` (deben ser 0) con todos los presets y bloques de 1 a 4096
+    muestras;
+  - comprueba que restaurar un proyecto deja cada parámetro on/off y cada lista en su valor exacto.
 
 Opciones para iterar más rápido:
 
 ```bash
 build/Release/UndertowTests.exe --fase8     # solo los tests de efectos (--fase7: warp y FM; --fase9: interfaz)
 build/Release/UndertowTests.exe --verbose   # detalle de cada medición
+build/Release/UndertowTests.exe --cpu       # tabla de CPU por escenario (no corre los tests)
 
-build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --verbose               # nivel de cada preset
+build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --verbose               # nivel y CPU de cada preset
 build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --verbose --user "ruta"  # mide también tus presets
 build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --notes                 # notas de los presets
+build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --update-references     # reescribe las huellas
+```
+
+`--update-references` solo se usa cuando un cambio de sonido es **intencional**; revisa el diff del archivo de huellas
+antes de hacer commit.
+
+Validación completa con pluginval (descárgalo de su página de releases):
+
+```bash
+pluginval.exe --strictness-level 10 --sample-rates 44100,48000,88200,96000 --block-sizes 1,7,64,256,512,1024,4096 --repeat 3 --randomise --validate "build/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3"
 ```
 
 ## Usarlo
@@ -256,6 +277,36 @@ Drive **40 %**, Tone **60 %**, y un Delay con Sync en **1/8 D**, Feedback **30 %
 Hay más recetas, ejercicios de escucha y vocabulario en **[APRENDIZAJE.md](APRENDIZAJE.md)**, el cuaderno de
 diseño sonoro del proyecto. Explica qué se oye con cada control y por qué.
 
+## Rendimiento
+
+CPU de un núcleo a 48 kHz (laptop; mejor de 5 mediciones con `UndertowTests --cpu`), antes y después de la
+optimización de la fase 11. El sonido es el mismo: 37 escenarios renderizados antes y después difieren como mucho en
+−125 dB bajo el pico, y los presets de fábrica conservan su huella espectral.
+
+| Escenario | Antes | Ahora |
+|---|---|---|
+| Init, 8 notas | 2.5 % | 2.0 % |
+| Supersaw: 8 notas × 7 copias | 5.5 % | 3.9 % |
+| Doble supersaw + sub + 4 rutas de modulación | 20.2 % | 11.5 % |
+| Pad: 16 notas, 2 osciladores × 16 copias | 55 % | 29 % |
+| Sync con 7 copias | 20 % | 13 % |
+| FM de 2 osciladores | 10.8 % | 8.6 % |
+| Peor caso: 16 notas, 2 × 16 copias, Mirror y FM/RM | 283 % | 144 % |
+| Los 4 efectos encendidos | 3.4 % | 2.7 % |
+| Presets de fábrica (media) | 3.3 % | 3.2 % |
+
+Cómo se consiguió:
+- **SIMD (SSE2):** las copias del unison se leen de 4 en 4: 4 posiciones, 4 interpolaciones cúbicas y 4 avances de
+  fase con una instrucción cada uno. Se usa SSE2 porque lo tiene cualquier procesador x64 (AVX no está garantizado).
+  Los filtros halfband del oversampling también calculan su producto escalar de 4 en 4.
+- **Hacer menos trabajo:** la lectura de la tabla se prepara solo cuando cambian la tabla, la posición o el mipmap; el
+  tono y el detune se recalculan como mucho una vez por muestra; la ADAA de la distorsión reutiliza el cálculo de la
+  muestra anterior; el filtro no recorre el suavizado con las perillas quietas; el drive del filtro usa una `tanh`
+  aproximada (error −124 dB).
+
+Los presets de fábrica casi no cambian porque usan poco unison: su coste es el fijo de cada voz (envolventes, mezcla y
+suavizados), que todavía no está vectorizado.
+
 ## Estructura del código
 
 ```
@@ -264,12 +315,12 @@ Source/
   PluginEditor.*      interfaz (contenido a tamaño fijo dibujado con una escala: zoom)
   presets/            formato .uwpreset, biblioteca (fábrica + usuario), cargar/guardar y estado del preset actual
   dsp/                oscilador con unison, warp y FM, wavetables, oversampling halfband, ruido, filtro, envolvente, LFO,
-                      FFT y efectos: distorsión, chorus, delay y reverb (sin JUCE)
+                      FFT, efectos (distorsión, chorus, delay y reverb) y utilidades SIMD (sin JUCE)
   synth/              voces, gestión de polifonía, matriz de modulación, banco de wavetables y cadena de efectos
   gui/                aspecto propio (LookAndFeel), perillas con anillos de modulación, barra de fuentes,
                       visor 3D/2D del wavetable, curva del filtro y LFO, barra y navegador de presets
 Presets/Factory/      presets de fábrica (.uwpreset), compilados dentro del plugin
-tests/                tests de DSP (sin JUCE) y de presets (con JUCE)
+tests/                tests de DSP (sin JUCE) y de presets (con JUCE); reference/ = huellas de los presets
 APRENDIZAJE.md        cuaderno de diseño sonoro: conceptos, recetas, ejercicios y vocabulario de cada fase
 ```
 
@@ -287,18 +338,22 @@ El DSP no depende de JUCE: se puede probar aislado. Dentro del hilo de audio no 
 - [x] 8 — Efectos: distorsión, chorus, delay y reverb
 - [x] 9 — Interfaz profesional: escalable, visor 3D del wavetable y arrastrar para modular
 - [x] 10 — Presets: guardar y cargar, navegador y librería de sonidos con notas
-- [ ] 11 — Optimización y pulido
+- [x] 11 — Optimización con SIMD, pluginval estricto y comparación contra referencias
 
-**Límites conocidos:**
-- El drive del filtro no tiene oversampling (va por voz: sobremuestrear 16 voces sería caro). Con drive alto en notas muy
-  agudas puede aparecer algo de aliasing; para una saturación agresiva y limpia, usa la distorsión de la pestaña
-  Efectos, que sí tiene oversampling ×4. Pendiente de revisar en la fase 11 (ADAA en el drive del filtro).
+Ideas para después: procesar 4 voces a la vez con SIMD, macros, modular el amount de una ruta con otra fuente,
+favoritos y comparación A/B de presets.
+
+### Límites conocidos
+
+- El drive del filtro no tiene oversampling ni ADAA (va por voz: sobremuestrear 16 voces sería caro). Con drive alto en
+  notas muy agudas puede aparecer algo de aliasing; para una saturación agresiva y limpia, usa la distorsión de la
+  pestaña Efectos, que sí tiene oversampling ×4.
 - Aliasing medido de la distorsión (seno de 0 dBFS): hasta 1.2 kHz, −67 a −92 dB; en C8 con drive 100 %, unos −55 dB
-  (Soft Clip ingenuo sin oversampling: −17 dB). Añade ~1 ms de retardo mientras está encendida.
+  (Soft Clip ingenuo sin oversampling: −17 dB). Añade ~1 ms de retardo mientras está encendida, que todavía no se
+  informa al DAW como latencia.
 - Los efectos no son destinos de la matriz de modulación (la matriz es por voz y los efectos son globales).
-- El unison es caro con todo al máximo (16 notas con los dos osciladores a 16 copias ≈ 65–80 % de un núcleo). Un
-  supersaw normal (8 notas, 7 copias) cuesta ≈ 9 %. Con warp o FM el oscilador cuesta de 2 a 4 veces más (8 notas con
-  Sync ≈ 9 %, FM de 2 osciladores ≈ 14 %). La optimización con SIMD llega en la fase 11.
+- Con todo al máximo (16 notas, los dos osciladores a 16 copias, Mirror y FM/RM) el sinte necesita más de un núcleo
+  (≈ 144 %). Con warp o FM el oscilador trabaja a doble frecuencia de muestreo y cuesta más que sin ellos.
 - Aliasing medido de los warps (peor caso de C4 a C7): entre −72 y −92 dB, salvo Bend − al 100 % (−62 dB) y Bitcrush de
   una sierra (−53 dB). En C8 con amounts extremos la lectura supera los 30 kHz y el alias sube (−53 a −79 dB).
 
