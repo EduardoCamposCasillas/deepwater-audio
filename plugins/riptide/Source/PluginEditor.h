@@ -1,13 +1,17 @@
 #pragma once
 
+#include <array>
+
 #include <juce_audio_processors/juce_audio_processors.h>
+
+#include "dsp/Saturator.h"
 
 #include "gui/LevelMeterView.h"
 #include "gui/RiptideLookAndFeel.h"
 
 class RiptideAudioProcessor;
 
-// GUI funcional (la profesional llega en la Fase 8). Medidor IN | perillas Input (drive) y Output | medidor OUT;
+// GUI funcional (la profesional llega en la Fase 8). Medidor IN | modos, perillas Input (drive) y Output | medidor OUT;
 // en la cabecera, el selector de oversampling y el bypass.
 // Un temporizador a 30 cuadros por segundo recoge los niveles que publicó el audio y redibuja los medidores.
 class RiptideAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
@@ -33,6 +37,7 @@ private:
 
     void timerCallback() override;
     void setUpKnob (Knob& knob, const char* parameterId, const juce::String& name, const juce::String& tooltip);
+    void showMode (int index);
 
     RiptideAudioProcessor& processor;
     riptide::gui::RiptideLookAndFeel lookAndFeel;
@@ -47,6 +52,13 @@ private:
     juce::Label oversamplingLabel;
     juce::ComboBox oversamplingBox;
     std::unique_ptr<ComboBoxAttachment> oversamplingAttachment;
+
+    // Un botón por modo (funcionan como radio: solo uno encendido). JUCE no trae un attachment de "grupo de botones"
+    // para un parámetro choice; ParameterAttachment hace de puente en los dos sentidos (clic → parámetro, y
+    // automatización o preset → botones).
+    std::array<juce::TextButton, riptide::dsp::numModes> modeButtons;
+    juce::Label modeDescription;
+    std::unique_ptr<juce::ParameterAttachment> modeAttachment;
 
     double lastFrameMs = 0.0;
 

@@ -223,3 +223,131 @@ sin bypass). Para comprobarlo, pon un **Fruity Parametric EQ 2** después de Rip
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 3 — Seis modos con carácter
+
+Hasta ahora Riptide tenía una sola curva (tanh). Un saturador profesional tiene varias porque **cada curva es un
+instrumento distinto**: no se trata de "más o menos distorsión" sino de *qué tipo* de armónicos aparece y *desde qué
+nivel*. Los seis modos tienen el mismo volumen con señal baja (pendiente 1 en el origen), así que puedes cambiar entre
+ellos y comparar el carácter sin que el volumen te engañe.
+
+### Conceptos aprendidos
+
+- **La rodilla (knee).** El tramo donde la curva deja de ser recta. Una rodilla **blanda** (cinta) empieza a redondear
+  muy pronto pero poco a poco: se siente como compresión más que como distorsión. Una rodilla **corta** (transistor)
+  deja pasar la señal limpia casi hasta el límite y ahí se ensucia de golpe. El **clip duro** no tiene rodilla: recto
+  hasta 0 dBFS y plano después. Con la misma entrada (1.0): la cinta da 0.71, el transistor 0.84 y el clip 1.0.
+- **Comportamiento según el nivel.** Por la rodilla, cada modo reacciona distinto al subir Input: la cinta se nota
+  "un poquito" desde muy abajo, el transistor no hace nada hasta que de pronto muerde, el wavefold cambia de timbre por
+  completo cada vez que la onda se dobla otra vez. Por eso un mismo modo suena distinto en un bajo a −24 dBFS que a
+  −6 dBFS.
+- **Armónicos pares vs impares.** Una curva simétrica (cinta, transistor, clip, wavefold) solo crea impares (3×, 5×...):
+  sonido "cuadrado", hueco, con mordida. Una curva **asimétrica** (bulbo) aplasta antes un semiciclo que el otro y crea
+  también **pares** (2× = una octava, 4× = dos octavas): se funden con la nota y suenan "llenos", cálidos. El bulbo de
+  Riptide añade un poco de 2º armónico incluso con señal baja (entre −60 y −40 dB): es su calidez de fondo.
+- **DC por asimetría.** Si un semiciclo se aplasta más que el otro, la onda deja de estar centrada en 0. El filtro DC
+  de la Fase 2 la vuelve a centrar. El bulbo con mucho drive llega a −1.41 en el semiciclo negativo (+3 dBFS): mira el
+  medidor OUT y baja Output.
+- **Pre-énfasis / de-énfasis (cinta).** Las grabadoras de cinta suben los agudos antes de grabar y los bajan al
+  reproducir. Con señal baja se anulan (respuesta plana). Con drive, los agudos llegan 6 dB más fuertes a la cinta y se
+  saturan antes: **la cinta comprime más los agudos que los graves**. Por eso suaviza platillos, sibilancias y
+  transientes. Medido en Riptide: con +12 dB de drive, 8 kHz se comprime más de 2 dB más que 300 Hz.
+- **Head bump.** Las cabezas reproductoras de cinta tienen una resonancia en los graves. Riptide la imita con +2 dB en
+  70 Hz (campana ancha). Está siempre, incluso sin drive: es parte del "sonido de cinta" (cuerpo en bombo y bajo).
+- **Rectificación.** Dar vuelta el semiciclo negativo (|x|). La onda se repite el doble de rápido: **la fundamental
+  desaparece y suena una octava arriba**. Riptide quita la DC *antes* de saturar (si saturara primero, con mucho drive
+  la onda sería casi cuadrada, y una cuadrada rectificada es una línea recta: silencio). Es la idea de los pedales de
+  octava fuzz de los 60–70.
+- **Wavefolding.** En vez de aplanar los picos, la curva (sin(x)) los **dobla hacia abajo**. Con más drive se doblan
+  otra vez y aparecen picos nuevos dentro de cada ciclo. El timbre se vuelve metálico y cambia todo el tiempo con el
+  nivel. Es el corazón de la síntesis "West Coast" (Buchla).
+- **Cambiar de modo sin clic.** Riptide calcula el modo nuevo en paralelo, en silencio, mientras su oversampling se
+  llena, y después cruza los dos en 20 ms. Puedes cambiar de modo mientras suena (y automatizarlo).
+
+### Qué hace cada control
+
+- **Mode** (los seis botones; la descripción del activo aparece debajo):
+  - **Tape**: el más sutil. Redondea, comprime, suaviza agudos y suma cuerpo en 70 Hz. En el analizador: 3er armónico
+    discreto y agudos que bajan un poco al subir el drive.
+  - **Tube**: engorda. 2º y 3er armónico; el 2º es el protagonista. Con drive alto "ronca" y el sonido se vuelve más
+    grueso que brillante.
+  - **Transistor**: limpio hasta que muerde. Armónicos impares altos (5º, 7º...): presencia, filo, aspereza.
+  - **Hard Clip**: no cambia nada mientras la señal (después de Input) no pase de 0 dBFS; cuando pasa, recorta en seco.
+    Sirve para controlar picos; con mucho drive suena a onda cuadrada y es el modo con más aliasing (oversampling 8x o
+    16x si suena "digital").
+  - **Rectify**: efecto extremo. Octava arriba, sin fundamental, sonido de fuzz de octava. Un bajo pierde su nota real.
+  - **Fold**: con poco drive parece una saturación suave; cuando el pico pasa de ~+4 dBFS (después de Input) empieza a
+    doblarse y el timbre cambia radicalmente. Mueve Input lentamente: el timbre "barre" como un filtro.
+- **Input / Output / Oversampling / Bypass**: igual que en la Fase 2. Ahora el Input decide *en qué parte de la rodilla*
+  de cada modo trabajas.
+- En la forma de onda (Wave Candy, oscilloscope) con un seno: Tape = seno con hombros redondos; Tube = un semiciclo
+  más aplastado que el otro; Transistor = casi cuadrada con esquinas suaves; Hard Clip = cuadrada con esquinas;
+  Rectify = "jorobas" al doble de velocidad; Fold = el pico se hunde y forma una "M".
+
+### Ejercicio de escucha guiado: el mismo drive, seis caracteres
+
+1. Un bajo sostenido (por ejemplo 3x Osc en sierra, **La2 (55 Hz)** y **La3 (110 Hz)**) a un insert con Riptide, y
+   después un **Fruity Parametric EQ 2** para ver el espectro. Oversampling 4x.
+2. Ajusta la fuente para que IN marque unos **−12 dBFS RMS**. Riptide en **Tape, Input +9 dB**. Iguala el volumen con
+   Output (mismo RMS en OUT con y sin bypass). Anota el Output que necesitaste.
+3. Recorre **Tube, Transistor, Hard Clip** con el mismo Input. Para cada uno iguala con Output y alterna con bypass.
+   Qué notar: Tube suena más grueso, Transistor más brillante y con filo, Hard Clip más "cuadrado". En el analizador,
+   de esos tres Tube es el único con un pico fuerte en 2× (110 Hz si tocas La2).
+4. Baja **Input a 0 dB**: Tape aún se nota un poco (head bump y redondeo), Transistor y Hard Clip suenan casi idénticos
+   al bypass. Esa es la diferencia de rodilla.
+5. Sube **Input** en **Fold** y muévelo despacio entre +6 y +24 dB: el timbre se transforma con cada pliegue.
+6. Pon **Rectify** y toca una melodía: suena una octava arriba. En el analizador, la fundamental casi desaparece.
+7. Cambia de modo mientras suena: no hay clics.
+
+### Receta de uso: calidez en una voz con Tube
+
+1. Riptide en el insert de la voz, **Tube**, Oversampling 4x.
+2. Que la voz llegue a IN con unos −18 dBFS RMS. Sube **Input de +3 a +6 dB** (poco: la voz es lo más expuesto de la
+   mezcla).
+3. Iguala con **Output** y alterna el bypass.
+4. Qué notar: la voz suena más "cerca" y gruesa, las consonantes no se vuelven ásperas. Si suena sucia en las notas
+   fuertes, baja Input.
+5. ¿Por qué Tube? El 2º armónico es una octava exacta de cada nota: engorda sin añadir notas "extrañas". Los impares
+   de Transistor añadirían filo, que en una voz se oye rápido como aspereza.
+6. Variante: **Tape** con +6 a +9 dB en un bus de batería para "pegarla" y suavizar los platillos.
+
+### Reto sin receta
+
+Tienes un **loop de batería con hi-hats muy brillantes y agresivos** y quieres que el loop suene más denso **sin que
+los hi-hats se vuelvan más molestos** (al contrario: un poco más suaves), con el volumen igualado. Elige el modo y el
+drive. Pista de partida: piensa qué modo trata distinto a los agudos y a los graves. Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Knee (rodilla)**: el tramo donde la curva deja de ser recta. *En música:* también existe en los compresores
+  ("soft knee" = compresión gradual).
+- **Armónicos pares**: 2×, 4×, 6× la fundamental. *En música:* la calidez de un preamplificador de válvulas en una
+  voz de soul de los 60; el bajo "gordo" pasado por un amplificador a válvulas.
+- **Saturación de cinta**: compresión suave + suavizado de agudos + cuerpo en graves. *En música:* el sonido de los
+  discos de rock de los 70 (Fleetwood Mac, Led Zeppelin) y de muchas baterías "pegadas".
+- **Pre-énfasis / de-énfasis**: subir una zona de frecuencias antes de un proceso y bajarla después. *En música:* las
+  grabadoras de cinta y los discos de vinilo (curva RIAA).
+- **Head bump**: resonancia de graves de la cinta. *En música:* el bombo "redondo" de muchas grabaciones analógicas.
+- **Clip duro**: corte en seco al llegar al límite. *En música:* los clippers que usan los productores de trap y
+  drill para que el 808 y el bombo suenen fuertes sin subir el pico.
+- **Rectificador / octava fuzz**: dar vuelta media onda para doblar la frecuencia. *En música:* el pedal Octavia de
+  Jimi Hendrix ("Purple Haze").
+- **Wavefolder**: dobla los picos en vez de aplanarlos. *En música:* sintetizadores Buchla y módulos de Eurorack;
+  bajos "growl" en dubstep.
+
+### Errores comunes
+
+- **Elegir el modo por el volumen**: algunos modos suben más el RMS que otros. Iguala Output en cada modo antes de
+  decidir.
+- **Tube con mucho drive y sin mirar OUT**: el semiciclo negativo pasa de 0 dBFS. Si el LED rojo se enciende, baja
+  Output.
+- **Hard Clip con Oversampling Off**: el modo con más aliasing de todos. Usa 4x como mínimo, 8x si hay agudos fuertes.
+- **Rectify o Fold en un bajo que tiene que llevar la nota**: la fundamental desaparece o se transforma y el bajo deja
+  de sostener la armonía. Úsalos en sonidos de efecto o en una capa paralela (el Mix llega en la Fase 5).
+- **Tape en todo "porque es cálido"**: el head bump suma graves en cada pista; en 20 pistas, los graves se acumulan.
+- **Cuándo NO usar cada modo**: Transistor en voces suaves y acústicas (filo innecesario); Tube en material que ya es
+  grueso y embarrado (más medios-graves); Tape cuando necesitas transientes con mucho ataque.
+
+### Retos completados
+
+(Ninguno todavía.)

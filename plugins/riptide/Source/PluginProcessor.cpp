@@ -48,6 +48,7 @@ RiptideAudioProcessor::RiptideAudioProcessor()
     outputGainParam = parameters.getRawParameterValue (id::outputGain);
     bypassParam = parameters.getRawParameterValue (id::bypass);
     oversamplingParam = parameters.getRawParameterValue (id::oversampling);
+    modeParam = parameters.getRawParameterValue (id::mode);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
     startTimerHz (20);
@@ -70,13 +71,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout RiptideAudioProcessor::creat
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::oversampling, id::versionHintPhase2 },
                                                               "Oversampling",
                                                               juce::StringArray { "Off", "2x", "4x", "8x", "16x" }, 2));
+    // Los nombres salen de riptide::dsp::modeNames: índice del parámetro = valor del enum (solo añadir al final).
+    // Tape por defecto: el modo más suave y el que menos "se nota" como efecto.
+    juce::StringArray modes;
+    for (const auto* name : riptide::dsp::modeNames)
+        modes.add (name);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::mode, id::versionHintPhase3 }, "Mode", modes, 0));
     return layout;
 }
 
 riptide::dsp::EngineSettings RiptideAudioProcessor::readSettings() const noexcept
 {
+    const int mode = juce::jlimit (0, riptide::dsp::numModes - 1, static_cast<int> (std::lround (modeParam->load())));
     return { inputGainParam->load(), outputGainParam->load(), bypassParam->load() >= 0.5f,
-             static_cast<int> (std::lround (oversamplingParam->load())) };
+             static_cast<int> (std::lround (oversamplingParam->load())), static_cast<riptide::dsp::Mode> (mode) };
 }
 
 void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)

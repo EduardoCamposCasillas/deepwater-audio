@@ -67,6 +67,7 @@ plugins/riptide/
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     dsp/Engine.h             # cadena de audio completa, sin JUCE
+    dsp/Saturator.h          # modos: curvas, filtros propios de cada modo, oversampling (un canal)
     gui/                     # tema, LookAndFeel, medidores
   tests/EngineTests.cpp    # tests del motor (sin JUCE)
 ```
@@ -95,6 +96,35 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
+Fase 3 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+- Cadena: entrada → × input (drive) → [medidor IN] → modo (`dsp/Saturator.h`) → filtro DC (5 Hz) → × output → fundido
+  de bypass → × fundido de factor → [medidor OUT].
+- Modos (`Mode`, índice = valor del parámetro; solo añadir al final). Todos con f(0) = 0 y, salvo Rectify, pendiente 1
+  en el origen (mismo volumen a nivel bajo):
+  - Tape: x/√(1+x²) (rodilla más blanda). Pre-énfasis de 1 polo (+6 dB, máximo en 4 kHz) antes de la curva y su inversa
+    exacta después (misma bilineal: g/G en el de-énfasis, sin re-prewarp); head bump +2 dB en 70 Hz, Q 0.8 (campana
+    SVF: x + (A−1)·k·bp), siempre activo.
+  - Tube: (tanh(x+0.3) − tanh 0.3)/(1 − tanh² 0.3). Techos +0.77 / −1.41. Crea 2º armónico ya a −34 dBFS (−60..−40 dB).
+  - Transistor: x/(1+x⁴)^¼. Hard Clip: clamp ±1. Fold: sin(x).
+  - Rectify: |x| → high-pass 1 polo de 20 Hz → tanh, TODO dentro del oversampling (g precalculado por factor en
+    `prepare`). Saturar antes de rectificar se probó y no sirve: con drive alto |tanh| es casi DC (silencio).
+  - Los filtros lineales de Tape van a la frecuencia del host, fuera del oversampler.
+- Cambio de modo: cada canal tiene DOS `Saturator`. Al pedir otro modo, el inactivo se configura (historia borrada),
+  procesa sin oírse 2 × latencia muestras (respuesta al impulso de los halfband) y luego se cruzan en 20 ms
+  (`LinearRamp`, llega exacto a 1). Un cambio pedido a mitad de cruce espera a que termine. Un cambio de factor (en
+  silencio) termina el cruce de golpe. El modo no cambia la latencia. CPU doble solo durante el cruce.
+- Parámetro nuevo `mode` (choice Tape/Tube/Transistor/Hard Clip/Rectify/Fold, def. Tape, versionHint 3).
+- GUI 580 × 420: dos filas de tres botones de modo (radio; `juce::ParameterAttachment` como puente con el parámetro) y
+  la descripción del modo activo debajo; perillas Input/Output debajo.
+- Tests `RiptideTests` (+7): curvas (f(0), pendiente, simetría, techos, orden de rodillas, pliegue), énfasis inverso
+  exacto (< 1e-5), armónicos por modo con drive alto (impares sin pares; Tube con pares; Rectify sin fundamental),
+  nivel bajo limpio con ganancia exacta y head bump de +2 dB, cinta comprime 8 kHz > 2 dB más que 300 Hz, DC del
+  rectificador eliminada, cruce de modos sin saltos (también a mitad de cruce) y resultado final idéntico al del modo
+  directo (< 1e-4), factor a mitad de cruce. Tests anteriores adaptados a modos explícitos (los que asumían tanh).
+- Release con 0 warnings; ctest 4/4; pluginval strictness 10 ampliado: SUCCESS. GUI revisada con captura del Standalone.
+- No se movió nada a la librería: las curvas son propias del carácter de Riptide. El ADAA de Undertow no hizo falta
+  (el oversampling seleccionable cubre el aliasing del clip duro).
+
 Fase 2 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena (`dsp/Engine.h`): entrada → × input (es el drive) → [medidor IN] → ↑N → `fastTanh` → ↓N → filtro DC (5 Hz) →
   × output → fundido de bypass con la señal original retrasada la latencia → × fundido de factor → [medidor OUT].
@@ -150,4 +180,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 3 (modos de saturación con carácter).
+Siguiente: que el usuario pruebe la Fase 3 en FL; después, Fase 4 (tono: filtros pre/post, tilt, emphasis).

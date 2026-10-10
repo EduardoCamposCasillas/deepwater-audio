@@ -12,7 +12,11 @@ inline constexpr const char* bypass = "bypass";
 // Fase 2.
 inline constexpr const char* oversampling = "oversampling";
 
+// Fase 3.
+inline constexpr const char* mode = "mode";
+
 // Versión en la que apareció cada parámetro (la usa el VST3 para ordenar y reconocer parámetros nuevos).
 inline constexpr int versionHint = 1;
 inline constexpr int versionHintPhase2 = 2;
+inline constexpr int versionHintPhase3 = 3;
 } // namespace riptide::params
