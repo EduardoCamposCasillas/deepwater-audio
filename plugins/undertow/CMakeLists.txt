@@ -1,23 +1,5 @@
-cmake_minimum_required(VERSION 3.22)
-
-project(UndertowSynth VERSION 0.1.0 LANGUAGES C CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-# --- JUCE vía FetchContent -----------------------------------------------------
-# Se fija a un tag (no a una rama) para que el build sea reproducible:
-# el mismo CMakeLists.txt siempre descarga exactamente el mismo JUCE.
-include(FetchContent)
-FetchContent_Declare(
-    JUCE
-    GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-    GIT_TAG        9.0.2
-    GIT_SHALLOW    TRUE
-    GIT_PROGRESS   TRUE
-)
-FetchContent_MakeAvailable(JUCE)
+# Undertow — sintetizador wavetable. Se compila desde el CMakeLists.txt raíz (que ya trae JUCE y C++20):
+#   cmake --build build --config Release --target UndertowSynth_VST3
 
 # --- Plugin --------------------------------------------------------------------
 juce_add_plugin(UndertowSynth
@@ -80,11 +62,9 @@ target_link_libraries(UndertowSynth
 # --- Tests ---------------------------------------------------------------------
 # Ejecutable independiente de JUCE con los tests de DSP y de voces.
 # Se ejecuta con:  ctest --test-dir build -C Release --output-on-failure
-option(UNDERTOW_BUILD_TESTS "Compilar los tests unitarios" ON)
+option(UNDERTOW_BUILD_TESTS "Compilar los tests unitarios de Undertow" ${DEEPWATER_BUILD_TESTS})
 
 if(UNDERTOW_BUILD_TESTS)
-    enable_testing()
-
     add_executable(UndertowTests
         tests/DspTests.cpp
         Source/dsp/Wavetable.cpp
