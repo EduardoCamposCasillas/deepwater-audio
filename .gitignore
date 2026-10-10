@@ -17,6 +17,11 @@ compile_commands.json
 # Herramientas descargadas (pluginval)
 tools/
 
+# Python (scripts/) y logs de compilación / validación
+__pycache__/
+*.pyc
+*.log
+
 # IDEs y editores
 .vs/
 .vscode/
@@ -32,7 +37,8 @@ Thumbs.db
 desktop.ini
 .DS_Store
 
-# Proyectos y audio de prueba de FL Studio (pueden incluir samples con copyright)
+# Proyectos y audio de prueba de FL Studio (pueden incluir samples con copyright). Los WAV de referencia de los null
+# tests se generan con los tests de cada plugin (p. ej. UndertowPresetTests --render) y se guardan en out/.
 *.flp
 *.wav
 *.mp3

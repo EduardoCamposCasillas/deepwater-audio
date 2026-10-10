@@ -2,7 +2,7 @@
 
 Sintetizador **wavetable polifónico** en formato VST3 y Standalone para Windows, escrito en C++20 con JUCE.
 Es un proyecto de aprendizaje de programación de audio y diseño sonoro, construido por fases, con la meta de
-llegar al nivel de sintes como Serum o Vital.
+llegar al nivel de sintes como Serum o Vital. Es el primer plugin de la [suite Deepwater Audio](../../README.md).
 
 ![Interfaz de Undertow Synth](docs/screenshot.png)
 
@@ -79,15 +79,17 @@ No hay binarios publicados todavía: hay que compilarlo (son 3 comandos).
 git clone https://github.com/EduardoCamposCasillas/deepwater-audio.git
 cd deepwater-audio
 cmake -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
+cmake --build build --config Release --target UndertowSynth_VST3 UndertowSynth_Standalone
 ```
 
-La primera configuración tarda unos minutos porque descarga JUCE. Al terminar tendrás:
+Se configura desde la raíz del repositorio (el `CMakeLists.txt` raíz trae JUCE y la librería compartida `libs/dsp`);
+sin `--target` se compila toda la suite con sus tests. La primera configuración tarda unos minutos porque descarga
+JUCE. Al terminar tendrás:
 
 | Formato | Ruta |
 |---|---|
-| VST3 | `build/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3` |
-| Standalone | `build/UndertowSynth_artefacts/Release/Standalone/Undertow Synth.exe` |
+| VST3 | `build/plugins/undertow/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3` |
+| Standalone | `build/plugins/undertow/UndertowSynth_artefacts/Release/Standalone/Undertow Synth.exe` |
 
 Si `cmake` no se reconoce, usa la ruta completa (`"C:\Program Files\CMake\bin\cmake.exe"`) o agrégalo al PATH.
 
@@ -97,7 +99,7 @@ Si `cmake` no se reconoce, usa la ruta completa (`"C:\Program Files\CMake\bin\cm
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Hay dos ejecutables de tests:
+Además de los de la librería compartida (`DeepwaterDspTests`), Undertow tiene dos ejecutables de tests:
 
 - `UndertowTests` (`tests/DspTests.cpp`, sin JUCE) mide afinación, aliasing, respuesta del filtro, ausencia de clics,
   tiempos de los ecos y de la reverb, y coste de CPU, a las 4 frecuencias de muestreo.
@@ -114,14 +116,16 @@ Hay dos ejecutables de tests:
 Opciones para iterar más rápido:
 
 ```bash
-build/Release/UndertowTests.exe --fase8     # solo los tests de efectos (--fase7: warp y FM; --fase9: interfaz)
-build/Release/UndertowTests.exe --verbose   # detalle de cada medición
-build/Release/UndertowTests.exe --cpu       # tabla de CPU por escenario (no corre los tests)
+build/plugins/undertow/Release/UndertowTests.exe --fase8     # solo los tests de efectos (--fase7: warp y FM; --fase9: interfaz)
+build/plugins/undertow/Release/UndertowTests.exe --verbose   # detalle de cada medición
+build/plugins/undertow/Release/UndertowTests.exe --cpu       # tabla de CPU por escenario (no corre los tests)
 
-build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --verbose               # nivel y CPU de cada preset
-build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --verbose --user "ruta"  # mide también tus presets
-build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --notes                 # notas de los presets
-build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --update-references     # reescribe las huellas
+build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --verbose               # nivel y CPU de cada preset
+build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --verbose --user "ruta"  # mide también tus presets
+build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --notes                 # notas de los presets
+build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --update-references     # reescribe las huellas
+build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --render plugins/undertow/tests/reference/migration-test.mid <carpeta>
+python scripts/null_test.py <carpeta_antes> <carpeta_después>   # null test: ¿un refactor cambió el sonido?
 ```
 
 `--update-references` solo se usa cuando un cambio de sonido es **intencional**; revisa el diff del archivo de huellas
@@ -130,7 +134,7 @@ antes de hacer commit.
 Validación completa con pluginval (descárgalo de su página de releases):
 
 ```bash
-pluginval.exe --strictness-level 10 --sample-rates 44100,48000,88200,96000 --block-sizes 1,7,64,256,512,1024,4096 --repeat 3 --randomise --validate "build/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3"
+pluginval.exe --strictness-level 10 --sample-rates 44100,48000,88200,96000 --block-sizes 1,7,64,256,512,1024,4096 --repeat 3 --randomise --validate "build/plugins/undertow/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3"
 ```
 
 ## Usarlo
@@ -144,7 +148,8 @@ pluginval.exe --strictness-level 10 --sample-rates 44100,48000,88200,96000 --blo
 ### En FL Studio
 
 1. Copia la carpeta `Undertow Synth.vst3` a `C:\Program Files\Common Files\VST3` (requiere administrador).
-   También puedes agregar `build/UndertowSynth_artefacts/Release/VST3` como carpeta de búsqueda.
+   También puedes agregar `build\plugins` como carpeta de búsqueda: FL busca en las subcarpetas y encuentra todos
+   los plugins de la suite.
 2. **Options → Manage plugins**. Si agregaste una carpeta propia, márcala como tipo **VST3**: si queda como VST2,
    FL no encuentra el plugin. Pulsa **Find installed plugins**.
 3. En el Channel Rack: **+ → Undertow Synth**.
@@ -321,13 +326,16 @@ suavizados), que todavía no está vectorizado.
 
 ## Estructura del código
 
+Todo es relativo a `plugins/undertow/`; las piezas de DSP que comparten los plugins de la suite (oversampling
+halfband, SVF, suavizado, línea de retardo, SIMD, FFT) están en [`libs/dsp`](../../libs/dsp).
+
 ```
 Source/
   PluginProcessor.*   parámetros, estado y processBlock
   PluginEditor.*      interfaz (contenido a tamaño fijo dibujado con una escala: zoom)
   presets/            formato .uwpreset, biblioteca (fábrica + usuario), cargar/guardar y estado del preset actual
-  dsp/                oscilador con unison, warp y FM, wavetables, oversampling halfband, ruido, filtro, envolvente, LFO,
-                      FFT, efectos (distorsión, chorus, delay y reverb) y utilidades SIMD (sin JUCE)
+  dsp/                oscilador con unison, warp y FM, wavetables, ruido, filtro de voz, envolvente, LFO y efectos
+                      (distorsión, chorus, delay y reverb), sin JUCE
   synth/              voces, gestión de polifonía, matriz de modulación, banco de wavetables y cadena de efectos
   gui/                aspecto propio (LookAndFeel), perillas con anillos de modulación, barra de fuentes,
                       visor 3D/2D del wavetable, curva del filtro y LFO, barra y navegador de presets
@@ -371,5 +379,5 @@ favoritos y comparación A/B de presets.
 
 ## Licencia
 
-[GNU AGPLv3](LICENSE). Undertow Synth usa [JUCE](https://juce.com), que se distribuye bajo AGPLv3 o bajo una
+[GNU AGPLv3](../../LICENSE). Undertow Synth usa [JUCE](https://juce.com), que se distribuye bajo AGPLv3 o bajo una
 licencia comercial.
