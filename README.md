@@ -6,9 +6,9 @@ llegar al nivel de sintes como Serum o Vital.
 
 ![Interfaz de Undertow Synth](docs/screenshot.png)
 
-> **Estado:** en desarrollo (fases 1–9 de 11 completadas). Ya suena y es usable en un DAW, con efectos y una interfaz
-> escalable con modulación por arrastre, pero todavía no tiene presets (llegan en la fase 10). Ver la
-> [hoja de ruta](#hoja-de-ruta).
+> **Estado:** en desarrollo (fases 1–10 de 11 completadas). Ya suena y es usable en un DAW: tiene efectos, una interfaz
+> escalable con modulación por arrastre y una librería de 22 presets que explican cómo se construyó cada sonido. Falta
+> la fase de optimización y pulido. Ver la [hoja de ruta](#hoja-de-ruta).
 
 ## Qué tiene hoy
 
@@ -39,6 +39,10 @@ llegar al nivel de sintes como Serum o Vital.
   anillo del color de su fuente y un punto muestra el valor modulado en vivo.
 - **Visor 3D del wavetable** con todos los frames apilados y el frame que suena, con el warp aplicado y la modulación
   en vivo (o en 2D: original y deformada). Visores de la curva del filtro y de los LFOs.
+- **Presets:** navegador con categorías y búsqueda, guardar tus propios sonidos (con notas) y **22 presets de fábrica**
+  (bajos, leads, pads, plucks, keys y FX) con el volumen igualado. Cada uno trae notas que explican cómo se construyó y
+  qué perilla probar: la librería es también material de estudio. El proyecto del DAW recuerda qué preset cargaste y si
+  lo modificaste.
 - Correcto a 44.1, 48, 88.2 y 96 kHz y con cualquier tamaño de buffer, en estéreo o mono. Validado con
   [pluginval](https://github.com/Tracktion/pluginval) en strictness 10.
 
@@ -89,13 +93,22 @@ Si `cmake` no se reconoce, usa la ruta completa (`"C:\Program Files\CMake\bin\cm
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Los tests (`tests/DspTests.cpp`) miden afinación, aliasing, respuesta del filtro, ausencia de clics, tiempos de los
-ecos y de la reverb, y coste de CPU, a las 4 frecuencias de muestreo. El ejecutable acepta opciones para iterar más
-rápido:
+Hay dos ejecutables de tests:
+
+- `UndertowTests` (`tests/DspTests.cpp`, sin JUCE) mide afinación, aliasing, respuesta del filtro, ausencia de clics,
+  tiempos de los ecos y de la reverb, y coste de CPU, a las 4 frecuencias de muestreo.
+- `UndertowPresetTests` (`tests/PresetTests.cpp`, con JUCE) valida cada preset de fábrica, guardar y cargar, el estado
+  del proyecto, y renderiza los 22 presets para comprobar que no hay NaN ni picos y que los volúmenes están igualados.
+
+Opciones para iterar más rápido:
 
 ```bash
 build/Release/UndertowTests.exe --fase8     # solo los tests de efectos (--fase7: warp y FM; --fase9: interfaz)
 build/Release/UndertowTests.exe --verbose   # detalle de cada medición
+
+build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --verbose               # nivel de cada preset
+build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --verbose --user "ruta"  # mide también tus presets
+build/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe --notes                 # notas de los presets
 ```
 
 ## Usarlo
@@ -118,6 +131,11 @@ En otros DAWs (Ableton, Reaper, Bitwig…) funciona igual: hay que reescanear la
 
 ### La interfaz
 
+- **Presets:** la barra de arriba muestra la categoría y el nombre del preset (con `*` si lo modificaste). **◀ ▶**
+  recorren la librería; clic en el nombre abre el **navegador**: categorías, búsqueda (también en las notas) y las
+  notas de cómo se construyó cada sonido. Un clic en la lista (o las flechas del teclado) carga el preset para
+  escucharlo; doble clic o Enter lo carga y cierra el navegador. **Guardar** pide nombre, categoría, autor y notas; el
+  menú **···** tiene *Init* (empezar desde cero) y abre tu carpeta de presets.
 - **Zoom:** botón con el porcentaje (arriba a la derecha) o arrastrando la esquina inferior derecha. La primera vez
   elige el mayor tamaño que cabe en tu pantalla; después recuerda el último que uses.
 - **Perillas:** arrastra arriba/abajo para moverlas; doble clic = valor por defecto; clic derecho = rutas de
@@ -133,7 +151,24 @@ En otros DAWs (Ableton, Reaper, Bitwig…) funciona igual: hay que reescanear la
     y del ruido, y Cutoff, Resonance y Drive del filtro. *Volume* y *Global Pitch* se conectan desde la matriz.
 - **Visor del wavetable:** arrastra sobre él para mover Position; clic en **3D / 2D** para cambiar la vista.
 
-![Filtro con una envolvente conectada al Cutoff](docs/screenshot-modulacion.png)
+![Navegador de presets con las notas de "Bajo Moog"](docs/screenshot-presets.png)
+
+Tus presets se guardan en `Documentos\Undertow\Presets` como archivos `.uwpreset` (XML legible, con los valores en
+Hz, ms y %). Puedes organizarlos en subcarpetas, copiarlos o compartirlos. Los de fábrica viven dentro del plugin y
+están en [`Presets/Factory`](Presets/Factory): cada archivo solo escribe lo que cambia respecto a *Init*, así que se
+lee como una receta.
+
+| Categoría | Presets |
+|---|---|
+| Init | Init |
+| Bass | Sub Profundo, Bajo Moog, Acid Squelch, Wobble 140, Reese DnB, Bajo FM Gruñido, Bajo Medio Tube |
+| Lead | Supersaw Trance, Sync Lead 80s, Lead Galopante, Lead Vocal Expresivo |
+| Pad | Pad que Habla, Pad Juno, Pad con Aire, Pad que Respira |
+| Pluck | Pluck House, Marimba FM |
+| Keys | Campana FM, E-Piano FM |
+| FX | Riser de Ruido, Lluvia S&H |
+
+![Filtro con una envolvente conectada al Cutoff ("Bajo Moog")](docs/screenshot-modulacion.png)
 
 ### Controles
 
@@ -207,9 +242,10 @@ Todos los parámetros se pueden automatizar desde el DAW (en FL: clic derecho �
 
 ### Primer sonido: bajo analógico
 
-*Basic Shapes*, Position **67 %** · Voices **1** · Filtro **On**, **Low Pass 24 dB**, Cutoff **450 Hz**,
+Este es el preset *Bajo Moog* construido a mano desde *Init* (menú **···**): *Basic Shapes*, Position **67 %** · Voices **1** · Filtro **On**, **Low Pass 24 dB**, Cutoff **450 Hz**,
 Resonance **25 %**, Drive **30 %**, Key Track **50 %** · Attack **2 ms**, Decay **300 ms**, Sustain **60 %**,
-Release **60 ms**. Toca corcheas entre C3 y C4 (notación de FL).
+Release **60 ms**. Toca corcheas entre C3 y C4 (notación de FL). Compáralo con el preset: la diferencia es la
+envolvente de filtro (Env 2 → Cutoff, +15 %).
 
 Para darle el "squelch" de un acid: Resonance **75 %** y, en la pestaña Modulación, Env 2 (Attack 1 ms, Decay 180 ms,
 Sustain 0 %) y arrastra la ficha **ENV 2** sobre el Cutoff; sube su anillo a **+40 %**. Para terminarlo, en la pestaña Efectos: Distorsión **Tube**,
@@ -226,12 +262,14 @@ diseño sonoro del proyecto. Explica qué se oye con cada control y por qué.
 Source/
   PluginProcessor.*   parámetros, estado y processBlock
   PluginEditor.*      interfaz (contenido a tamaño fijo dibujado con una escala: zoom)
+  presets/            formato .uwpreset, biblioteca (fábrica + usuario), cargar/guardar y estado del preset actual
   dsp/                oscilador con unison, warp y FM, wavetables, oversampling halfband, ruido, filtro, envolvente, LFO,
                       FFT y efectos: distorsión, chorus, delay y reverb (sin JUCE)
   synth/              voces, gestión de polifonía, matriz de modulación, banco de wavetables y cadena de efectos
   gui/                aspecto propio (LookAndFeel), perillas con anillos de modulación, barra de fuentes,
-                      visor 3D/2D del wavetable, curva del filtro y LFO
-tests/                tests de DSP (ejecutable independiente, sin JUCE)
+                      visor 3D/2D del wavetable, curva del filtro y LFO, barra y navegador de presets
+Presets/Factory/      presets de fábrica (.uwpreset), compilados dentro del plugin
+tests/                tests de DSP (sin JUCE) y de presets (con JUCE)
 APRENDIZAJE.md        cuaderno de diseño sonoro: conceptos, recetas, ejercicios y vocabulario de cada fase
 ```
 
@@ -248,7 +286,7 @@ El DSP no depende de JUCE: se puede probar aislado. Dentro del hilo de audio no 
 - [x] 7 — FM, ring mod y modos de warp
 - [x] 8 — Efectos: distorsión, chorus, delay y reverb
 - [x] 9 — Interfaz profesional: escalable, visor 3D del wavetable y arrastrar para modular
-- [ ] 10 — Presets y librería de sonidos
+- [x] 10 — Presets: guardar y cargar, navegador y librería de sonidos con notas
 - [ ] 11 — Optimización y pulido
 
 **Límites conocidos:**
