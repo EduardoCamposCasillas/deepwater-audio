@@ -76,8 +76,8 @@ No hay binarios publicados todavía: hay que compilarlo (son 3 comandos).
 ## Compilar
 
 ```bash
-git clone https://github.com/EduardoCamposCasillas/undertow-synth.git
-cd undertow-synth
+git clone https://github.com/EduardoCamposCasillas/deepwater-audio.git
+cd deepwater-audio
 cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
