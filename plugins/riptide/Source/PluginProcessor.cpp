@@ -47,8 +47,15 @@ RiptideAudioProcessor::RiptideAudioProcessor()
     inputGainParam = parameters.getRawParameterValue (id::inputGain);
     outputGainParam = parameters.getRawParameterValue (id::outputGain);
     bypassParam = parameters.getRawParameterValue (id::bypass);
+    oversamplingParam = parameters.getRawParameterValue (id::oversampling);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
+    startTimerHz (20);
+}
+
+RiptideAudioProcessor::~RiptideAudioProcessor()
+{
+    stopTimer();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout RiptideAudioProcessor::createParameterLayout()
@@ -58,17 +65,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout RiptideAudioProcessor::creat
     layout.add (makeGainParameter (id::inputGain, "Input"));
     layout.add (makeGainParameter (id::outputGain, "Output"));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bypass, id::versionHint }, "Bypass", false));
+    // El índice de cada opción es el número de etapas ×2 del motor (no cambiar el orden: los proyectos guardan el
+    // índice). 4x por defecto: el aliasing de tanh queda muy por debajo de lo audible con 1.7 ms de latencia a 44.1 kHz.
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::oversampling, id::versionHintPhase2 },
+                                                              "Oversampling",
+                                                              juce::StringArray { "Off", "2x", "4x", "8x", "16x" }, 2));
     return layout;
 }
 
 riptide::dsp::EngineSettings RiptideAudioProcessor::readSettings() const noexcept
 {
-    return { inputGainParam->load(), outputGainParam->load(), bypassParam->load() >= 0.5f };
+    return { inputGainParam->load(), outputGainParam->load(), bypassParam->load() >= 0.5f,
+             static_cast<int> (std::lround (oversamplingParam->load())) };
 }
 
 void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
 {
-    // Fase 1 no tiene buffers propios: el motor procesa en el sitio y sus medidores y rampas son de tamaño fijo.
+    // El motor no reserva memoria: todo (las etapas de los cinco factores, el retardo del camino original) es de tamaño
+    // fijo. Aquí solo se diseñan los filtros para esta frecuencia de muestreo.
     engine.prepare (sampleRate, readSettings());
     for (auto* meter : { &inputMeter, &outputMeter })
         for (auto& channel : *meter)
@@ -76,7 +90,8 @@ void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBl
             channel.peak.store (0.0f);
             channel.rms.store (0.0f);
         }
-    setLatencySamples (0);
+    engineLatency.store (engine.getLatency());
+    setLatencySamples (engine.getLatency());
 }
 
 void RiptideAudioProcessor::releaseResources() {}
@@ -101,7 +116,16 @@ void RiptideAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
     engine.setSettings (readSettings());
     engine.process (buffer.getArrayOfWritePointers(), numChannels, buffer.getNumSamples());
+    engineLatency.store (engine.getLatency(), std::memory_order_relaxed);
     publishMeters (numChannels);
+}
+
+void RiptideAudioProcessor::timerCallback()
+{
+    // El motor cambia de factor en silencio; aquí solo se le cuenta al host, que vuelve a alinear esta pista con las
+    // demás. Entre el cambio y el aviso pasan como mucho 50 ms.
+    if (const int latency = engineLatency.load (std::memory_order_relaxed); latency != getLatencySamples())
+        setLatencySamples (latency);
 }
 
 void RiptideAudioProcessor::publishMeters (int numChannels) noexcept

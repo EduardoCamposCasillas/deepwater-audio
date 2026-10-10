@@ -12,12 +12,14 @@
 #include <numbers>
 #include <vector>
 
+#include "deepwater/dsp/DcBlocker.h"
 #include "deepwater/dsp/Decibels.h"
 #include "deepwater/dsp/DelayLine.h"
 #include "deepwater/dsp/FastMath.h"
 #include "deepwater/dsp/Fft.h"
 #include "deepwater/dsp/Halfband.h"
 #include "deepwater/dsp/LevelMeter.h"
+#include "deepwater/dsp/Oversampler.h"
 #include "deepwater/dsp/Pitch.h"
 #include "deepwater/dsp/Simd.h"
 #include "deepwater/dsp/Smoothing.h"
@@ -177,6 +179,113 @@ void testHalfbandInterpolator()
                      interpolator.getLatency(), ripple, worstImage);
         CHECK (ripple < 0.001);
         CHECK (worstImage < -95.0);
+    }
+}
+
+void testOversamplerLatency()
+{
+    std::printf ("Oversampler: sin curva, subir y bajar devuelve la señal retrasada exactamente getLatency() muestras\n");
+
+    for (const double sr : sampleRates)
+    {
+        std::printf ("  %4.1f kHz, latencia por factor:", sr / 1000.0);
+        for (int stages = 0; stages <= dw::Oversampler::maxStages; ++stages)
+        {
+            dw::Oversampler oversampler;
+            oversampler.prepare (sr, stages);
+            const int latency = oversampler.getLatency();
+            std::printf ("  %dx = %d", 1 << stages, latency);
+
+            // Un seno de 1 kHz: medio sample de desalineación daría un error de ~0.07; aquí debe quedar en el rizado
+            // de los filtros (8 filtros de ±0.001 dB como mucho).
+            const auto input = sineSignal (1000.0, sr, 8192);
+            float worst = 0.0f;
+            for (size_t i = 0; i < input.size(); ++i)
+            {
+                const float y = oversampler.process (input[i], [] (float x) { return x; });
+                if (i >= 1000)
+                    worst = std::max (worst, std::abs (y - input[i - static_cast<size_t> (latency)]));
+            }
+            CHECK (worst < 2.0e-3f);
+            CHECK (latency == oversampler.getLatency (stages));
+            CHECK (latency < 100); // a 44.1 kHz y ×16 son unas 80 muestras (1.8 ms)
+        }
+        std::printf ("\n");
+    }
+}
+
+void testOversamplerReducesAliasing()
+{
+    std::printf ("Oversampler: con una curva fuerte (tanh de un seno de 5 kHz) el aliasing audible baja con el factor\n");
+
+    // Seno exactamente en el bin 863 (primo) de una FFT de 8192: sus armónicos caen en múltiplos de 863 y cualquier
+    // otra cosa por debajo de 20 kHz es aliasing (un armónico que se pasó de Nyquist y se reflejó).
+    constexpr double sr = 48000.0;
+    constexpr size_t n = 8192;
+    constexpr size_t bin = 863;
+    const double hz = sr * static_cast<double> (bin) / static_cast<double> (n);
+
+    double previous = 0.0;
+    for (int stages = 0; stages <= dw::Oversampler::maxStages; ++stages)
+    {
+        dw::Oversampler oversampler;
+        oversampler.prepare (sr, stages);
+        std::vector<Complex> spectrum (n);
+        constexpr size_t settle = 1000;
+        for (size_t i = 0; i < settle + n; ++i)
+        {
+            const auto x = 4.0f * static_cast<float> (std::sin (2.0 * pi * hz * static_cast<double> (i) / sr));
+            const float y = oversampler.process (x, [] (float v) { return dw::fastTanh (v); });
+            if (i >= settle)
+                spectrum[i - settle] = y;
+        }
+        dw::fft (spectrum, false);
+
+        double harmonic = 0.0, alias = 0.0;
+        for (size_t k = 1; static_cast<double> (k) * sr / static_cast<double> (n) <= 20000.0; ++k)
+            (k % bin == 0 ? harmonic : alias) += std::norm (spectrum[k]);
+        const double aliasDb = 10.0 * std::log10 (alias / harmonic + 1.0e-30);
+        std::printf ("  %2dx: aliasing audible %6.1f dB respecto a los armónicos\n", 1 << stages, aliasDb);
+
+        if (stages == 0)
+            CHECK (aliasDb > -40.0); // sin oversampling se oye claramente
+        else
+            CHECK (aliasDb < previous - 6.0 || aliasDb < -120.0); // −120 dB o menos ya es el ruido del float
+        if (stages >= 2)
+            CHECK (aliasDb < -60.0);
+        previous = aliasDb;
+    }
+}
+
+void testDcBlocker()
+{
+    std::printf ("Filtro DC: quita un desplazamiento constante y deja pasar lo audible intacto\n");
+
+    for (const double sr : sampleRates)
+    {
+        dw::DcBlocker blocker;
+        blocker.prepare (5.0, sr);
+        // DC de 0.5 + seno de 1 kHz: tras 1 s la DC tiene que haber desaparecido y el seno seguir igual.
+        const auto sine = sineSignal (1000.0, sr, static_cast<size_t> (2.0 * sr));
+        std::vector<float> output (sine.size());
+        for (size_t i = 0; i < sine.size(); ++i)
+            output[i] = blocker.process (0.5f + 0.25f * sine[i]);
+
+        const size_t start = static_cast<size_t> (sr);
+        double mean = 0.0;
+        for (size_t i = start; i < output.size(); ++i)
+            mean += output[i];
+        mean /= static_cast<double> (output.size() - start);
+        CHECK (std::abs (mean) < 1.0e-4);
+        CHECK (std::abs (toDb (toneAmplitude (output, 1000.0, sr, start) / 0.25)) < 0.01);
+        // En el corte, −3 dB (como cualquier filtro de 1 polo).
+        dw::DcBlocker atCutoff;
+        atCutoff.prepare (5.0, sr);
+        const auto slow = sineSignal (5.0, sr, static_cast<size_t> (4.0 * sr));
+        std::vector<float> slowOut (slow.size());
+        for (size_t i = 0; i < slow.size(); ++i)
+            slowOut[i] = atCutoff.process (slow[i]);
+        CHECK (std::abs (toDb (toneAmplitude (slowOut, 5.0, sr, static_cast<size_t> (2.0 * sr))) + 3.01) < 0.1);
     }
 }
 
@@ -531,6 +640,9 @@ int main()
     testFftRoundTrip();
     testHalfbandDecimator();
     testHalfbandInterpolator();
+    testOversamplerLatency();
+    testOversamplerReducesAliasing();
+    testDcBlocker();
     testSvfMatchesTheory();
     testSvfIsStableWhenModulated();
     testSmoothedParameter();

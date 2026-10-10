@@ -7,10 +7,13 @@
 
 #include "dsp/Engine.h"
 
-// Fase 1: efecto mono/estéreo que por ahora solo pasa la señal: input gain → (saturación, Fase 2) → output gain,
-// con medidores de entrada y salida y bypass con fundido. Todo el audio está en riptide::dsp::Engine (sin JUCE);
-// aquí solo se conectan los parámetros, el estado y los medidores con la GUI.
-class RiptideAudioProcessor final : public juce::AudioProcessor
+// Fase 2: efecto mono/estéreo: input (drive) → tanh con oversampling → filtro DC → output, con medidores de entrada
+// y salida y bypass con fundido. Todo el audio está en riptide::dsp::Engine (sin JUCE); aquí solo se conectan los
+// parámetros, el estado, la latencia y los medidores con la GUI.
+//
+// El temporizador corre en el hilo de mensajes: informa al host la latencia nueva cuando el audio cambia de factor de
+// oversampling (setLatencySamples avisa al host, y eso no se hace desde el hilo de audio).
+class RiptideAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
 public:
     // Lo que el audio publica para la GUI: el pico desde la última lectura (la GUI lo recoge y lo pone a 0) y el
@@ -23,7 +26,7 @@ public:
     using StereoMeter = std::array<MeterChannel, riptide::dsp::Engine::maxChannels>;
 
     RiptideAudioProcessor();
-    ~RiptideAudioProcessor() override = default;
+    ~RiptideAudioProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -64,11 +67,13 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     riptide::dsp::EngineSettings readSettings() const noexcept;
     void publishMeters (int numChannels) noexcept;
+    void timerCallback() override;
 
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* inputGainParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
     std::atomic<float>* bypassParam = nullptr;
+    std::atomic<float>* oversamplingParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     riptide::dsp::Engine engine;
@@ -76,6 +81,7 @@ private:
     StereoMeter inputMeter;
     StereoMeter outputMeter;
     std::atomic<int> meteredChannels { 2 };
+    std::atomic<int> engineLatency { 0 }; // la escribe el audio; el temporizador se la informa al host
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RiptideAudioProcessor)
 };

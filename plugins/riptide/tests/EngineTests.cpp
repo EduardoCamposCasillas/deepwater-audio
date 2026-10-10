@@ -46,6 +46,30 @@ std::vector<float> noise (size_t count, float amplitude, std::uint32_t seed = 0x
     return result;
 }
 
+std::vector<float> sine (double hz, double sampleRate, size_t count, float amplitude)
+{
+    std::vector<float> result (count);
+    for (size_t i = 0; i < count; ++i)
+        result[i] = amplitude * static_cast<float> (std::sin (2.0 * pi * hz * static_cast<double> (i) / sampleRate));
+    return result;
+}
+
+// Amplitud de un seno de frecuencia 'hz' dentro de 'signal' (desde 'start'), por correlación con ventana de Hann.
+double toneAmplitude (const std::vector<float>& signal, double hz, double sampleRate, size_t start)
+{
+    const size_t count = signal.size() - start;
+    double re = 0.0, im = 0.0, windowSum = 0.0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        const double window = 0.5 - 0.5 * std::cos (2.0 * pi * static_cast<double> (i) / static_cast<double> (count - 1));
+        const double phase = 2.0 * pi * hz * static_cast<double> (start + i) / sampleRate;
+        re += window * signal[start + i] * std::cos (phase);
+        im -= window * signal[start + i] * std::sin (phase);
+        windowSum += window;
+    }
+    return 2.0 * std::sqrt (re * re + im * im) / windowSum;
+}
+
 // Procesa 'left'/'right' (en el sitio) en bloques de 'blockSize'. right vacío = mono.
 void processInBlocks (Engine& engine, std::vector<float>& left, std::vector<float>& right, int blockSize)
 {
@@ -66,113 +90,209 @@ float maxStep (const std::vector<float>& signal)
     return result;
 }
 
-void testUnityIsBitExact()
+EngineSettings withOversampling (int index, EngineSettings settings = {})
 {
-    std::printf ("Engine: con 0 dB / 0 dB la salida es la entrada bit a bit (mono y estéreo, cualquier bloque)\n");
-
-    for (const double sr : sampleRates)
-        for (const int blockSize : { 1, 7, 64, 512, 4096 })
-            for (const bool stereo : { false, true })
-            {
-                Engine engine;
-                engine.prepare (sr, {});
-                const auto inputL = noise (20000, 0.9f, 1u);
-                const auto inputR = noise (20000, 0.9f, 2u);
-                auto left = inputL;
-                auto right = stereo ? inputR : std::vector<float> {};
-                processInBlocks (engine, left, right, blockSize);
-                CHECK (left == inputL);
-                if (stereo)
-                    CHECK (right == inputR);
-            }
-
-    // Después de mover las perillas y volver a 0 dB también: la rampa llega exacta, no "casi".
-    Engine engine;
-    engine.prepare (48000.0, {});
-    auto scratchL = noise (4800, 0.5f);
-    std::vector<float> scratchR;
-    engine.setSettings ({ 9.0f, -4.5f, false });
-    processInBlocks (engine, scratchL, scratchR, 256);
-    engine.setSettings ({});
-    scratchL = noise (4800, 0.5f);
-    processInBlocks (engine, scratchL, scratchR, 256); // 100 ms: la rampa de 20 ms ya terminó
-    const auto input = noise (4800, 0.5f, 7u);
-    auto output = input;
-    processInBlocks (engine, output, scratchR, 256);
-    CHECK (output == input);
+    settings.oversampling = index;
+    return settings;
 }
 
-void testGainsAndRampTime()
+void testBypassIsDelayedInput()
 {
-    std::printf ("Engine: input y output gain se suman en dB y llegan al valor en 20 ms exactos\n");
+    std::printf ("Engine: con bypass la salida es la entrada retrasada la latencia, bit a bit (mono/estéreo, cualquier bloque)\n");
 
     for (const double sr : sampleRates)
-    {
-        Engine engine;
-        engine.prepare (sr, {});
-        engine.setSettings ({ 6.0f, -18.0f, false });
+        for (int os = 0; os < riptide::dsp::numOversamplingChoices; ++os)
+            for (const int blockSize : { 1, 7, 512, 4096 })
+                for (const bool stereo : { false, true })
+                {
+                    Engine engine;
+                    engine.prepare (sr, withOversampling (os, { 12.0f, 6.0f, true }));
+                    const auto latency = static_cast<size_t> (engine.getLatency());
+                    const auto inputL = noise (10000, 0.9f, 1u);
+                    const auto inputR = noise (10000, 0.9f, 2u);
+                    auto left = inputL;
+                    auto right = stereo ? inputR : std::vector<float> {};
+                    processInBlocks (engine, left, right, blockSize);
 
-        const int rampSamples = static_cast<int> (std::lround (Engine::gainRampSeconds * sr));
-        std::vector<float> left (static_cast<size_t> (rampSamples) * 2, 0.5f);
-        std::vector<float> right;
-        processInBlocks (engine, left, right, 100);
-
-        const float expected = 0.5f * dw::dbToGain (6.0f) * dw::dbToGain (-18.0f);
-        // La muestra rampSamples − 1 es la última de la rampa: ya vale exactamente el objetivo.
-        CHECK (left[static_cast<size_t> (rampSamples) - 1] == expected);
-        CHECK (left[static_cast<size_t> (rampSamples) - 2] != expected);
-        CHECK (left.back() == expected);
-        CHECK (std::abs (dw::gainToDb (left.back() / 0.5f) - (-12.0f)) < 1.0e-4f);
-        // Sin saltos: las dos rampas se multiplican (a·b), así que el paso por muestra está acotado por
-        // 0.5 · (|Δa| · máx b + máx a · |Δb|) / rampSamples.
-        const float deltaIn = dw::dbToGain (6.0f) - 1.0f;
-        const float deltaOut = 1.0f - dw::dbToGain (-18.0f);
-        CHECK (maxStep (left) <= 0.5f * (deltaIn * 1.0f + dw::dbToGain (6.0f) * deltaOut) / static_cast<float> (rampSamples) * 1.01f);
-    }
+                    bool exact = true;
+                    for (size_t i = 0; i < left.size(); ++i)
+                    {
+                        const float expectedL = i < latency ? 0.0f : inputL[i - latency];
+                        const float expectedR = i < latency ? 0.0f : inputR[i - latency];
+                        exact = exact && left[i] == expectedL && (! stereo || right[i] == expectedR);
+                    }
+                    CHECK (exact);
+                }
 }
 
-void testBypass()
+void testLatencyAlignsWetAndDry()
 {
-    std::printf ("Engine: bypass quieto = entrada bit a bit; conmutarlo es un fundido de 20 ms sin saltos\n");
+    std::printf ("Engine: la señal procesada sale con la misma latencia que la original (a nivel bajo, tanh ≈ recta)\n");
 
     for (const double sr : sampleRates)
-    {
-        // Bypass desde el principio: las ganancias no se oyen.
-        Engine engine;
-        engine.prepare (sr, { 12.0f, 6.0f, true });
-        const auto input = noise (10000, 0.8f);
-        auto left = input;
-        std::vector<float> right;
-        processInBlocks (engine, left, right, 64);
-        CHECK (left == input);
-
-        // Con una señal continua (DC) y +12 dB de diferencia, cualquier conmutación brusca sería un escalón enorme.
-        Engine dc;
-        dc.prepare (sr, { 0.0f, 12.0f, false });
-        const int fadeSamples = static_cast<int> (std::lround (Engine::bypassFadeSeconds * sr));
-        std::vector<float> signal;
-        const float processed = 0.25f * dw::dbToGain (12.0f);
-        for (int toggle = 0; toggle < 6; ++toggle)
+        for (int os = 0; os < riptide::dsp::numOversamplingChoices; ++os)
         {
-            dc.setSettings ({ 0.0f, 12.0f, toggle % 2 == 0 });
-            // Algunos cambios llegan a mitad de un fundido (cada 0.7 fundidos) y otros con el fundido terminado.
-            std::vector<float> block (static_cast<size_t> (toggle < 3 ? fadeSamples * 7 / 10 : fadeSamples * 3), 0.25f);
-            std::vector<float> none;
-            processInBlocks (dc, block, none, 32);
-            signal.insert (signal.end(), block.begin(), block.end());
+            Engine engine;
+            engine.prepare (sr, withOversampling (os));
+            const auto latency = static_cast<size_t> (engine.getLatency());
+            // −40 dBFS: tanh se desvía de la recta en 10⁻⁵ relativo. Lo que queda es el filtro DC (desfase de 0.3° a
+            // 1 kHz: 0.5 % de error). Media muestra de desalineación sería un 7 %.
+            const auto input = sine (1000.0, sr, 20000, 0.01f);
+            auto left = input;
+            std::vector<float> right;
+            processInBlocks (engine, left, right, 256);
+            float worst = 0.0f;
+            for (size_t i = 10000; i < left.size(); ++i)
+                worst = std::max (worst, std::abs (left[i] - input[i - latency]));
+            CHECK (worst < 0.01f * 0.01f);
         }
-        CHECK (maxStep (signal) <= (processed - 0.25f) / static_cast<float> (fadeSamples) * 1.01f);
-        CHECK (signal.back() == processed); // el último cambio (toggle 5) quitó el bypass y el fundido terminó
+}
+
+void testSaturation()
+{
+    std::printf ("Engine: tanh limita a ±1, crea armónicos impares y no pares; a nivel bajo la ganancia es la de las perillas\n");
+
+    for (const double sr : sampleRates)
+    {
+        // +24 dB sobre un seno a −6 dBFS: casi una onda cuadrada.
+        Engine hot;
+        hot.prepare (sr, withOversampling (2, { 24.0f, 0.0f, false }));
+        auto left = sine (1000.0, sr, static_cast<size_t> (sr), 0.5f);
+        std::vector<float> right;
+        processInBlocks (hot, left, right, 512);
+        const size_t start = left.size() / 2;
+        float peak = 0.0f;
+        for (size_t i = start; i < left.size(); ++i)
+            peak = std::max (peak, std::abs (left[i]));
+        CHECK (peak <= 1.1f); // tanh ≤ 1; el filtro halfband agrega un pequeño rizado (Gibbs) en las esquinas
+        const double fundamental = toneAmplitude (left, 1000.0, sr, start);
+        CHECK (fundamental > 1.1); // una cuadrada de amplitud 1 tiene fundamental 4/π
+        CHECK (toneAmplitude (left, 3000.0, sr, start) > 0.2 * fundamental);
+        CHECK (toneAmplitude (left, 2000.0, sr, start) < 1.0e-4 * fundamental); // curva simétrica: sin pares
+
+        // Nivel bajo: Input +6 y Output −18 dejan el seno en −40 + 6 − 18 = −52 dBFS.
+        Engine soft;
+        soft.prepare (sr, withOversampling (1));
+        soft.setSettings (withOversampling (1, { 6.0f, -18.0f, false }));
+        auto quiet = sine (1000.0, sr, static_cast<size_t> (sr), 0.01f);
+        processInBlocks (soft, quiet, right, 100);
+        const auto level = static_cast<float> (toneAmplitude (quiet, 1000.0, sr, quiet.size() / 2));
+        CHECK (std::abs (dw::gainToDb (level / 0.01f) - (6.0f - 18.0f)) < 0.01f);
     }
+}
+
+void testDcIsRemoved()
+{
+    std::printf ("Engine: el filtro DC quita un desplazamiento constante de la entrada\n");
+
+    Engine engine;
+    engine.prepare (48000.0, withOversampling (1));
+    std::vector<float> left (96000, 0.2f), right;
+    processInBlocks (engine, left, right, 480);
+    CHECK (std::abs (left.back()) < 1.0e-4f);
+}
+
+void testBypassToggleIsSmooth()
+{
+    std::printf ("Engine: conmutar el bypass es un fundido de 20 ms sin saltos (también a mitad de un fundido)\n");
+
+    for (const double sr : sampleRates)
+    {
+        // Seno grave a nivel alto con +12 dB de drive: procesado y original son muy distintos, pero están alineados.
+        const EngineSettings settings = withOversampling (2, { 12.0f, 0.0f, false });
+        const int fadeSamples = static_cast<int> (std::lround (Engine::bypassFadeSeconds * sr));
+        const auto input = sine (100.0, sr, static_cast<size_t> (fadeSamples) * 20, 0.5f);
+
+        Engine still;
+        still.prepare (sr, settings);
+        std::vector<float> reference = input, none;
+        processInBlocks (still, reference, none, 64); // procesado sin conmutar: su paso máximo es el de la onda
+
+        Engine engine;
+        engine.prepare (sr, settings);
+        std::vector<float> signal;
+        size_t position = 0;
+        for (int toggle = 0; position < input.size(); ++toggle)
+        {
+            auto toggled = settings;
+            toggled.bypassed = toggle % 2 == 0;
+            engine.setSettings (toggled);
+            // Algunos cambios llegan a mitad de un fundido (cada 0.7 fundidos) y otros con el fundido terminado.
+            const size_t length = std::min (input.size() - position,
+                                            static_cast<size_t> (toggle < 3 ? fadeSamples * 7 / 10 : fadeSamples * 3));
+            std::vector<float> block (input.begin() + static_cast<std::ptrdiff_t> (position),
+                                      input.begin() + static_cast<std::ptrdiff_t> (position + length));
+            processInBlocks (engine, block, none, 32);
+            signal.insert (signal.end(), block.begin(), block.end());
+            position += length;
+        }
+        // Paso de la onda + lo que cambia el fundido en una muestra (como mucho la diferencia entre las dos señales).
+        CHECK (maxStep (signal) <= std::max (maxStep (reference), maxStep (input)) + 1.5f / static_cast<float> (fadeSamples));
+    }
+}
+
+void testOversamplingSwitchIsClickless()
+{
+    std::printf ("Engine: cambiar el oversampling baja a silencio, cambia la latencia y vuelve sin saltos\n");
+
+    for (const double sr : sampleRates)
+    {
+        const auto settingsFor = [] (int os) { return withOversampling (os, { 6.0f, 0.0f, false }); };
+        const int fadeSamples = static_cast<int> (std::lround (Engine::factorFadeSeconds * sr));
+        const auto input = sine (200.0, sr, static_cast<size_t> (sr), 0.5f);
+
+        // Referencia: el paso máximo de la onda saturada sin cambios de factor.
+        Engine still;
+        still.prepare (sr, settingsFor (4));
+        std::vector<float> reference = input, none;
+        processInBlocks (still, reference, none, 64);
+
+        Engine engine;
+        engine.prepare (sr, settingsFor (0));
+        std::vector<float> output;
+        size_t position = 0;
+        int index = 0;
+        for (const int os : { 4, 1, 3, 0, 2, 4, 0 })
+        {
+            engine.setSettings (settingsFor (os));
+            // Algunos cambios llegan antes de terminar el fundido anterior.
+            const size_t length = static_cast<size_t> (index++ % 2 == 0 ? fadeSamples * 3 : fadeSamples / 2);
+            std::vector<float> block (input.begin() + static_cast<std::ptrdiff_t> (position),
+                                      input.begin() + static_cast<std::ptrdiff_t> (position + length));
+            processInBlocks (engine, block, none, 64);
+            output.insert (output.end(), block.begin(), block.end());
+            position += length;
+        }
+        std::vector<float> tail (input.begin() + static_cast<std::ptrdiff_t> (position),
+                                 input.begin() + static_cast<std::ptrdiff_t> (position + 4000));
+        processInBlocks (engine, tail, none, 64);
+        output.insert (output.end(), tail.begin(), tail.end());
+
+        // El fundido suma como mucho 1/fadeSamples por muestra (la salida no pasa de 1).
+        CHECK (maxStep (output) <= maxStep (reference) * 1.05f + 1.0f / static_cast<float> (fadeSamples));
+        CHECK (engine.getActiveOversampling() == 0);
+        CHECK (engine.getLatency() == 0);
+    }
+
+    // La latencia publicada sigue al factor activo, y cambia solo cuando el cambio se aplica (en silencio).
+    Engine engine;
+    engine.prepare (44100.0, withOversampling (0));
+    std::vector<float> block (2000, 0.0f), none;
+    engine.setSettings (withOversampling (4));
+    CHECK (engine.getLatency() == 0);
+    processInBlocks (engine, block, none, 512);
+    CHECK (engine.getActiveOversampling() == 4);
+    CHECK (engine.getLatency() > 70);
 }
 
 void testBlockSizeIndependence()
 {
-    std::printf ("Engine: el resultado no depende del tamaño de bloque (con automatización)\n");
+    std::printf ("Engine: el resultado no depende del tamaño de bloque (con automatización y cambios de factor)\n");
 
     constexpr size_t changeEvery = 28672; // múltiplo de todos los bloques probados: los cambios caen en la misma muestra
-    const std::array<EngineSettings, 4> changes { { { 8.0f, -3.0f, false }, { -6.0f, 4.0f, true },
-                                                     { 2.5f, 0.0f, false }, { 0.0f, -24.0f, false } } };
+    const std::array<EngineSettings, 5> changes { { { 8.0f, -3.0f, false, 2 }, { -6.0f, 4.0f, true, 4 },
+                                                     { 2.5f, 0.0f, false, 0 }, { 18.0f, -24.0f, false, 3 },
+                                                     { 0.0f, 0.0f, false, 1 } } };
     const auto inputL = noise (changeEvery * changes.size(), 0.7f, 3u);
     const auto inputR = noise (changeEvery * changes.size(), 0.7f, 4u);
 
@@ -210,28 +330,27 @@ void testMeters()
     for (const double sr : sampleRates)
     {
         Engine engine;
-        engine.prepare (sr, { 6.0f, -10.0f, false });
+        engine.prepare (sr, { 6.0f, -10.0f, false, 2 });
 
-        // L: seno de 1 kHz a −12 dBFS; R: silencio.
+        // L: seno de 1 kHz a −40 dBFS (tanh casi recta); R: silencio.
         const size_t count = static_cast<size_t> (3.0 * sr); // 3 s = 10 constantes de tiempo del RMS (llega al 99.995 %)
-        std::vector<float> left (count), right (count, 0.0f);
-        for (size_t i = 0; i < count; ++i)
-            left[i] = dw::dbToGain (-12.0f) * static_cast<float> (std::sin (2.0 * pi * 1000.0 * static_cast<double> (i) / sr));
+        std::vector<float> left = sine (1000.0, sr, count, dw::dbToGain (-40.0f)), right (count, 0.0f);
         processInBlocks (engine, left, right, 512);
 
-        CHECK (std::abs (dw::gainToDb (engine.inputMeter (0).takePeak()) - (-6.0f)) < 0.01f);
-        CHECK (std::abs (dw::gainToDb (engine.outputMeter (0).takePeak()) - (-16.0f)) < 0.01f);
-        CHECK (std::abs (dw::gainToDb (engine.inputMeter (0).rms()) - (-6.0f - 3.01f)) < 0.05f);
-        CHECK (std::abs (dw::gainToDb (engine.outputMeter (0).rms()) - (-16.0f - 3.01f)) < 0.05f);
+        CHECK (std::abs (dw::gainToDb (engine.inputMeter (0).takePeak()) - (-34.0f)) < 0.01f);
+        // El filtro DC desplaza un poco la fase: los puntos muestreados ya no caen igual de cerca de la cresta.
+        CHECK (std::abs (dw::gainToDb (engine.outputMeter (0).takePeak()) - (-44.0f)) < 0.05f);
+        CHECK (std::abs (dw::gainToDb (engine.inputMeter (0).rms()) - (-34.0f - 3.01f)) < 0.05f);
+        CHECK (std::abs (dw::gainToDb (engine.outputMeter (0).rms()) - (-44.0f - 3.01f)) < 0.05f);
         CHECK (engine.inputMeter (1).takePeak() == 0.0f && engine.outputMeter (1).rms() == 0.0f);
     }
 
     // Mono: solo se mide el canal 0.
     Engine mono;
     mono.prepare (48000.0, {});
-    std::vector<float> left (4800, 0.5f), none;
+    std::vector<float> left = sine (1000.0, 48000.0, 4800, 0.1f), none;
     processInBlocks (mono, left, none, 480);
-    CHECK (mono.outputMeter (0).takePeak() == 0.5f);
+    CHECK (mono.outputMeter (0).takePeak() > 0.09f);
     CHECK (mono.outputMeter (1).takePeak() == 0.0f);
 }
 
@@ -239,9 +358,12 @@ void testMeters()
 
 int main()
 {
-    testUnityIsBitExact();
-    testGainsAndRampTime();
-    testBypass();
+    testBypassIsDelayedInput();
+    testLatencyAlignsWetAndDry();
+    testSaturation();
+    testDcIsRemoved();
+    testBypassToggleIsSmooth();
+    testOversamplingSwitchIsClickless();
     testBlockSizeIndependence();
     testMeters();
 

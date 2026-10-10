@@ -22,8 +22,9 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
     addAndMakeVisible (inputMeter);
     addAndMakeVisible (outputMeter);
     setUpKnob (inputKnob, id::inputGain, "Input",
-               juce::String::fromUTF8 ("Nivel con el que la se\xc3\xb1" "al entra al saturador (lo que mide IN). Desde la "
-                                       "Fase 2, subirlo = saturar m\xc3\xa1s."));
+               juce::String::fromUTF8 ("Drive: nivel con el que la se\xc3\xb1" "al entra a la curva (lo que mide IN). "
+                                       "Subirlo = saturar m\xc3\xa1s: m\xc3\xa1s arm\xc3\xb3nicos, m\xc3\xa1s densidad, "
+                                       "menos pegada."));
     setUpKnob (outputKnob, id::outputGain, "Output",
                juce::String::fromUTF8 ("Volumen final. Sirve para igualar el volumen con el bypass y comparar a "
                                        "o\xc3\xad" "do justo."));
@@ -33,6 +34,20 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
                                                      "y entra con un fundido de 20 ms (sin clics)."));
     addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), id::bypass, bypassButton);
+
+    oversamplingLabel.setText ("OVERSAMPLING", juce::dontSendNotification);
+    oversamplingLabel.setJustificationType (juce::Justification::centredRight);
+    oversamplingLabel.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    oversamplingLabel.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
+    addAndMakeVisible (oversamplingLabel);
+    // Las opciones salen del propio parámetro (Off, 2x, 4x, 8x, 16x): el attachment asocia la opción N con el índice N.
+    oversamplingBox.addItemList (processor.getParameters().getParameter (id::oversampling)->getAllValueStrings(), 1);
+    oversamplingBox.setTooltip (juce::String::fromUTF8 (
+        "Calcula la saturaci\xc3\xb3n a 2, 4, 8 o 16 veces la frecuencia de muestreo para que los arm\xc3\xb3nicos que "
+        "pasan de Nyquist no se reflejen como aliasing. M\xc3\xa1s factor = menos aliasing, m\xc3\xa1s CPU y algo "
+        "m\xc3\xa1s de latencia (FL la compensa). Off = sin oversampling: \xc3\xbasalo para o\xc3\xad" "r el aliasing."));
+    addAndMakeVisible (oversamplingBox);
+    oversamplingAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), id::oversampling, oversamplingBox);
 
     setSize (editorWidth, editorHeight);
     lastFrameMs = juce::Time::getMillisecondCounterHiRes();
@@ -83,7 +98,8 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("RIPTIDE", header.removeFromLeft (110), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("saturador  -  Fase 1: passthrough", header, juce::Justification::centredLeft);
+    g.drawText ("saturador  -  Fase 2", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
+                juce::Justification::centredLeft);
 
     // Panel de las perillas, entre los dos medidores.
     const auto body = getLocalBounds().withTrimmedTop (headerHeight).reduced (padding);
@@ -96,7 +112,7 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     // Flecha del recorrido de la señal: IN → perillas → OUT.
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (juce::String::fromUTF8 ("entrada \xe2\x86\x92 input \xe2\x86\x92 (saturaci\xc3\xb3n, Fase 2) \xe2\x86\x92 output \xe2\x86\x92 salida"),
+    g.drawText (juce::String::fromUTF8 ("entrada \xe2\x86\x92 input (drive) \xe2\x86\x92 tanh \xe2\x86\x92 output \xe2\x86\x92 salida"),
                 knobsPanel.removeFromBottom (28.0f), juce::Justification::centred);
 }
 
@@ -104,6 +120,9 @@ void RiptideAudioProcessorEditor::resized()
 {
     auto header = getLocalBounds().removeFromTop (headerHeight).reduced (padding, 8);
     bypassButton.setBounds (header.removeFromRight (90));
+    header.removeFromRight (padding);
+    oversamplingBox.setBounds (header.removeFromRight (70));
+    oversamplingLabel.setBounds (header.removeFromRight (100));
 
     auto body = getLocalBounds().withTrimmedTop (headerHeight).reduced (padding);
     inputMeter.setBounds (body.removeFromLeft (meterWidth));

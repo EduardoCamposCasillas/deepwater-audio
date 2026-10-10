@@ -31,6 +31,14 @@ public:
         setColour (juce::TextButton::buttonOnColourId, meterClip.withAlpha (0.55f));
         setColour (juce::TextButton::textColourOffId, dimText);
         setColour (juce::TextButton::textColourOnId, text);
+        setColour (juce::ComboBox::backgroundColourId, control);
+        setColour (juce::ComboBox::outlineColourId, panelOutline);
+        setColour (juce::ComboBox::textColourId, text);
+        setColour (juce::ComboBox::arrowColourId, dimText);
+        setColour (juce::PopupMenu::backgroundColourId, panel);
+        setColour (juce::PopupMenu::textColourId, text);
+        setColour (juce::PopupMenu::highlightedBackgroundColourId, accent.withAlpha (0.35f));
+        setColour (juce::PopupMenu::highlightedTextColourId, text);
         setColour (juce::TooltipWindow::backgroundColourId, panel.brighter (0.15f));
         setColour (juce::TooltipWindow::textColourId, text);
         setColour (juce::TooltipWindow::outlineColourId, panelOutline);

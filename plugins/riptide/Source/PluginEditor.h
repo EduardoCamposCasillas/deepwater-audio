@@ -7,7 +7,8 @@
 
 class RiptideAudioProcessor;
 
-// Fase 1: GUI funcional. Medidor IN | perillas Input y Output | medidor OUT, y el bypass en la cabecera.
+// GUI funcional (la profesional llega en la Fase 8). Medidor IN | perillas Input (drive) y Output | medidor OUT;
+// en la cabecera, el selector de oversampling y el bypass.
 // Un temporizador a 30 cuadros por segundo recoge los niveles que publicó el audio y redibuja los medidores.
 class RiptideAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -21,6 +22,7 @@ public:
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     struct Knob
     {
@@ -42,6 +44,9 @@ private:
     Knob outputKnob;
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<ButtonAttachment> bypassAttachment;
+    juce::Label oversamplingLabel;
+    juce::ComboBox oversamplingBox;
+    std::unique_ptr<ComboBoxAttachment> oversamplingAttachment;
 
     double lastFrameMs = 0.0;
 

@@ -95,6 +95,32 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
+Fase 2 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+- Cadena (`dsp/Engine.h`): entrada → × input (es el drive) → [medidor IN] → ↑N → `fastTanh` → ↓N → filtro DC (5 Hz) →
+  × output → fundido de bypass con la señal original retrasada la latencia → × fundido de factor → [medidor OUT].
+  tanh es simétrica (solo armónicos impares) y limita a ±1. No hay parámetro Drive aparte: Input hace de drive, como
+  estaba previsto en la Fase 1.
+- Librería (nuevo): `Oversampler.h` (un canal; cascada de 0–4 etapas halfband de `Halfband.h`, todas diseñadas en
+  `prepare`, muestra a muestra, sin buffers por bloque; cada etapa subida+bajada retrasa 2H − 1 muestras de su
+  frecuencia alta y la suma se completa hasta un entero de muestras del host con un retardo puro en la frecuencia más
+  alta) y `DcBlocker.h` (y = x − x₁ + R·y₁, R = e^(−2π·fc/sr)). Latencias medidas (×2/×4/×8/×16): 44.1 kHz 69/75/77/78,
+  48 kHz 39/44/46/47, 88.2 kHz 13/17/19/20, 96 kHz 11/15/17/18. Aliasing audible de tanh(4·seno de 5 kHz) a 48 kHz:
+  −25 dB sin oversampling, −58 dB ×2, −118 dB ×4, en el ruido del float desde ×8.
+- Parámetro nuevo `oversampling` (choice Off/2x/4x/8x/16x, def. 4x, versionHint 2). El índice = número de etapas: no
+  cambiar el orden. Cambiar el factor: el motor baja la salida a cero en 10 ms (`factorFade`), cambia las etapas
+  (borrando su historia) y la latencia, y vuelve a subir. El retardo del camino original (256 muestras fijas, máximo
+  real ~140 a frecuencias bajas) conserva su historia. El procesador publica la latencia en un atómico y un
+  `juce::Timer` (20 Hz, hilo de mensajes) llama a `setLatencySamples` cuando cambia; en `prepareToPlay` se informa
+  directamente.
+- GUI: selector OVERSAMPLING en la cabecera, junto a BYPASS. La comparación con y sin oversampling se hace con un
+  analizador de FL (Wave Candy / Fruity Parametric EQ 2) después de Riptide; el analizador propio llega en la Fase 8.
+- Tests: `DeepwaterDspTests` (+3: latencia entera exacta del oversampler a 4 sample rates × 5 factores, aliasing que baja
+  con el factor medido con FFT, filtro DC) y `RiptideTests` reescritos (bypass = entrada retrasada bit a bit en todos
+  los factores/bloques/mono-estéreo, procesado alineado con el original, saturación sin armónicos pares, DC eliminada,
+  conmutar bypass y factor sin saltos, latencia publicada tras el cambio, independencia del tamaño de bloque).
+- Release con 0 warnings; ctest 4/4; pluginval strictness 10 ampliado: SUCCESS (compilado en `out/pv` porque FL tenía
+  abierto el VST3 de `build/`). Undertow no cambia (solo se agregaron headers a la librería).
+
 Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Nombre decidido con el usuario: Riptide (`Rpt1`). `COMPANY_NAME "Deepwater"` en Riptide y también en Undertow (antes
   "Undertow"): FL agrupa la suite bajo un fabricante. Los códigos no cambian, así que los proyectos guardados siguen
@@ -124,4 +150,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 2 (waveshaping + oversampling).
+Siguiente: que el usuario pruebe la Fase 2 en FL; después, Fase 3 (modos de saturación).

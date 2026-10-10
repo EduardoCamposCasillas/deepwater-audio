@@ -113,3 +113,113 @@ después pide pistas.
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 2 — La primera saturación (tanh) y el aliasing
+
+Ahora Riptide satura de verdad. La perilla **Input** es el *drive*: decide con qué nivel llega la señal a la curva.
+Y aparece un control técnico que todo saturador serio tiene: el **oversampling**.
+
+### Conceptos aprendidos
+
+- **Waveshaping (curva de transferencia).** Cada muestra pasa por una función: `salida = f(entrada)`. Si `f` fuera una
+  recta, sería solo un cambio de volumen. Riptide usa `tanh`, que es casi recta cerca de 0 y se dobla suavemente hacia
+  ±1: las partes bajas de la onda pasan igual y los picos se redondean. **Redondear la onda = crear armónicos.**
+- **Clipping suave vs duro.** `tanh` es un clip *suave*: la curva se dobla poco a poco, así que los armónicos crecen
+  de forma gradual al subir el drive. Un clip duro (Fase 3) corta en seco: más armónicos agudos y más aspereza.
+- **Armónicos impares.** Una curva simétrica (lo que hace con la parte positiva lo hace igual con la negativa) solo
+  crea armónicos impares: 3×, 5×, 7× la frecuencia. Con un La4 de 220 Hz aparecen 660, 1100, 1540 Hz... Suenan más
+  "huecos", "nasales" o "cuadrados" que los pares (Fase 3: bulbo asimétrico = pares, más "cálidos").
+- **Techo.** `tanh` nunca pasa de ±1: por mucho drive que pongas, antes de Output la señal no supera 0 dBFS. Por eso
+  con mucho drive el pico se queda quieto y el RMS sube: **baja el factor de cresta** (lo que se predijo en la Fase 1).
+- **Aliasing.** A 44.1 kHz no cabe nada por encima de 22.05 kHz (Nyquist). Si la curva crea un armónico a 35 kHz,
+  no desaparece: se **refleja** como en un espejo y cae en 44.1 − 35 = 9.1 kHz. Ese tono no es múltiplo de la nota:
+  suena inarmónico, metálico, "digital barato". Lo delator: si la nota sube, el alias puede **bajar**.
+- **Oversampling.** Saturar a 2, 4, 8 o 16 veces la frecuencia de muestreo. Así los armónicos tienen sitio para
+  existir sin reflejarse, y luego un filtro los quita antes de volver a 44.1 kHz. Medido en Riptide con un seno de
+  5 kHz muy saturado: el aliasing está a −25 dB sin oversampling (se oye), −58 dB con 2x y −118 dB con 4x (inaudible).
+- **Latencia.** Los filtros del oversampling tardan un poco (≈1.7 ms con 4x a 44.1 kHz). Riptide se lo dice a FL, y
+  FL retrasa las demás pistas lo mismo para que todo siga alineado (compensación de latencia, *PDC*). Al cambiar el
+  factor, Riptide hace un silencio de 10 ms para que el cambio no haga clic.
+- **DC.** Si una curva desplaza la onda hacia arriba o abajo, aparece una componente de 0 Hz. No se oye, pero gasta
+  headroom. Riptide tiene un filtro DC a 5 Hz después de la curva (con tanh casi no trabaja; será importante en la
+  Fase 3 con las curvas asimétricas).
+
+### Qué hace cada control
+
+- **Input (drive)**: con la señal a −18 dBFS RMS, de 0 a +6 dB apenas se nota (un poco más de densidad, picos algo
+  más redondos). De +6 a +12 dB la saturación se oye: más "cuerpo", los transitorios pierden filo, aparecen armónicos
+  en el analizador. De +12 a +24 dB es distorsión clara: la onda se vuelve casi cuadrada, el sonido se aplana y se
+  llena de agudos ásperos.
+- **Output**: igual que antes, para igualar el volumen. Regla rápida: si subes Input X dB, baja Output un poco menos
+  de X (tanh comprime, el volumen no sube tanto) y ajusta mirando el RMS de OUT.
+- **Oversampling** (Off / 2x / 4x / 8x / 16x): **4x** es el punto de partida (aliasing inaudible con poco CPU). Off solo
+  para oír el aliasing o si buscas ese sonido "lo-fi digital". 8x y 16x apenas cambian con tanh; servirán con las
+  curvas duras de la Fase 3.
+- En el analizador: con un seno en la entrada, cada paso de drive hace aparecer una "escalera" de picos en 3×, 5×,
+  7×... la frecuencia. En la forma de onda (Wave Candy, modo oscilloscope) el seno se va volviendo cuadrado.
+
+### Ejercicio de escucha guiado: ver y oír el aliasing
+
+1. Crea un canal con **3x Osc** (una sola onda senoidal) y toca un **La7 (1760 Hz)**. Mándalo a un insert con Riptide
+   y, **después** de Riptide, un **Fruity Parametric EQ 2** (su analizador) o **Wave Candy** en modo espectro.
+2. Riptide en **Oversampling 4x, Input +18 dB, Output −12 dB**. En el analizador verás la escalera de armónicos
+   impares: 5280, 8800, 12320 Hz... ordenados, a intervalos iguales.
+3. Pon **Oversampling Off**. Aparecen picos **entre** los armónicos, incluso por debajo de la fundamental. Eso es
+   aliasing. Escucha: el tono se ensucia con un zumbido metálico.
+4. Haz un **glissando** lento hacia arriba (slide en el Piano roll) con Off: oirás tonos que bajan mientras la nota
+   sube. Es la firma del aliasing. Repite con 4x: desaparecen.
+5. Prueba con una **nota grave** (La3, 110 Hz) en Off y en 4x: casi no hay diferencia. El aliasing es un problema
+   sobre todo con **agudos fuertes y mucho drive** (hi-hats, platillos, voces brillantes, leads).
+6. Cambia entre Off y 16x mientras suena: hay un pequeño hueco de silencio, sin clic, y FL vuelve a compensar la
+   latencia solo.
+
+### Receta de uso: densidad en un bus de batería
+
+1. Pon Riptide en el insert de la batería (o de un loop). Oversampling 4x.
+2. Lleva el RMS de entrada a unos −18 dBFS con Input y, desde ahí, sube **Input de +4 a +8 dB**.
+3. Baja **Output** hasta que el RMS de OUT sea el mismo que con bypass. Alterna el bypass.
+4. Qué notar: la batería suena más "junta" y densa, la caja con más cuerpo, los platillos un poco más presentes; a
+   cambio, los golpes pierden algo de pegada (el pico se redondea). Si pierdes demasiada pegada, baja Input.
+5. ¿Por qué funciona? tanh aplasta los picos (los golpes) más que el resto: baja el factor de cresta y añade
+   armónicos que hacen que cada golpe se oiga más, incluso al mismo volumen.
+
+### Reto sin receta
+
+Tienes un **808** que suena bien en audífonos pero desaparece en las bocinas del celular (no reproducen por debajo de
+~100 Hz). Usa Riptide para que el 808 se oiga en bocinas pequeñas **sin que suba su volumen** (mismo RMS en OUT con y
+sin bypass). Para comprobarlo, pon un **Fruity Parametric EQ 2** después de Riptide que corte todo por debajo de
+150 Hz (simula el celular). Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Waveshaper / curva de transferencia**: la función que convierte cada muestra de entrada en una de salida.
+  *En música:* los pedales de distorsión de guitarra son waveshapers analógicos.
+- **Drive**: cuánto se empuja la señal contra la curva. *En música:* el "Drive" de un Tube Screamer o de Decapitator.
+- **Soft clipping (clip suave)**: la curva se dobla poco a poco. *En música:* la cinta y los preamplificadores de
+  consola; el "pegamento" de muchas mezclas de rock de los 70.
+- **Armónicos impares**: 3×, 5×, 7× la fundamental. *En música:* el sonido de un fuzz o de una onda cuadrada (el
+  clarinete también es rico en impares).
+- **Nyquist**: la mitad de la frecuencia de muestreo; lo más agudo que cabe (22.05 kHz a 44.1 kHz).
+- **Aliasing**: armónicos que pasan de Nyquist y se reflejan como tonos inarmónicos. *En música:* la aspereza de los
+  primeros plugins de distorsión y de muchos bitcrushers (ahí se usa a propósito).
+- **Oversampling**: procesar a una frecuencia de muestreo más alta para evitar el aliasing.
+- **Latencia / PDC**: el retardo que añade un plugin y la compensación automática del DAW que mantiene todo alineado.
+- **DC offset**: desplazamiento constante de la onda respecto al 0. *En música:* aparece en grabaciones con equipos
+  defectuosos; hace que los cortes de audio hagan clic.
+
+### Errores comunes
+
+- **Saturar con más volumen** y creer que suena mejor. Iguala siempre con Output antes de decidir.
+- **Dejar Oversampling en Off** en material brillante con mucho drive: el aliasing ensucia los agudos y se acumula al
+  usar varias instancias.
+- **Poner 16x "por si acaso"** en 30 pistas: gasta CPU sin diferencia audible con tanh. 4x basta; sube solo si oyes
+  o ves aliasing.
+- **Mucho drive en todo**: si todas las pistas están saturadas, la mezcla pierde dinámica y profundidad. Satura donde
+  haga falta densidad o presencia, no por costumbre.
+- **Cuándo NO usar saturación**: en pistas que ya vienen distorsionadas o muy comprimidas (se vuelven planas), en
+  instrumentos acústicos donde la dinámica es lo importante (piano clásico, guitarra fingerstyle), y en el master si
+  no puedes comparar con el volumen igualado.
+
+### Retos completados
+
+(Ninguno todavía.)
