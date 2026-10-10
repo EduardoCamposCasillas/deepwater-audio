@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pad oscuro y cálido: pulsos con PWM lento (LFO → Position), triángulo una octava abajo, filtro cerrado, reverb larga. -->
+<UndertowPreset formatVersion="1" name="Pad Noche Urbana" category="Pad" author="Undertow">
+  <Notes>
+    Género: Reggaeton romántico / R&amp;B latino (80–95 BPM). El colchón oscuro que va debajo de la voz.
+
+    Cómo se construyó:
+    - Osc A: Pulse Width 30 % con 4 copias de unison (Detune 15 %, Width 80 %): ancho pero sin desafinar.
+    - LFO 1 (Triangle, Free, 0.15 Hz) → Osc A Position +15 %: el ancho del pulso se mueve muy despacio (PWM). Eso
+      da el movimiento "de coro" de los pads analógicos sin que se note un vibrato.
+    - Osc B: triángulo una octava abajo al 50 %: cuerpo cálido sin armónicos que choquen con la voz.
+    - Low Pass 12 dB a 1.5 kHz: oscuro a propósito. La voz del cantante vive en 1–4 kHz y el pad le deja el espacio.
+    - Env 1: Attack 600 ms, Release 1.8 s: entra y sale sin golpe. Voices 8.
+    - Chorus lento + reverb grande (4.5 s, Mix 32 %): lo aleja hacia el fondo de la mezcla.
+
+    Tócalo: acordes de 4 notas que duren un compás: Am – F – C – G alrededor de C5.
+    Prueba a mover: el Cutoff (800 Hz = más íntimo; 4 kHz = aparece al frente) y el amount de LFO 1 → Position.
+    Técnicas: Fase 5 (LFO libre) + Fase 6 (unison, Osc B) + Fase 8 (chorus, reverb).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAWavetable" value="Pulse Width"/>
+    <PARAM id="oscAPosition" value="0.3"/>
+    <PARAM id="oscAUnison" value="4"/>
+    <PARAM id="oscADetune" value="0.15"/>
+    <PARAM id="oscAWidth" value="0.8"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0.3333"/>  <!-- triángulo -->
+    <PARAM id="oscBOctave" value="-1"/>
+    <PARAM id="oscBLevel" value="0.5"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.6"/>
+    <PARAM id="decay" value="1.5"/>
+    <PARAM id="sustain" value="0.85"/>
+    <PARAM id="release" value="1.8"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="1500"/>
+    <PARAM id="filter1Resonance" value="0.1"/>
+    <PARAM id="filter1KeyTrack" value="0.3"/>
+
+    <PARAM id="lfo1Shape" value="Triangle"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.15"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Osc A Position"/>
+    <PARAM id="mod1Amount" value="0.15"/>
+
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.35"/>
+    <PARAM id="fxChorusDepth" value="0.5"/>
+    <PARAM id="fxChorusFeedback" value="0"/>
+    <PARAM id="fxChorusMix" value="0.4"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.75"/>
+    <PARAM id="fxReverbDecay" value="4.5"/>
+    <PARAM id="fxReverbDamping" value="0.55"/>
+    <PARAM id="fxReverbPreDelay" value="0.03"/>
+    <PARAM id="fxReverbMix" value="0.32"/>
+    <PARAM id="master" value="-2.3"/>
+  </Parameters>
+</UndertowPreset>

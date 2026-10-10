@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Riser de build-up: supersaw + ruido que suben una octava y abren el filtro en 8 s (Env 2 con attack largo). -->
+<UndertowPreset formatVersion="1" name="Riser Supersaw" category="FX" author="Undertow">
+  <Notes>
+    Género: EDM (cualquier subgénero). La subida de tensión de los compases antes del drop.
+
+    Cómo se construyó:
+    - Osc A: sierra con 9 copias (Detune 30 %) + ruido (Level 35 %, Color 70 %): tono y "viento" a la vez.
+    - Env 2 con Attack de 8 s y Sustain 100 %: una rampa lenta que solo sube. Va a dos destinos:
+      Env 2 → Global Pitch +50 % (sube 12 semitonos, una octava) y Env 2 → Cutoff +55 % (abre el filtro 5.5 octavas,
+      de 250 Hz a 11 kHz). Subir de tono Y de brillo a la vez es lo que el oído siente como "algo va a pasar".
+    - LFO 1 (Square, Retrigger, Sync 1/16) → Volume +15 %: un leve tartamudeo en semicorcheas que acelera la
+      sensación de urgencia.
+    - Low Pass 24 dB a 250 Hz, Resonance 30 %: el pico de resonancia "silba" mientras el cutoff sube.
+    - Delay 1/8 + reverb grande (Mix 35 %): cuando sueltas la nota, la cola sigue sonando sobre el silencio previo
+      al drop.
+
+    Tócalo: una sola nota (C5) de 4 compases a 128 BPM: la subida dura 8 s, unos 4 compases. Para un build-up de 2 compases,
+    pon el Attack de Env 2 en 3.75 s (el máximo, 10 s, da unos 5 compases).
+    Prueba a mover: el Attack de Env 2 (la duración de la subida) y el amount → Global Pitch (100 % = 2 octavas).
+    Técnicas: Fase 5 (Env 2 lenta a dos destinos, LFO → Volume) + Fase 6 (unison, ruido) + Fase 8.
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="9"/>
+    <PARAM id="oscADetune" value="0.3"/>
+    <PARAM id="oscAWidth" value="1"/>
+    <PARAM id="noiseOn" value="On"/>
+    <PARAM id="noiseLevel" value="0.35"/>
+    <PARAM id="noiseColor" value="0.7"/>
+
+    <PARAM id="voices" value="4"/>
+    <PARAM id="velocity" value="0"/>
+    <PARAM id="attack" value="0.5"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="1.5"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="250"/>
+    <PARAM id="filter1Resonance" value="0.3"/>
+
+    <PARAM id="env2Attack" value="8"/>
+    <PARAM id="env2Decay" value="0.1"/>
+    <PARAM id="env2Sustain" value="1"/>
+    <PARAM id="env2Release" value="1"/>
+    <PARAM id="lfo1Shape" value="Square"/>
+    <PARAM id="lfo1Mode" value="Retrigger"/>
+    <PARAM id="lfo1Sync" value="On"/>
+    <PARAM id="lfo1Division" value="1/16"/>
+    <PARAM id="mod1Source" value="Env 2"/>
+    <PARAM id="mod1Destination" value="Global Pitch"/>
+    <PARAM id="mod1Amount" value="0.5"/>
+    <PARAM id="mod2Source" value="Env 2"/>
+    <PARAM id="mod2Destination" value="Filter Cutoff"/>
+    <PARAM id="mod2Amount" value="0.55"/>
+    <PARAM id="mod3Source" value="LFO 1"/>
+    <PARAM id="mod3Destination" value="Volume"/>
+    <PARAM id="mod3Amount" value="0.15"/>
+
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/8"/>
+    <PARAM id="fxDelayFeedback" value="0.4"/>
+    <PARAM id="fxDelayPingPong" value="On"/>
+    <PARAM id="fxDelayTone" value="0.6"/>
+    <PARAM id="fxDelayMix" value="0.2"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.9"/>
+    <PARAM id="fxReverbDecay" value="5"/>
+    <PARAM id="fxReverbMix" value="0.35"/>
+    <PARAM id="master" value="3.2"/>
+  </Parameters>
+</UndertowPreset>

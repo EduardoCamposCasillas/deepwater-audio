@@ -694,12 +694,16 @@ int main (int argc, char* argv[])
         {
             if (! preset.factory)
                 continue;
-            manager.load (preset);
+            // Un procesador nuevo por preset: el contador de notas (semilla de las fases del unison, el ruido y el S&H)
+            // y el reloj de los LFO libres siguen corriendo entre renders. Con uno compartido, añadir un preset de
+            // fábrica cambiaba la huella de todos los que van detrás en la lista.
+            auto fresh = makeProcessor (temp.folder);
+            fresh->getPresetManager().load (preset);
             const auto notes = phraseFor (preset.category);
             double length = 0.0;
             for (const auto& n : notes)
                 length = std::max (length, n.end);
-            const auto stats = render (*processor, notes, 48000.0, length + 1.0, {}, true);
+            const auto stats = render (*fresh, notes, 48000.0, length + 1.0, {}, true);
             const auto bands = fingerprintOf (stats.mono, 48000.0);
 
             juce::StringArray values;

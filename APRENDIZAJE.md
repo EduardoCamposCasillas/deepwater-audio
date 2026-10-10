@@ -583,6 +583,8 @@ Undertow**, sin ningún plugin extra, sobre un pad de acordes a **128 BPM** con 
 El volumen debe caer justo en el bombo y recuperarse de forma suave (no un corte seco como el trance gate).
 Extra: que el filtro también se cierre un poco en cada golpe, para que el bombeo se note más.
 Inténtalo primero; las pistas vendrán después.
+> **Ojo, spoiler en la librería:** los presets *Pad Sidechain* y *Lead Big Room* (librería por géneros) usan la
+> solución. Intenta el reto **antes** de abrirlos; después compáralos con tu versión.
 
 ### Vocabulario
 - **Modulación.** Hacer que un parámetro cambie solo. *Ejemplo:* el "wah" automático de casi cualquier pad de trance.
@@ -1177,6 +1179,8 @@ Tu reto, a **100 BPM**: una melodía de 2 compases entre **C5 y C6** donde:
 
 Pista para empezar: los tres efectos "de espacio" de esta fase hacen tres trabajos distintos (ancho, ritmo y sala).
 Inténtalo primero; las pistas vendrán después.
+> **Ojo, spoiler en la librería:** el preset *Lead Outrun* (librería por géneros) es una solución posible. Intenta el
+> reto **antes** de abrirlo; después compara: ¿qué decidiste distinto y por qué?
 
 ### Vocabulario
 - **Saturación / clipping.** Aplastar (suave) o cortar (duro) los picos de la onda. *Ejemplo:* el "calor" de una
@@ -1491,6 +1495,8 @@ Casi todos los presets son las recetas de las fases anteriores, ya montadas. Áb
 Los retos pendientes (lead de 8 bits, pad "detrás de la pared", sidechain falso, chord stab de future bass, growl,
 lead de synthwave y el reese con 3 rutas) **no están** en la librería a propósito: son tuyos. Cuando los resuelvas,
 guárdalos como presets con sus notas.
+(Excepción posterior: la librería por géneros incluye soluciones del sidechain falso y del lead de synthwave; cada
+reto lo avisa.)
 
 ### Ejercicio de escucha guiado
 Montaje: un patrón de 4 compases en el Piano Roll (por ejemplo, la línea de bajo **C3 – C3 – D#3 – F3** en corcheas)
@@ -1800,3 +1806,124 @@ Inténtalo primero; las pistas vendrán después.
 
 ### Retos completados
 - [ ] Reto Fase 11 — mismo sonido, mitad de CPU
+
+## Librería por géneros: Reggaeton, Synthwave, EDM, Electropop y Alternativo
+
+21 presets de fábrica nuevos, pensados para usarse en producciones reales y para estudiarlos. Cada uno dice en sus
+notas el **género** (en el navegador, busca "reggaeton", "synthwave", "EDM", "electropop" o "alternativo"), cómo se
+construyó, qué tocar y qué perilla mover. No se añadió nada al motor: todo está hecho con lo que existe hasta la
+Fase 11.
+
+### Conceptos aprendidos
+Cada género tiene un puñado de "firmas" sonoras. Reconocerlas es la mitad del diseño sonoro:
+
+- **Reggaeton.** El **808** lleva el bajo y el golpe a la vez: un seno con una **caída de tono muy rápida** al empezar
+  (Env 2 → Global Pitch, 45 ms) y saturación para que se oiga en el celular. Arriba, plucks cortos con eco de corchea y
+  pads oscuros que dejan sitio a la voz. El gancho suele ser un silbido o una flauta: un tono casi puro con **soplo de
+  ruido** y una **entrada desde abajo** (Env → Pitch negativo), que es como ataca la voz humana.
+- **Synthwave.** Todo suena "a los 80" por tres cosas: **chorus** (Juno), **PWM** (un LFO lento moviendo el ancho del
+  pulso) y **ecos con puntillo** en ping-pong. El bajo corre en semicorcheas con una envolvente de filtro corta; el
+  brass sintético se reconoce porque el filtro **se abre DESPUÉS del ataque** (Env 2 con attack de 80 ms).
+- **EDM.** El **supersaw** (muchas copias desafinadas) y el **bombeo**: un LFO *Saw Up* sincronizado a negras sobre el
+  Volume imita al compresor con sidechain del bombo. El **riser** sube tono y brillo a la vez durante 8 compases.
+  El bajo de future house es una tabla Hard Sync barrida por una envolvente (el "bwow" metálico).
+- **Electropop.** Sonidos **definidos y ordenados**: un pulso estrecho en el bajo (más medios que una sierra: se
+  distingue en mezclas llenas), stabs con envolvente de filtro y pads con **High Pass** que les quita los graves para
+  no enlodar el bajo. El "vocal chop" se imita barriendo la tabla *Vowels* con una envolvente.
+- **Alternativo.** La distorsión se vuelve **textura**: un fuzz Hard Clip con el Tone cerrado (sin "abeja"), una
+  saturación Tube fundida en una reverb de 7–10 s (shoegaze) y la **inestabilidad** como recurso (wow y flutter de
+  cinta con LFOs muy pequeños al pitch, Bitcrush).
+
+Una idea que atraviesa todos los géneros: **cada sonido tiene su sitio en el espectro**. El 808 vive abajo, la voz
+en 1–4 kHz, el pad pop arriba de 300 Hz (High Pass), el pad de reggaeton abajo de 1.5 kHz (Low Pass). Un preset
+"profesional" no es el que suena más grande solo, sino el que deja espacio a los demás.
+
+### Qué hace cada control (los trucos nuevos)
+| Truco | Qué se oye | En el analizador / osciloscopio |
+|---|---|---|
+| Env 2 → Global Pitch +30 %, decay 45 ms (808) | Un "golpe" al inicio de la nota, no un cambio de tono. | Los primeros ciclos son más cortos; en el espectro, un barrido rapidísimo hacia abajo. |
+| Env → Pitch negativo pequeño (−2/−3 %) | La nota "se coloca" desde abajo, como una voz o un silbido. | La fundamental sube unos cents durante 60–70 ms. |
+| LFO Saw Up a 1/4 → Volume (bombeo) | El sonido cae en cada tiempo y sube en rampa: "respira" con el bombo. | En el osciloscopio, la envolvente es un diente de sierra a negras. |
+| Env 2 con attack 80 ms → Cutoff (brass) | Un "bwah" que crece, como soplar un metal. | El brillo llega tarde: los armónicos altos aparecen después del ataque. |
+| High Pass a 300 Hz en un pad | Más ligero y "de radio"; deja de tapar el bajo. | Todo lo que está abajo de 300 Hz desaparece. |
+| LFO muy pequeño (0.3–0.5 %) → Global Pitch | Ondulación de cinta o de palanca de guitarra. | La línea del armónico se ondula apenas. |
+
+### Mapa de la librería por géneros
+| Preset | Género | Categoría | Qué enseña |
+|---|---|---|---|
+| Bajo 808 Perreo | Reggaeton | Bass | Caída de tono rápida = golpe; Tube para el celular. |
+| Pluck Dembow | Reggaeton | Pluck | Envolvente de filtro + cuadrada una octava arriba ("marimba"). |
+| Pad Noche Urbana | Reggaeton | Pad | PWM lento y Low Pass bajo: un pad que deja sitio a la voz. |
+| Lead Silbido | Reggaeton | Lead | Soplo de ruido + entrada desde abajo + vibrato mínimo. |
+| Bajo Synthwave Octavas | Synthwave | Bass | Filtro muy cerrado que "escupe" en cada semicorchea. |
+| Lead Outrun | Synthwave | Lead | Sierras + pulso desafinado, delay 1/4 D y sala grande. *(Spoiler del reto de la Fase 8.)* |
+| Pad Neón | Synthwave | Pad | PWM + chorus profundo: la firma de los 80. |
+| Brass Ochentero | Synthwave | Keys | El filtro se abre después del ataque. |
+| Arpegio Retrowave | Synthwave | Pluck | Ecos 1/8 D que rebotan entre las semicorcheas. |
+| Lead Big Room | EDM | Lead | Supersaw de 9 copias + capa grave + bombeo. *(Spoiler del reto de la Fase 5.)* |
+| Bajo Future House | EDM | Bass | Tabla Hard Sync barrida por una envolvente: el "bwow". |
+| Pad Sidechain | EDM | Pad | El bombeo con LFO → Volume. *(Spoiler del reto de la Fase 5.)* |
+| Riser Supersaw | EDM | FX | Una envolvente lenta a dos destinos (tono y filtro). |
+| Bajo Electropop | Electropop | Bass | Pulso estrecho: un bajo con medios que se distingue. |
+| Stab Electropop | Electropop | Keys | Acordes con forma gracias a la envolvente de filtro. |
+| Lead Vocal Chop | Electropop | Lead | Vowels barrida por una envolvente = una sílaba cantada. |
+| Pad Brillo Pop | Electropop | Pad | High Pass + aire de ruido + detune que se mueve. |
+| Bajo Fuzz Indie | Alternativo | Bass | Hard Clip con el Tone cerrado y Mix al 85 %. |
+| Lead Fuzz Shoegaze | Alternativo | Lead | Distorsión + "palanca" lenta + reverb enorme. |
+| Pad Shoegaze | Alternativo | Pad | Muro de sonido: Fold suave, chorus con feedback, reverb de 10 s. |
+| Textura Cinta Rota | Alternativo | FX | Wow (LFO seno) + flutter (S&H) + Bitcrush + siseo. |
+
+### Ejercicio de escucha guiado
+1. **El golpe del 808.** Carga *Bajo 808 Perreo*. Toca F3 (87 Hz) en negras a 95 BPM. Ve a *Modulación* y baja el
+   amount de Env 2 → Global Pitch de 30 % a 0 %: el bajo pierde el golpe y se vuelve un "zumbido". Súbelo a 60 %:
+   ahora oyes un "boing" (el sonido del trap de 2015). Déjalo donde la caída se sienta como golpe y no como nota.
+2. **El bombeo.** Carga *Pad Sidechain*, pon el proyecto a 126 BPM, un bombo en cada tiempo (4 on the floor en el
+   Channel Rack) y un acorde largo en el Piano Roll. Dale Play: el pad baja justo con el bombo. Ahora para el
+   transporte y toca el acorde sin reproducir: el LFO sigue su reloj interno y ya no coincide con nada. Eso es lo que
+   aporta la sincronización con el host.
+3. **El sitio en el espectro.** Pon *Bajo Electropop* y *Pad Brillo Pop* en dos canales del Mixer, con Fruity
+   Parametric EQ 2 en cada uno (solo para mirar). El pad no tiene nada abajo de 300 Hz y el bajo casi nada arriba de
+   2 kHz. Ahora cambia el filtro del pad de High Pass a Low Pass (2 kHz): los dos se pisan y la mezcla se enloda.
+4. **Firmas de los 80.** Carga *Pad Neón*. Apaga el chorus (Efectos → Chorus On): el pad suena moderno y plano.
+   Enciéndelo de nuevo. Luego pon LFO 1 → Position a 0 %: el pad se queda "quieto". Las dos cosas juntas son "los 80".
+
+### Recetas
+Las 21 recetas están en las notas de cada preset (navegador → seleccionar → panel de notas). Para estudiarlas a fondo,
+haz **ingeniería inversa**: carga uno, apaga sus partes una por una (rutas de la matriz, Osc B, cada efecto) y escucha
+qué aporta cada una. Así se aprende a "leer" un sonido.
+
+### Reto sin receta
+**Reggaeton de los 80** (la fusión de dembow con sintetizadores retro de algunos temas recientes de reggaeton y pop
+latino). Tu reto, a **95 BPM**:
+- un **lead** para un gancho de 2 compases en A menor (A5–E6) que suene "a los 80" pero **no tape una voz** que
+  cantaría en la misma octava cuando el lead calla,
+- y un **bajo** que funcione como 808 (con golpe) pero tenga algo del carácter de un bajo de synthwave.
+
+Guarda los dos presets con notas: qué tomaste de cada género y por qué.
+Pista para empezar: compara las notas de *Lead Silbido* y *Lead Outrun*: ¿qué firmas de cada uno puedes combinar?
+Inténtalo primero; las pistas vendrán después.
+
+### Vocabulario
+- **Dembow.** El patrón rítmico del reggaeton (bombo en cada tiempo y caja sincopada). *Ejemplo:* casi cualquier
+  tema de reggaeton desde los 2000.
+- **808.** Por la caja de ritmos Roland TR-808: un bombo largo y afinado que se usa como bajo. *Ejemplo:* el bajo
+  de casi todo el trap y el reggaeton moderno.
+- **Sidechain / bombeo (pumping).** Un compresor que baja un sonido cuando suena otro (normalmente el bombo).
+  *Ejemplo:* los pads que "respiran" en el house francés y en el EDM de festival.
+- **Four on the floor.** Bombo en cada negra. *Ejemplo:* house, techno, big room, disco.
+- **Drop / build-up / riser.** El momento de máxima energía, la subida de tensión antes de él y el efecto que la
+  acompaña. *Ejemplo:* los 8 compases de subida antes del drop de cualquier tema de EDM.
+- **Stab.** Un acorde corto y con golpe. *Ejemplo:* los acordes de piano del house de los 90 o los de synth-pop.
+- **Vocal chop.** Trocitos de voz cortados y tocados como instrumento. *Ejemplo:* los ganchos del tropical house y
+  del future bass.
+- **PWM (Pulse Width Modulation).** Mover el ancho de un pulso con un LFO. *Ejemplo:* las cuerdas sintéticas del Juno.
+- **Wall of sound (muro de sonido).** Capas densas que se funden en una masa. *Ejemplo:* el shoegaze y el post-rock.
+- **Wow y flutter.** Inestabilidad de afinación de la cinta: lenta (wow) y rápida (flutter). *Ejemplo:* el lo-fi
+  hip hop y el bedroom pop imitan una cinta vieja.
+- **Fuzz.** Distorsión extrema por recorte, nacida en los pedales de guitarra. *Ejemplo:* el bajo del rock
+  alternativo moderno (Royal Blood, Muse).
+- **Enmascaramiento (masking).** Un sonido que tapa a otro porque ocupan las mismas frecuencias. *Ejemplo:* un pad
+  con graves que hace "desaparecer" al bajo; se arregla con un High Pass en el pad.
+
+### Retos completados
+- [ ] Reto librería por géneros — reggaeton de los 80

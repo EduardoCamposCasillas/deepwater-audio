@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Muro de sonido: Harmonic Build con 8 copias, Fold suave, chorus con feedback, ondulación lenta y reverb de 10 s. -->
+<UndertowPreset formatVersion="1" name="Pad Shoegaze" category="Pad" author="Undertow">
+  <Notes>
+    Género: Alternativo / Shoegaze / Post-rock (70–110 BPM). El "muro de sonido": una masa densa y borrosa donde ya no
+    se distinguen las notas sueltas.
+
+    Cómo se construyó:
+    - Osc A: tabla Harmonic Build en 60 % (muchos armónicos, todos con el mismo peso) con 8 copias (Detune 30 %,
+      Width 100 %): espeso y ancho.
+    - Osc B: sierra una octava abajo con 3 copias al 45 %: el cuerpo grave del muro.
+    - LFO 1 (Triangle, Free, 0.4 Hz) → Global Pitch +0.3 %: ondulación lenta de afinación, como una cinta vieja.
+    - Low Pass 24 dB a 3 kHz: el muro es denso pero no chillón.
+    - Distorsión Fold (Drive 25 %, Tone 50 %, Mix 30 %): el wavefolding "dobla" la onda y añade armónicos
+      inarmónicos suaves, una textura que brilla sin sonar a distorsión de rock.
+    - Chorus con feedback (40 %) + reverb enorme (Size 100 %, 10 s, Mix 50 %): las notas se derriten unas en otras.
+    - Env 1: Attack 1.5 s, Release 3 s. Voices 8.
+
+    Tócalo: acordes de 2 compases con notas repetidas a la octava: E – C#m – A – B alrededor de E4–E5. Mantenlos.
+    Prueba a mover: el Mix de la reverb (20 % = pad normal; 70 % = solo nube) y el Mix de la distorsión.
+    Técnicas: Fase 3 (Harmonic Build) + Fase 5 (LFO → Global Pitch) + Fase 6 + Fase 8 (Fold, chorus, reverb).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAWavetable" value="Harmonic Build"/>
+    <PARAM id="oscAPosition" value="0.6"/>
+    <PARAM id="oscAUnison" value="8"/>
+    <PARAM id="oscADetune" value="0.3"/>
+    <PARAM id="oscAWidth" value="1"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0.6667"/>
+    <PARAM id="oscBOctave" value="-1"/>
+    <PARAM id="oscBUnison" value="3"/>
+    <PARAM id="oscBDetune" value="0.2"/>
+    <PARAM id="oscBWidth" value="0.6"/>
+    <PARAM id="oscBLevel" value="0.45"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="1.5"/>
+    <PARAM id="decay" value="2"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="3"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="3000"/>
+    <PARAM id="filter1Resonance" value="0.1"/>
+
+    <PARAM id="lfo1Shape" value="Triangle"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.4"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Global Pitch"/>
+    <PARAM id="mod1Amount" value="0.003"/>
+
+    <PARAM id="fxDistOn" value="On"/>
+    <PARAM id="fxDistMode" value="Fold"/>
+    <PARAM id="fxDistDrive" value="0.25"/>
+    <PARAM id="fxDistTone" value="0.5"/>
+    <PARAM id="fxDistMix" value="0.3"/>
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.3"/>
+    <PARAM id="fxChorusDepth" value="0.6"/>
+    <PARAM id="fxChorusFeedback" value="0.4"/>
+    <PARAM id="fxChorusMix" value="0.5"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="1"/>
+    <PARAM id="fxReverbDecay" value="10"/>
+    <PARAM id="fxReverbDamping" value="0.55"/>
+    <PARAM id="fxReverbPreDelay" value="0.02"/>
+    <PARAM id="fxReverbMix" value="0.5"/>
+    <PARAM id="master" value="-1.6"/>
+  </Parameters>
+</UndertowPreset>

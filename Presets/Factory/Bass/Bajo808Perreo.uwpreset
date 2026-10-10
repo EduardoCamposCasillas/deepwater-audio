@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 808 de reggaeton: seno con una caída de tono muy rápida al empezar (el "golpe") y saturación de válvula. -->
+<UndertowPreset formatVersion="1" name="Bajo 808 Perreo" category="Bass" author="Undertow">
+  <Notes>
+    Género: Reggaeton (dembow, 90–100 BPM). El 808 que lleva el bajo y el bombo a la vez.
+
+    Cómo se construyó:
+    - Osc A: seno puro (Position 0 %). Un 808 es casi solo fundamental: por eso se siente en el pecho y no "suena"
+      como un sintetizador.
+    - Env 2 → Global Pitch +30 % (decay 45 ms): cada nota empieza 7 semitonos más aguda y cae a su altura en 45 ms.
+      Esa caída rápida es el "punch" del 808: el oído la oye como un golpe, no como un cambio de nota.
+    - Distorsión Tube (Drive 30 %, Tone 55 %): añade armónicos pares (2.º, 4.º) que hacen que el bajo se oiga en el
+      celular y en audífonos pequeños, donde los 50 Hz no existen. El Tone recorta el siseo de arriba.
+    - Env 1: Attack 1 ms, Decay 900 ms, Sustain 55 %, Release 120 ms: el golpe inicial es más fuerte que la cola.
+    - Voices 1: una nota nueva corta a la anterior (como un 808 de verdad: nunca se pisan dos bajos).
+
+    Tócalo: a 95 BPM sigue el ritmo del bombo del dembow (1, el "y" del 2, el 3) en F3 (87 Hz), D#3 y C#3.
+    Prueba a mover: el amount de Env 2 → Global Pitch (10 % = suave, 50 % = el "boing" del trap) y el Drive de la
+    distorsión (0 % = sub limpio que desaparece en el celular).
+    Límite: Undertow aún no tiene glide, así que los "slides" de 808 entre notas todavía no se pueden hacer.
+    Técnicas: Fase 5 (envolvente al pitch) + Fase 8 (distorsión Tube).
+  </Notes>
+  <Parameters>
+    <PARAM id="voices" value="1"/>
+    <PARAM id="attack" value="0.001"/>
+    <PARAM id="decay" value="0.9"/>
+    <PARAM id="sustain" value="0.55"/>
+    <PARAM id="release" value="0.12"/>
+
+    <PARAM id="env2Attack" value="0.001"/>
+    <PARAM id="env2Decay" value="0.045"/>
+    <PARAM id="env2Sustain" value="0"/>
+    <PARAM id="env2Release" value="0.05"/>
+    <PARAM id="mod1Source" value="Env 2"/>
+    <PARAM id="mod1Destination" value="Global Pitch"/>
+    <PARAM id="mod1Amount" value="0.3"/>
+
+    <PARAM id="fxDistOn" value="On"/>
+    <PARAM id="fxDistMode" value="Tube"/>
+    <PARAM id="fxDistDrive" value="0.3"/>
+    <PARAM id="fxDistTone" value="0.55"/>
+    <PARAM id="fxDistMix" value="1"/>
+    <PARAM id="master" value="0.5"/>
+  </Parameters>
+</UndertowPreset>

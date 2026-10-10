@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lead tipo silbido/flauta: casi seno, soplo de ruido, entrada desde abajo (Env 3 → Pitch) y vibrato suave. -->
+<UndertowPreset formatVersion="1" name="Lead Silbido" category="Lead" author="Undertow">
+  <Notes>
+    Género: Reggaeton / pop latino. El silbido o la flauta que repite el gancho en el intro y entre versos.
+
+    Cómo se construyó:
+    - Osc A: Basic Shapes 12 % (seno con un poco de triángulo): casi puro, con apenas armónicos impares, como una
+      flauta o un silbido.
+    - Ruido (Level 8 %, Color 70 %): el "aire" del soplo. Sin él suena a tono de teléfono.
+    - Env 3 → Osc A Pitch −2 % (decay 70 ms): cada nota entra medio semitono abajo y sube. Así ataca la voz humana,
+      y por eso suena "silbado" y no electrónico.
+    - LFO 1 (Sine, Free, 5.5 Hz) → Osc A Pitch +0.4 %: vibrato de ±10 cents, apenas un temblor vivo.
+    - Low Pass 12 dB a 5 kHz: suaviza el soplo. Env 1: Attack 25 ms (el soplo que entra), Release 250 ms.
+    - Delay 1/8 D ping-pong + reverb: el silbido rebota a los lados como en un callejón.
+
+    Tócalo: a 95 BPM una frase corta en A menor pentatónica alrededor de A5–E6, con notas de corchea.
+    Prueba a mover: el Color del ruido (0 % = soplo grave, 100 % = siseo) y el amount de Env 3 → Pitch (−8 % =
+    "deslizado" muy notorio).
+    Técnicas: Fase 5 (vibrato, envolvente al pitch) + Fase 6 (ruido) + Fase 8 (delay, reverb).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.12"/>
+    <PARAM id="noiseOn" value="On"/>
+    <PARAM id="noiseLevel" value="0.08"/>
+    <PARAM id="noiseColor" value="0.7"/>
+
+    <PARAM id="voices" value="1"/>
+    <PARAM id="velocity" value="0.4"/>
+    <PARAM id="attack" value="0.025"/>
+    <PARAM id="decay" value="0.5"/>
+    <PARAM id="sustain" value="0.9"/>
+    <PARAM id="release" value="0.25"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="5000"/>
+    <PARAM id="filter1KeyTrack" value="0.3"/>
+
+    <PARAM id="env3Attack" value="0.001"/>
+    <PARAM id="env3Decay" value="0.07"/>
+    <PARAM id="env3Sustain" value="0"/>
+    <PARAM id="env3Release" value="0.05"/>
+    <PARAM id="lfo1Shape" value="Sine"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="5.5"/>
+    <PARAM id="mod1Source" value="Env 3"/>
+    <PARAM id="mod1Destination" value="Osc A Pitch"/>
+    <PARAM id="mod1Amount" value="-0.02"/>
+    <PARAM id="mod2Source" value="LFO 1"/>
+    <PARAM id="mod2Destination" value="Osc A Pitch"/>
+    <PARAM id="mod2Amount" value="0.004"/>
+
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/8 D"/>
+    <PARAM id="fxDelayFeedback" value="0.3"/>
+    <PARAM id="fxDelayPingPong" value="On"/>
+    <PARAM id="fxDelayTone" value="0.5"/>
+    <PARAM id="fxDelayMix" value="0.2"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.6"/>
+    <PARAM id="fxReverbDecay" value="2.2"/>
+    <PARAM id="fxReverbMix" value="0.22"/>
+    <PARAM id="master" value="2.7"/>
+  </Parameters>
+</UndertowPreset>

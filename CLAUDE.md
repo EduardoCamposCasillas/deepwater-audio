@@ -420,4 +420,22 @@ Fase 11 COMPLETADA (2026-10-09). Probada por el usuario en FL Studio. El sonido 
   sigue sin oversampling ni ADAA. La latencia de la distorsión (~1 ms) sigue sin informarse al host. Las mediciones de
   CPU son de este equipo (laptop; varían ±10 % entre ejecuciones aunque se tome el mínimo).
 
+Ampliación — Librería por géneros (2026-10-09). Probada por el usuario en FL Studio. Sin cambios en el motor.
+- 21 presets de fábrica nuevos (43 en total): Reggaeton (Bajo 808 Perreo, Pluck Dembow, Pad Noche Urbana, Lead Silbido),
+  Synthwave (Bajo Synthwave Octavas, Lead Outrun, Pad Neón, Brass Ochentero, Arpegio Retrowave), EDM (Lead Big Room,
+  Bajo Future House, Pad Sidechain, Riser Supersaw), Electropop (Bajo Electropop, Stab Electropop, Lead Vocal Chop, Pad
+  Brillo Pop), Alternativo (Bajo Fuzz Indie, Lead Fuzz Shoegaze, Pad Shoegaze, Textura Cinta Rota). Las categorías no
+  cambian: el género va en la primera línea de las notas ("Género: …"; la búsqueda del navegador lo encuentra).
+- El usuario ELIGIÓ incluir soluciones de retos pendientes (sidechain falso: Pad Sidechain y Lead Big Room; lead de
+  synthwave: Lead Outrun). APRENDIZAJE.md lo avisa en cada reto. Los demás retos siguen sin resolver en la librería.
+- Niveles: RMS −20.1…−17.2 dBFS; Plucks por pico (−10.8 y −11.4). CPU media 3.0 % (máx. Pad Shoegaze 7.4 %).
+- Test de huellas: ahora usa un procesador NUEVO por preset (el contador de notas = semilla del unison/ruido/S&H y el
+  reloj de los LFO libres seguían corriendo entre renders: añadir un preset cambiaba la huella de los de detrás). Las
+  22 huellas viejas se regeneraron con el código sin cambios (comprobado antes que las viejas pasaban sin los nuevos);
+  al añadir los 21 el diff solo agrega líneas.
+- OJO build: archivos de `build/` con fecha futura hacían que MSBuild no reenlazara (el test no veía presets nuevos);
+  y al cambiar el número de presets quedan `BinaryData*.obj` viejos duplicados (LNK4006): borrar
+  `build/UndertowPresetData.dir` y `build/juce_binarydata_UndertowPresetData` y reconfigurar.
+- Release con 0 warnings; ctest 2/2; pluginval strictness 10: SUCCESS.
+
 Siguiente: todas las fases de la hoja de ruta están hechas. Próximos pasos posibles, a decidir con el usuario.

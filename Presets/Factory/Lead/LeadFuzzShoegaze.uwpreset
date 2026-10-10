@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lead shoegaze: sierras saturadas con Tube, "palanca" lenta (LFO → Global Pitch), chorus y una reverb de 7 s. -->
+<UndertowPreset formatVersion="1" name="Lead Fuzz Shoegaze" category="Lead" author="Undertow">
+  <Notes>
+    Género: Alternativo / Shoegaze / Dream pop (80–120 BPM). Una guitarra imposible: distorsionada pero borrosa,
+    ondulando dentro de una reverb enorme (al estilo de My Bloody Valentine o Slowdive).
+
+    Cómo se construyó:
+    - Osc A: sierra con 3 copias (Detune 18 %): ya ligeramente desafinada antes de distorsionar.
+    - LFO 1 (Triangle, Free, 0.6 Hz) → Global Pitch +0.4 %: la nota sube y baja ±10 cents muy despacio. Imita la
+      palanca de trémolo de la guitarra que Kevin Shields movía SIN PARAR mientras tocaba ("glide guitar").
+    - Distorsión Tube (Drive 70 %, Tone 40 %): saturación fuerte pero oscura. En el shoegaze la distorsión no es
+      agresiva: es una textura que se funde con la reverb.
+    - Chorus (Depth 60 %, Mix 40 %) + delay 1/4 D (feedback 45 %) + reverb gigante (Size 100 %, 7 s, Mix 40 %): el
+      sonido "flota". La reverb es la mitad del instrumento.
+    - Env 1: Attack 20 ms, Release 600 ms. Voices 4: las notas se encadenan dentro de la reverb.
+
+    Tócalo: a 90 BPM notas largas (blancas y redondas) en E mayor alrededor de E5–B5, dejando que se pisen.
+    Prueba a mover: el amount de LFO 1 → Global Pitch (0 % = estable; 1.5 % = mareado), el Decay de la reverb y el
+    Tone de la distorsión.
+    Técnicas: Fase 5 (LFO → Global Pitch) + Fase 6 (unison) + Fase 8 (los cuatro efectos juntos).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="3"/>
+    <PARAM id="oscADetune" value="0.18"/>
+    <PARAM id="oscAWidth" value="0.8"/>
+
+    <PARAM id="voices" value="4"/>
+    <PARAM id="velocity" value="0.3"/>
+    <PARAM id="attack" value="0.02"/>
+    <PARAM id="decay" value="1"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.6"/>
+
+    <PARAM id="lfo1Shape" value="Triangle"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.6"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Global Pitch"/>
+    <PARAM id="mod1Amount" value="0.004"/>
+
+    <PARAM id="fxDistOn" value="On"/>
+    <PARAM id="fxDistMode" value="Tube"/>
+    <PARAM id="fxDistDrive" value="0.7"/>
+    <PARAM id="fxDistTone" value="0.4"/>
+    <PARAM id="fxDistMix" value="1"/>
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.4"/>
+    <PARAM id="fxChorusDepth" value="0.6"/>
+    <PARAM id="fxChorusFeedback" value="0.2"/>
+    <PARAM id="fxChorusMix" value="0.4"/>
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/4 D"/>
+    <PARAM id="fxDelayFeedback" value="0.45"/>
+    <PARAM id="fxDelayPingPong" value="On"/>
+    <PARAM id="fxDelayTone" value="0.4"/>
+    <PARAM id="fxDelayMix" value="0.2"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="1"/>
+    <PARAM id="fxReverbDecay" value="7"/>
+    <PARAM id="fxReverbDamping" value="0.5"/>
+    <PARAM id="fxReverbPreDelay" value="0.03"/>
+    <PARAM id="fxReverbMix" value="0.4"/>
+    <PARAM id="master" value="1.9"/>
+  </Parameters>
+</UndertowPreset>

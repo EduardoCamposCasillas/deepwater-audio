@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pluck de reggaeton: triángulo/sierra + cuadrada una octava arriba, filtro que se cierra rápido y eco de corchea. -->
+<UndertowPreset formatVersion="1" name="Pluck Dembow" category="Pluck" author="Undertow">
+  <Notes>
+    Género: Reggaeton (90–100 BPM). El pluck que toca el gancho melódico encima del dembow, entre marimba y guitarra.
+
+    Cómo se construyó:
+    - Osc A: Basic Shapes 45 % (a medio camino entre triángulo y sierra): cuerpo redondo con algo de brillo.
+    - Osc B: cuadrada una octava arriba al 25 %: los armónicos impares de la cuadrada dan el toque "hueco" de
+      marimba.
+    - Low Pass 24 dB a 1.1 kHz + Env 2 → Cutoff +35 % (decay 150 ms): cada nota empieza brillante (3.5 octavas más
+      arriba) y se oscurece en seguida. Eso es lo que hace que suene "pulsado" y no "soplado".
+    - Velocity → Cutoff +10 % y Key Track 50 %: tocar fuerte o agudo da más brillo, como un instrumento real.
+    - Env 1: Attack 1 ms, Decay 380 ms, Sustain 0 %: el volumen también cae solo, aunque mantengas la tecla.
+    - Delay 1/8 (feedback 20 %, Mix 15 %) + reverb corta: llena los huecos entre golpes sin ensuciar el ritmo.
+
+    Tócalo: a 95 BPM un patrón sincopado en semicorcheas en C menor (C5, D#5, G5, A#5).
+    Prueba a mover: el Decay de Env 2 (60 ms = muy seco; 400 ms = más "wah") y Osc B Level (0 % = más suave).
+    Técnicas: Fase 4 (filtro) + Fase 5 (Env 2 → Cutoff) + Fase 8 (delay).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.45"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="1"/>      <!-- cuadrada -->
+    <PARAM id="oscBOctave" value="1"/>
+    <PARAM id="oscBLevel" value="0.25"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.6"/>
+    <PARAM id="attack" value="0.001"/>
+    <PARAM id="decay" value="0.38"/>
+    <PARAM id="sustain" value="0"/>
+    <PARAM id="release" value="0.25"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="1100"/>
+    <PARAM id="filter1Resonance" value="0.2"/>
+    <PARAM id="filter1KeyTrack" value="0.5"/>
+
+    <PARAM id="env2Attack" value="0.001"/>
+    <PARAM id="env2Decay" value="0.15"/>
+    <PARAM id="env2Sustain" value="0"/>
+    <PARAM id="env2Release" value="0.15"/>
+    <PARAM id="mod1Source" value="Env 2"/>
+    <PARAM id="mod1Destination" value="Filter Cutoff"/>
+    <PARAM id="mod1Amount" value="0.35"/>
+    <PARAM id="mod2Source" value="Velocity"/>
+    <PARAM id="mod2Destination" value="Filter Cutoff"/>
+    <PARAM id="mod2Amount" value="0.1"/>
+
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/8"/>
+    <PARAM id="fxDelayFeedback" value="0.2"/>
+    <PARAM id="fxDelayPingPong" value="Off"/>
+    <PARAM id="fxDelayTone" value="0.5"/>
+    <PARAM id="fxDelayMix" value="0.15"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.4"/>
+    <PARAM id="fxReverbDecay" value="1.2"/>
+    <PARAM id="fxReverbMix" value="0.15"/>
+    <PARAM id="master" value="6"/>
+  </Parameters>
+</UndertowPreset>

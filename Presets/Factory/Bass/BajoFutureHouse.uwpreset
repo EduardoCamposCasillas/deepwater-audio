@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bajo de future house: tabla Hard Sync barrida por una envolvente rápida (el "bwow" metálico) + sub seno. -->
+<UndertowPreset formatVersion="1" name="Bajo Future House" category="Bass" author="Undertow">
+  <Notes>
+    Género: EDM / Future House / Bass House (124–128 BPM). El bajo metálico y rebotón que hace de melodía en el drop.
+
+    Cómo se construyó:
+    - Osc A: tabla Hard Sync en 25 %. Env 2 → Osc A Position +35 % (decay 220 ms): en cada nota la posición salta
+      hacia un sync más agudo y regresa. El timbre "dice" bwow: esa vocal metálica es la firma del future house.
+    - Sub: seno una octava abajo al 60 %: el sync tiene poca fundamental; el sub pone el peso que se siente.
+    - Low Pass 24 dB a 2.5 kHz, Resonance 25 %: deja pasar el metal pero quita el silbido de arriba.
+    - Env 1: Attack 1 ms, Decay 300 ms, Sustain 60 %, Release 90 ms: notas con rebote y cortas.
+    - Distorsión Soft Clip (Drive 35 %, Mix 70 %): lo pone al frente de la mezcla.
+    - Voices 1: línea de bajo monofónica.
+
+    Tócalo: a 126 BPM una línea sincopada de corcheas en F3 (87 Hz), con saltos a F4 y G#3. Deja silencios: el rebote
+    se oye mejor en notas cortas.
+    Prueba a mover: el Decay de Env 2 (80 ms = "pluck" metálico; 500 ms = "wah" lento) y la Position base de Osc A.
+    Técnicas: Fase 3 (posición de la tabla) + Fase 5 (Env 2 → Position) + Fase 6 (sub) + Fase 8 (distorsión).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAWavetable" value="Hard Sync"/>
+    <PARAM id="oscAPosition" value="0.25"/>
+    <PARAM id="subOn" value="On"/>
+    <PARAM id="subShape" value="Sine"/>
+    <PARAM id="subOctave" value="-1"/>
+    <PARAM id="subLevel" value="0.6"/>
+
+    <PARAM id="voices" value="1"/>
+    <PARAM id="velocity" value="0.3"/>
+    <PARAM id="attack" value="0.001"/>
+    <PARAM id="decay" value="0.3"/>
+    <PARAM id="sustain" value="0.6"/>
+    <PARAM id="release" value="0.09"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="2500"/>
+    <PARAM id="filter1Resonance" value="0.25"/>
+
+    <PARAM id="env2Attack" value="0.001"/>
+    <PARAM id="env2Decay" value="0.22"/>
+    <PARAM id="env2Sustain" value="0"/>
+    <PARAM id="env2Release" value="0.08"/>
+    <PARAM id="mod1Source" value="Env 2"/>
+    <PARAM id="mod1Destination" value="Osc A Position"/>
+    <PARAM id="mod1Amount" value="0.35"/>
+
+    <PARAM id="fxDistOn" value="On"/>
+    <PARAM id="fxDistMode" value="Soft Clip"/>
+    <PARAM id="fxDistDrive" value="0.35"/>
+    <PARAM id="fxDistTone" value="0.8"/>
+    <PARAM id="fxDistMix" value="0.7"/>
+    <PARAM id="master" value="2.7"/>
+  </Parameters>
+</UndertowPreset>

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pad de synthwave: pulsos con unison y PWM por LFO, sierra una octava arriba, chorus profundo y reverb de 6 s. -->
+<UndertowPreset formatVersion="1" name="Pad Neón" category="Pad" author="Undertow">
+  <Notes>
+    Género: Synthwave / Retrowave (80–118 BPM). El pad ancho y brillante de los 80, como un Juno o un OB-Xa con
+    chorus.
+
+    Cómo se construyó:
+    - Osc A: Pulse Width 20 % con 5 copias (Detune 18 %, Width 100 %): lo abre de lado a lado.
+    - LFO 1 (Triangle, Free, 0.3 Hz) → Osc A Position +20 %: PWM. El ancho del pulso cambia y los armónicos se mueven
+      sin cambiar el tono: es el "brillo que se mueve" de los pads analógicos.
+    - Osc B: sierra al 35 %, Fine −6 cents: más armónicos pares y un batido lento contra Osc A.
+    - Low Pass 24 dB a 2.8 kHz + LFO 2 (Sine, Free, 0.08 Hz) → Cutoff +8 %: el filtro "respira" una vez cada 12 s.
+    - Env 1: Attack 800 ms, Release 2.5 s. Voices 8.
+    - Chorus (0.5 Hz, Depth 70 %, Mix 50 %) + reverb grande (Size 90 %, 6 s, Mix 35 %): el chorus es la firma del
+      sonido de los 80; sin él, el pad suena "plano" y moderno.
+
+    Tócalo: acordes largos de 2 compases: Fm – Db – Ab – Eb alrededor de C5. Mantenlos y escucha cómo se mueven
+    solos.
+    Prueba a mover: el amount de LFO 1 → Position (0 % = quieto) y el Mix del chorus (0 % vs 50 %).
+    Técnicas: Fase 5 (LFO libres) + Fase 6 (unison) + Fase 8 (chorus, reverb).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAWavetable" value="Pulse Width"/>
+    <PARAM id="oscAPosition" value="0.2"/>
+    <PARAM id="oscAUnison" value="5"/>
+    <PARAM id="oscADetune" value="0.18"/>
+    <PARAM id="oscAWidth" value="1"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0.6667"/>
+    <PARAM id="oscBFine" value="-6"/>
+    <PARAM id="oscBLevel" value="0.35"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.8"/>
+    <PARAM id="decay" value="2"/>
+    <PARAM id="sustain" value="0.9"/>
+    <PARAM id="release" value="2.5"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="2800"/>
+    <PARAM id="filter1Resonance" value="0.15"/>
+    <PARAM id="filter1KeyTrack" value="0.3"/>
+
+    <PARAM id="lfo1Shape" value="Triangle"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.3"/>
+    <PARAM id="lfo2Shape" value="Sine"/>
+    <PARAM id="lfo2Mode" value="Free"/>
+    <PARAM id="lfo2Sync" value="Off"/>
+    <PARAM id="lfo2Rate" value="0.08"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Osc A Position"/>
+    <PARAM id="mod1Amount" value="0.2"/>
+    <PARAM id="mod2Source" value="LFO 2"/>
+    <PARAM id="mod2Destination" value="Filter Cutoff"/>
+    <PARAM id="mod2Amount" value="0.08"/>
+
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.5"/>
+    <PARAM id="fxChorusDepth" value="0.7"/>
+    <PARAM id="fxChorusFeedback" value="0"/>
+    <PARAM id="fxChorusMix" value="0.5"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.9"/>
+    <PARAM id="fxReverbDecay" value="6"/>
+    <PARAM id="fxReverbDamping" value="0.45"/>
+    <PARAM id="fxReverbPreDelay" value="0.04"/>
+    <PARAM id="fxReverbMix" value="0.35"/>
+    <PARAM id="master" value="-2.8"/>
+  </Parameters>
+</UndertowPreset>

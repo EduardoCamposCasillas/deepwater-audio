@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Textura lo-fi: triángulo con Bitcrush, afinación inestable (wow con LFO 2 + saltos S&H con LFO 1), siseo y eco. -->
+<UndertowPreset formatVersion="1" name="Textura Cinta Rota" category="FX" author="Undertow">
+  <Notes>
+    Género: Alternativo / Lo-fi / Bedroom pop (70–100 BPM). Un sonido de cassette viejo y maltratado para intros,
+    transiciones o como capa debajo de otro instrumento.
+
+    Cómo se construyó:
+    - Osc A: triángulo (Basic Shapes 33 %) con warp Bitcrush 35 %: la onda se vuelve una escalera de pocos niveles.
+      Da ese grano "digital barato" de sampler de 8 bits.
+    - LFO 2 (Sine, Free, 0.35 Hz) → Osc A Pitch +0.5 %: el "wow" de la cinta: la afinación sube y baja lentamente
+      porque el motor no gira parejo.
+    - LFO 1 (Sample &amp; Hold, Free, 4 Hz) → Osc A Pitch +0.25 %: pequeños saltos de afinación al azar, el "flutter"
+      de una cinta arrugada.
+    - Ruido (Level 18 %, Color 75 %): el siseo de la cinta.
+    - Low Pass 12 dB a 3 kHz: una cinta vieja pierde los agudos.
+    - Delay 1/4 (feedback 50 %, Tone 30 %: cada eco más oscuro) + reverb: ecos que se desvanecen como un recuerdo.
+    - Env 1: Attack 50 ms, Release 1 s. Voices 8.
+
+    Tócalo: notas o acordes largos alrededor de C5 durante 4–8 compases, a 80 BPM.
+    Prueba a mover: el Warp Amount (0 % = triángulo limpio; 70 % = muy roto) y el amount de LFO 2 → Pitch.
+    Técnicas: Fase 5 (LFO S&amp;H y seno al pitch) + Fase 6 (ruido) + Fase 7 (Bitcrush) + Fase 8 (delay, reverb).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.3333"/>
+    <PARAM id="oscAWarpMode" value="Bitcrush"/>
+    <PARAM id="oscAWarpAmount" value="0.35"/>
+    <PARAM id="noiseOn" value="On"/>
+    <PARAM id="noiseLevel" value="0.18"/>
+    <PARAM id="noiseColor" value="0.75"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.3"/>
+    <PARAM id="attack" value="0.05"/>
+    <PARAM id="decay" value="1"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="1"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="3000"/>
+
+    <PARAM id="lfo1Shape" value="Sample &amp; Hold"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="4"/>
+    <PARAM id="lfo2Shape" value="Sine"/>
+    <PARAM id="lfo2Mode" value="Free"/>
+    <PARAM id="lfo2Sync" value="Off"/>
+    <PARAM id="lfo2Rate" value="0.35"/>
+    <PARAM id="mod1Source" value="LFO 2"/>
+    <PARAM id="mod1Destination" value="Osc A Pitch"/>
+    <PARAM id="mod1Amount" value="0.005"/>
+    <PARAM id="mod2Source" value="LFO 1"/>
+    <PARAM id="mod2Destination" value="Osc A Pitch"/>
+    <PARAM id="mod2Amount" value="0.0025"/>
+
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/4"/>
+    <PARAM id="fxDelayFeedback" value="0.5"/>
+    <PARAM id="fxDelayPingPong" value="Off"/>
+    <PARAM id="fxDelayTone" value="0.3"/>
+    <PARAM id="fxDelayMix" value="0.25"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.6"/>
+    <PARAM id="fxReverbDecay" value="2.5"/>
+    <PARAM id="fxReverbMix" value="0.25"/>
+    <PARAM id="master" value="1.6"/>
+  </Parameters>
+</UndertowPreset>

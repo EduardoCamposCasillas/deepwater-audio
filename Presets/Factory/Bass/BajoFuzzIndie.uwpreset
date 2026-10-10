@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bajo fuzz: sierra + cuadrada desafinadas, drive del filtro y Hard Clip global con el Tone cerrado (fuzz de pedal). -->
+<UndertowPreset formatVersion="1" name="Bajo Fuzz Indie" category="Bass" author="Undertow">
+  <Notes>
+    Género: Alternativo / Indie / Rock electrónico (100–130 BPM). Un bajo sucio, como un bajo eléctrico pasado por un
+    pedal de fuzz (al estilo de Muse, Royal Blood o Tame Impala).
+
+    Cómo se construyó:
+    - Osc A: sierra + Osc B: cuadrada al 60 % con Fine −5 cents: dos formas distintas que se rozan. El batido lento
+      hace que el fuzz "se mueva" en vez de sonar como un zumbido fijo.
+    - Low Pass 24 dB a 1.2 kHz con Drive 50 %: primera saturación, antes del filtro.
+    - Distorsión Hard Clip (Drive 55 %, Tone 45 %, Mix 85 %): el fuzz. Hard Clip recorta los picos en seco y crea
+      muchos armónicos impares (como un pedal de transistores). El Tone cerrado quita la "abeja" de arriba de 3 kHz,
+      que es lo que hace sonar barato a un fuzz. El 15 % de señal limpia conserva la definición de cada nota.
+    - Env 1: Attack 3 ms, Decay 500 ms, Sustain 80 %, Release 100 ms. Voices 1.
+
+    Tócalo: a 120 BPM un riff de rock en corcheas en E3 (82 Hz), G3, A3 con alguna nota a la octava.
+    Prueba a mover: el Tone de la distorsión (20 % = fuzz oscuro "de muralla"; 80 % = áspero) y el Mix (50 % =
+    "blend" de pedal moderno: grave limpio y arriba sucio).
+    Técnicas: Fase 4 (drive del filtro) + Fase 6 (Osc B) + Fase 8 (Hard Clip, Tone, Mix).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="1"/>      <!-- cuadrada -->
+    <PARAM id="oscBFine" value="-5"/>
+    <PARAM id="oscBLevel" value="0.6"/>
+
+    <PARAM id="voices" value="1"/>
+    <PARAM id="velocity" value="0.3"/>
+    <PARAM id="attack" value="0.003"/>
+    <PARAM id="decay" value="0.5"/>
+    <PARAM id="sustain" value="0.8"/>
+    <PARAM id="release" value="0.1"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="1200"/>
+    <PARAM id="filter1Resonance" value="0.1"/>
+    <PARAM id="filter1Drive" value="0.5"/>
+    <PARAM id="filter1KeyTrack" value="0.3"/>
+
+    <PARAM id="fxDistOn" value="On"/>
+    <PARAM id="fxDistMode" value="Hard Clip"/>
+    <PARAM id="fxDistDrive" value="0.55"/>
+    <PARAM id="fxDistTone" value="0.45"/>
+    <PARAM id="fxDistMix" value="0.85"/>
+    <PARAM id="master" value="-5.8"/>
+  </Parameters>
+</UndertowPreset>

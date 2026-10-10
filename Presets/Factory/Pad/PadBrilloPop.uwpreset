@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pad pop brillante: supersaw suave con filtro HIGH PASS (sin graves que estorben), aire de ruido y reverb. -->
+<UndertowPreset formatVersion="1" name="Pad Brillo Pop" category="Pad" author="Undertow">
+  <Notes>
+    Género: Electropop / Pop (100–125 BPM). El pad luminoso que llena la parte alta de un coro sin ensuciar el bajo ni
+    la voz.
+
+    Cómo se construyó:
+    - Osc A: sierra con 6 copias (Detune 20 %, Width 100 %): ancho y brillante.
+    - Filtro HIGH PASS 12 dB a 300 Hz: quita los graves del pad. En una mezcla pop, el bajo y el bombo viven abajo de
+      200 Hz; un pad con graves los "enlodaría". Este filtro es uno de los trucos de mezcla más usados.
+    - Ruido (Level 12 %, Color 85 %): un siseo agudo que da "aire" arriba de 10 kHz, como el soplo de una voz.
+    - LFO 1 (Sine, Free, 0.2 Hz) → Osc A Detune +10 %: el desafinado se abre y se cierra lentamente: el pad "brilla"
+      y se mueve.
+    - Env 1: Attack 400 ms, Release 1.5 s. Voices 8.
+    - Chorus (Mix 30 %) + reverb (Size 80 %, 3.5 s, Mix 30 %).
+
+    Tócalo: acordes abiertos en la parte media-alta (C5–C6): C – G/B – Am – F, de un compás cada uno.
+    Prueba a mover: el Cutoff del High Pass (100 Hz = más cuerpo; 800 Hz = solo brillo, muy "radio") y el nivel del
+    ruido.
+    Técnicas: Fase 4 (High Pass) + Fase 5 (LFO → Detune) + Fase 6 (unison, ruido) + Fase 8 (chorus, reverb).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="6"/>
+    <PARAM id="oscADetune" value="0.2"/>
+    <PARAM id="oscAWidth" value="1"/>
+    <PARAM id="noiseOn" value="On"/>
+    <PARAM id="noiseLevel" value="0.12"/>
+    <PARAM id="noiseColor" value="0.85"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.4"/>
+    <PARAM id="decay" value="1"/>
+    <PARAM id="sustain" value="0.9"/>
+    <PARAM id="release" value="1.5"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="High Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="300"/>
+    <PARAM id="filter1Resonance" value="0.1"/>
+
+    <PARAM id="lfo1Shape" value="Sine"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.2"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Osc A Detune"/>
+    <PARAM id="mod1Amount" value="0.1"/>
+
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.4"/>
+    <PARAM id="fxChorusDepth" value="0.5"/>
+    <PARAM id="fxChorusFeedback" value="0"/>
+    <PARAM id="fxChorusMix" value="0.3"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.8"/>
+    <PARAM id="fxReverbDecay" value="3.5"/>
+    <PARAM id="fxReverbDamping" value="0.3"/>
+    <PARAM id="fxReverbMix" value="0.3"/>
+    <PARAM id="master" value="0.3"/>
+  </Parameters>
+</UndertowPreset>

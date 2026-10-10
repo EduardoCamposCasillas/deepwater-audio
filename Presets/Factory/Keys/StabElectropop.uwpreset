@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Stab de acordes: sierras con unison + cuadrada una octava arriba, filtro con envolvente y decay medio. -->
+<UndertowPreset formatVersion="1" name="Stab Electropop" category="Keys" author="Undertow">
+  <Notes>
+    Género: Electropop / Dance-pop (115–125 BPM). Los acordes cortos y brillantes que marcan el ritmo en el coro.
+
+    Cómo se construyó:
+    - Osc A: sierra con 4 copias (Detune 15 %, Width 90 %): ancho y brillante.
+    - Osc B: cuadrada una octava arriba al 30 %: "brillo de campana" en la parte alta del acorde.
+    - Low Pass 24 dB a 2.2 kHz + Env 2 → Cutoff +35 % (decay 250 ms): cada acorde empieza abierto y se cierra. Sin
+      esto, un acorde de sierras es una pared; con esto es un "golpe" con forma.
+    - Velocity → Cutoff +10 % y Key Track 40 %.
+    - Env 1: Decay 600 ms, Sustain 40 %: el acorde baja de volumen aunque mantengas las teclas. Tocado corto es un
+      stab; tocado largo deja una cola suave.
+    - Chorus (Mix 25 %), delay 1/4 (Mix 12 %), reverb (Mix 20 %).
+
+    Tócalo: a 120 BPM, acordes en corcheas con el ritmo de "off-beat" (en los "y" de cada tiempo): Dm – Bb – F – C.
+    Prueba a mover: el Sustain de Env 1 (0 % = stab puro; 80 % = acordes de sostén) y el Cutoff.
+    Técnicas: Fase 4 (filtro) + Fase 5 (Env 2 → Cutoff) + Fase 6 (unison, Osc B) + Fase 8.
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="4"/>
+    <PARAM id="oscADetune" value="0.15"/>
+    <PARAM id="oscAWidth" value="0.9"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="1"/>
+    <PARAM id="oscBOctave" value="1"/>
+    <PARAM id="oscBLevel" value="0.3"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.5"/>
+    <PARAM id="attack" value="0.001"/>
+    <PARAM id="decay" value="0.6"/>
+    <PARAM id="sustain" value="0.4"/>
+    <PARAM id="release" value="0.25"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="2200"/>
+    <PARAM id="filter1Resonance" value="0.2"/>
+    <PARAM id="filter1KeyTrack" value="0.4"/>
+
+    <PARAM id="env2Attack" value="0.001"/>
+    <PARAM id="env2Decay" value="0.25"/>
+    <PARAM id="env2Sustain" value="0"/>
+    <PARAM id="env2Release" value="0.2"/>
+    <PARAM id="mod1Source" value="Env 2"/>
+    <PARAM id="mod1Destination" value="Filter Cutoff"/>
+    <PARAM id="mod1Amount" value="0.35"/>
+    <PARAM id="mod2Source" value="Velocity"/>
+    <PARAM id="mod2Destination" value="Filter Cutoff"/>
+    <PARAM id="mod2Amount" value="0.1"/>
+
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.7"/>
+    <PARAM id="fxChorusDepth" value="0.4"/>
+    <PARAM id="fxChorusFeedback" value="0"/>
+    <PARAM id="fxChorusMix" value="0.25"/>
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/4"/>
+    <PARAM id="fxDelayFeedback" value="0.25"/>
+    <PARAM id="fxDelayPingPong" value="On"/>
+    <PARAM id="fxDelayTone" value="0.5"/>
+    <PARAM id="fxDelayMix" value="0.12"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.55"/>
+    <PARAM id="fxReverbDecay" value="1.8"/>
+    <PARAM id="fxReverbMix" value="0.2"/>
+    <PARAM id="master" value="6"/>
+  </Parameters>
+</UndertowPreset>

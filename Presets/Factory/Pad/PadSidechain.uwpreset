@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pad que bombea: supersaw suave filtrado con un LFO Saw Up sincronizado a negras sobre el volumen (falso sidechain). -->
+<UndertowPreset formatVersion="1" name="Pad Sidechain" category="Pad" author="Undertow">
+  <Notes>
+    Género: EDM / Progressive House / Tropical (120–128 BPM). Los acordes que "respiran" con el bombo en el break y en
+    el drop.
+
+    Cómo se construyó:
+    - Osc A: sierra con 7 copias (Detune 25 %, Width 100 %) + Osc B: sierra una octava arriba con 5 copias al 40 %:
+      un supersaw amplio pero no agresivo.
+    - Low Pass 12 dB a 3.5 kHz: lo suaviza para que viva detrás del lead.
+    - LFO 1 (Saw Up, Free, Sync 1/4) → Volume +80 %: en cada negra el volumen cae casi a cero y sube en rampa. Así
+      suena un pad pasado por un compresor con sidechain del bombo, pero sin necesitar el bombo. Con FL reproduciendo,
+      el LFO sigue el compás, así que el bajón cae justo en cada tiempo.
+    - Env 1: Attack 150 ms, Release 800 ms. Voices 8.
+    - Reverb (Size 75 %, 3 s, Mix 25 %): la reverb va DESPUÉS del bombeo, así que la cola rellena un poco los
+      huecos, como en las producciones reales.
+
+    Tócalo: a 126 BPM acordes de un compás: Am – F – C – G alrededor de C5, con un bombo en cada tiempo.
+    Prueba a mover: el amount de LFO 1 → Volume (30 % = sutil; 100 % = bombeo extremo) y la Division (1/8 = el doble
+    de rápido, para los build-ups).
+    Técnicas: Fase 5 (LFO sincronizado → Volume) + Fase 6 (unison) + Fase 8 (reverb).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="7"/>
+    <PARAM id="oscADetune" value="0.25"/>
+    <PARAM id="oscAWidth" value="1"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0.6667"/>
+    <PARAM id="oscBOctave" value="1"/>
+    <PARAM id="oscBUnison" value="5"/>
+    <PARAM id="oscBDetune" value="0.2"/>
+    <PARAM id="oscBWidth" value="1"/>
+    <PARAM id="oscBLevel" value="0.4"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.15"/>
+    <PARAM id="decay" value="1"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.8"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="3500"/>
+    <PARAM id="filter1Resonance" value="0.1"/>
+    <PARAM id="filter1KeyTrack" value="0.3"/>
+
+    <PARAM id="lfo1Shape" value="Saw Up"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="On"/>
+    <PARAM id="lfo1Division" value="1/4"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Volume"/>
+    <PARAM id="mod1Amount" value="0.8"/>
+
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.75"/>
+    <PARAM id="fxReverbDecay" value="3"/>
+    <PARAM id="fxReverbMix" value="0.25"/>
+    <PARAM id="master" value="-5.2"/>
+  </Parameters>
+</UndertowPreset>

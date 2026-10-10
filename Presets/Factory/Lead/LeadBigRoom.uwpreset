@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lead de festival: supersaw de 9 copias + cuadrada una octava abajo, saturación suave y bombeo (LFO → Volume). -->
+<UndertowPreset formatVersion="1" name="Lead Big Room" category="Lead" author="Undertow">
+  <Notes>
+    Género: EDM / Big Room / Progressive House (126–128 BPM). El lead del "drop" de festival: enorme, ancho y
+    bombeando con el bombo.
+
+    Cómo se construyó:
+    - Osc A: sierra con 9 copias (Detune 40 %, Width 100 %): el supersaw. Las copias desafinadas suenan como un coro
+      de sintetizadores y abren el sonido de lado a lado.
+    - Osc B: cuadrada una octava ABAJO con 5 copias al 50 %: da cuerpo y peso en los medios-graves. Sin ella, el
+      supersaw suena "delgado" fuera del drop.
+    - Low Pass 12 dB a 9 kHz: solo quita la aspereza digital extrema.
+    - LFO 1 (Saw Up, Free, Sync 1/4) → Volume +45 %: el volumen cae en cada negra y vuelve a subir. Es el truco del
+      "sidechain": imita a un compresor que baja el synth cada vez que suena el bombo. Con el host reproduciendo, el
+      LFO sigue el compás de FL, así que el bajón cae justo en el tiempo.
+    - Distorsión Soft Clip (Drive 40 %, Tone 75 %, Mix 60 %): satura y une las capas en un solo bloque.
+    - Reverb media (Mix 18 %). Voices 8, Attack 3 ms, Release 250 ms.
+
+    Tócalo: a 128 BPM, acordes o melodía en negras en G menor alrededor de G5. Reprodúcelo con un bombo en cada
+    tiempo (4 on the floor) para que el bombeo coincida.
+    Prueba a mover: el amount de LFO 1 → Volume (0 % = sin bombeo; 80 % = bombeo extremo de "French house") y
+    Osc A Detune (20 % = más afinado; 70 % = "hoover").
+    Técnicas: Fase 5 (LFO sincronizado → Volume) + Fase 6 (unison) + Fase 8 (distorsión, reverb).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="9"/>
+    <PARAM id="oscADetune" value="0.4"/>
+    <PARAM id="oscAWidth" value="1"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="1"/>      <!-- cuadrada -->
+    <PARAM id="oscBOctave" value="-1"/>
+    <PARAM id="oscBUnison" value="5"/>
+    <PARAM id="oscBDetune" value="0.3"/>
+    <PARAM id="oscBWidth" value="0.6"/>
+    <PARAM id="oscBLevel" value="0.5"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.003"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.25"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="9000"/>
+
+    <PARAM id="lfo1Shape" value="Saw Up"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="On"/>
+    <PARAM id="lfo1Division" value="1/4"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Volume"/>
+    <PARAM id="mod1Amount" value="0.45"/>
+
+    <PARAM id="fxDistOn" value="On"/>
+    <PARAM id="fxDistMode" value="Soft Clip"/>
+    <PARAM id="fxDistDrive" value="0.4"/>
+    <PARAM id="fxDistTone" value="0.75"/>
+    <PARAM id="fxDistMix" value="0.6"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.7"/>
+    <PARAM id="fxReverbDecay" value="2.5"/>
+    <PARAM id="fxReverbMix" value="0.18"/>
+    <PARAM id="master" value="-1.5"/>
+  </Parameters>
+</UndertowPreset>
