@@ -80,7 +80,7 @@ plugins/riptide/
       (único en la suite; el fabricante, compartido).
 - [x] Fase 2 — Waveshaping básico + oversampling seleccionable (2x a 16x, etapas halfband de la librería), filtro DC,
       comparación con y sin oversampling en el analizador para escuchar y ver el aliasing.
-- [ ] Fase 3 — Modos de saturación con carácter: cinta (suave, compresión, realce de graves),
+- [x] Fase 3 — Modos de saturación con carácter: cinta (suave, compresión, realce de graves),
       bulbo (asimétrico, armónicos pares), transistor (más duro, impares), clip duro, rectificador y wavefold.
       Cada modo con su propia curva y comportamiento según el nivel de entrada.
 - [ ] Fase 4 — Tono: filtros pre y post saturación (HP/LP), tilt EQ y control de "emphasis"
@@ -96,7 +96,7 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 3 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+Fase 3 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena: entrada → × input (drive) → [medidor IN] → modo (`dsp/Saturator.h`) → filtro DC (5 Hz) → × output → fundido
   de bypass → × fundido de factor → [medidor OUT].
 - Modos (`Mode`, índice = valor del parámetro; solo añadir al final). Todos con f(0) = 0 y, salvo Rectify, pendiente 1
@@ -180,4 +180,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: que el usuario pruebe la Fase 3 en FL; después, Fase 4 (tono: filtros pre/post, tilt, emphasis).
+Siguiente: Fase 4 (tono: filtros pre/post, tilt, emphasis).
