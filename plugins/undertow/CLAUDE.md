@@ -410,7 +410,8 @@ Ampliación — Librería por géneros (2026-10-09). Probada por el usuario en F
   y reconfigurar (rutas desde la migración al monorepo).
 - Release con 0 warnings; ctest 2/2; pluginval strictness 10: SUCCESS.
 
-Migración al monorepo (2026-10-09). El sonido no cambia (null test: idéntico bit a bit).
+Migración al monorepo (2026-10-09). Probada por el usuario en FL Studio: funciona. El sonido no cambia (null test:
+idéntico bit a bit). FL: la ruta de búsqueda es `build\plugins` como VST3 (editarla en la ventana de FL la vuelve VST2).
 - El synth vive en `plugins/undertow/` (movido con `git mv`; `git log --follow` conserva el historial). JUCE, C++20 y
   `enable_testing()` vienen del CMakeLists.txt raíz. El VST3 queda en
   `build/plugins/undertow/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3`.
