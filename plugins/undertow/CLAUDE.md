@@ -1,23 +1,11 @@
-# CLAUDE.md — Sintetizador Wavetable (JUCE / C++ moderno)
+# CLAUDE.md — Undertow, sintetizador wavetable
+
+Plugin 1 de la suite. Las reglas generales (modo de trabajo, stack, reglas del hilo de audio, estilo, git) están en
+el `CLAUDE.md` de la raíz del repositorio; aquí solo va lo propio del synth.
 
 ## Objetivo del proyecto
 Construir un sintetizador wavetable polifónico de calidad profesional (referencia de nivel: Serum 2 y Vital),
 con nombre, diseño y código propios. Se usa principalmente en FL Studio sobre Windows.
-
-El dueño del proyecto está APRENDIENDO programación de audio y DSP mientras lo construimos.
-El objetivo es doble: un plugin de nivel profesional y que él entienda cada parte.
-
-## Modo de trabajo (muy importante)
-- Trabajar SIEMPRE por fases pequeñas. Una fase a la vez.
-- Antes de implementar un concepto de DSP nuevo, explicarlo en español en 1–3 párrafos:
-  qué problema resuelve, la idea matemática básica y cómo se traduce a código.
-- Al terminar cada fase: compilar, confirmar que no hay warnings y explicar cómo probarla en FL Studio
-  (qué tocar, qué debería escucharse y qué artefactos buscar).
-- NO avanzar a la siguiente fase hasta que yo confirme que la probé en FL Studio.
-- Si hay varias formas de resolver algo, explicar brevemente las opciones y por qué se elige una.
-- Comentarios en el código en español, educativos pero concisos (explicar el "por qué", no el "qué").
-- Al terminar cada fase, actualizar la sección "Estado actual" de este archivo.
-- Nunca copiar código de Vital, Surge u otros proyectos GPL. Se pueden estudiar sus ideas, no su código.
 
 ## Aprendizaje de diseño sonoro (igual de importante que el código)
 Además de programar, quiero aprender a DISEÑAR SONIDOS. Al final del proyecto debo poder crear
@@ -36,58 +24,41 @@ mis propios sonidos desde cero, no solo usar presets. Por eso, al terminar cada 
 5. **Vocabulario.** Los términos nuevos de la fase (ej. "armónicos", "detune", "resonancia", "transitorio")
    con una definición corta y un ejemplo de dónde se escucha en música real.
 
-Mantener un archivo `APRENDIZAJE.md` en la raíz del proyecto, actualizado al final de cada fase, con:
+Mantener el archivo `APRENDIZAJE.md` de esta carpeta (`plugins/undertow/`), actualizado al final de cada fase, con:
 conceptos aprendidos, recetas de sonidos, vocabulario y los retos completados. Es mi cuaderno de
 diseño sonoro; debe servirme como referencia aunque no esté abierto el código.
 
 Los presets de fábrica (Fase 10) deben incluir notas que expliquen cómo se construyó cada sonido,
 para que funcionen también como material de estudio.
 
-## Stack técnico
-- C++20, compilador MSVC (Visual Studio 2026 o 2022, workload "Desarrollo para el escritorio con C++").
-- JUCE 9 (tag 9.0.2) integrado con CMake mediante FetchContent, fijado a un tag estable (nunca a una rama).
-- CMake >= 3.22.
-- Formatos: VST3 + Standalone (Standalone para probar rápido sin abrir FL).
-- Validación: pluginval antes de dar por terminada cualquier fase que toque parámetros, estado o procesamiento.
-
-## Comandos de compilación
+## Comandos
+Desde la raíz del repositorio (ver también los comandos generales en el `CLAUDE.md` raíz):
 ```
-cmake -B build -G "Visual Studio 17 2022" -A x64    # VS Community 2022 detectado en esta máquina
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure   # tests de DSP/voces (UndertowTests, sin JUCE)
-build/Release/UndertowTests.exe --cpu                   # tabla de CPU (Fase 11)
-tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,88200,96000     --block-sizes 1,7,64,256,512,1024,4096 --repeat 3 --randomise --validate "<ruta al .vst3>"   # validación completa
+cmake --build build --config Release --target UndertowSynth_VST3        # solo el plugin
+build/plugins/undertow/Release/UndertowTests.exe                         # tests de DSP y voces (--fase7/8/9, --verbose)
+build/plugins/undertow/Release/UndertowTests.exe --cpu                   # tabla de CPU (Fase 11)
+build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe   # presets, huellas, memoria
+UndertowPresetTests --render plugins/undertow/tests/reference/migration-test.mid <carpeta>   # WAV para null tests
+python scripts/null_test.py <carpeta_referencia> <carpeta_nueva>
 ```
-- CMake está en `C:\Program Files\CMake\bin` y no está en el PATH: usar la ruta completa o agregarlo.
-- El VST3 queda en `build/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3`.
-- NO copiar automáticamente a `C:\Program Files\Common Files\VST3` (requiere administrador).
-  En FL Studio se agrega la carpeta de artefactos como ruta de búsqueda en el Plugin Manager.
+- VST3: `build/plugins/undertow/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3`.
+- Standalone: `build/plugins/undertow/UndertowSynth_artefacts/Release/Standalone/Undertow Synth.exe`.
 
-## Reglas del hilo de audio (NO negociables)
-Dentro de `processBlock` y de todo lo que llame:
-- Nada de reservar o liberar memoria (`new`, `delete`, `std::vector::push_back`, `resize`, `std::string`, etc.).
-- Nada de locks, mutex, esperas, I/O de archivos, logging ni llamadas al sistema.
-- Todo buffer se reserva en `prepareToPlay`.
-- Comunicación GUI ↔ audio solo con atómicos, `AudioProcessorValueTreeState` o colas lock-free.
-- Todo parámetro que afecte al sonido se suaviza (`SmoothedValue`) para evitar clics y zipper noise.
-- Denormals desactivados (`juce::ScopedNoDenormals`) al inicio de `processBlock`.
-- El sonido debe ser correcto a 44.1, 48, 88.2 y 96 kHz y con cualquier tamaño de buffer.
-
-## Estilo de código
-- C++ moderno: RAII, `std::unique_ptr`, `std::array`, `constexpr`, `noexcept` en código de audio.
-- Nada de `new`/`delete` manuales ni punteros crudos con propiedad.
-- DSP separado de JUCE cuando sea razonable (clases puras en `Source/dsp/`), para poder probarlas aisladas.
-- Nombres claros en inglés para el código; comentarios en español.
-- Tests unitarios para piezas de DSP críticas (osciladores, filtros, envolventes) cuando aporten valor.
-
-## Estructura sugerida
+## Estructura
 ```
-Source/
-  PluginProcessor.h/.cpp   # parámetros, estado, processBlock
-  PluginEditor.h/.cpp      # GUI
-  dsp/                     # osciladores, filtros, envolventes, LFOs (sin dependencias de GUI)
-  synth/                   # voces, gestión de polifonía, matriz de modulación
-  gui/                     # componentes visuales propios
+plugins/undertow/
+  CMakeLists.txt           # plugin, presets de fábrica (BinaryData) y tests; enlaza deepwater::dsp
+  Source/
+    PluginProcessor.h/.cpp   # parámetros, estado, processBlock
+    PluginEditor.h/.cpp      # GUI
+    Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
+    dsp/                     # osciladores, filtro de voz, envolventes, LFO, warp, efectos (lo compartido: libs/dsp)
+    synth/                   # voces, polifonía, matriz de modulación, banco de wavetables, cadena de efectos
+    gui/                     # componentes visuales propios
+    presets/                 # PresetManager
+  Presets/Factory/         # .uwpreset de fábrica (compilados dentro del plugin)
+  tests/                   # DspTests.cpp (sin JUCE), PresetTests.cpp (con JUCE), reference/
+  docs/                    # capturas para el README
 ```
 
 ## Hoja de ruta
@@ -435,7 +406,32 @@ Ampliación — Librería por géneros (2026-10-09). Probada por el usuario en F
   al añadir los 21 el diff solo agrega líneas.
 - OJO build: archivos de `build/` con fecha futura hacían que MSBuild no reenlazara (el test no veía presets nuevos);
   y al cambiar el número de presets quedan `BinaryData*.obj` viejos duplicados (LNK4006): borrar
-  `build/UndertowPresetData.dir` y `build/juce_binarydata_UndertowPresetData` y reconfigurar.
+  `build/plugins/undertow/UndertowPresetData.dir` y `build/plugins/undertow/juce_binarydata_UndertowPresetData`
+  y reconfigurar (rutas desde la migración al monorepo).
 - Release con 0 warnings; ctest 2/2; pluginval strictness 10: SUCCESS.
+
+Migración al monorepo (2026-10-09). El sonido no cambia (null test: idéntico bit a bit).
+- El synth vive en `plugins/undertow/` (movido con `git mv`; `git log --follow` conserva el historial). JUCE, C++20 y
+  `enable_testing()` vienen del CMakeLists.txt raíz. El VST3 queda en
+  `build/plugins/undertow/UndertowSynth_artefacts/Release/VST3/Undertow Synth.vst3`.
+- Pasaron a la librería compartida `libs/dsp` (namespace `deepwater::dsp`): `HalfbandDecimator.h` → `Halfband.h`,
+  `SvfStage` (de `Filter.h`) → `Svf.h`, `SmoothedParameter`/`EffectSwitch` (de `DelayLine.h`) → `Smoothing.h`,
+  `DelayLine.h`, `Simd.h`, `FastMath.h`, `Fft.h` (+ `src/Fft.cpp`) y `Pitch.h`. Las menciones a esos archivos en las
+  fases anteriores se refieren a sus nuevas rutas. Los headers del synth declaran lo que toman (`using
+  deepwater::dsp::SvfStage;`, `namespace simd = deepwater::dsp::simd;`); el código de dentro no cambió.
+- Se quedan aquí `Filter` (filtro de voz: resonancia ×17, compensación, drive, key tracking, modulación), `Distortion`,
+  `Chorus`, `StereoDelay`, `Reverb`, `Lfo`, osciladores, envolventes y ruido. Se mueven cuando otro plugin los necesite.
+- Tests: FFT, decimador e interpolador pasaron a `DeepwaterDspTests`. `UndertowPresetTests --render <mid> <carpeta>`
+  toca `tests/reference/migration-test.mid` con 4 presets (Supersaw Trance, Sync Lead 80s, Bajo Fuzz Indie, Pad
+  Shoegaze) y guarda WAV float de 32 bits; `scripts/null_test.py` (raíz) compara dos carpetas. Referencia de antes de
+  la migración en `out/reference-pre-monorepo/` (no está en git).
+- Release con 0 warnings (build limpio); ctest 3/3; pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096,
+  `--repeat 3 --randomise`): SUCCESS.
+- Encontrado al escribir los tests de la librería (bug previo, sin arreglar todavía porque cambiaría el sonido en
+  ~1e-5): `SmoothedParameter::approach` y el cutoff de `Filter` nunca terminan de llegar a un objetivo distinto de 0
+  (el paso queda por debajo de la resolución del float antes de cruzar el umbral de "llegó"; simulado en float32: se
+  quedan a 1.4e-5 y a 1.1e-4 octavas) y siguen avisando de cambios para siempre: tras mover el cutoff, el filtro deja
+  de estar `settled`, y tras mover una perilla de chorus/delay/reverb esos efectos recalculan coeficientes en cada
+  muestra. Solo cuesta CPU.
 
 Siguiente: todas las fases de la hoja de ruta están hechas. Próximos pasos posibles, a decidir con el usuario.
