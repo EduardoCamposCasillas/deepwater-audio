@@ -29,5 +29,8 @@ if(DEEPWATER_BUILD_TESTS)
     enable_testing()
 endif()
 
+# --- Librerías compartidas ------------------------------------------------------
+add_subdirectory(libs/dsp)
+
 # --- Plugins -------------------------------------------------------------------
 add_subdirectory(plugins/undertow)

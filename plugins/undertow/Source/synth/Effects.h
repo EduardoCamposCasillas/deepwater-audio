@@ -4,10 +4,10 @@
 #include <array>
 
 #include "dsp/Chorus.h"
-#include "dsp/DelayLine.h"
 #include "dsp/Distortion.h"
 #include "dsp/Reverb.h"
 #include "dsp/StereoDelay.h"
+#include "deepwater/dsp/Smoothing.h"
 
 namespace undertow::synth
 {
@@ -214,7 +214,7 @@ private:
     dsp::Chorus chorus;
     dsp::StereoDelay delay;
     dsp::Reverb reverb;
-    std::array<dsp::EffectSwitch, numEffects> switches;
+    std::array<deepwater::dsp::EffectSwitch, numEffects> switches;
     std::array<float, chunkSize> dryLeft {}, dryRight {};
 };
 

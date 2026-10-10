@@ -13,16 +13,16 @@
 // escalar. Si algún día se compila para otra arquitectura (ARM), se usa la versión escalar de abajo: hace lo
 // mismo con un array de 4 floats (el compilador la vectoriza a su manera).
 #if defined(_M_X64) || defined(__x86_64__) || defined(__SSE2__) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
-    #define UNDERTOW_SSE2 1
+    #define DEEPWATER_SSE2 1
     #include <emmintrin.h>
 #else
-    #define UNDERTOW_SSE2 0
+    #define DEEPWATER_SSE2 0
 #endif
 
-namespace undertow::dsp::simd
+namespace deepwater::dsp::simd
 {
 
-#if UNDERTOW_SSE2
+#if DEEPWATER_SSE2
 
 struct Float4
 {
@@ -57,7 +57,7 @@ inline void transpose (Float4& r0, Float4& r1, Float4& r2, Float4& r3) noexcept
 }
 
 // Posición de lectura de 4 copias en una tabla de 'size' muestras: índice entero (truncado) y fracción.
-// La fase va en double (ver WavetableOscillator) y SSE2 solo hace 2 doubles por instrucción, así que se parte en
+// La fase va en double (p. ej. el WavetableOscillator de Undertow) y SSE2 solo hace 2 doubles por instrucción, así que se parte en
 // dos mitades. Mismo redondeo que la versión escalar: static_cast<int> trunca y static_cast<float> redondea.
 inline Float4 readPositions (const double* phase, double size, int* index) noexcept
 {
@@ -156,4 +156,4 @@ inline void advancePhases (double* phase, const double* increment) noexcept
 
 #endif
 
-} // namespace undertow::dsp::simd
+} // namespace deepwater::dsp::simd

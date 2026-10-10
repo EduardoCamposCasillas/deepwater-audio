@@ -3,10 +3,12 @@
 #include <cassert>
 #include <cmath>
 
-#include "dsp/Fft.h"
+#include "deepwater/dsp/Fft.h"
 
 namespace undertow::dsp
 {
+
+using deepwater::dsp::fft;
 
 Wavetable Wavetable::fromSpectra (std::string name, const std::vector<HarmonicSpectrum>& frames)
 {

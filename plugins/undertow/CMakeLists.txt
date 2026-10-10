@@ -53,6 +53,7 @@ target_link_libraries(UndertowSynth
         juce::juce_audio_utils         # incluye audio_processors, audio_devices, gui, etc.
         juce::juce_dsp
         UndertowPresetData
+        deepwater::dsp                 # librería DSP compartida de la suite (libs/dsp)
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -72,6 +73,7 @@ if(UNDERTOW_BUILD_TESTS)
         Source/synth/WavetableBank.cpp
     )
     target_include_directories(UndertowTests PRIVATE Source)
+    target_link_libraries(UndertowTests PRIVATE deepwater::dsp)
 
     if(MSVC)
         target_compile_options(UndertowTests PRIVATE /W4 /permissive- /utf-8)
@@ -102,6 +104,7 @@ if(UNDERTOW_BUILD_TESTS)
             juce::juce_audio_utils
             juce::juce_dsp
             UndertowPresetData
+            deepwater::dsp
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
     )

@@ -6,10 +6,13 @@
 #include <numbers>
 
 #include "dsp/Filter.h"
-#include "dsp/HalfbandDecimator.h"
+#include "deepwater/dsp/Halfband.h"
 
 namespace undertow::dsp
 {
+
+using deepwater::dsp::HalfbandDecimator;
+using deepwater::dsp::HalfbandInterpolator;
 
 // --- Distorsión con oversampling ×4 y ADAA --------------------------------------------------------------
 //

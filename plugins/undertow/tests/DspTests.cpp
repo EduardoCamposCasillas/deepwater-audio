@@ -1,5 +1,7 @@
 // Tests de las piezas de DSP y de gestión de voces. No dependen de JUCE: se compilan como un
 // ejecutable normal y se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la condición.
+// Las piezas de la librería compartida (FFT, oversampling halfband, SVF, suavizado...) tienen sus propios tests en
+// libs/dsp/tests; aquí se prueban a través del synth (filtro de la voz, warp/FM a 2x, distorsión a 4x...).
 
 #include <algorithm>
 #include <array>
@@ -18,7 +20,6 @@
 #include <vector>
 
 #include "dsp/AdsrEnvelope.h"
-#include "dsp/Fft.h"
 #include "dsp/Filter.h"
 #include "dsp/WavetableOscillator.h"
 #include "dsp/Lfo.h"
@@ -26,6 +27,7 @@
 #include "synth/VoiceManager.h"
 #include "synth/WavetableBank.h"
 #include "gui/ModulationTargets.h"
+#include "deepwater/dsp/Fft.h"
 
 namespace
 {
@@ -370,7 +372,7 @@ void testReferencePitches()
     } };
 
     for (const auto& ref : references)
-        CHECK (std::abs (centsBetween (undertow::dsp::midiNoteToHz (ref.note), ref.hz)) < 0.001);
+        CHECK (std::abs (centsBetween (deepwater::dsp::midiNoteToHz (ref.note), ref.hz)) < 0.001);
 }
 
 void testRenderedPitchMatchesNote()
@@ -393,7 +395,7 @@ void testRenderedPitchMatchesNote()
             std::vector<float> signal (static_cast<size_t> (sr), 0.0f);
             manager.render (signal.data(), static_cast<int> (signal.size()));
 
-            const double expected = undertow::dsp::midiNoteToHz (note);
+            const double expected = deepwater::dsp::midiNoteToHz (note);
             const double cents = centsBetween (measureFrequency (signal, sr), expected);
             worstCents = std::max (worstCents, std::abs (cents));
             CHECK (std::abs (cents) < 0.05); // el oído más entrenado distingue ~2-5 cents
@@ -415,7 +417,7 @@ void testRenderedPitchMatchesNote()
         renderSilently (manager, 480);
         std::vector<float> signal (48000, 0.0f);
         manager.render (signal.data(), static_cast<int> (signal.size()));
-        std::printf ("  %9d | %9s | %13.4f | %11.4f\n", note, flName, undertow::dsp::midiNoteToHz (note),
+        std::printf ("  %9d | %9s | %13.4f | %11.4f\n", note, flName, deepwater::dsp::midiNoteToHz (note),
                      measureFrequency (signal, 48000.0));
     }
 }
@@ -434,35 +436,11 @@ const WavetableBank& factoryBank()
     return bank;
 }
 
-void testFftRoundTrip()
-{
-    std::printf ("FFT: una senoidal cae en su bin y la inversa recupera la señal\n");
-
-    constexpr size_t n = 1024;
-    std::vector<Complex> data (n);
-    for (size_t i = 0; i < n; ++i)
-    {
-        const auto x = static_cast<double> (i);
-        data[i] = std::cos (2.0 * pi * 5.0 * x / n) + 0.25 * std::sin (0.37 * x * x);
-    }
-    const auto original = data;
-
-    undertow::dsp::fft (data, false);
-    // cos(2π·5·n/N) aporta N/2 al bin 5; el resto de la señal es "ruido" de fondo, mucho menor.
-    CHECK (std::abs (data[5]) > 0.4 * n);
-
-    undertow::dsp::fft (data, true);
-    double maxError = 0.0;
-    for (size_t i = 0; i < n; ++i)
-        maxError = std::max (maxError, std::abs (data[i] - original[i]));
-    CHECK (maxError < 1.0e-12);
-}
-
 // Magnitud de cada armónico de un ciclo de la tabla (vía FFT del propio ciclo).
 std::vector<double> cycleHarmonics (const float* cycle, int size)
 {
     std::vector<Complex> bins (cycle, cycle + size);
-    undertow::dsp::fft (bins, false);
+    deepwater::dsp::fft (bins, false);
     std::vector<double> magnitudes (static_cast<size_t> (size / 2));
     for (size_t h = 0; h < magnitudes.size(); ++h)
         magnitudes[h] = 2.0 * std::abs (bins[h]) / size;
@@ -548,7 +526,7 @@ std::vector<double> magnitudeSpectrum (const std::vector<float>& signal)
         const double window = 0.35875 - 0.48829 * std::cos (x) + 0.14128 * std::cos (2 * x) - 0.01168 * std::cos (3 * x);
         bins[i] = signal[i] * window;
     }
-    undertow::dsp::fft (bins, false);
+    deepwater::dsp::fft (bins, false);
 
     std::vector<double> magnitudes (n / 2);
     for (size_t k = 0; k < magnitudes.size(); ++k)
@@ -610,7 +588,7 @@ void testNoAudibleAliasing()
         {
             for (const int note : notes)
             {
-                const double f0 = undertow::dsp::midiNoteToHz (note);
+                const double f0 = deepwater::dsp::midiNoteToHz (note);
                 const auto signal = renderOscillator (factoryBank().get (c.table), c.position, sr, f0, n);
                 const double db = worstAliasDb (magnitudeSpectrum (signal), f0, binHz);
                 worstOurs = std::max (worstOurs, db);
@@ -622,7 +600,7 @@ void testNoAudibleAliasing()
         // Referencia: una sierra "ingenua" (2·fase - 1, sin límite de armónicos), para comparar.
         for (const int note : notes)
         {
-            const double f0 = undertow::dsp::midiNoteToHz (note);
+            const double f0 = deepwater::dsp::midiNoteToHz (note);
             std::vector<float> naive (n);
             double phase = 0.0;
             for (auto& sample : naive)
@@ -654,7 +632,7 @@ void testHighHarmonicsArePreserved()
 
         for (const int note : { 36, 48, 60, 72, 84, 96 })
         {
-            const double f0 = undertow::dsp::midiNoteToHz (note);
+            const double f0 = deepwater::dsp::midiNoteToHz (note);
             const auto spectrum = magnitudeSpectrum (renderOscillator (factoryBank().get (0), 2.0f / 3.0f, sr, f0, n));
 
             const double h = std::floor (std::min (limit / 2.0, 19000.0) / f0);
@@ -907,11 +885,11 @@ void testFilterModulationIsStable()
         }
 
     // La etapa SVF sola, con coeficientes al azar sin suavizar: el TPT sigue siendo estable.
-    undertow::dsp::SvfStage stage;
+    deepwater::dsp::SvfStage stage;
     float peak = 0.0f;
     for (int i = 0; i < 200'000; ++i)
     {
-        const auto c = undertow::dsp::SvfStage::Coefficients::make (std::tan (1.5f * unit (random)), 0.05f + 2.0f * unit (random));
+        const auto c = deepwater::dsp::SvfStage::Coefficients::make (std::tan (1.5f * unit (random)), 0.05f + 2.0f * unit (random));
         const auto out = stage.process (unit (random) * 2.0f - 1.0f, c);
         peak = std::max ({ peak, std::abs (out.lowPass), std::abs (out.highPass) });
     }
@@ -1972,7 +1950,7 @@ void testUnisonMipmapHasNoAlias()
     double worst = -300.0;
     for (const int note : { 72, 84, 96, 103 })
     {
-        const double f0 = undertow::dsp::midiNoteToHz (note);
+        const double f0 = deepwater::dsp::midiNoteToHz (note);
         const double fLow = f0 * std::exp2 (-1.0 / 12.0);
         const double fHigh = f0 * std::exp2 (1.0 / 12.0);
         WavetableOscillator saw;
@@ -2078,7 +2056,6 @@ void testUnisonCpuCost()
 
 // --- Fase 7: warp, FM y ring mod -----------------------------------------------------------------
 
-using undertow::dsp::HalfbandDecimator;
 using undertow::dsp::Warp;
 using undertow::dsp::WarpMode;
 using undertow::synth::FmMode;
@@ -2162,55 +2139,6 @@ void testWarpShapes()
         integers = integers && value == std::round (value);
     }
     CHECK (integers);
-}
-
-void testHalfbandDecimator()
-{
-    std::printf ("Decimador halfband (2x → 1x): plano hasta 20 kHz; rechaza lo que se reflejaría en lo audible\n");
-
-    for (const double sr : { 44100.0, 48000.0 })
-    {
-        // Ganancia para un seno de frecuencia 'hz' a la frecuencia sobremuestreada (2·sr). En la banda de paso se mide
-        // la amplitud exacta (correlación con ventana de Hann); en la de rechazo basta el RMS de lo que sale.
-        const auto gainDb = [sr] (double hz) {
-            HalfbandDecimator decimator;
-            decimator.prepare (sr);
-            const double rate = 2.0 * sr;
-            constexpr int settle = 2000;
-            constexpr int count = 40000;
-            double sum = 0.0, windowSum = 0.0;
-            Complex correlation {};
-            for (int i = 0; i < settle + count; ++i)
-            {
-                const auto first = static_cast<float> (std::sin (2.0 * pi * hz * (2.0 * i) / rate));
-                const auto second = static_cast<float> (std::sin (2.0 * pi * hz * (2.0 * i + 1.0) / rate));
-                const double y = decimator.process (first, second);
-                if (i < settle)
-                    continue;
-                const double window = 0.5 - 0.5 * std::cos (2.0 * pi * (i - settle) / (count - 1.0));
-                correlation += window * y * std::polar (1.0, -2.0 * pi * hz * i / sr);
-                windowSum += window;
-                sum += y * y;
-            }
-            return hz < 0.5 * sr ? toDb (2.0 * std::abs (correlation) / windowSum) : toDb (std::sqrt (2.0 * sum / count));
-        };
-
-        double ripple = 0.0;
-        for (const double hz : { 50.0, 1000.0, 5000.0, 10000.0, 15000.0, 19000.0, 20000.0 })
-            ripple = std::max (ripple, std::abs (gainDb (hz)));
-
-        // Todo lo que está entre sr − 20 kHz y sr se reflejaría por debajo de 20 kHz al volver a 1x.
-        double rejection = -300.0;
-        for (double hz = sr - 20000.0; hz < sr; hz += 250.0)
-            rejection = std::max (rejection, gainDb (hz));
-
-        HalfbandDecimator decimator;
-        decimator.prepare (sr);
-        std::printf ("  %4.1f kHz: %3d taps, retardo %.1f muestras; banda de paso ±%.5f dB; rechazo %.1f dB\n", sr / 1000.0,
-                     decimator.getNumTaps(), decimator.getLatency(), ripple, rejection);
-        CHECK (ripple < 0.001);
-        CHECK (rejection < -95.0);
-    }
 }
 
 // Espectro de una nota (mono) a través de la voz completa, con las fuentes indicadas.
@@ -2367,7 +2295,7 @@ double voiceAliasDb (const SourceSettings& sources, int note, double sr)
 {
     const size_t n = sr > 50000.0 ? 131072 : 65536;
     const auto spectrum = voiceSpectrum (sources, note, sr, n);
-    return worstAliasDb (spectrum, undertow::dsp::midiNoteToHz (note), sr / static_cast<double> (n));
+    return worstAliasDb (spectrum, deepwater::dsp::midiNoteToHz (note), sr / static_cast<double> (n));
 }
 
 void testWarpAliasing()
@@ -2429,7 +2357,7 @@ void testWarpAliasing()
     double naive = -300.0;
     for (const int note : notes)
     {
-        const double f0 = undertow::dsp::midiNoteToHz (note);
+        const double f0 = deepwater::dsp::midiNoteToHz (note);
         std::vector<float> signal (65536);
         double phase = 0.0;
         for (auto& sample : signal)
@@ -2680,7 +2608,6 @@ using undertow::dsp::DelayParameters;
 using undertow::dsp::Distortion;
 using undertow::dsp::DistortionMode;
 using undertow::dsp::DistortionParameters;
-using undertow::dsp::HalfbandInterpolator;
 using undertow::dsp::Reverb;
 using undertow::dsp::ReverbParameters;
 using undertow::dsp::StereoDelay;
@@ -2741,37 +2668,6 @@ double correlationOf (const std::vector<float>& a, const std::vector<float>& b, 
 bool allFinite (const std::vector<float>& signal, float limit)
 {
     return std::all_of (signal.begin(), signal.end(), [limit] (float s) { return std::isfinite (s) && std::abs (s) < limit; });
-}
-
-void testHalfbandInterpolator()
-{
-    std::printf ("Interpolador halfband (1x → 2x): plano hasta 20 kHz; la imagen espejo a −100 dB\n");
-
-    for (const double sr : sampleRates)
-    {
-        double ripple = 0.0, worstImage = -300.0;
-        for (const double hz : { 50.0, 1000.0, 5000.0, 10000.0, 15000.0, 19000.0, 20000.0 })
-        {
-            HalfbandInterpolator interpolator;
-            interpolator.prepare (sr);
-            constexpr size_t n = 65536;
-            std::vector<float> up (2 * n);
-            for (size_t i = 0; i < n; ++i)
-            {
-                const auto x = static_cast<float> (std::sin (2.0 * pi * hz * static_cast<double> (i) / sr));
-                interpolator.process (x, up[2 * i], up[2 * i + 1]);
-            }
-            ripple = std::max (ripple, std::abs (toDb (toneAmplitude (up, hz, 2.0 * sr, 1000))));
-            // Rellenar con ceros crea una copia del espectro en sr − f: el filtro debe borrarla.
-            worstImage = std::max (worstImage, toDb (toneAmplitude (up, sr - hz, 2.0 * sr, 1000)));
-        }
-        HalfbandInterpolator interpolator;
-        interpolator.prepare (sr);
-        std::printf ("  %4.1f kHz: retardo %.1f muestras; banda de paso ±%.5f dB; imagen %.1f dB\n", sr / 1000.0,
-                     interpolator.getLatency(), ripple, worstImage);
-        CHECK (ripple < 0.001);
-        CHECK (worstImage < -95.0);
-    }
 }
 
 std::vector<float> distort (const DistortionParameters& parameters, const std::vector<float>& input, double sr)
@@ -3537,7 +3433,6 @@ int main (int argc, char** argv)
         const auto elapsed = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - start).count();
         std::printf ("Banco de wavetables de fábrica construido en %.0f ms\n", elapsed);
 
-        testFftRoundTrip();
         testMipmapsRemoveHarmonics();
         testMipLevelSelection();
         testNoAudibleAliasing();
@@ -3588,7 +3483,6 @@ int main (int argc, char** argv)
     if (all || onlyPhase7)
     {
         testWarpShapes();
-        testHalfbandDecimator();
         testFmMatchesBessel();
         testRingModulation();
         testModulatedPathKeepsTheSound();
@@ -3602,7 +3496,6 @@ int main (int argc, char** argv)
 
     if (all || onlyPhase8)
     {
-        testHalfbandInterpolator();
         testDistortionMixZeroIsTransparent();
         testDistortionHarmonics();
         testDistortionAliasing();

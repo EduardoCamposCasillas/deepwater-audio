@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace undertow::dsp
+namespace deepwater::dsp
 {
 
 // tanh rápida: la fracción continua de Lambert, tanh x = x / (1 + x²/(3 + x²/(5 + x²/(7 + ...)))), cortada en el
@@ -21,4 +21,4 @@ namespace undertow::dsp
     return x * p / q;
 }
 
-} // namespace undertow::dsp
+} // namespace deepwater::dsp

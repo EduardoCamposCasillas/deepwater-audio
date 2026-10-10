@@ -6,12 +6,14 @@
 #include <cstdint>
 #include <numbers>
 
-#include "dsp/Simd.h"
 #include "dsp/Warp.h"
 #include "dsp/Wavetable.h"
+#include "deepwater/dsp/Simd.h"
 
 namespace undertow::dsp
 {
+
+namespace simd = deepwater::dsp::simd;
 
 // Oscilador wavetable sin aliasing audible, con unison. Sin dependencias de JUCE para poder probarlo aislado.
 //

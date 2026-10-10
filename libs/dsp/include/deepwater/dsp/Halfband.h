@@ -5,9 +5,9 @@
 #include <cmath>
 #include <numbers>
 
-#include "dsp/Simd.h"
+#include "deepwater/dsp/Simd.h"
 
-namespace undertow::dsp
+namespace deepwater::dsp
 {
 
 // Decimador ×2 con un filtro FIR "halfband". Sin dependencias de JUCE.
@@ -228,4 +228,4 @@ private:
     int writeIndex = 0;
 };
 
-} // namespace undertow::dsp
+} // namespace deepwater::dsp

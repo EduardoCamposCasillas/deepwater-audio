@@ -7,13 +7,13 @@
 
 #include "dsp/AdsrEnvelope.h"
 #include "dsp/Filter.h"
-#include "dsp/HalfbandDecimator.h"
 #include "dsp/Lfo.h"
 #include "dsp/NoiseGenerator.h"
-#include "dsp/Pitch.h"
 #include "dsp/WavetableOscillator.h"
 #include "synth/Modulation.h"
 #include "synth/SourceSettings.h"
+#include "deepwater/dsp/Halfband.h"
+#include "deepwater/dsp/Pitch.h"
 
 namespace undertow::synth
 {
@@ -191,7 +191,7 @@ public:
         noteOrder = order;
         keyHeld = true;
         sustainedByPedal = false;
-        const double hz = dsp::midiNoteToHz (midiNote);
+        const double hz = deepwater::dsp::midiNoteToHz (midiNote);
         for (auto& oscillator : oscillators)
             oscillator.setFrequency (hz);
         subOscillator.setFrequency (hz);
@@ -729,7 +729,7 @@ private:
         const double rate = baseSampleRate * oversampling;
         const double harmonicLimit =
             complexPath ? std::min (dsp::WavetableOscillator::defaultHarmonicLimit (baseSampleRate),
-                                    foldMargin * (rate - dsp::HalfbandDecimator::passbandEdge (baseSampleRate)))
+                                    foldMargin * (rate - deepwater::dsp::HalfbandDecimator::passbandEdge (baseSampleRate)))
                         : 0.0;
         for (size_t o = 0; o < oscillators.size(); ++o)
         {
@@ -807,7 +807,7 @@ private:
     bool complexPath = false;
     int oversampling = 1;
     double baseSampleRate = 44100.0;
-    std::array<dsp::HalfbandDecimator, 2> decimators; // izquierdo y derecho
+    std::array<deepwater::dsp::HalfbandDecimator, 2> decimators; // izquierdo y derecho
     std::array<float, numOscillators> warpKnobs {}, fmKnobs {}; // perillas suavizadas
     std::array<float, numOscillators> lastOutputs {};           // última muestra de cada oscilador (para FM/RM)
     DuckStage duckStage = DuckStage::none;

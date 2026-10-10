@@ -1,24 +1,14 @@
-#pragma once
+#include "deepwater/dsp/Fft.h"
 
 #include <cassert>
 #include <cmath>
-#include <complex>
 #include <numbers>
 #include <utility>
-#include <vector>
 
-namespace undertow::dsp
+namespace deepwater::dsp
 {
 
-// FFT radix-2 (Cooley-Tukey iterativa), en el sitio. Solo se usa FUERA del hilo de audio
-// (al construir wavetables y en los tests), así que prioriza claridad sobre velocidad.
-//
-//   inverse = false:  X[k] = Σ x[n] · e^(-i·2π·k·n/N)            (tiempo -> frecuencia)
-//   inverse = true:   x[n] = (1/N) · Σ X[k] · e^(+i·2π·k·n/N)    (frecuencia -> tiempo)
-//
-// La idea: una DFT de N puntos se parte en dos DFT de N/2 (muestras pares e impares) que se
-// combinan con una "mariposa". Repetido log2(N) veces cuesta N·log2(N) en vez de N².
-inline void fft (std::vector<std::complex<double>>& data, bool inverse)
+void fft (std::vector<std::complex<double>>& data, bool inverse)
 {
     const size_t n = data.size();
     assert (n > 0 && (n & (n - 1)) == 0 && "el tamaño debe ser potencia de 2");
@@ -61,4 +51,4 @@ inline void fft (std::vector<std::complex<double>>& data, bool inverse)
             value /= static_cast<double> (n);
 }
 
-} // namespace undertow::dsp
+} // namespace deepwater::dsp

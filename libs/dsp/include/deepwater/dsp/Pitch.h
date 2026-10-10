@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace undertow::dsp
+namespace deepwater::dsp
 {
 
 // Frecuencia en Hz de una nota MIDI con afinación estándar (La = nota 69 = 440 Hz).
@@ -12,4 +12,4 @@ namespace undertow::dsp
     return 440.0 * std::pow (2.0, (midiNote - 69) / 12.0);
 }
 
-} // namespace undertow::dsp
+} // namespace deepwater::dsp

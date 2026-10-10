@@ -5,10 +5,15 @@
 #include <cmath>
 #include <numbers>
 
-#include "dsp/DelayLine.h"
+#include "deepwater/dsp/DelayLine.h"
+#include "deepwater/dsp/Smoothing.h"
 
 namespace undertow::dsp
 {
+
+using deepwater::dsp::DelayLine;
+using deepwater::dsp::EffectSwitch;
+using deepwater::dsp::SmoothedParameter;
 
 // --- Reverb: red de retardos realimentados (FDN) ------------------------------------------------------------
 //
