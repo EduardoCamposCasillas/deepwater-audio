@@ -4,7 +4,7 @@
 # --- Plugin --------------------------------------------------------------------
 juce_add_plugin(UndertowSynth
     PRODUCT_NAME             "Undertow Synth"
-    COMPANY_NAME             "Undertow"
+    COMPANY_NAME             "Deepwater"    # fabricante que muestra el host (toda la suite aparece junta)
     PLUGIN_MANUFACTURER_CODE Undw          # 4 caracteres, al menos una mayúscula
     PLUGIN_CODE              Uwt1          # único por plugin de este fabricante
     FORMATS                  VST3 Standalone

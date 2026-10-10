@@ -12,10 +12,12 @@
 #include <numbers>
 #include <vector>
 
+#include "deepwater/dsp/Decibels.h"
 #include "deepwater/dsp/DelayLine.h"
 #include "deepwater/dsp/FastMath.h"
 #include "deepwater/dsp/Fft.h"
 #include "deepwater/dsp/Halfband.h"
+#include "deepwater/dsp/LevelMeter.h"
 #include "deepwater/dsp/Pitch.h"
 #include "deepwater/dsp/Simd.h"
 #include "deepwater/dsp/Smoothing.h"
@@ -286,6 +288,44 @@ void testSmoothedParameter()
     CHECK (steps < 20 * 480);
 }
 
+void testLinearRamp()
+{
+    std::printf ("LinearRamp: llega exactamente al objetivo en el tiempo pedido, sin saltos al cambiarlo a mitad\n");
+
+    for (const double sr : sampleRates)
+    {
+        dw::LinearRamp ramp;
+        ramp.setTime (0.020, sr);
+        ramp.snap (1.0f);
+        CHECK (ramp.isSteady() && ramp.next() == 1.0f);
+
+        const float goal = dw::dbToGain (-7.3f);
+        ramp.setTarget (goal);
+        const int samples = static_cast<int> (std::lround (0.020 * sr));
+        for (int i = 0; i < samples - 1; ++i)
+            ramp.next();
+        CHECK (! ramp.isSteady());
+        CHECK (ramp.next() == goal); // exacto, no "casi"
+        CHECK (ramp.isSteady() && ramp.next() == goal);
+
+        // Cambiar el objetivo a mitad de rampa: sigue desde donde estaba, con pasos acotados.
+        float maxStep = 0.0f;
+        const auto advance = [&] (int count) {
+            for (int i = 0; i < count; ++i)
+            {
+                const float previous = ramp.value;
+                maxStep = std::max (maxStep, std::abs (ramp.next() - previous));
+            }
+        };
+        ramp.setTarget (2.0f);
+        advance (samples / 2);
+        ramp.setTarget (0.0f);
+        advance (2 * samples);
+        CHECK (ramp.value == 0.0f);
+        CHECK (maxStep <= 2.0f / static_cast<float> (samples) * 1.001f);
+    }
+}
+
 void testEffectSwitch()
 {
     std::printf ("EffectSwitch: fundido lineal del tiempo pedido; apagado y quieto = silencio\n");
@@ -300,6 +340,83 @@ void testEffectSwitch()
     CHECK (std::abs ((samples + 1) - 480) <= 1);
     CHECK (fade.isSteady (true));
     CHECK (! fade.isSilent (false)); // acaba de apagarse: todavía tiene que bajar
+}
+
+// --- Decibelios y medidores ----------------------------------------------------------------------------------------
+
+void testDecibels()
+{
+    std::printf ("Decibelios: 0 dB = ×1 exacto, ±6.02 dB = ×2 / ×0.5, ida y vuelta, silencio\n");
+    CHECK (dw::dbToGain (0.0f) == 1.0f);
+    CHECK (std::abs (dw::dbToGain (6.0206f) - 2.0f) < 1.0e-4f);
+    CHECK (std::abs (dw::dbToGain (-6.0206f) - 0.5f) < 1.0e-5f);
+    for (float db = -60.0f; db <= 24.0f; db += 0.7f)
+        CHECK (std::abs (dw::gainToDb (dw::dbToGain (db)) - db) < 1.0e-4f);
+    CHECK (dw::gainToDb (0.0f) == dw::silenceDb);
+    CHECK (dw::gainToDb (1.0e-9f) == dw::silenceDb);
+}
+
+void testLevelMeter()
+{
+    std::printf ("LevelMeter: RMS de un seno = pico − 3.01 dB, integración de 300 ms, pico exacto entre lecturas\n");
+
+    for (const double sr : sampleRates)
+    {
+        dw::LevelMeter meter;
+        meter.prepare (sr);
+
+        // Seno de 1 kHz a −6 dBFS durante 2 s (casi 7 constantes de tiempo): RMS = pico / raíz(2).
+        const float amplitude = dw::dbToGain (-6.0f);
+        const int total = static_cast<int> (2.0 * sr);
+        for (int i = 0; i < total; ++i)
+            meter.push (amplitude * static_cast<float> (std::sin (2.0 * pi * 1000.0 * i / sr)));
+        CHECK (std::abs (dw::gainToDb (meter.rms()) - (-6.0f - 3.0103f)) < 0.02f);
+        CHECK (std::abs (meter.takePeak() - amplitude) < 1.0e-3f);
+        CHECK (meter.takePeak() == 0.0f); // leer reinicia el pico
+
+        // Escalón de silencio a 1.0: tras 300 ms la potencia media llega al 63 %.
+        meter.reset();
+        const int tau = static_cast<int> (std::lround (dw::LevelMeter::rmsSeconds * sr));
+        for (int i = 0; i < tau; ++i)
+            meter.push (1.0f);
+        CHECK (std::abs (meter.rms() * meter.rms() - (1.0f - std::exp (-1.0f))) < 0.002f);
+
+        // Un solo pico entre miles de muestras bajas no se pierde.
+        meter.reset();
+        for (int i = 0; i < 4096; ++i)
+            meter.push (i == 1234 ? -0.9f : 0.01f);
+        CHECK (meter.takePeak() == 0.9f);
+    }
+}
+
+void testPeakDisplay()
+{
+    std::printf ("PeakDisplay: sube al instante, cae 20 dB/s, marca sostenida 1.5 s, clip latcheado\n");
+
+    dw::PeakDisplay display;
+    display.update (dw::dbToGain (-6.0f), 1.0 / 30.0);
+    CHECK (std::abs (display.levelDb + 6.0f) < 1.0e-4f);
+    CHECK (std::abs (display.holdDb + 6.0f) < 1.0e-4f);
+
+    // Silencio durante 1 s: la barra baja 20 dB; la marca sigue en -6 hasta los 1.5 s.
+    for (int frame = 0; frame < 30; ++frame)
+        display.update (0.0f, 1.0 / 30.0);
+    CHECK (std::abs (display.levelDb + 26.0f) < 0.01f);
+    CHECK (std::abs (display.holdDb + 6.0f) < 1.0e-4f);
+    for (int frame = 0; frame < 30; ++frame)
+        display.update (0.0f, 1.0 / 30.0);
+    CHECK (display.holdDb < -6.0f && display.holdDb >= display.levelDb);
+    CHECK (! display.clipped);
+
+    // 0 dBFS exacto no es clip; por encima sí, y queda encendido hasta reiniciarlo.
+    display.update (1.0f, 1.0 / 30.0);
+    CHECK (! display.clipped);
+    display.update (1.01f, 1.0 / 30.0);
+    display.update (0.0f, 10.0);
+    CHECK (display.clipped);
+    CHECK (display.levelDb == dw::silenceDb);
+    display.resetClip();
+    CHECK (! display.clipped);
 }
 
 // --- Línea de retardo -----------------------------------------------------------------------------------------------
@@ -417,7 +534,11 @@ int main()
     testSvfMatchesTheory();
     testSvfIsStableWhenModulated();
     testSmoothedParameter();
+    testLinearRamp();
     testEffectSwitch();
+    testDecibels();
+    testLevelMeter();
+    testPeakDisplay();
     testDelayLine();
     testFastTanh();
     testSimdMatchesScalar();

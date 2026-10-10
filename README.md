@@ -13,7 +13,7 @@ que usa y un cuaderno (`APRENDIZAJE.md`) con ejercicios de escucha, recetas y vo
 | # | Plugin | Qué es | Referencia de nivel | Estado |
 |---|--------|--------|---------------------|--------|
 | 1 | [Undertow](plugins/undertow) | Sintetizador wavetable: FM, warp, unison, matriz de modulación, efectos y 43 presets con notas | Serum 2, Vital | ✅ Terminado |
-| 2 | [Saturador](plugins/saturador) | Saturación con modos cinta/bulbo/transistor, multibanda y auto gain | Decapitator, Saturn 2 | 🔨 En curso (Fase 1 sin empezar) |
+| 2 | [Riptide](plugins/riptide) | Saturador con modos cinta/bulbo/transistor, multibanda y auto gain | Decapitator, Saturn 2 | 🔨 En curso (Fase 1) |
 | 3 | EQ paramétrico | EQ con analizador de espectro | FabFilter Pro-Q | Pendiente |
 | 4 | Compresor | Estilos limpio y FET/1176 | FabFilter Pro-C 2, 1176 | Pendiente |
 | 5 | Delay | Sync, ping-pong, filtros y modulación en el feedback | Valhalla Delay | Pendiente |
@@ -26,9 +26,9 @@ Cada plugin tiene su propio README (cuando ya existe), su hoja de ruta (`CLAUDE.
 ```
 CMakeLists.txt     raíz: JUCE 9.0.2 (FetchContent, una sola vez) + librerías + plugins
 libs/dsp/          deepwater::dsp, la librería DSP compartida (sin JUCE): oversampling halfband, filtro SVF TPT/ZDF,
-                   suavizado de parámetros, línea de retardo, SIMD, FFT. Con sus propios tests
+                   suavizado de parámetros, línea de retardo, SIMD, FFT, medidores. Con sus propios tests
 plugins/undertow/  sintetizador wavetable
-plugins/saturador/ saturador (hoja de ruta)
+plugins/riptide/  saturador
 scripts/           null_test.py: compara dos renders para comprobar que un cambio no alteró el sonido
 ```
 

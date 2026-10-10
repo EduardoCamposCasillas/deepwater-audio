@@ -34,3 +34,4 @@ add_subdirectory(libs/dsp)
 
 # --- Plugins -------------------------------------------------------------------
 add_subdirectory(plugins/undertow)
+add_subdirectory(plugins/riptide)

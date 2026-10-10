@@ -20,12 +20,13 @@ libs/
     src/  tests/
 plugins/
   undertow/             # sintetizador wavetable
-  saturador/            # saturador
+  riptide/              # saturador
   <plugin>/             # cada plugin: CMakeLists.txt, Source/, tests/, CLAUDE.md, APRENDIZAJE.md
 scripts/
   null_test.py          # resta dos carpetas de WAV (verificar que un refactor no cambia el sonido)
 ```
-- Cada plugin compila a su propio VST3/Standalone independiente.
+- Cada plugin compila a su propio VST3/Standalone independiente. Todos comparten `PLUGIN_MANUFACTURER_CODE Undw` y
+  `COMPANY_NAME "Deepwater"`; cada uno tiene su `PLUGIN_CODE` (Undertow `Uwt1`, Riptide `Rpt1`).
 - Compilar solo el plugin en el que se trabaja: `cmake --build build --config Release --target <Plugin>_VST3`.
 - La librería compartida se enlaza estáticamente dentro de cada plugin (`target_link_libraries(... deepwater::dsp)`).
 
@@ -46,8 +47,10 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 
 ## Librería compartida (`libs/dsp`, namespace `deepwater::dsp`)
 - Contiene: oversampling halfband ×2 (`Halfband.h`), SVF TPT/ZDF (`Svf.h`), suavizado de parámetros y fundidos
-  (`Smoothing.h`), línea de retardo (`DelayLine.h`), SIMD SSE2 (`Simd.h`), `fastTanh` (`FastMath.h`), FFT (`Fft.h`)
-  y `midiNoteToHz` (`Pitch.h`).
+  (`Smoothing.h`), línea de retardo (`DelayLine.h`), SIMD SSE2 (`Simd.h`), `fastTanh` (`FastMath.h`), FFT (`Fft.h`),
+  `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`) y medidores de pico/RMS (`LevelMeter.h`).
+- Suavizado: usar `LinearRamp` (llega exacto al objetivo). `SmoothedParameter` tiene un bug conocido (nunca termina de
+  llegar) y solo lo usa Undertow; arreglarlo cambiaría su sonido.
 - Sin JUCE ni GUI, C++20 estándar. Lo que corre en el hilo de audio va en headers (para que se inlinee); lo que corre
   fuera del audio puede ir en `src/`. Tests en `libs/dsp/tests` (ejecutable `DeepwaterDspTests`, en ctest).
 - Mover código de un plugin a la librería es un refactor que NO debe cambiar el sonido: renderizar antes y después
@@ -58,7 +61,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 | # | Plugin | Referencia de nivel | Estado |
 |---|--------|---------------------|--------|
 | 1 | Undertow — sintetizador wavetable (FM, warp, unison, matriz de modulación, FX) | Serum 2, Vital | ✅ Terminado |
-| 2 | Saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | 🔨 En curso |
+| 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | 🔨 En curso |
 | 3 | EQ paramétrico con analizador de espectro | FabFilter Pro-Q | Pendiente |
 | 4 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
 | 5 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |

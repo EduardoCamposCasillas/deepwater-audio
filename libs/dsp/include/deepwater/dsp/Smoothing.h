@@ -33,6 +33,48 @@ struct SmoothedParameter
     }
 };
 
+// Rampa lineal hacia un objetivo en un tiempo fijo. A diferencia de SmoothedParameter llega EXACTAMENTE al objetivo
+// (la última muestra de la rampa copia el objetivo) y después queda quieta: con una perilla de ganancia de vuelta en
+// 0 dB la señal pasa intacta bit a bit, y el código puede saltarse cálculos mientras isSteady(). Si el objetivo cambia
+// a mitad de rampa, empieza una rampa nueva desde el valor actual (sin saltos).
+struct LinearRamp
+{
+    float value = 0.0f;
+    float target = 0.0f;
+    float step = 0.0f;
+    int rampSamples = 1;
+    int remaining = 0;
+
+    void setTime (double seconds, double sampleRate) noexcept
+    {
+        rampSamples = std::max (1, static_cast<int> (std::lround (seconds * sampleRate)));
+    }
+
+    void snap (float newValue) noexcept
+    {
+        value = target = newValue;
+        remaining = 0;
+    }
+
+    void setTarget (float goal) noexcept
+    {
+        if (goal == target)
+            return;
+        target = goal;
+        remaining = rampSamples;
+        step = (target - value) / static_cast<float> (rampSamples);
+    }
+
+    float next() noexcept
+    {
+        if (remaining > 0)
+            value = --remaining == 0 ? target : value + step;
+        return value;
+    }
+
+    [[nodiscard]] bool isSteady() const noexcept { return remaining == 0; }
+};
+
 // Fundido lineal de encendido/apagado de un efecto. Apagado y con el fundido terminado = no se procesa.
 struct EffectSwitch
 {
