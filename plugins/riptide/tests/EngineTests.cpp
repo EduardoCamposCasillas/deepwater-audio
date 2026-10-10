@@ -29,6 +29,7 @@ namespace dw = deepwater::dsp;
 using riptide::dsp::Engine;
 using riptide::dsp::EngineSettings;
 using riptide::dsp::Mode;
+using riptide::dsp::ToneSettings;
 namespace curves = riptide::dsp::curves;
 
 constexpr double pi = std::numbers::pi;
@@ -114,6 +115,19 @@ std::vector<float> render (double sampleRate, const EngineSettings& settings, st
     std::vector<float> none;
     processInBlocks (engine, signal, none, 256);
     return signal;
+}
+
+EngineSettings withTone (const ToneSettings& tone, EngineSettings settings = {})
+{
+    settings.tone = tone;
+    return settings;
+}
+
+// Ganancia en dB de la fundamental de un seno a −40 dBFS (la curva es recta: solo se mide el tono).
+double lowLevelGainDb (double sampleRate, const EngineSettings& settings, double hz)
+{
+    const auto out = render (sampleRate, settings, sine (hz, sampleRate, static_cast<size_t> (sampleRate), 0.01f));
+    return dw::gainToDb (static_cast<float> (toneAmplitude (out, hz, sampleRate, out.size() / 2) / 0.01));
 }
 
 void testCurves()
@@ -522,17 +536,213 @@ void testModeSwitchIsClickless()
     CHECK (engine.getActiveMode() == Mode::fold && ! engine.isSwitchingMode() && engine.getActiveOversampling() == 3);
 }
 
+void testToneNeutralIsTransparent()
+{
+    std::printf ("Tono: con los cortes apagados y emphasis/tilt en 0 la señal no cambia (en cualquier posición PRE/POST)\n");
+
+    const double sr = 48000.0;
+    const auto input = noise (24000, 0.7f, 11u);
+    for (const Mode mode : allModes)
+    {
+        const auto settings = withOversampling (2, withMode (mode, { 9.0f, -2.0f, false }));
+        const auto reference = render (sr, settings, input);
+        ToneSettings flipped;
+        flipped.lowCutPost = true;
+        flipped.highCutPost = false;
+        CHECK (render (sr, withTone (flipped, settings), input) == reference);
+    }
+}
+
+void testCutFilters()
+{
+    std::printf ("Tono: Low Cut y High Cut son de 12 dB/oct (−3 dB en el corte), en PRE y en POST\n");
+
+    for (const double sr : sampleRates)
+        for (const bool post : { false, true })
+        {
+            ToneSettings low;
+            low.lowCutHz = 200.0f;
+            low.lowCutPost = post;
+            const auto lowSettings = withTone (low, withMode (Mode::hardClip));
+            CHECK (std::abs (lowLevelGainDb (sr, lowSettings, 200.0) + 3.01) < 0.1);
+            CHECK (std::abs (lowLevelGainDb (sr, lowSettings, 50.0) + 24.1) < 0.3); // 2 octavas debajo: −24 dB
+            CHECK (std::abs (lowLevelGainDb (sr, lowSettings, 3000.0)) < 0.05);
+
+            ToneSettings high;
+            high.highCutHz = 4000.0f;
+            high.highCutPost = post;
+            const auto highSettings = withTone (high, withMode (Mode::hardClip));
+            CHECK (std::abs (lowLevelGainDb (sr, highSettings, 4000.0) + 3.01) < 0.1);
+            CHECK (lowLevelGainDb (sr, highSettings, 16000.0) < -20.0); // 2 octavas arriba (la bilineal cae aún más)
+            CHECK (std::abs (lowLevelGainDb (sr, highSettings, 200.0)) < 0.05);
+        }
+}
+
+void testPreAndPostSoundDifferent()
+{
+    std::printf ("Tono: el mismo corte suena distinto antes y después de la curva\n");
+
+    const double sr = 48000.0;
+    // +24 dB: el seno llega con amplitud 8 a la curva y sale casi cuadrado (armónicos impares fuertes).
+    const auto base = withOversampling (2, withMode (Mode::hardClip, { 24.0f, 0.0f, false }));
+
+    // Bajo de 100 Hz y Low Cut de 1 kHz. PRE: al bajo le quedan −40 dB (amplitud 0.08) al llegar a la curva: no satura y
+    // no crea armónicos. POST: satura al máximo y el corte quita la fundamental, pero quedan sus armónicos (11º = 1.1 kHz).
+    const auto bass = sine (100.0, sr, 48000, 0.5f);
+    ToneSettings lowCut;
+    lowCut.lowCutHz = 1000.0f;
+    lowCut.lowCutPost = false;
+    const double preHarmonic = toneAmplitude (render (sr, withTone (lowCut, base), bass), 1100.0, sr, 24000);
+    lowCut.lowCutPost = true;
+    const double postHarmonic = toneAmplitude (render (sr, withTone (lowCut, base), bass), 1100.0, sr, 24000);
+    CHECK (preHarmonic < 1.0e-4);
+    CHECK (postHarmonic > 0.05);
+
+    // Seno de 200 Hz y High Cut de 1 kHz. PRE: el seno pasa entero y la curva crea los armónicos DESPUÉS del filtro (el
+    // 15º, en 3 kHz, sigue ahí). POST: el corte se lleva los armónicos agudos (−20 dB a 3 kHz).
+    // (No se mide más arriba: este seno recortado tiene un "hueco" en su espectro cerca del armónico 25, en 5 kHz.)
+    const auto tone = sine (200.0, sr, 48000, 0.5f);
+    ToneSettings highCut;
+    highCut.highCutHz = 1000.0f;
+    highCut.highCutPost = false;
+    const double preHigh = toneAmplitude (render (sr, withTone (highCut, base), tone), 3000.0, sr, 24000);
+    highCut.highCutPost = true;
+    const double postHigh = toneAmplitude (render (sr, withTone (highCut, base), tone), 3000.0, sr, 24000);
+    CHECK (preHigh > 0.03);
+    CHECK (preHigh > 5.0 * postHigh);
+}
+
+void testEmphasisCancelsAtLowLevel()
+{
+    std::printf ("Tono: con señal baja el de-emphasis deshace exactamente el emphasis (respuesta plana)\n");
+
+    for (const double sr : sampleRates)
+    {
+        // Ruido a −40 dBFS: con +12 dB de emphasis no pasa de 0.04, el clip duro es una recta (no satura).
+        const auto input = noise (20000, 0.01f, 5u);
+        const auto settings = withOversampling (1, withMode (Mode::hardClip));
+        const auto flat = render (sr, settings, input);
+        for (const float db : { -12.0f, 6.0f, 12.0f })
+            for (const float hz : { 60.0f, 1000.0f, 9000.0f })
+            {
+                ToneSettings tone;
+                tone.emphasisDb = db;
+                tone.emphasisHz = hz;
+                const auto out = render (sr, withTone (tone, settings), input);
+                float worst = 0.0f;
+                for (size_t i = 0; i < out.size(); ++i)
+                    worst = std::max (worst, std::abs (out[i] - flat[i]));
+                CHECK (worst < 1.0e-6f);
+            }
+    }
+}
+
+void testEmphasisChoosesWhatSaturates()
+{
+    std::printf ("Tono: con drive, la zona de emphasis es la que más satura (y con emphasis negativo, la más limpia)\n");
+
+    const double sr = 48000.0;
+    const auto base = withOversampling (2, withMode (Mode::transistor, { 6.0f, 0.0f, false }));
+    // Distorsión = 3er armónico relativo a la fundamental.
+    const auto distortion = [&] (double hz, float emphasisDb)
+    {
+        ToneSettings tone;
+        tone.emphasisDb = emphasisDb;
+        tone.emphasisHz = 2000.0f;
+        const auto out = render (sr, withTone (tone, base), sine (hz, sr, 48000, 0.4f));
+        return toneAmplitude (out, 3.0 * hz, sr, 24000) / toneAmplitude (out, hz, sr, 24000);
+    };
+    const double neutral = distortion (2000.0, 0.0f);
+    CHECK (distortion (2000.0, 12.0f) > 3.0 * neutral);  // en la zona: mucha más saturación
+    CHECK (distortion (2000.0, -12.0f) < 0.5 * neutral); // emphasis negativo: esa zona queda más limpia
+    const double bassNeutral = distortion (100.0, 0.0f);
+    CHECK (std::abs (distortion (100.0, 12.0f) / bassNeutral - 1.0) < 0.3); // lejos de la zona: casi igual
+}
+
+void testTiltAtLowLevel()
+{
+    std::printf ("Tono: el tilt inclina la salida alrededor de 1 kHz (+dB en agudos, −dB en graves)\n");
+
+    for (const double sr : sampleRates)
+        for (const float db : { -6.0f, 4.0f })
+        {
+            ToneSettings tone;
+            tone.tiltDb = db;
+            const auto settings = withTone (tone, withMode (Mode::hardClip));
+            CHECK (std::abs (lowLevelGainDb (sr, settings, 30.0) + db) < 0.15);
+            CHECK (std::abs (lowLevelGainDb (sr, settings, 1000.0)) < 0.1);
+            CHECK (std::abs (lowLevelGainDb (sr, settings, 15000.0) - db) < 0.5);
+        }
+}
+
+void testToneChangesAreClickless()
+{
+    std::printf ("Tono: mover las perillas de golpe y conmutar PRE/POST no produce saltos\n");
+
+    const std::array<ToneSettings, 6> steps { { { 400.0f, false, 3000.0f, true, 5.0f, 12.0f, 200.0f },
+                                                { 400.0f, true, 3000.0f, false, -6.0f, -12.0f, 8000.0f },
+                                                { 20.0f, true, 20000.0f, false, 0.0f, 0.0f, 1000.0f },
+                                                { 2000.0f, false, 500.0f, true, 6.0f, 12.0f, 50.0f },
+                                                { 60.0f, true, 12000.0f, true, -3.0f, 6.0f, 3000.0f },
+                                                { 20.0f, false, 20000.0f, true, 0.0f, 0.0f, 1000.0f } } };
+    for (const double sr : sampleRates)
+    {
+        const auto base = withOversampling (2, withMode (Mode::tube, { 9.0f, 0.0f, false }));
+        const int fadeSamples = static_cast<int> (std::lround (riptide::dsp::ToneControls::rampSeconds * sr));
+        const auto input = sine (110.0, sr, static_cast<size_t> (sr) * 2, 0.5f);
+
+        // Paso máximo con cada ajuste quieto.
+        float reference = maxStep (render (sr, base, input));
+        for (const auto& tone : steps)
+            reference = std::max (reference, maxStep (render (sr, withTone (tone, base), input)));
+
+        Engine engine;
+        engine.prepare (sr, base);
+        std::vector<float> output, none;
+        size_t position = 0;
+        for (size_t c = 0; position + static_cast<size_t> (fadeSamples) * 4 < input.size(); ++c)
+        {
+            engine.setSettings (withTone (steps[c % steps.size()], base));
+            // Algunos cambios llegan a mitad de una rampa.
+            const size_t length = static_cast<size_t> (c % 3 == 1 ? fadeSamples / 2 : fadeSamples * 3);
+            std::vector<float> block (input.begin() + static_cast<std::ptrdiff_t> (position),
+                                      input.begin() + static_cast<std::ptrdiff_t> (position + length));
+            processInBlocks (engine, block, none, 64);
+            output.insert (output.end(), block.begin(), block.end());
+            position += length;
+        }
+        std::printf ("  %.0f Hz: paso máximo %.4f (quieto: %.4f)\n", sr, static_cast<double> (maxStep (output)),
+                     static_cast<double> (reference));
+        CHECK (maxStep (output) <= reference * 1.1f + 2.0f / static_cast<float> (fadeSamples));
+    }
+}
+
+void testInputMeterSeesEmphasis()
+{
+    std::printf ("Tono: IN mide lo que llega a la curva (con el emphasis); OUT, la salida ya de-enfatizada\n");
+
+    Engine engine;
+    ToneSettings tone;
+    tone.emphasisDb = 12.0f;
+    tone.emphasisHz = 1000.0f;
+    engine.prepare (48000.0, withTone (tone, withMode (Mode::hardClip)));
+    std::vector<float> left = sine (1000.0, 48000.0, 96000, dw::dbToGain (-40.0f)), none;
+    processInBlocks (engine, left, none, 512);
+    CHECK (std::abs (dw::gainToDb (engine.inputMeter (0).takePeak()) - (-28.0f)) < 0.1f);
+    CHECK (std::abs (dw::gainToDb (engine.outputMeter (0).takePeak()) - (-40.0f)) < 0.1f);
+}
+
 void testBlockSizeIndependence()
 {
-    std::printf ("Engine: el resultado no depende del tamaño de bloque (con automatización y cambios de factor y modo)\n");
+    std::printf ("Engine: el resultado no depende del tamaño de bloque (con automatización y cambios de factor, modo y tono)\n");
 
     constexpr size_t changeEvery = 28672; // múltiplo de todos los bloques probados: los cambios caen en la misma muestra
-    const std::array<EngineSettings, 6> changes { { { 8.0f, -3.0f, false, 2, Mode::tube },
-                                                     { -6.0f, 4.0f, true, 4, Mode::rectify },
+    const std::array<EngineSettings, 6> changes { { { 8.0f, -3.0f, false, 2, Mode::tube, { 300.0f, false, 6000.0f, true, 3.0f, 6.0f, 2000.0f } },
+                                                     { -6.0f, 4.0f, true, 4, Mode::rectify, { 300.0f, true, 6000.0f, false, -2.0f, -9.0f, 150.0f } },
                                                      { 2.5f, 0.0f, false, 0, Mode::fold },
-                                                     { 18.0f, -24.0f, false, 3, Mode::hardClip },
+                                                     { 18.0f, -24.0f, false, 3, Mode::hardClip, { 40.0f, false, 900.0f, false, 6.0f, 12.0f, 7000.0f } },
                                                      { 0.0f, 0.0f, false, 1, Mode::transistor },
-                                                     { 6.0f, 0.0f, false, 1, Mode::tape } } };
+                                                     { 6.0f, 0.0f, false, 1, Mode::tape, { 20.0f, true, 20000.0f, true, -6.0f, 0.0f, 1000.0f } } } };
     const auto inputL = noise (changeEvery * changes.size(), 0.7f, 3u);
     const auto inputR = noise (changeEvery * changes.size(), 0.7f, 4u);
 
@@ -610,6 +820,14 @@ int main()
     testBypassToggleIsSmooth();
     testOversamplingSwitchIsClickless();
     testModeSwitchIsClickless();
+    testToneNeutralIsTransparent();
+    testCutFilters();
+    testPreAndPostSoundDifferent();
+    testEmphasisCancelsAtLowLevel();
+    testEmphasisChoosesWhatSaturates();
+    testTiltAtLowLevel();
+    testToneChangesAreClickless();
+    testInputMeterSeesEmphasis();
     testBlockSizeIndependence();
     testMeters();
 

@@ -15,8 +15,18 @@ inline constexpr const char* oversampling = "oversampling";
 // Fase 3.
 inline constexpr const char* mode = "mode";
 
+// Fase 4.
+inline constexpr const char* lowCut = "lowCut";
+inline constexpr const char* lowCutPosition = "lowCutPosition";
+inline constexpr const char* highCut = "highCut";
+inline constexpr const char* highCutPosition = "highCutPosition";
+inline constexpr const char* emphasis = "emphasis";
+inline constexpr const char* emphasisFreq = "emphasisFreq";
+inline constexpr const char* tilt = "tilt";
+
 // Versión en la que apareció cada parámetro (la usa el VST3 para ordenar y reconocer parámetros nuevos).
 inline constexpr int versionHint = 1;
 inline constexpr int versionHintPhase2 = 2;
 inline constexpr int versionHintPhase3 = 3;
+inline constexpr int versionHintPhase4 = 4;
 } // namespace riptide::params

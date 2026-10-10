@@ -7,8 +7,8 @@
 
 #include "dsp/Engine.h"
 
-// Fase 3: efecto mono/estéreo: input (drive) → modo de saturación con oversampling → filtro DC → output, con medidores de entrada
-// y salida y bypass con fundido. Todo el audio está en riptide::dsp::Engine (sin JUCE); aquí solo se conectan los
+// Fase 4: efecto mono/estéreo: input (drive) → tono pre (cortes, emphasis) → modo de saturación con oversampling → tono post
+// (de-emphasis, cortes, tilt) → filtro DC → output, con medidores de entrada y salida y bypass con fundido. Todo el audio está en riptide::dsp::Engine (sin JUCE); aquí solo se conectan los
 // parámetros, el estado, la latencia y los medidores con la GUI.
 //
 // El temporizador corre en el hilo de mensajes: informa al host la latencia nueva cuando el audio cambia de factor de
@@ -75,6 +75,13 @@ private:
     std::atomic<float>* bypassParam = nullptr;
     std::atomic<float>* oversamplingParam = nullptr;
     std::atomic<float>* modeParam = nullptr;
+    std::atomic<float>* lowCutParam = nullptr;
+    std::atomic<float>* lowCutPositionParam = nullptr;
+    std::atomic<float>* highCutParam = nullptr;
+    std::atomic<float>* highCutPositionParam = nullptr;
+    std::atomic<float>* emphasisParam = nullptr;
+    std::atomic<float>* emphasisFreqParam = nullptr;
+    std::atomic<float>* tiltParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     riptide::dsp::Engine engine;

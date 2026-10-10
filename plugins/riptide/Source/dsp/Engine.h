@@ -8,6 +8,7 @@
 #include "deepwater/dsp/LevelMeter.h"
 #include "deepwater/dsp/Smoothing.h"
 #include "dsp/Saturator.h"
+#include "dsp/Tone.h"
 
 namespace riptide::dsp
 {
@@ -25,15 +26,18 @@ struct EngineSettings
     bool bypassed = false;
     int oversampling = 2; // índice: 0 = Off, 1 = 2x, 2 = 4x, 3 = 8x, 4 = 16x
     Mode mode = Mode::tape;
+    ToneSettings tone {};
 };
 
-// Fase 3: cadena de audio completa del saturador, sin JUCE (se prueba en tests/EngineTests.cpp):
+// Fase 4: cadena de audio completa del saturador, sin JUCE (se prueba en tests/EngineTests.cpp):
 //
-//   entrada ─┬─ × input (drive) ─[medidor IN]─ modo (Saturator) ─ filtro DC ─ × output ─┐
-//            │                                                                       ├─ fundido ─ × fundido de factor ─[medidor OUT]─ salida
-//            └────────────────── señal original retrasada lo mismo que el oversampling ──┘
+//   entrada ─┬─ × input (drive) ─ tono pre ─[medidor IN]─ modo (Saturator) ─ tono post ─ filtro DC ─ × output ─┐
+//            │                                                                                              ├─ fundido ─ × fundido de factor ─[medidor OUT]─ salida
+//            └─────────────────────────── señal original retrasada lo mismo que el oversampling ──────────────┘
 //
-// Input es el drive: decide con qué nivel llega la señal a la curva del modo (ver Saturator.h). Cada modo calcula su
+// Input es el drive: decide con qué nivel llega la señal a la curva del modo (ver Saturator.h). El tono (Tone.h)
+// decide QUÉ frecuencias llegan a la curva y con cuánto nivel (cortes PRE y emphasis) y el color de lo que sale (de-
+// emphasis, cortes POST y tilt). IN mide justo antes de la curva: lo que la curva "ve". Cada modo calcula su
 // curva con oversampling (etapas halfband de la librería) para que los armónicos que pasan de Nyquist no se
 // reflejen como aliasing.
 //
@@ -63,6 +67,7 @@ public:
         bypassFade.setTime (bypassFadeSeconds, sampleRate);
         factorFade.setTime (factorFadeSeconds, sampleRate);
         modeFade.setTime (modeFadeSeconds, sampleRate);
+        tone.prepare (sampleRate, settings.tone);
 
         // Al preparar no hay nada que suavizar: se empieza directamente en los valores actuales.
         inputGain.snap (deepwater::dsp::dbToGain (settings.inputGainDb));
@@ -81,6 +86,7 @@ public:
         {
             for (auto& slot : channel.slots)
                 slot.prepare (sampleRate, activeStages, requestedMode);
+            channel.tone.reset();
             channel.dcBlocker.prepare (dcCutoffHz, sampleRate);
             channel.dryDelay.fill (0.0f);
             channel.input.prepare (sampleRate);
@@ -97,6 +103,7 @@ public:
         processing = ! settings.bypassed;
         requestedStages = clampStages (settings.oversampling);
         requestedMode = settings.mode;
+        tone.setSettings (settings.tone);
     }
 
     // Procesa en el sitio. Con más de maxChannels canales, los de más se dejan intactos.
@@ -128,6 +135,7 @@ public:
             const float gainIn = inputGain.next();
             const float gainOut = outputGain.next();
             const float wet = bypassFade.next (processing); // 1 = procesado, 0 = original
+            tone.advance();
             const size_t readIndex = (dryWriteIndex - static_cast<size_t> (latency)) & (dryDelaySize - 1);
 
             for (int ch = 0; ch < numChannels; ++ch)
@@ -138,7 +146,7 @@ public:
                 channel.dryDelay[dryWriteIndex] = sample;
                 const float dry = channel.dryDelay[readIndex];
 
-                const float driven = sample * gainIn;
+                const float driven = channel.tone.pre (sample * gainIn, tone);
                 channel.input.push (driven);
                 float saturated = channel.slots[activeSlot].process (driven);
                 if (switching)
@@ -146,7 +154,7 @@ public:
                     const float incoming = channel.slots[1 - activeSlot].process (driven);
                     saturated = blend == 1.0f ? incoming : saturated + (incoming - saturated) * blend;
                 }
-                const float processed = channel.dcBlocker.process (saturated) * gainOut;
+                const float processed = channel.dcBlocker.process (channel.tone.post (saturated, tone)) * gainOut;
 
                 // Fuera de los fundidos se copia la señal tal cual: con el bypass puesto la salida es la entrada
                 // retrasada, bit a bit.
@@ -180,6 +188,7 @@ private:
     struct Channel
     {
         std::array<Saturator, 2> slots; // el activo y el que entra durante un cambio de modo
+        ToneChannel tone;
         deepwater::dsp::DcBlocker dcBlocker;
         std::array<float, dryDelaySize> dryDelay {};
         LevelMeter input, output;
@@ -225,6 +234,7 @@ private:
     deepwater::dsp::EffectSwitch bypassFade;
     deepwater::dsp::EffectSwitch factorFade;
     deepwater::dsp::LinearRamp modeFade;
+    ToneControls tone;
     bool processing = true;
     int requestedStages = 0;
     int activeStages = 0;

@@ -351,3 +351,127 @@ drive. Pista de partida: piensa qué modo trata distinto a los agudos y a los gr
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 4 — Tono: qué se satura y cómo suena lo que sale
+
+Hasta ahora todo el espectro entraba igual a la curva. Un saturador profesional te deja decidir **qué frecuencias
+saturan** y **qué color tiene el resultado**. La clave de esta fase es una sola idea: la saturación no es lineal, así
+que **un mismo filtro suena distinto antes o después de la curva**.
+
+### Conceptos aprendidos
+
+- **El orden importa (procesos no lineales).** Un EQ seguido de otro EQ da lo mismo en cualquier orden. Un EQ y un
+  saturador, no. Lo que va **antes** (PRE) decide qué llega a la curva y con cuánto nivel, o sea, qué se satura. Lo que
+  va **después** (POST) solo cambia el color de lo que sale, incluidos los armónicos que la curva acaba de crear.
+- **Intermodulación.** Cuando dos frecuencias saturan juntas, no solo aparecen sus armónicos: aparecen también tonos
+  de **suma y diferencia** (100 Hz y 1 kHz → 900 Hz, 1100 Hz...). No son múltiplos de ninguna nota: suenan a "barro",
+  aspereza, desafinación. El caso clásico: un bajo fuerte que satura junto con una voz o una guitarra y la ensucia.
+  Un Low Cut **PRE** evita que los graves participen en la saturación.
+- **Low Cut / High Cut (high-pass / low-pass).** Filtros de **12 dB/oct**: en el corte la señal baja 3 dB; una octava
+  más allá, 12 dB; dos octavas, 24 dB. En el extremo de la perilla se apagan ("Off"): la señal pasa intacta.
+- **PRE vs POST en la práctica.**
+  - Low Cut **PRE**: el bajo deja de empujar la curva (más claridad, menos intermodulación). OJO: también se quita de
+    la salida. Hasta la Fase 5 (mix) no hay forma de "saturar sin graves y recuperarlos limpios".
+  - Low Cut **POST**: el bajo satura con todo y después se le quita la fundamental, pero sus **armónicos se quedan**.
+    Sirve para capas de efecto o para quitar barro después de saturar.
+  - High Cut **POST**: el uso más común. Suaviza el **fizz** (el chisporroteo agudo que crea la saturación).
+  - High Cut **PRE**: los agudos no entran a la curva, así que no se ensucian. Pero los graves y medios crean sus
+    armónicos DESPUÉS del filtro: siguen apareciendo agudos nuevos.
+- **Emphasis / de-emphasis (a la carta).** Es el truco de la cinta de la Fase 3, pero eliges zona y cantidad: una
+  campana ancha sube esa zona **antes** de la curva y su inversa exacta la baja **después**. Sin drive se anulan
+  (respuesta plana: compruébalo con el bypass a nivel bajo). Con drive, la zona realzada llega más fuerte a la curva y
+  es la que **más satura**; con emphasis **negativo**, esa zona llega más baja y queda **más limpia** que el resto.
+  Medido en Riptide (Transistor, +6 dB): +12 dB de emphasis en 2 kHz triplica el 3er armónico de un tono de 2 kHz;
+  −12 dB lo baja a menos de la mitad; un tono de 100 Hz casi no se entera.
+- **Tilt.** Inclina todo el espectro de la salida alrededor de 1 kHz: +3 dB = agudos +3 dB y graves −3 dB (1 kHz no
+  cambia). Es un "control de tono" muy suave, como el de un amplificador de guitarra o de un equipo de música: cambia
+  el color general sin dibujar picos ni valles.
+- **El medidor IN ahora ve el tono PRE.** IN mide justo antes de la curva: si subes el emphasis o pones un corte PRE,
+  IN cambia aunque la salida (sin drive) no cambie. Es lo que la curva "ve".
+
+### Qué hace cada control
+
+- **Low Cut** (20 Hz = Off ... 2 kHz) y su botón **PRE/POST** (por defecto PRE). En el analizador: en PRE desaparecen a
+  la vez los graves y los armónicos que creaban; en POST desaparecen los graves pero los armónicos medios siguen ahí.
+- **High Cut** (500 Hz ... 20 kHz = Off) y su botón (por defecto POST). En POST el espectro cae por encima del corte
+  (adiós fizz); en PRE siguen apareciendo armónicos por encima del corte (la curva los crea después).
+- **Emphasis** (−12 ... +12 dB) y **Emph Freq** (50 Hz ... 10 kHz). Con Input en 0 dB y señal suave no oyes nada (es lo
+  correcto). Sube Input y mueve Emph Freq: la "suciedad" se mueve por el espectro, como un filtro que barre, pero de
+  saturación en vez de volumen.
+- **Tilt** (−6 ... +6 dB): más brillante (positivo) o más oscuro y cálido (negativo). Va al final: no cambia qué se
+  satura.
+- Doble clic en cualquier perilla = su valor por defecto (cortes en Off, emphasis y tilt en 0 dB).
+- En la forma de onda: un Low Cut PRE con un bajo saturado deja la onda casi senoidal (no llega a recortar); en POST
+  la onda se ve recortada pero "flotando" (sin la fundamental).
+
+### Ejercicio de escucha guiado: PRE contra POST (con volumen igualado)
+
+1. Un bajo sostenido (3x Osc en sierra, **La2 (55 Hz)**) o un loop de bajo en un insert con Riptide, y un **Fruity
+   Parametric EQ 2** después para ver el espectro. **Tube**, Oversampling 4x, **Input +12 dB**.
+2. Iguala con Output contra el bypass. Escucha y mira: graves fuertes y armónicos hasta los medios.
+3. **Low Cut en 300 Hz, PRE.** Iguala con Output (vas a tener que subirlo bastante: se fueron los graves). Qué notar:
+   suena fino y casi limpio, porque lo que queda llega con poco nivel a la curva.
+4. Pulsa **POST** (vuelve a igualar). Qué notar: también fino, pero ahora áspero y "gritón": son los armónicos que creó
+   el bajo saturado, sin su fundamental. Alterna PRE/POST varias veces: misma perilla, sonido opuesto.
+5. Low Cut en Off. **High Cut en 3 kHz, POST**, y después **PRE**. En POST el fizz desaparece y queda un sonido
+   redondo; en PRE vuelven a aparecer agudos (mira el analizador por encima de 3 kHz).
+6. High Cut en Off. **Emphasis +9 dB** y barre **Emph Freq** despacio de 80 Hz a 5 kHz. Qué notar: la zona que se
+   "rompe" se mueve. Después pon **−9 dB en 80 Hz**: el bajo sigue fuerte pero más limpio y firme, y la suciedad queda
+   en los medios.
+7. Al final, **Tilt** de −4 a +4 dB: solo cambia el brillo; la saturación no se mueve.
+
+### Receta de uso: un 808 que se oye en bocinas pequeñas (celular, laptop)
+
+1. Riptide en el insert del 808. **Tube** (armónicos pares: octavas que refuerzan la nota), Oversampling 4x.
+2. **Emphasis +6 a +9 dB en unos 100 Hz**: el cuerpo del 808 es lo que más satura. Sus armónicos (2×, 3×, 4×: de 90 a
+   180 Hz para un 808 en **Fa2 (44 Hz)**, y más arriba) son justo lo que una bocina pequeña sí puede reproducir.
+3. **Input +6 a +12 dB** hasta que la nota se entienda a volumen bajo. **High Cut POST en 5–8 kHz** para quitar el fizz,
+   que no le aporta nada a un bajo.
+4. Iguala con Output, alterna el bypass y prueba en audífonos baratos o en la bocina de la laptop.
+5. ¿Por qué funciona? El oído "reconstruye" una fundamental que no oye si escucha sus armónicos (la **fundamental
+   ausente**). El emphasis hace que la saturación caiga sobre el cuerpo del 808 y no sobre su clic, que ya es brillante.
+6. Variante para voz: **Low Cut PRE en 120–150 Hz** (que los golpes de micrófono y la respiración grave no saturen),
+   **Tape** o **Transistor** con +3 a +6 dB, **Emphasis +4 dB en 3 kHz** (presencia) y **High Cut POST en 12 kHz**.
+
+### Reto sin receta
+
+Tienes un **bajo eléctrico** que quieres hacer **gruñir en los medios** (que se oiga la "mugre" de las cuerdas), pero el
+**sub tiene que seguir limpio y firme**, con el mismo volumen que sin Riptide. Ojo: un Low Cut PRE no sirve, porque se
+llevaría el sub de la salida. Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **PRE / POST**: antes o después del proceso. *En música:* el Tube Screamer recorta graves antes de distorsionar; por
+  eso la guitarra de Stevie Ray Vaughan suena clara y no embarrada.
+- **Intermodulación**: tonos de suma y diferencia entre frecuencias que saturan juntas. *En música:* por qué un acorde
+  completo con mucha distorsión suena áspero, y los guitarristas de metal tocan "power chords" (quinta y octava).
+- **Low Cut / High Cut**: filtros que quitan graves / agudos (high-pass / low-pass). *En música:* el "efecto teléfono"
+  en voces (los dos cortes muy cerrados), típico en intros de canciones pop y en coros de hip-hop.
+- **Pendiente (dB/oct)**: cuánto baja un filtro por cada octava pasado el corte. 12 dB/oct es suave y musical.
+- **Fizz**: el chisporroteo agudo de la saturación. *En música:* una guitarra distorsionada grabada directo, sin el
+  filtro natural del altavoz y el gabinete.
+- **Emphasis / de-emphasis**: realzar una zona antes de un proceso y devolverla después. *En música:* las cintas de
+  estudio, los discos de vinilo (curva RIAA) y la radio FM.
+- **Tilt EQ**: inclinación del espectro alrededor de un pivote. *En música:* el control "Tone" de muchos pedales y
+  amplificadores, y los EQ de mastering con control de tilt.
+- **Fundamental ausente**: el oído percibe la nota aunque falte su fundamental, si oye sus armónicos. *En música:* por
+  qué un 808 saturado "se oye" en un celular que físicamente no reproduce 45 Hz.
+
+### Errores comunes
+
+- **Low Cut PRE "para limpiar" y perder el bajo**: el corte PRE también quita esos graves de la salida. Si quieres
+  graves limpios y medios sucios, la herramienta es el **emphasis negativo** en los graves (o el Mix de la Fase 5).
+- **Juzgar el emphasis sin igualar el volumen**: con drive, subir el emphasis sube el nivel. Iguala con Output antes de
+  decidir.
+- **High Cut POST demasiado bajo**: el sonido queda opaco y se va al fondo de la mezcla. Bájalo hasta que el fizz
+  desaparezca, y no más.
+- **Emphasis +12 dB en agudos con Hard Clip y oversampling bajo**: agudos fuertes + clip duro = aliasing. Sube el
+  oversampling a 8x.
+- **Usar el tilt como EQ correctivo**: el tilt es para el color general. Un problema en una frecuencia concreta (una
+  resonancia, un "honk") es trabajo de un EQ paramétrico (el plugin 3 de la suite).
+- **Cuándo NO usar el tono de Riptide**: si solo quieres ecualizar sin saturar, usa un EQ: es más preciso y no le
+  agregas al canal la latencia del oversampling.
+
+### Retos completados
+
+(Ninguno todavía.)

@@ -6,11 +6,14 @@
 #include <numbers>
 
 #include "deepwater/dsp/FastMath.h"
+#include "deepwater/dsp/OnePole.h"
 #include "deepwater/dsp/Oversampler.h"
 #include "deepwater/dsp/Svf.h"
 
 namespace riptide::dsp
 {
+
+using deepwater::dsp::OnePole;
 
 // Modos de saturación, en el orden del selector. El proyecto de FL guarda el ÍNDICE: solo añadir al final.
 enum class Mode { tape, tube, transistor, hardClip, rectify, fold };
@@ -67,29 +70,6 @@ namespace curves
     [[nodiscard]] inline float fold (float x) noexcept { return std::sin (x); }
 } // namespace curves
 
-// --- Filtros de 1 polo TPT -------------------------------------------------------------------------------------------
-// Low-pass/high-pass de 1 polo (6 dB/oct) con integrador trapezoidal: es la transformada bilineal del filtro RC
-// analógico w / (s + w), con g = w / (2·sr).
-class OnePole
-{
-public:
-    void setG (float g) noexcept { gain = g / (1.0f + g); }
-    void reset() noexcept { state = 0.0f; }
-
-    // Devuelve el high-pass (x − low-pass).
-    [[nodiscard]] float highPass (float x) noexcept
-    {
-        const float v = (x - state) * gain;
-        const float lowPass = v + state;
-        state = lowPass + v;
-        return x - lowPass;
-    }
-
-private:
-    float gain = 0.0f;
-    float state = 0.0f;
-};
-
 // Pre-énfasis y de-énfasis de la cinta. Una grabadora real sube los agudos antes de grabar y los baja al reproducir
 // (para tapar el siseo de la cinta). Efecto secundario: los agudos llegan más fuertes a la cinta y se saturan antes.
 // Con señal baja los dos filtros se anulan (respuesta plana); con drive, los agudos se comprimen más que los graves:
@@ -107,22 +87,23 @@ public:
     void prepare (double sampleRate) noexcept
     {
         const auto g = static_cast<float> (std::tan (std::numbers::pi * std::min (cornerHz, 0.45 * sampleRate) / sampleRate));
-        pre.setG (g);
-        post.setG (g / boost);
+        pre = OnePole::coefficient (g);
+        post = OnePole::coefficient (g / boost);
         reset();
     }
 
     void reset() noexcept
     {
-        pre.reset();
-        post.reset();
+        preFilter.reset();
+        postFilter.reset();
     }
 
-    [[nodiscard]] float emphasize (float x) noexcept { return x + (boost - 1.0f) * pre.highPass (x); }
-    [[nodiscard]] float deEmphasize (float x) noexcept { return x + (1.0f / boost - 1.0f) * post.highPass (x); }
+    [[nodiscard]] float emphasize (float x) noexcept { return x + (boost - 1.0f) * preFilter.highPass (x, pre); }
+    [[nodiscard]] float deEmphasize (float x) noexcept { return x + (1.0f / boost - 1.0f) * postFilter.highPass (x, post); }
 
 private:
-    OnePole pre, post;
+    OnePole preFilter, postFilter;
+    float pre = 0.0f, post = 0.0f;
 };
 
 // --- Saturador de un canal -------------------------------------------------------------------------------------------
@@ -178,7 +159,7 @@ public:
         oversampler.reset();
         emphasis.reset();
         headBumpFilter.reset();
-        rectifyHighPass.setG (rectifyG[static_cast<size_t> (oversampler.getNumStages())]);
+        rectifyCoefficient = OnePole::coefficient (rectifyG[static_cast<size_t> (oversampler.getNumStages())]);
         rectifyHighPass.reset();
     }
 
@@ -202,7 +183,7 @@ public:
             case Mode::hardClip:   return oversampler.process (x, curves::hardClip);
             case Mode::rectify:
                 return oversampler.process (x, [this] (float v)
-                                            { return deepwater::dsp::fastTanh (rectifyHighPass.highPass (curves::rectify (v))); });
+                                            { return deepwater::dsp::fastTanh (rectifyHighPass.highPass (curves::rectify (v), rectifyCoefficient)); });
             case Mode::fold:       return oversampler.process (x, curves::fold);
         }
         return x;
@@ -217,6 +198,7 @@ private:
     deepwater::dsp::SvfStage::Coefficients headBump;
     float headBumpAmount = 0.0f;
     OnePole rectifyHighPass;
+    float rectifyCoefficient = 0.0f;
     std::array<float, deepwater::dsp::Oversampler::maxStages + 1> rectifyG {};
 };
 

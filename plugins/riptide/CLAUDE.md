@@ -25,6 +25,7 @@ un plugin de nivel profesional y que él entienda cada parte y sepa cuándo y c�
 - `Halfband.h`: decimador e interpolador halfband ×2 (100 dB). El oversampling 2x–16x de la Fase 2 se construye
   encadenando etapas ×2 (la latencia total es la suma de las etapas: hay que informarla al host).
 - `Svf.h`: SVF TPT/ZDF para los filtros pre/post y el tono (Fase 4); base de los crossovers (Fase 6).
+- `OnePole.h`: filtro de 1 polo TPT (pre/de-énfasis de Tape, high-pass de Rectify) y `TiltFilter` (Fase 4).
 - `Smoothing.h`: suavizado de gain, drive y mix; fundidos de bypass.
 - `FastMath.h` (`fastTanh`), `Fft.h` (analizador fuera del hilo de audio), `Simd.h`.
 
@@ -68,6 +69,7 @@ plugins/riptide/
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     dsp/Engine.h             # cadena de audio completa, sin JUCE
     dsp/Saturator.h          # modos: curvas, filtros propios de cada modo, oversampling (un canal)
+    dsp/Tone.h               # cortes PRE/POST, emphasis y tilt (coeficientes compartidos + estado por canal)
     gui/                     # tema, LookAndFeel, medidores
   tests/EngineTests.cpp    # tests del motor (sin JUCE)
 ```
@@ -96,8 +98,41 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
+Fase 4 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+- Cadena: entrada → × input (drive) → tono pre → [medidor IN] → modo → tono post → filtro DC → × output → fundido de
+  bypass → × fundido de factor → [medidor OUT]. IN mide ahora justo antes de la curva (con los cortes PRE y el
+  emphasis): lo que la curva "ve".
+- `dsp/Tone.h`: `ToneControls` (rampas, fundidos y coeficientes, una vez por muestra para todos los canales; tan() solo
+  mientras una perilla se mueve) y `ToneChannel` (estado de los filtros). Todo a la frecuencia del host (lineal: no
+  necesita oversampling) y sin latencia.
+  - pre: Low Cut → High Cut → emphasis; post: de-emphasis → Low Cut → High Cut → tilt.
+  - Cortes: SVF Butterworth 12 dB/oct (HP para Low Cut, LP para High Cut). Cada corte existe en pre y en post; las dos
+    copias procesan siempre y su interruptor PRE/POST las cruza en 20 ms (`EffectSwitch`). Off = extremo de la perilla
+    (±1 %, `isCutOff`; la GUI muestra "Off"): fundido a 0 y la señal pasa bit a bit.
+  - Emphasis: campana SVF (Q 0.7) pre `x + (A−1)·k·bp` y su inversa exacta post: misma g, amortiguación A·k,
+    `x + (1−A)·k·bp'`. Con señal baja la diferencia con emphasis 0 es < 1e-6.
+  - Tilt (`TiltFilter` en la librería): A·HP + LP/A con el polo en A·1 kHz; plano = bit a bit.
+  - Frecuencias suavizadas en octavas (log2) y dB lineales, `LinearRamp` de 20 ms.
+- Neutro (por defecto) = idéntico bit a bit a la Fase 3: comprobado renderizando el motor de la Fase 3 (HEAD) y el
+  nuevo con 6 modos × 3 factores × 2 sample rates, estéreo y con cambio de modo (también cubre mover `OnePole` a la
+  librería sin cambiar Tape ni Rectify).
+- Parámetros nuevos (versionHint 4): `lowCut` (20–2000 Hz log, def. 20 = Off), `lowCutPosition` (choice Pre/Post, def.
+  Pre), `highCut` (500–20 000 Hz log, def. 20 000 = Off), `highCutPosition` (def. Post), `emphasis` (±12 dB, def. 0),
+  `emphasisFreq` (50–10 000 Hz log, def. 1 kHz), `tilt` (±6 dB = ganancia en agudos, graves la contraria; def. 0).
+  Las perillas de frecuencia son logarítmicas de verdad (`NormalisableRange` con lambdas).
+- GUI 760 × 560: modos y descripción; sección TONO (Low Cut, High Cut con botón PRE/POST debajo, Emphasis, Emph Freq,
+  Tilt); sección NIVEL (Input, Output). Doble clic = valor por defecto del parámetro.
+- Librería: `OnePole.h` nuevo (`OnePole` movido desde `Saturator.h`, ahora con el coeficiente como argumento, +
+  `TiltFilter`). Undertow no lo usa: no cambia.
+- Tests: `DeepwaterDspTests` (+2: 1 polo LP+HP = x, −3 dB y pendiente; tilt ±dB, pivote 0 dB, plano bit a bit) y
+  `RiptideTests` (+8: neutro bit a bit en cualquier posición, cortes −3 dB en el corte y 12 dB/oct en pre y post, pre
+  vs post (Low Cut PRE no crea armónicos, POST sí; High Cut PRE deja los armónicos agudos, POST los quita), emphasis
+  inverso exacto a nivel bajo, emphasis decide qué satura (+12 dB: 3er armónico ×3; −12 dB: ×0.5; lejos de la zona,
+  igual), tilt, cambios bruscos y PRE/POST sin saltos, IN ve el emphasis; independencia de bloque con tono).
+- Release con 0 warnings; ctest 4/4; pluginval strictness 10 ampliado: SUCCESS. GUI revisada con captura del Standalone.
+
 Fase 3 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
-- Cadena: entrada → × input (drive) → [medidor IN] → modo (`dsp/Saturator.h`) → filtro DC (5 Hz) → × output → fundido
+- Cadena (Fase 3): entrada → × input (drive) → [medidor IN] → modo (`dsp/Saturator.h`) → filtro DC (5 Hz) → × output → fundido
   de bypass → × fundido de factor → [medidor OUT].
 - Modos (`Mode`, índice = valor del parámetro; solo añadir al final). Todos con f(0) = 0 y, salvo Rectify, pendiente 1
   en el origen (mismo volumen a nivel bajo):
@@ -180,4 +215,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 4 (tono: filtros pre/post, tilt, emphasis).
+Siguiente: que el usuario pruebe la Fase 4 en FL; después, Fase 5 (mix dry/wet, auto gain, delta).

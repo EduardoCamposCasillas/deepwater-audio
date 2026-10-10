@@ -4,12 +4,15 @@
 
 namespace
 {
-constexpr int editorWidth = 580;
-constexpr int editorHeight = 420;
+constexpr int editorWidth = 760;
+constexpr int editorHeight = 560;
 constexpr int headerHeight = 44;
 constexpr int padding = 12;
 constexpr int meterWidth = 96;
-constexpr int knobSize = 110;
+constexpr int knobSize = 104;
+constexpr int toneKnobSize = 70;
+constexpr int sectionLabelHeight = 18;
+constexpr int positionButtonHeight = 22;
 constexpr int framesPerSecond = 30;
 constexpr int modeButtonHeight = 26;
 constexpr int modeDescriptionHeight = 34;
@@ -41,12 +44,20 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
     addAndMakeVisible (inputMeter);
     addAndMakeVisible (outputMeter);
     setUpKnob (inputKnob, id::inputGain, "Input",
-               juce::String::fromUTF8 ("Drive: nivel con el que la se\xc3\xb1" "al entra a la curva (lo que mide IN). "
-                                       "Subirlo = saturar m\xc3\xa1s: m\xc3\xa1s arm\xc3\xb3nicos, m\xc3\xa1s densidad, "
-                                       "menos pegada."));
+               juce::String::fromUTF8 ("Drive: nivel con el que la se\xc3\xb1" "al entra a la curva (lo que mide IN, despu\xc3\xa9s de los cortes PRE y el emphasis). Subirlo = saturar m\xc3\xa1s: m\xc3\xa1s arm\xc3\xb3nicos, m\xc3\xa1s densidad, menos pegada."));
     setUpKnob (outputKnob, id::outputGain, "Output",
                juce::String::fromUTF8 ("Volumen final. Sirve para igualar el volumen con el bypass y comparar a "
                                        "o\xc3\xad" "do justo."));
+
+    setUpSectionLabel (levelSection, "NIVEL");
+    setUpSectionLabel (toneSection, "TONO");
+    setUpKnob (lowCutKnob, id::lowCut, "Low Cut", juce::String::fromUTF8 ("Low Cut (high-pass, 12 dB/oct): quita graves. En PRE los graves ya no llegan a la curva: no la empujan ni la ensucian (m\xc3\xa1s claridad, menos \"barro\"). En POST el bajo satura con fuerza y despu\xc3\xa9s se le quita la fundamental, pero sus arm\xc3\xb3nicos se quedan. Al m\xc3\xadnimo: apagado."));
+    setUpKnob (highCutKnob, id::highCut, "High Cut", juce::String::fromUTF8 ("High Cut (low-pass, 12 dB/oct): quita agudos. En POST suaviza el \"fizz\" (los arm\xc3\xb3nicos agudos que crea la saturaci\xc3\xb3n). En PRE los agudos no se saturan: la saturaci\xc3\xb3n queda en graves y medios, m\xc3\xa1s oscura. Al m\xc3\xa1ximo: apagado."));
+    setUpKnob (emphasisKnob, id::emphasis, "Emphasis", juce::String::fromUTF8 ("Emphasis: sube (o baja) una zona ANTES de la curva y la devuelve a su sitio DESPU\xc3\x89S. Sin drive no cambia nada; con drive, esa zona es la que m\xc3\xa1s se satura (positivo) o la que se mantiene limpia (negativo)."));
+    setUpKnob (emphasisFreqKnob, id::emphasisFreq, "Emph Freq", juce::String::fromUTF8 ("Centro de la zona de emphasis (campana ancha, unas 2 octavas). Ejemplos: 100 Hz = saturar el cuerpo del bajo; 3 kHz = la presencia de una voz o una guitarra."));
+    setUpKnob (tiltKnob, id::tilt, "Tilt", juce::String::fromUTF8 ("Tilt: inclina el espectro de la salida alrededor de 1 kHz. Positivo = agudos arriba y graves abajo (m\xc3\xa1s brillante); negativo = m\xc3\xa1s oscuro y c\xc3\xa1lido. Va despu\xc3\xa9s de la curva: cambia el color, no lo que se satura."));
+    setUpPositionButton (lowCutPositionButton, lowCutPositionAttachment, id::lowCutPosition);
+    setUpPositionButton (highCutPositionButton, highCutPositionAttachment, id::highCutPosition);
 
     bypassButton.setClickingTogglesState (true);
     bypassButton.setTooltip (juce::String::fromUTF8 ("Escuchar la se\xc3\xb1" "al original. Es el mismo bypass que el de FL "
@@ -103,15 +114,38 @@ void RiptideAudioProcessorEditor::setUpKnob (Knob& knob, const char* parameterId
 {
     knob.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 20);
     knob.slider.setTooltip (tooltip);
-    knob.slider.setDoubleClickReturnValue (true, 0.0); // doble clic = 0 dB
     addAndMakeVisible (knob.slider);
     knob.attachment = std::make_unique<SliderAttachment> (processor.getParameters(), parameterId, knob.slider);
+    // Doble clic = valor por defecto (0 dB en las ganancias, apagado en los cortes).
+    auto* parameter = processor.getParameters().getParameter (parameterId);
+    knob.slider.setDoubleClickReturnValue (true, parameter->convertFrom0to1 (parameter->getDefaultValue()));
 
     knob.label.setText (name, juce::dontSendNotification);
     knob.label.setJustificationType (juce::Justification::centred);
     knob.label.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     knob.label.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
     addAndMakeVisible (knob.label);
+}
+
+void RiptideAudioProcessorEditor::setUpPositionButton (juce::TextButton& button, std::unique_ptr<ButtonAttachment>& attachment,
+                                                       const char* parameterId)
+{
+    button.setClickingTogglesState (true);
+    button.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::accent.withAlpha (0.35f));
+    button.setTooltip (juce::String::fromUTF8 ("PRE = el filtro act\xc3\xba" "a antes de la curva (decide qu\xc3\xa9 se satura). POST = act\xc3\xba" "a despu\xc3\xa9s (solo cambia lo que se oye). Cambiarlo cruza los dos en 20 ms, sin clics."));
+    // El texto sigue al estado (también cuando lo cambia la automatización o un preset).
+    button.onStateChange = [&button] { button.setButtonText (button.getToggleState() ? "POST" : "PRE"); };
+    addAndMakeVisible (button);
+    attachment = std::make_unique<ButtonAttachment> (processor.getParameters(), parameterId, button);
+    button.onStateChange();
+}
+
+void RiptideAudioProcessorEditor::setUpSectionLabel (juce::Label& label, const juce::String& text)
+{
+    label.setText (text, juce::dontSendNotification);
+    label.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    label.setColour (juce::Label::textColourId, riptide::gui::theme::accent);
+    addAndMakeVisible (label);
 }
 
 void RiptideAudioProcessorEditor::showMode (int index)
@@ -144,7 +178,7 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("RIPTIDE", header.removeFromLeft (110), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("saturador  -  Fase 3", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
+    g.drawText ("saturador  -  Fase 4", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
                 juce::Justification::centredLeft);
 
     // Panel de las perillas, entre los dos medidores.
@@ -158,7 +192,7 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     // Flecha del recorrido de la señal: IN → perillas → OUT.
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (juce::String::fromUTF8 ("entrada \xe2\x86\x92 input (drive) \xe2\x86\x92 modo \xe2\x86\x92 output \xe2\x86\x92 salida"),
+    g.drawText (juce::String::fromUTF8 ("input \xe2\x86\x92 cortes PRE \xe2\x86\x92 emphasis \xe2\x86\x92 MODO \xe2\x86\x92 de-emphasis \xe2\x86\x92 cortes POST \xe2\x86\x92 tilt \xe2\x86\x92 output"),
                 knobsPanel.removeFromBottom (static_cast<float> (signalFlowHeight)), juce::Justification::centred);
 }
 
@@ -186,12 +220,32 @@ void RiptideAudioProcessorEditor::resized()
     }
     modeDescription.setBounds (panel.removeFromTop (modeDescriptionHeight));
 
+    // Tono: cinco perillas en el orden de la señal; debajo de los cortes, su interruptor PRE/POST.
+    panel.removeFromTop (4);
+    toneSection.setBounds (panel.removeFromTop (sectionLabelHeight));
+    auto toneRow = panel.removeFromTop (18 + toneKnobSize + 20 + 4 + positionButtonHeight);
+    const int toneWidth = toneRow.getWidth() / 5;
+    for (auto* knob : { &lowCutKnob, &highCutKnob, &emphasisKnob, &emphasisFreqKnob, &tiltKnob })
+    {
+        auto column = toneRow.removeFromLeft (toneWidth);
+        knob->label.setBounds (column.removeFromTop (18));
+        knob->slider.setBounds (column.removeFromTop (toneKnobSize + 20));
+        column.removeFromTop (4);
+        if (knob == &lowCutKnob)
+            lowCutPositionButton.setBounds (column.withSizeKeepingCentre (56, positionButtonHeight));
+        else if (knob == &highCutKnob)
+            highCutPositionButton.setBounds (column.withSizeKeepingCentre (56, positionButtonHeight));
+    }
+
+    // Nivel: Input (drive) y Output.
+    panel.removeFromTop (6);
+    levelSection.setBounds (panel.removeFromTop (sectionLabelHeight));
     auto knobs = panel.withTrimmedBottom (signalFlowHeight - padding);
     const int knobWidth = knobs.getWidth() / 2;
     for (auto* knob : { &inputKnob, &outputKnob })
     {
         auto column = knobs.removeFromLeft (knobWidth);
-        auto content = column.withSizeKeepingCentre (column.getWidth(), knobSize + 20 + 24);
+        auto content = column.withSizeKeepingCentre (column.getWidth(), juce::jmin (column.getHeight(), knobSize + 20 + 24));
         knob->label.setBounds (content.removeFromTop (20));
         knob->slider.setBounds (content);
     }

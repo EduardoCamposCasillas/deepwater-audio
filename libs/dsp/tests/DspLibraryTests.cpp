@@ -19,6 +19,7 @@
 #include "deepwater/dsp/Fft.h"
 #include "deepwater/dsp/Halfband.h"
 #include "deepwater/dsp/LevelMeter.h"
+#include "deepwater/dsp/OnePole.h"
 #include "deepwater/dsp/Oversampler.h"
 #include "deepwater/dsp/Pitch.h"
 #include "deepwater/dsp/Simd.h"
@@ -287,6 +288,84 @@ void testDcBlocker()
             slowOut[i] = atCutoff.process (slow[i]);
         CHECK (std::abs (toDb (toneAmplitude (slowOut, 5.0, sr, static_cast<size_t> (2.0 * sr))) + 3.01) < 0.1);
     }
+}
+
+// --- Filtro de 1 polo y tilt ---------------------------------------------------------------------------------------
+
+// Mide la ganancia (dB) de un filtro de un canal a una frecuencia, con un seno a régimen.
+template <typename Filter>
+double measureDb (Filter&& filter, double hz, double sampleRate)
+{
+    const auto input = sineSignal (hz, sampleRate, 32768);
+    std::vector<float> output (input.size());
+    for (size_t i = 0; i < input.size(); ++i)
+        output[i] = filter (input[i]);
+    return toDb (toneAmplitude (output, hz, sampleRate, 8192));
+}
+
+void testOnePole()
+{
+    std::printf ("1 polo: low-pass + high-pass = la entrada, −3 dB en el corte y 6 dB/oct\n");
+
+    for (const double sr : sampleRates)
+    {
+        const float coefficient = dw::OnePole::coefficientForCutoff (1000.0, sr);
+        dw::OnePole a, b;
+        float worst = 0.0f;
+        for (size_t i = 0; i < 2000; ++i)
+        {
+            const float x = std::sin (0.37f * static_cast<float> (i)) + 0.3f * std::sin (0.05f * static_cast<float> (i));
+            worst = std::max (worst, std::abs (a.lowPass (x, coefficient) + b.highPass (x, coefficient) - x));
+        }
+        CHECK (worst < 1.0e-6f);
+
+        const auto lowPassAt = [&] (double hz)
+        {
+            dw::OnePole filter;
+            return measureDb ([&] (float x) { return filter.lowPass (x, coefficient); }, hz, sr);
+        };
+        const auto highPassAt = [&] (double hz)
+        {
+            dw::OnePole filter;
+            return measureDb ([&] (float x) { return filter.highPass (x, coefficient); }, hz, sr);
+        };
+        CHECK (std::abs (lowPassAt (1000.0) + 3.01) < 0.02);
+        CHECK (std::abs (highPassAt (1000.0) + 3.01) < 0.02);
+        CHECK (std::abs (lowPassAt (8000.0) - lowPassAt (4000.0) + 6.0) < 1.5); // ~6 dB/oct (la bilineal cae más cerca de Nyquist)
+        CHECK (std::abs (highPassAt (62.5) + 24.1) < 0.1);                      // 4 octavas debajo: −24 dB
+    }
+}
+
+void testTiltFilter()
+{
+    std::printf ("Tilt: ±dB en agudos, el contrario en graves, 0 dB en el pivote; plano = bit a bit\n");
+
+    for (const double sr : sampleRates)
+        for (const float tiltDb : { -6.0f, -2.5f, 3.0f, 6.0f })
+        {
+            const auto c = dw::TiltFilter::Coefficients::forTilt (1000.0, tiltDb, sr);
+            const auto at = [&] (double hz)
+            {
+                dw::TiltFilter tilt;
+                return measureDb ([&] (float x) { return tilt.process (x, c); }, hz, sr);
+            };
+            CHECK (std::abs (at (1000.0)) < 0.05);          // pivote
+            CHECK (std::abs (at (20.0) + tiltDb) < 0.1);     // graves: −tilt
+            CHECK (std::abs (at (16000.0) - tiltDb) < 0.35); // agudos: +tilt (la bilineal comprime la subida cerca de Nyquist)
+            CHECK (std::abs (at (5000.0)) < std::abs (tiltDb)); // la transición es gradual
+        }
+
+    // Con 0 dB la señal sale intacta, bit a bit.
+    const auto flat = dw::TiltFilter::Coefficients::forTilt (1000.0, 0.0f, 48000.0);
+    CHECK (flat.isFlat());
+    dw::TiltFilter tilt;
+    bool exact = true;
+    for (size_t i = 0; i < 1000; ++i)
+    {
+        const float x = std::sin (0.1f * static_cast<float> (i));
+        exact = exact && tilt.process (x, flat) == x;
+    }
+    CHECK (exact);
 }
 
 // --- SVF TPT/ZDF -----------------------------------------------------------------------------------------------------
@@ -643,6 +722,8 @@ int main()
     testOversamplerLatency();
     testOversamplerReducesAliasing();
     testDcBlocker();
+    testOnePole();
+    testTiltFilter();
     testSvfMatchesTheory();
     testSvfIsStableWhenModulated();
     testSmoothedParameter();

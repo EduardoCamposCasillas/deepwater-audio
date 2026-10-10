@@ -4,7 +4,6 @@
 
 namespace
 {
-constexpr float minGainDb = -24.0f;
 constexpr float maxGainDb = 24.0f;
 
 // Ganancias como "+3.5 dB", "-12.0 dB" o "0.0 dB".
@@ -14,16 +13,55 @@ juce::String gainToText (float db, int /*maxLength*/)
     return (rounded > 0.0f ? "+" : "") + juce::String (rounded == 0.0f ? 0.0f : rounded, 1) + " dB";
 }
 
-std::unique_ptr<juce::AudioParameterFloat> makeGainParameter (const char* id, const juce::String& name)
+std::unique_ptr<juce::AudioParameterFloat> makeDbParameter (const char* id, const juce::String& name, float maxDb, int version)
 {
     // Lineal en dB: cada milímetro de la perilla cambia lo mismo en volumen percibido.
     return std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { id, riptide::params::versionHint }, name,
-        juce::NormalisableRange<float> (minGainDb, maxGainDb, 0.1f), 0.0f,
+        juce::ParameterID { id, version }, name, juce::NormalisableRange<float> (-maxDb, maxDb, 0.1f), 0.0f,
         juce::AudioParameterFloatAttributes()
             .withLabel ("dB")
             .withStringFromValueFunction (gainToText)
             .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); }));
+}
+
+// Frecuencias como "80 Hz" o "2.5 kHz"; el extremo que apaga el filtro (offHz) se muestra como "Off".
+juce::String frequencyToText (float hz, float offHz)
+{
+    if (offHz > 0.0f && riptide::dsp::isCutOff (hz, offHz))
+        return "Off";
+    return hz < 999.5f ? juce::String (juce::roundToInt (hz)) + " Hz" : juce::String (hz / 1000.0f, 1) + " kHz";
+}
+
+float textToFrequency (const juce::String& text, float offHz)
+{
+    if (offHz > 0.0f && text.trim().equalsIgnoreCase ("off"))
+        return offHz;
+    const float value = text.getFloatValue();
+    return text.containsIgnoreCase ("k") ? value * 1000.0f : value;
+}
+
+// Perilla de frecuencia logarítmica: cada octava ocupa lo mismo en el recorrido (el oído escucha en octavas).
+// offHz < 0 = el parámetro no tiene posición de apagado.
+std::unique_ptr<juce::AudioParameterFloat> makeFrequencyParameter (const char* id, const juce::String& name, float minHz,
+                                                                   float maxHz, float defaultHz, float offHz)
+{
+    juce::NormalisableRange<float> range (
+        minHz, maxHz,
+        [] (float start, float end, float proportion) { return start * std::pow (end / start, proportion); },
+        [] (float start, float end, float hz) { return std::log (hz / start) / std::log (end / start); });
+    return std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id, riptide::params::versionHintPhase4 }, name, range, defaultHz,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("Hz")
+            .withStringFromValueFunction ([offHz] (float hz, int) { return frequencyToText (hz, offHz); })
+            .withValueFromStringFunction ([offHz] (const juce::String& text) { return textToFrequency (text, offHz); }));
+}
+
+std::unique_ptr<juce::AudioParameterChoice> makePositionParameter (const char* id, const juce::String& name, bool post)
+{
+    // Índice 0 = antes de la curva, 1 = después (no cambiar el orden: los proyectos guardan el índice).
+    return std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id, riptide::params::versionHintPhase4 }, name,
+                                                         juce::StringArray { "Pre", "Post" }, post ? 1 : 0);
 }
 
 // Publica el pico de este bloque sin perder el de bloques anteriores que la GUI aún no leyó: se queda con el mayor.
@@ -49,6 +87,13 @@ RiptideAudioProcessor::RiptideAudioProcessor()
     bypassParam = parameters.getRawParameterValue (id::bypass);
     oversamplingParam = parameters.getRawParameterValue (id::oversampling);
     modeParam = parameters.getRawParameterValue (id::mode);
+    lowCutParam = parameters.getRawParameterValue (id::lowCut);
+    lowCutPositionParam = parameters.getRawParameterValue (id::lowCutPosition);
+    highCutParam = parameters.getRawParameterValue (id::highCut);
+    highCutPositionParam = parameters.getRawParameterValue (id::highCutPosition);
+    emphasisParam = parameters.getRawParameterValue (id::emphasis);
+    emphasisFreqParam = parameters.getRawParameterValue (id::emphasisFreq);
+    tiltParam = parameters.getRawParameterValue (id::tilt);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
     startTimerHz (20);
@@ -63,8 +108,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout RiptideAudioProcessor::creat
 {
     namespace id = riptide::params;
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
-    layout.add (makeGainParameter (id::inputGain, "Input"));
-    layout.add (makeGainParameter (id::outputGain, "Output"));
+    layout.add (makeDbParameter (id::inputGain, "Input", maxGainDb, id::versionHint));
+    layout.add (makeDbParameter (id::outputGain, "Output", maxGainDb, id::versionHint));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bypass, id::versionHint }, "Bypass", false));
     // El índice de cada opción es el número de etapas ×2 del motor (no cambiar el orden: los proyectos guardan el
     // índice). 4x por defecto: el aliasing de tanh queda muy por debajo de lo audible con 1.7 ms de latencia a 44.1 kHz.
@@ -77,14 +122,34 @@ juce::AudioProcessorValueTreeState::ParameterLayout RiptideAudioProcessor::creat
     for (const auto* name : riptide::dsp::modeNames)
         modes.add (name);
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::mode, id::versionHintPhase3 }, "Mode", modes, 0));
+
+    // Tono. Los valores por defecto dejan la señal intacta (cortes apagados, emphasis y tilt en 0): un proyecto de la
+    // Fase 3 suena igual. Low Cut antes de la curva y High Cut después, como suele usarse (ver Tone.h).
+    namespace dsp = riptide::dsp;
+    layout.add (makeFrequencyParameter (id::lowCut, "Low Cut", dsp::lowCutOffHz, dsp::lowCutMaxHz, dsp::lowCutOffHz, dsp::lowCutOffHz));
+    layout.add (makePositionParameter (id::lowCutPosition, "Low Cut Position", false));
+    layout.add (makeFrequencyParameter (id::highCut, "High Cut", dsp::highCutMinHz, dsp::highCutOffHz, dsp::highCutOffHz,
+                                        dsp::highCutOffHz));
+    layout.add (makePositionParameter (id::highCutPosition, "High Cut Position", true));
+    layout.add (makeDbParameter (id::emphasis, "Emphasis", dsp::maxEmphasisDb, id::versionHintPhase4));
+    layout.add (makeFrequencyParameter (id::emphasisFreq, "Emphasis Freq", dsp::emphasisMinHz, dsp::emphasisMaxHz, 1000.0f, -1.0f));
+    layout.add (makeDbParameter (id::tilt, "Tilt", dsp::maxTiltDb, id::versionHintPhase4));
     return layout;
 }
 
 riptide::dsp::EngineSettings RiptideAudioProcessor::readSettings() const noexcept
 {
     const int mode = juce::jlimit (0, riptide::dsp::numModes - 1, static_cast<int> (std::lround (modeParam->load())));
+    riptide::dsp::ToneSettings tone;
+    tone.lowCutHz = lowCutParam->load();
+    tone.lowCutPost = lowCutPositionParam->load() >= 0.5f;
+    tone.highCutHz = highCutParam->load();
+    tone.highCutPost = highCutPositionParam->load() >= 0.5f;
+    tone.emphasisDb = emphasisParam->load();
+    tone.emphasisHz = emphasisFreqParam->load();
+    tone.tiltDb = tiltParam->load();
     return { inputGainParam->load(), outputGainParam->load(), bypassParam->load() >= 0.5f,
-             static_cast<int> (std::lround (oversamplingParam->load())), static_cast<riptide::dsp::Mode> (mode) };
+             static_cast<int> (std::lround (oversamplingParam->load())), static_cast<riptide::dsp::Mode> (mode), tone };
 }
 
 void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
