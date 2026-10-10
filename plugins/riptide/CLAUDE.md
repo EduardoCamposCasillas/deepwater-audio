@@ -77,7 +77,7 @@ plugins/riptide/
       `Smoothing.h`), medidores de nivel de entrada y salida (pico y RMS) en una GUI funcional y bypass sin clics.
       Tests de lo que no dependa de JUCE y pluginval. Decidir antes: el nombre del plugin y su `PLUGIN_CODE`
       (único en la suite; el fabricante, compartido).
-- [ ] Fase 2 — Waveshaping básico + oversampling seleccionable (2x a 16x, etapas halfband de la librería), filtro DC,
+- [x] Fase 2 — Waveshaping básico + oversampling seleccionable (2x a 16x, etapas halfband de la librería), filtro DC,
       comparación con y sin oversampling en el analizador para escuchar y ver el aliasing.
 - [ ] Fase 3 — Modos de saturación con carácter: cinta (suave, compresión, realce de graves),
       bulbo (asimétrico, armónicos pares), transistor (más duro, impares), clip duro, rectificador y wavefold.
@@ -95,7 +95,7 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 2 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+Fase 2 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena (`dsp/Engine.h`): entrada → × input (es el drive) → [medidor IN] → ↑N → `fastTanh` → ↓N → filtro DC (5 Hz) →
   × output → fundido de bypass con la señal original retrasada la latencia → × fundido de factor → [medidor OUT].
   tanh es simétrica (solo armónicos impares) y limita a ±1. No hay parámetro Drive aparte: Input hace de drive, como
@@ -150,4 +150,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: que el usuario pruebe la Fase 2 en FL; después, Fase 3 (modos de saturación).
+Siguiente: Fase 3 (modos de saturación con carácter).
