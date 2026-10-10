@@ -475,3 +475,115 @@ llevaría el sub de la salida. Inténtalo y después pide pistas.
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 5 — Mezcla en paralelo, auto gain y delta
+
+Hasta ahora Riptide reemplazaba la señal por su versión saturada. Los ingenieros casi nunca trabajan así: mezclan la
+saturada **con** la original (procesamiento en paralelo), comparan siempre al mismo volumen, y de vez en cuando escuchan
+**solo lo que el proceso agrega** para saber qué están haciendo. Esta fase trae las tres herramientas.
+
+### Conceptos aprendidos
+
+- **Procesamiento en paralelo (dry/wet).** Mix = cuánto de la señal saturada (wet) se suma a la original (dry). Con
+  50 % oyes las dos a la vez: la original conserva sus **transientes** (la pegada del golpe, el ataque de la nota) y la
+  saturada aporta **densidad** y armónicos. Es lo que en un estudio se hace mandando la pista a un bus aparte (la
+  "compresión Nueva York", pero con saturación).
+- **Alineación y filtro de peine.** Sumar dos copias de la misma señal solo funciona si llegan **alineadas**. Si una va
+  retrasada aunque sea 1 ms, unas frecuencias se suman y otras se cancelan: el espectro se llena de "dientes" (filtro de
+  peine) y suena hueco, metálico, como un flanger quieto. Riptide retrasa la dry exactamente la latencia del
+  oversampling y la pasa por un filtro DC igual al de la wet (que mueve un poco la fase de los graves). Resultado: sin
+  drive, wet y dry son idénticas y el delta da silencio.
+- **El sesgo del volumen (otra vez).** Desde la Fase 1: lo más fuerte parece mejor. Subir el Input sube el volumen, y
+  el oído te engaña. **Auto gain** compensa solo: mover Input o el modo cambia el carácter, no el volumen.
+- **Cómo funciona este auto gain.** No mide "entrada contra salida" (eso da saltos de volumen al bajar el drive y
+  bombea con la batería). Riptide *sabe* qué curva usa cada modo, así que **calcula** cuánto volumen pierde la señal al
+  pasar por ella según su nivel, y solo mide lentamente (1 s) el nivel de la música. Por eso reacciona al instante cuando
+  mueves Input y no bombea. Medido: con un tono puro queda a ±0.1 dB; con ruido rosa (parecido a una mezcla) y mucho
+  drive, hasta 2.4 dB por debajo. A propósito queda igual o más bajo, nunca más fuerte: si algo te suena mejor con auto
+  gain puesto, no es por estar más fuerte. La lectura debajo del botón muestra la compensación (tenue cuando está
+  apagado: lo que *haría*).
+- **Delta (escuchar la diferencia).** Delta = salida − original. Lo que oyes es exactamente lo que Riptide le agrega
+  (armónicos, fizz, barro) o le quita (lo que la curva aplastó). Sin drive, silencio. Es la misma idea que el "null
+  test" de la librería: restar dos señales para ver en qué se diferencian.
+- **Por qué el auto gain va antes del mix.** Si la wet saliera 8 dB más fuerte que la dry, el mix al 30 % sonaría casi
+  como el 100 %. Igualadas, el mix cambia **la proporción de carácter**, no el volumen.
+
+### Qué hace cada control
+
+- **Mix** (0–100 %, por defecto 100). 0 % = la original (sin saturar); 100 % = solo la saturada. En la forma de onda:
+  al bajar el mix vuelven a asomar los picos que la curva había aplastado (más pegada). En el analizador: los armónicos
+  bajan de nivel, pero siguen ahí.
+- **AUTO GAIN** (por defecto apagado) y su lectura en dB. Con el botón puesto, el medidor OUT se queda cerca de donde
+  estaba sin drive. Con el botón apagado, sube Input mirando la lectura: ves cuánto está cambiando el volumen.
+- **DELTA** (por defecto apagado). La salida pasa a ser solo la diferencia. Con mix al 50 % el delta es la mitad (lo que
+  realmente agrega esa mezcla). Output también afecta al delta: súbelo para escuchar detalles.
+- **Output** sigue siendo el último paso: ajusta todo (dry + wet, o el delta).
+- Los tres controles cambian sin clics (rampas y fundidos de 20 ms) y el bypass sigue siendo la original intacta.
+
+### Ejercicio de escucha guiado: lo que agrega cada modo (con volumen igualado)
+
+1. Un loop de batería completo en un insert con Riptide. **AUTO GAIN puesto**, **Hard Clip**, Oversampling 4x.
+2. Sube Input de 0 a +12 dB. Qué notar: el volumen casi no cambia (mira OUT), pero la batería se vuelve más densa y
+   pierde pegada. Alterna con el bypass: por fin una comparación justa.
+3. Pon **DELTA**. Qué notar: con Input en +3 dB solo oyes "chasquidos" en los golpes más fuertes (lo único que el clip
+   toca). Sube a +12 dB: ahora el delta tiene cuerpo, un fizz continuo. Eso es lo que le estás agregando a la mezcla.
+4. Con DELTA puesto, cambia de modo: **Tape** (un delta suave, sobre todo agudos de los platillos y algo de grave por el
+   head bump), **Tube** (aparecen armónicos pares, más "llenos"), **Fold** (metálico). Quita DELTA.
+5. **Mix al 40 %**, Hard Clip, Input +18 dB. Alterna con Mix al 100 %. Qué notar: al 40 % vuelven los transientes,
+   pero la densidad se queda. Así suena la saturación en paralelo.
+6. Con mix al 40 %, apaga y enciende **AUTO GAIN**: sin él la wet domina (está más fuerte); con él la mezcla es pareja.
+
+### Receta de uso: saturación en paralelo en un bus de batería
+
+1. Riptide en el bus de la batería. **Transistor** o **Hard Clip**, Oversampling 4x, **AUTO GAIN puesto**.
+2. **Input +15 a +20 dB**: la wet tiene que sonar claramente destrozada (escúchala sola con Mix al 100 %).
+3. **High Cut POST en 6–8 kHz** y **Low Cut PRE en 80–100 Hz**: la wet aporta medios (el "crunch" de la caja y el cuerpo
+   de los toms) sin fizz y sin que el bombo ensucie la curva.
+4. Baja el **Mix** hasta que la batería suene más grande y llena pero los golpes sigan "pegando": normalmente entre
+   20 y 40 %. Verifica con el bypass.
+5. ¿Por qué funciona? La dry conserva los transientes intactos (el oído los usa para el ritmo y la pegada); la wet
+   rellena entre golpe y golpe (más energía media: la batería se oye más fuerte sin subir los picos). Con el Low Cut PRE
+   en la wet, el bombo no pierde graves: su sub llega limpio por la dry.
+6. Variante para un bajo: **Tube**, Input +12 dB, Low Cut PRE en 200 Hz, Mix 50 %: el sub llega limpio por la dry y la
+   wet suma el gruñido de los medios (es una pista para el reto de la Fase 4). Si suena un poco hueco justo alrededor del
+   corte es normal: el Low Cut desfasa esa zona de la wet respecto de la dry. Mueve el corte o baja un poco el mix.
+
+### Reto sin receta
+
+Tienes una **voz principal** que se pierde detrás de las guitarras en el estribillo. Quieres que **gane presencia y
+se entienda**, pero sin que suene distorsionada ni más fuerte (compruébalo con AUTO GAIN y el bypass), y sin que las
+**eses y las "t"** se vuelvan ásperas. Usa el DELTA para revisar qué estás agregando. Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Dry / wet**: la señal sin procesar / la procesada. *En música:* los controles "Mix" de casi todos los efectos; una
+  reverb al 100 % wet en una voz es el efecto "voz lejana" de muchas intros.
+- **Procesamiento en paralelo**: mezclar la señal procesada con la original. *En música:* la "compresión Nueva York"
+  de las baterías de rock y pop: golpes con pegada y a la vez un cuerpo enorme.
+- **Filtro de peine (comb filtering)**: cancelaciones periódicas al sumar dos copias desalineadas de una señal. *En
+  música:* el flanger y el phaser (a propósito), o dos micrófonos mal colocados en una batería (sin querer).
+- **Coherencia de fase**: que dos señales lleguen con la misma fase y se sumen sin cancelarse. *En música:* el botón de
+  "invertir fase" de las consolas, para los micrófonos de arriba y de abajo de una caja.
+- **Gain matching / auto gain**: igualar el volumen para comparar con justicia. *En música:* los ingenieros de mastering
+  comparan siempre así; las plataformas (Spotify, YouTube) normalizan el volumen, así que "más fuerte" no gana.
+- **Delta / null test**: restar dos señales para oír la diferencia. *En música:* el truco de invertir la fase de la
+  versión instrumental contra la canción completa para aislar la voz.
+
+### Errores comunes
+
+- **Dejar DELTA puesto y exportar.** El delta es para escuchar, no para mezclar. Si una pista suena como un fantasma,
+  revisa que DELTA esté apagado.
+- **Juzgar el mix sin AUTO GAIN.** Sin compensar, más wet suele ser más fuerte, y el oído siempre elige más. Pon AUTO
+  GAIN (o iguala con Output) antes de decidir el porcentaje.
+- **Confiar ciegamente en el auto gain.** Es una aproximación: con mucho drive queda hasta un par de dB por debajo (con
+  Rectify y un tono puro, casi 3 dB). Para la decisión final, iguala de oído con Output contra el bypass.
+- **Mix bajo para "arreglar" una saturación mal elegida.** Si la wet sola suena mal (fizz, barro), mezclarla al 20 %
+  agrega un poco de eso mismo. Primero haz que la wet suene bien (modo, tono) y después baja el mix.
+- **Paralelo en todo.** En un master o en un bus ya muy denso, la saturación en paralelo puede sumar volumen y fase
+  rara sin aportar nada. Si con DELTA casi no oyes nada útil, quítalo.
+- **Cuándo NO usar el paralelo:** cuando quieres justamente **domar** los picos (un clip para ganar headroom antes de
+  un limitador): ahí la dry devuelve los picos que querías quitar. Usa Mix al 100 %.
+
+### Retos completados
+
+(Ninguno todavía.)

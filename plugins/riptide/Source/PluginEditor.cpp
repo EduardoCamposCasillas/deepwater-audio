@@ -17,6 +17,8 @@ constexpr int framesPerSecond = 30;
 constexpr int modeButtonHeight = 26;
 constexpr int modeDescriptionHeight = 34;
 constexpr int signalFlowHeight = 28;
+constexpr int toggleWidth = 96;
+constexpr int toggleHeight = 26;
 
 // Qué hace cada modo, en lenguaje musical (se muestra debajo de los botones y como tooltip). En UTF-8 escapado: MSVC
 // no garantiza la codificación de los literales del código fuente.
@@ -49,7 +51,18 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
                juce::String::fromUTF8 ("Volumen final. Sirve para igualar el volumen con el bypass y comparar a "
                                        "o\xc3\xad" "do justo."));
 
-    setUpSectionLabel (levelSection, "NIVEL");
+    setUpKnob (mixKnob, id::mix, "Mix",
+               juce::String::fromUTF8 ("Mezcla en paralelo: cu\xc3\xa1nto de la se\xc3\xb1" "al saturada se suma a la original. 100 % = solo saturada; 30-50 % = la original conserva su pegada y la saturada le agrega densidad y arm\xc3\xb3nicos. Las dos llegan alineadas (misma latencia y misma fase)."));
+    setUpToggle (autoGainButton, autoGainAttachment, id::autoGain,
+                 juce::String::fromUTF8 ("Iguala el volumen de la se\xc3\xb1" "al saturada con el de la original: mover Input o el modo cambia el car\xc3\xa1" "cter, no el volumen. Debajo, la compensaci\xc3\xb3n que aplica. Sigue al nivel de la m\xc3\xba" "sica despacio (1 s) y queda un poco por debajo, nunca por encima."));
+    setUpToggle (deltaButton, deltaAttachment, id::delta,
+                 juce::String::fromUTF8 ("Escuchar solo lo que Riptide le agrega (o le quita) a la se\xc3\xb1" "al: la salida menos la original. Sin drive, silencio. Sirve para o\xc3\xad" "r los arm\xc3\xb3nicos, el fizz o el barro que agrega cada ajuste. No lo dejes puesto al exportar."));
+    autoGainReadout.setJustificationType (juce::Justification::centred);
+    autoGainReadout.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    addAndMakeVisible (autoGainReadout);
+    updateAutoGainReadout();
+
+    setUpSectionLabel (levelSection, "NIVEL Y MEZCLA");
     setUpSectionLabel (toneSection, "TONO");
     setUpKnob (lowCutKnob, id::lowCut, "Low Cut", juce::String::fromUTF8 ("Low Cut (high-pass, 12 dB/oct): quita graves. En PRE los graves ya no llegan a la curva: no la empujan ni la ensucian (m\xc3\xa1s claridad, menos \"barro\"). En POST el bajo satura con fuerza y despu\xc3\xa9s se le quita la fundamental, pero sus arm\xc3\xb3nicos se quedan. Al m\xc3\xadnimo: apagado."));
     setUpKnob (highCutKnob, id::highCut, "High Cut", juce::String::fromUTF8 ("High Cut (low-pass, 12 dB/oct): quita agudos. En POST suaviza el \"fizz\" (los arm\xc3\xb3nicos agudos que crea la saturaci\xc3\xb3n). En PRE los agudos no se saturan: la saturaci\xc3\xb3n queda en graves y medios, m\xc3\xa1s oscura. Al m\xc3\xa1ximo: apagado."));
@@ -140,6 +153,26 @@ void RiptideAudioProcessorEditor::setUpPositionButton (juce::TextButton& button,
     button.onStateChange();
 }
 
+void RiptideAudioProcessorEditor::setUpToggle (juce::TextButton& button, std::unique_ptr<ButtonAttachment>& attachment,
+                                               const char* parameterId, const juce::String& tooltip)
+{
+    button.setClickingTogglesState (true);
+    button.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::accent.withAlpha (0.55f));
+    button.setTooltip (tooltip);
+    addAndMakeVisible (button);
+    attachment = std::make_unique<ButtonAttachment> (processor.getParameters(), parameterId, button);
+}
+
+void RiptideAudioProcessorEditor::updateAutoGainReadout()
+{
+    // Encendido: la compensación que se aplica. Apagado: la que se aplicaría, tenue (útil para ver cuánto cambia el
+    // volumen el drive).
+    const float db = std::round (processor.getAutoGainDb() * 10.0f) / 10.0f;
+    autoGainReadout.setText ((db > 0.0f ? "+" : "") + juce::String (db == 0.0f ? 0.0f : db, 1) + " dB", juce::dontSendNotification);
+    autoGainReadout.setColour (juce::Label::textColourId, autoGainButton.getToggleState() ? riptide::gui::theme::accent
+                                                                                           : riptide::gui::theme::dimText.withAlpha (0.6f));
+}
+
 void RiptideAudioProcessorEditor::setUpSectionLabel (juce::Label& label, const juce::String& text)
 {
     label.setText (text, juce::dontSendNotification);
@@ -165,6 +198,7 @@ void RiptideAudioProcessorEditor::timerCallback()
     const int channels = processor.getMeteredChannels();
     inputMeter.update (channels, elapsed);
     outputMeter.update (channels, elapsed);
+    updateAutoGainReadout();
 }
 
 void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
@@ -178,7 +212,7 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("RIPTIDE", header.removeFromLeft (110), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("saturador  -  Fase 4", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
+    g.drawText ("saturador  -  Fase 5", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
                 juce::Justification::centredLeft);
 
     // Panel de las perillas, entre los dos medidores.
@@ -192,7 +226,7 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     // Flecha del recorrido de la señal: IN → perillas → OUT.
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (juce::String::fromUTF8 ("input \xe2\x86\x92 cortes PRE \xe2\x86\x92 emphasis \xe2\x86\x92 MODO \xe2\x86\x92 de-emphasis \xe2\x86\x92 cortes POST \xe2\x86\x92 tilt \xe2\x86\x92 output"),
+    g.drawText (juce::String::fromUTF8 ("input \xe2\x86\x92 PRE \xe2\x86\x92 emphasis \xe2\x86\x92 MODO \xe2\x86\x92 de-emph. \xe2\x86\x92 POST \xe2\x86\x92 tilt \xe2\x86\x92 auto gain \xe2\x86\x92 mix \xe2\x86\x92 delta \xe2\x86\x92 output"),
                 knobsPanel.removeFromBottom (static_cast<float> (signalFlowHeight)), juce::Justification::centred);
 }
 
@@ -237,16 +271,21 @@ void RiptideAudioProcessorEditor::resized()
             highCutPositionButton.setBounds (column.withSizeKeepingCentre (56, positionButtonHeight));
     }
 
-    // Nivel: Input (drive) y Output.
+    // Nivel y mezcla: Input (drive), Mix, Output y la columna de AUTO GAIN (con su lectura) y DELTA.
     panel.removeFromTop (6);
     levelSection.setBounds (panel.removeFromTop (sectionLabelHeight));
     auto knobs = panel.withTrimmedBottom (signalFlowHeight - padding);
-    const int knobWidth = knobs.getWidth() / 2;
-    for (auto* knob : { &inputKnob, &outputKnob })
+    const int knobWidth = knobs.getWidth() / 4;
+    for (auto* knob : { &inputKnob, &mixKnob, &outputKnob })
     {
         auto column = knobs.removeFromLeft (knobWidth);
         auto content = column.withSizeKeepingCentre (column.getWidth(), juce::jmin (column.getHeight(), knobSize + 20 + 24));
         knob->label.setBounds (content.removeFromTop (20));
         knob->slider.setBounds (content);
     }
+    auto toggles = knobs.withSizeKeepingCentre (toggleWidth, toggleHeight * 2 + 20 + 16);
+    autoGainButton.setBounds (toggles.removeFromTop (toggleHeight));
+    autoGainReadout.setBounds (toggles.removeFromTop (20));
+    toggles.removeFromTop (16);
+    deltaButton.setBounds (toggles.removeFromTop (toggleHeight));
 }

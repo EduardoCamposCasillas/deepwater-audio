@@ -94,6 +94,9 @@ RiptideAudioProcessor::RiptideAudioProcessor()
     emphasisParam = parameters.getRawParameterValue (id::emphasis);
     emphasisFreqParam = parameters.getRawParameterValue (id::emphasisFreq);
     tiltParam = parameters.getRawParameterValue (id::tilt);
+    mixParam = parameters.getRawParameterValue (id::mix);
+    autoGainParam = parameters.getRawParameterValue (id::autoGain);
+    deltaParam = parameters.getRawParameterValue (id::delta);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
     startTimerHz (20);
@@ -134,6 +137,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout RiptideAudioProcessor::creat
     layout.add (makeDbParameter (id::emphasis, "Emphasis", dsp::maxEmphasisDb, id::versionHintPhase4));
     layout.add (makeFrequencyParameter (id::emphasisFreq, "Emphasis Freq", dsp::emphasisMinHz, dsp::emphasisMaxHz, 1000.0f, -1.0f));
     layout.add (makeDbParameter (id::tilt, "Tilt", dsp::maxTiltDb, id::versionHintPhase4));
+
+    // Mezcla. Por defecto 100 %, auto gain y delta apagados: un proyecto de la Fase 4 suena igual.
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::mix, id::versionHintPhase5 }, "Mix", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("%")
+            .withStringFromValueFunction ([] (float percent, int) { return juce::String (juce::roundToInt (percent)) + " %"; })
+            .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::autoGain, id::versionHintPhase5 }, "Auto Gain", false));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::delta, id::versionHintPhase5 }, "Delta", false));
     return layout;
 }
 
@@ -148,8 +161,15 @@ riptide::dsp::EngineSettings RiptideAudioProcessor::readSettings() const noexcep
     tone.emphasisDb = emphasisParam->load();
     tone.emphasisHz = emphasisFreqParam->load();
     tone.tiltDb = tiltParam->load();
-    return { inputGainParam->load(), outputGainParam->load(), bypassParam->load() >= 0.5f,
-             static_cast<int> (std::lround (oversamplingParam->load())), static_cast<riptide::dsp::Mode> (mode), tone };
+    return { inputGainParam->load(),
+             outputGainParam->load(),
+             bypassParam->load() >= 0.5f,
+             static_cast<int> (std::lround (oversamplingParam->load())),
+             static_cast<riptide::dsp::Mode> (mode),
+             tone,
+             mixParam->load() / 100.0f,
+             autoGainParam->load() >= 0.5f,
+             deltaParam->load() >= 0.5f };
 }
 
 void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
@@ -190,6 +210,7 @@ void RiptideAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     engine.setSettings (readSettings());
     engine.process (buffer.getArrayOfWritePointers(), numChannels, buffer.getNumSamples());
     engineLatency.store (engine.getLatency(), std::memory_order_relaxed);
+    autoGainDb.store (engine.getAutoGainDb(), std::memory_order_relaxed);
     publishMeters (numChannels);
 }
 

@@ -70,6 +70,7 @@ plugins/riptide/
     dsp/Engine.h             # cadena de audio completa, sin JUCE
     dsp/Saturator.h          # modos: curvas, filtros propios de cada modo, oversampling (un canal)
     dsp/Tone.h               # cortes PRE/POST, emphasis y tilt (coeficientes compartidos + estado por canal)
+    dsp/AutoGain.h           # auto gain: tabla de pérdida de volumen de cada curva + nivel lento con puerta
     gui/                     # tema, LookAndFeel, medidores
   tests/EngineTests.cpp    # tests del motor (sin JUCE)
 ```
@@ -98,6 +99,41 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
+Fase 5 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+- Cadena: entrada → × input (drive) → tono pre → [IN] → modo → tono post → filtro DC → × auto gain = wet; dry = entrada
+  retrasada la latencia → filtro DC gemelo; mix `dry + (wet − dry)·mix` → `− delta·dry` → × output → fundido de bypass
+  (con la original intacta, sin filtro DC: bit a bit) → × fundido de factor → [OUT].
+- Compensación de fase/latencia del mix: los halfband son FIR de fase lineal, así que el retardo entero de la latencia
+  alinea todas las frecuencias; la dry pasa por un `DcBlocker` idéntico al de la wet (su desfase en graves dejaba un
+  residuo de −16 dB a 30 Hz en el delta). Los cortes, el tilt y el head bump de Tape NO se compensan: son EQ de la wet
+  (como en un paralelo analógico; alrededor del corte de un Low Cut la suma pierde un poco).
+- Auto gain (`dsp/AutoGain.h`), por modelo y no por medición entrada/salida (esa da saltos de hasta +20 dB al bajar el
+  drive con la corrección vieja, y bombea si se mide rápido):
+  - `CurveLoudness`: tabla por modo de la pérdida de RMS de la curva según el nivel RMS de entrada (−60..+48 dB, paso
+    0.5 dB), integrando la curva sobre un seno y sobre ruido gaussiano (DC quitada; Rectify: |x| − media → tanh), y
+    guardando la MENOR de las dos pérdidas (nunca más fuerte con ninguna). Se calcula una vez (static local, primera
+    llamada en `prepare`, fuera del audio).
+  - `AutoGain`: nivel lento (1 s, double) de la entrada a la curva SIN el drive (`tono pre / drive`), con puerta de
+    −60 dBFS (detector de 10 ms) para no caer en silencios. Ganancia = 10^(pérdida(nivel + drive)/20) / drive, con el
+    drive retrasado la latencia (`driveDelay`, alineado con lo que sale) y ±36 dB de límite. Durante un cruce de modos
+    las pérdidas se mezclan con el mismo blend. Se calcula siempre (la GUI muestra la compensación también apagado).
+  - Medido (48 kHz, −15 dBFS, 4 drives 0..+24 dB): seno ±0.12 dB salvo Rectify (−2.7 dB) y Fold +24 (−0.9); ruido rosa
+    entre −2.4 dB (Tape +24) y +0.4 dB (Rectify). Saltos de 36 dB de drive a nivel bajo: volumen de 10 ms a 0.002 dB;
+    clip duro de +24 a 0 dB: el volumen de 10 ms sube como mucho 0.24 dB. Tras 3 s de silencio se mueve 0.4 dB.
+- Mix con `LinearRamp` de 20 ms; auto gain y delta con `EffectSwitch` de 20 ms. Defaults (mix 100 %, auto y delta
+  apagados) = idéntico bit a bit a la Fase 4: comprobado renderizando el motor de la Fase 4 y el nuevo (6 modos × 3
+  factores × 2 sample rates × con/sin tono, estéreo, con cambios de modo, drive y tilt a mitad).
+- Parámetros nuevos (versionHint 5): `mix` (0–100 %, paso 0.1, def. 100), `autoGain` (bool, def. off), `delta` (bool,
+  def. off). El motor recibe mix en 0..1.
+- GUI 760 × 560: sección NIVEL Y MEZCLA con Input | Mix | Output | columna AUTO GAIN (lectura en dB debajo, en acento si
+  está puesto y tenue si no) y DELTA. Cabecera "Fase 5"; flecha de la señal con auto gain → mix → delta.
+- Tests `RiptideTests` (+8): mix 0 % = dry alineada bit a bit y mezcla lineal, delta en silencio sin saturación (30 Hz–12
+  kHz, 4 sample rates, 5 factores, < −80 dB), delta = mix·(wet − dry) con los armónicos de la wet, precisión del auto
+  gain (seno y ruido rosa: nunca > +0.5 dB ni < −3 dB; Tube/Transistor/Hard Clip con seno ±0.2 dB), drive que se mueve,
+  silencio, mix/auto/delta sin saltos, bypass bit a bit con todo puesto; independencia de bloque con mix/auto/delta.
+- No se movió nada a la librería: el modelo del auto gain depende de las curvas de Riptide (el compresor tendrá el suyo).
+- Release con 0 warnings; ctest 4/4; pluginval strictness 10 ampliado: SUCCESS. GUI revisada con captura del Standalone.
+
 Fase 4 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena: entrada → × input (drive) → tono pre → [medidor IN] → modo → tono post → filtro DC → × output → fundido de
   bypass → × fundido de factor → [medidor OUT]. IN mide ahora justo antes de la curva (con los cortes PRE y el
@@ -215,4 +251,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 5 (mix dry/wet, auto gain, delta).
+Siguiente: que el usuario pruebe la Fase 5 en FL; después, Fase 6 (multibanda).

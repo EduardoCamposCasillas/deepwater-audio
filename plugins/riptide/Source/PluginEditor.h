@@ -11,8 +11,9 @@
 
 class RiptideAudioProcessor;
 
-// GUI funcional (la profesional llega en la Fase 8). Medidor IN | modos, tono (cortes con PRE/POST, emphasis, tilt) y
-// perillas Input (drive) y Output | medidor OUT; en la cabecera, el selector de oversampling y el bypass.
+// GUI funcional (la profesional llega en la Fase 8). Medidor IN | modos, tono (cortes con PRE/POST, emphasis, tilt),
+// nivel y mezcla (Input, Mix, Output, AUTO GAIN con la compensación en dB, DELTA) | medidor OUT; en la cabecera, el
+// selector de oversampling y el bypass.
 // Un temporizador a 30 cuadros por segundo recoge los niveles que publicó el audio y redibuja los medidores.
 class RiptideAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -39,6 +40,9 @@ private:
     void setUpKnob (Knob& knob, const char* parameterId, const juce::String& name, const juce::String& tooltip);
     void setUpPositionButton (juce::TextButton& button, std::unique_ptr<ButtonAttachment>& attachment, const char* parameterId);
     void setUpSectionLabel (juce::Label& label, const juce::String& text);
+    void setUpToggle (juce::TextButton& button, std::unique_ptr<ButtonAttachment>& attachment, const char* parameterId,
+                      const juce::String& tooltip);
+    void updateAutoGainReadout();
     void showMode (int index);
 
     RiptideAudioProcessor& processor;
@@ -50,6 +54,13 @@ private:
     Knob inputKnob;
     Knob outputKnob;
     juce::Label levelSection;
+
+    // Mezcla (Fase 5).
+    Knob mixKnob;
+    juce::TextButton autoGainButton { "AUTO GAIN" };
+    juce::TextButton deltaButton { "DELTA" };
+    std::unique_ptr<ButtonAttachment> autoGainAttachment, deltaAttachment;
+    juce::Label autoGainReadout;
 
     // Tono (Fase 4). Cada corte tiene su interruptor: apagado = PRE (antes de la curva), encendido = POST (después).
     juce::Label toneSection;

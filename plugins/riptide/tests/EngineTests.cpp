@@ -734,15 +734,15 @@ void testInputMeterSeesEmphasis()
 
 void testBlockSizeIndependence()
 {
-    std::printf ("Engine: el resultado no depende del tamaño de bloque (con automatización y cambios de factor, modo y tono)\n");
+    std::printf ("Engine: el resultado no depende del tamaño de bloque (con automatización y cambios de factor, modo, tono y mezcla)\n");
 
     constexpr size_t changeEvery = 28672; // múltiplo de todos los bloques probados: los cambios caen en la misma muestra
-    const std::array<EngineSettings, 6> changes { { { 8.0f, -3.0f, false, 2, Mode::tube, { 300.0f, false, 6000.0f, true, 3.0f, 6.0f, 2000.0f } },
+    const std::array<EngineSettings, 6> changes { { { 8.0f, -3.0f, false, 2, Mode::tube, { 300.0f, false, 6000.0f, true, 3.0f, 6.0f, 2000.0f }, 0.4f, true, false },
                                                      { -6.0f, 4.0f, true, 4, Mode::rectify, { 300.0f, true, 6000.0f, false, -2.0f, -9.0f, 150.0f } },
-                                                     { 2.5f, 0.0f, false, 0, Mode::fold },
-                                                     { 18.0f, -24.0f, false, 3, Mode::hardClip, { 40.0f, false, 900.0f, false, 6.0f, 12.0f, 7000.0f } },
+                                                     { 2.5f, 0.0f, false, 0, Mode::fold, {}, 0.7f, false, true },
+                                                     { 18.0f, -24.0f, false, 3, Mode::hardClip, { 40.0f, false, 900.0f, false, 6.0f, 12.0f, 7000.0f }, 1.0f, true, true },
                                                      { 0.0f, 0.0f, false, 1, Mode::transistor },
-                                                     { 6.0f, 0.0f, false, 1, Mode::tape, { 20.0f, true, 20000.0f, true, -6.0f, 0.0f, 1000.0f } } } };
+                                                     { 6.0f, 0.0f, false, 1, Mode::tape, { 20.0f, true, 20000.0f, true, -6.0f, 0.0f, 1000.0f }, 0.0f, true, false } } };
     const auto inputL = noise (changeEvery * changes.size(), 0.7f, 3u);
     const auto inputR = noise (changeEvery * changes.size(), 0.7f, 4u);
 
@@ -804,6 +804,301 @@ void testMeters()
     CHECK (mono.outputMeter (1).takePeak() == 0.0f);
 }
 
+// --- Fase 5: mix, auto gain y delta ----------------------------------------------------------------------------------
+
+EngineSettings withMix (float mix, bool autoGain, bool delta, EngineSettings settings = {})
+{
+    settings.mix = mix;
+    settings.autoGain = autoGain;
+    settings.delta = delta;
+    return settings;
+}
+
+// La dry del mix: la entrada retrasada la latencia y pasada por un filtro DC igual al de la wet.
+std::vector<float> alignedDry (const std::vector<float>& input, double sampleRate, size_t latency)
+{
+    dw::DcBlocker dc;
+    dc.prepare (Engine::dcCutoffHz, sampleRate);
+    std::vector<float> result (input.size());
+    for (size_t i = 0; i < input.size(); ++i)
+        result[i] = dc.process (i < latency ? 0.0f : input[i - latency]);
+    return result;
+}
+
+// Ruido rosa (−3 dB por octava, como el espectro medio de la música) con un RMS dado. Filtro de Paul Kellet sobre ruido
+// blanco.
+std::vector<float> pinkNoise (size_t count, float rms, std::uint32_t seed)
+{
+    auto white = noise (count, 1.0f, seed);
+    double b0 = 0.0, b1 = 0.0, b2 = 0.0, sum = 0.0;
+    for (auto& x : white)
+    {
+        b0 = 0.99765 * b0 + x * 0.0990460;
+        b1 = 0.96300 * b1 + x * 0.2965164;
+        b2 = 0.57000 * b2 + x * 1.0526913;
+        x = static_cast<float> (b0 + b1 + b2 + x * 0.1848);
+        sum += static_cast<double> (x) * x;
+    }
+    const auto scale = static_cast<float> (rms / std::sqrt (sum / static_cast<double> (count)));
+    for (auto& x : white)
+        x *= scale;
+    return white;
+}
+
+// RMS en ventanas de 10 ms: el volumen "de corto plazo" (lo que se oiría como un salto).
+std::vector<double> shortTermDb (const std::vector<float>& signal, double sampleRate, size_t start = 0)
+{
+    const auto window = static_cast<size_t> (sampleRate / 100.0);
+    std::vector<double> result;
+    for (; start + window <= signal.size(); start += window)
+    {
+        double sum = 0.0;
+        for (size_t i = start; i < start + window; ++i)
+            sum += static_cast<double> (signal[i]) * signal[i];
+        result.push_back (10.0 * std::log10 (sum / static_cast<double> (window) + 1.0e-30));
+    }
+    return result;
+}
+
+double rmsDb (const std::vector<float>& signal, size_t start)
+{
+    double sum = 0.0;
+    for (size_t i = start; i < signal.size(); ++i)
+        sum += static_cast<double> (signal[i]) * signal[i];
+    return 10.0 * std::log10 (sum / static_cast<double> (signal.size() - start));
+}
+
+void testMixEndpoints()
+{
+    std::printf ("Mix: 0 %% = la original alineada (retardo + filtro DC) bit a bit; 100 %% = la saturada; en medio, la mezcla lineal\n");
+
+    for (const double sr : { 44100.0, 96000.0 })
+        for (int os = 0; os < riptide::dsp::numOversamplingChoices; os += 2)
+            for (const Mode mode : allModes)
+            {
+                EngineSettings settings = withOversampling (os, withMode (mode, { 12.0f, 0.0f, false }));
+                const auto input = noise (20000, 0.5f, 5u);
+                Engine probe;
+                probe.prepare (sr, settings);
+                const auto dry = alignedDry (input, sr, static_cast<size_t> (probe.getLatency()));
+
+                const auto zero = render (sr, withMix (0.0f, false, false, settings), input);
+                CHECK (zero == dry);
+
+                const auto wet = render (sr, settings, input);
+                const auto third = render (sr, withMix (0.3f, false, false, settings), input);
+                float worst = 0.0f;
+                for (size_t i = 0; i < input.size(); ++i)
+                    worst = std::max (worst, std::abs (third[i] - (dry[i] + (wet[i] - dry[i]) * 0.3f)));
+                CHECK (worst < 1.0e-6f);
+            }
+}
+
+void testDeltaIsSilentWithoutSaturation()
+{
+    std::printf ("Delta: sin saturación (−40 dBFS, curvas rectas) la diferencia es silencio, también en graves (fase compensada)\n");
+
+    for (const double sr : sampleRates)
+        for (int os = 0; os < riptide::dsp::numOversamplingChoices; ++os)
+            for (const Mode mode : { Mode::transistor, Mode::hardClip, Mode::fold })
+                for (const double hz : { 30.0, 1000.0, 12000.0 })
+                {
+                    const auto input = sine (hz, sr, static_cast<size_t> (sr / 2), 0.01f);
+                    const auto delta = render (sr, withMix (1.0f, false, true, withOversampling (os, withMode (mode))), input);
+                    // Sin el filtro DC en la dry, a 30 Hz quedaría un residuo de −16 dB (el desfase del filtro DC de la wet).
+                    CHECK (rmsDb (delta, delta.size() / 2) - rmsDb (input, input.size() / 2) < -80.0);
+                }
+}
+
+void testDeltaIsWhatTheSaturationAdds()
+{
+    std::printf ("Delta: es mix·(wet − dry); con drive alto contiene los armónicos de la saturación y no la fundamental\n");
+
+    const double sr = 48000.0;
+    const auto input = sine (1000.0, sr, 24000, 0.25f);
+    const auto settings = withMode (Mode::hardClip, { 18.0f, 0.0f, false });
+    Engine probe;
+    probe.prepare (sr, settings);
+    const auto dry = alignedDry (input, sr, static_cast<size_t> (probe.getLatency()));
+    const auto wet = render (sr, settings, input);
+    for (const float mix : { 1.0f, 0.5f })
+    {
+        const auto delta = render (sr, withMix (mix, false, true, settings), input);
+        float worst = 0.0f;
+        for (size_t i = 0; i < input.size(); ++i)
+            worst = std::max (worst, std::abs (delta[i] - mix * (wet[i] - dry[i])));
+        CHECK (worst < 1.0e-5f);
+        // La dry no tiene 3er armónico: el del delta es exactamente el que creó la saturación (escalado por el mix).
+        CHECK (std::abs (toneAmplitude (delta, 3000.0, sr, 12000) - mix * toneAmplitude (wet, 3000.0, sr, 12000)) < 1.0e-4);
+    }
+}
+
+void testAutoGainMatchesLevel()
+{
+    std::printf ("Auto gain: la salida queda al volumen de la entrada (seno y ruido rosa: nunca más fuerte, como mucho 3 dB menos)\n");
+
+    const double sr = 48000.0;
+    const size_t count = static_cast<size_t> (sr * 6.0); // 6 constantes de tiempo del nivel
+    const size_t start = count - static_cast<size_t> (sr);
+    Engine probe;
+    probe.prepare (sr, {});
+    const auto latency = static_cast<size_t> (probe.getLatency());
+    // Se compara con la dry alineada: el filtro DC le quita al ruido rosa algo de sus graves más profundos (unos 0.6 dB),
+    // y eso no es cosa del auto gain.
+    const auto tone = sine (440.0, sr, count, 0.25f);      // −15 dBFS RMS
+    const auto hiss = pinkNoise (count, 0.18f, 6u);        // −15 dBFS RMS
+    const double toneDb = rmsDb (alignedDry (tone, sr, latency), start);
+    const double hissDb = rmsDb (alignedDry (hiss, sr, latency), start);
+    for (const Mode mode : allModes)
+    {
+        std::printf ("   %-10s", riptide::dsp::modeNames[static_cast<size_t> (mode)]);
+        for (const float drive : { 0.0f, 6.0f, 12.0f, 24.0f })
+        {
+            const auto settings = withMix (1.0f, true, false, withMode (mode, { drive, 0.0f, false }));
+            const double sineError = rmsDb (render (sr, settings, tone), start) - toneDb;
+            const double noiseError = rmsDb (render (sr, settings, hiss), start) - hissDb;
+            std::printf ("  %+5.1f dB: seno %+5.2f ruido %+5.2f", drive, sineError, noiseError);
+            // Nunca más fuerte (medio dB de margen), como mucho 3 dB más bajo. Las curvas que solo comprimen, con un seno,
+            // exactas. (Rectify con un seno queda ~2.7 dB bajo: es el precio de no pasarse con ruido.)
+            CHECK (sineError < 0.5 && sineError > -3.0);
+            CHECK (noiseError < 0.5 && noiseError > -3.0);
+            if (mode == Mode::tube || mode == Mode::transistor || mode == Mode::hardClip)
+                CHECK (std::abs (sineError) < 0.2);
+        }
+        std::printf ("\n");
+    }
+}
+
+void testAutoGainFollowsDriveInstantly()
+{
+    std::printf ("Auto gain: mover Input no cambia el volumen (nivel bajo: exacto; saturando: bajar el drive nunca da un salto)\n");
+
+    const double sr = 48000.0;
+    // Nivel bajo, curva recta: la compensación es −drive y la salida es la dry alineada, incluso durante la rampa.
+    {
+        Engine engine;
+        auto settings = withMix (1.0f, true, false, withMode (Mode::transistor));
+        engine.prepare (sr, settings);
+        const auto input = sine (1000.0, sr, 48000, 0.003f);
+        const auto dry = alignedDry (input, sr, static_cast<size_t> (engine.getLatency()));
+        std::vector<float> out = input, none;
+        for (size_t start = 0; start < out.size(); start += 4800)
+        {
+            settings.inputGainDb = start % 9600 == 0 ? 24.0f : -12.0f; // saltos de 36 dB cada 100 ms
+            engine.setSettings (settings);
+            float* channels[1] { out.data() + start };
+            engine.process (channels, 1, 4800);
+        }
+        // Muestra a muestra no puede ser exacto durante la rampa (los filtros mezclan muestras saturadas con drives
+        // distintos), pero el volumen de corto plazo no se mueve.
+        const auto outLevel = shortTermDb (out, sr);
+        const auto dryLevel = shortTermDb (dry, sr);
+        double worst = 0.0;
+        for (size_t w = 1; w < outLevel.size(); ++w)
+            worst = std::max (worst, std::abs (outLevel[w] - dryLevel[w]));
+        std::printf ("   saltos de 36 dB a nivel bajo: volumen de 10 ms a %.3f dB de la original\n", worst);
+        CHECK (worst < 0.1);
+    }
+    // Saturando mucho (clip duro, +24 dB): al bajar el drive a 0 de golpe la salida no sube más de 1 dB sobre su nivel.
+    {
+        Engine engine;
+        auto settings = withMix (1.0f, true, false, withMode (Mode::hardClip, { 24.0f, 0.0f, false }));
+        engine.prepare (sr, settings);
+        const auto input = sine (220.0, sr, static_cast<size_t> (sr * 8.0), 0.5f);
+        std::vector<float> out = input, none;
+        const size_t change = static_cast<size_t> (sr * 5.0);
+        std::vector<float> before (out.begin(), out.begin() + static_cast<std::ptrdiff_t> (change));
+        processInBlocks (engine, before, none, 512);
+        settings.inputGainDb = 0.0f;
+        engine.setSettings (settings);
+        std::vector<float> after (out.begin() + static_cast<std::ptrdiff_t> (change), out.end());
+        processInBlocks (engine, after, none, 512);
+
+        // Volumen de corto plazo (no picos: una cuadrada y un seno del mismo volumen tienen picos distintos).
+        const double settled = shortTermDb (before, sr).back();
+        double loudest = -100.0;
+        for (const double level : shortTermDb (after, sr))
+            loudest = std::max (loudest, level);
+        std::printf ("   clip duro, drive de +24 a 0 dB: el volumen de 10 ms sube como mucho %.2f dB\n", loudest - settled);
+        CHECK (loudest - settled < 1.0);
+        CHECK (std::isfinite (after.back()));
+    }
+}
+
+void testAutoGainHoldsThroughSilence()
+{
+    std::printf ("Auto gain: en silencio la compensación se queda donde estaba (puerta de −60 dBFS)\n");
+
+    const double sr = 44100.0;
+    Engine engine;
+    engine.prepare (sr, withMix (1.0f, true, false, withMode (Mode::tube, { 18.0f, 0.0f, false })));
+    auto music = noise (static_cast<size_t> (sr * 5.0), 0.5f, 7u);
+    std::vector<float> none;
+    processInBlocks (engine, music, none, 256);
+    const float before = engine.getAutoGainDb();
+    std::vector<float> silence (static_cast<size_t> (sr * 3.0), 0.0f);
+    processInBlocks (engine, silence, none, 256);
+    std::printf ("   tras 3 s de silencio la compensación se movió %.2f dB\n", engine.getAutoGainDb() - before);
+    CHECK (std::abs (engine.getAutoGainDb() - before) < 0.6f);
+    CHECK (before > -18.0f + 3.0f); // compensa más que el drive: la curva comprimió
+}
+
+void testMixControlsAreClickless()
+{
+    std::printf ("Mix, auto gain y delta: mover el mix y conmutar auto gain y delta no da saltos\n");
+
+    for (const double sr : sampleRates)
+    {
+        const auto base = withMode (Mode::tube, { 12.0f, 0.0f, false });
+        const auto input = sine (100.0, sr, static_cast<size_t> (sr), 0.5f);
+        const float fadeStep = 1.0f / static_cast<float> (Engine::switchFadeSeconds * sr);
+
+        // Paso máximo de cada estado quieto: el más empinado es la wet sin compensar.
+        float steady = 0.0f;
+        for (const bool automatic : { false, true })
+            for (const float mix : { 0.0f, 1.0f })
+                for (const bool delta : { false, true })
+                    steady = std::max (steady, maxStep (render (sr, withMix (mix, automatic, delta, base), input)));
+
+        Engine engine;
+        engine.prepare (sr, base);
+        std::vector<float> signal = input, none;
+        const size_t length = static_cast<size_t> (sr / 20);
+        for (size_t start = 0, step = 0; start < signal.size(); start += length, ++step)
+        {
+            // Saltos bruscos de los tres controles, algunos a mitad de un fundido (cada 50 ms < 20 ms × 3).
+            engine.setSettings (withMix (step % 3 == 0 ? 0.0f : 1.0f, step % 2 == 0, step % 4 == 1, base));
+            const size_t count = std::min (length, signal.size() - start);
+            float* channels[1] { signal.data() + start };
+            engine.process (channels, 1, static_cast<int> (count));
+        }
+        // Wet (Tube +12 dB: hasta 1.4) y dry (0.5): cada fundido agrega como mucho su paso por muestra por la diferencia
+        // entre los dos estados. Un escalón (clic) sería del orden de la señal.
+        std::printf ("   %6.0f Hz: paso máximo %.4f (quieto: %.4f)\n", sr, maxStep (signal), steady);
+        CHECK (maxStep (signal) < steady + 4.0f * fadeStep);
+    }
+}
+
+void testBypassIgnoresMix()
+{
+    std::printf ("Bypass: con mix, auto gain y delta puestos, la salida sigue siendo la entrada retrasada, bit a bit\n");
+
+    for (const double sr : sampleRates)
+    {
+        Engine engine;
+        engine.prepare (sr, withMix (0.4f, true, true, withMode (Mode::fold, { 12.0f, 3.0f, true })));
+        const auto latency = static_cast<size_t> (engine.getLatency());
+        const auto input = noise (10000, 0.9f, 8u);
+        auto left = input;
+        std::vector<float> none;
+        processInBlocks (engine, left, none, 128);
+        bool exact = true;
+        for (size_t i = 0; i < left.size(); ++i)
+            exact = exact && left[i] == (i < latency ? 0.0f : input[i - latency]);
+        CHECK (exact);
+    }
+}
+
 } // namespace
 
 int main()
@@ -830,6 +1125,14 @@ int main()
     testInputMeterSeesEmphasis();
     testBlockSizeIndependence();
     testMeters();
+    testMixEndpoints();
+    testDeltaIsSilentWithoutSaturation();
+    testDeltaIsWhatTheSaturationAdds();
+    testAutoGainMatchesLevel();
+    testAutoGainFollowsDriveInstantly();
+    testAutoGainHoldsThroughSilence();
+    testMixControlsAreClickless();
+    testBypassIgnoresMix();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de Riptide pasaron.\n");

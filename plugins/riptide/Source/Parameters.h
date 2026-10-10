@@ -24,9 +24,15 @@ inline constexpr const char* emphasis = "emphasis";
 inline constexpr const char* emphasisFreq = "emphasisFreq";
 inline constexpr const char* tilt = "tilt";
 
+// Fase 5.
+inline constexpr const char* mix = "mix";
+inline constexpr const char* autoGain = "autoGain";
+inline constexpr const char* delta = "delta";
+
 // Versión en la que apareció cada parámetro (la usa el VST3 para ordenar y reconocer parámetros nuevos).
 inline constexpr int versionHint = 1;
 inline constexpr int versionHintPhase2 = 2;
 inline constexpr int versionHintPhase3 = 3;
 inline constexpr int versionHintPhase4 = 4;
+inline constexpr int versionHintPhase5 = 5;
 } // namespace riptide::params
