@@ -2,3 +2,4 @@
 * text=auto eol=lf
 *.sln text eol=crlf
 *.bat text eol=crlf
+*.mid binary

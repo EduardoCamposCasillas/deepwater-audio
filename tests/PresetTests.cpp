@@ -5,6 +5,8 @@
 //   UndertowPresetTests --verbose  además, la tabla de niveles de cada preset de fábrica
 //   UndertowPresetTests --verbose --user "C:\ruta"   mide también los presets de esa carpeta (p. ej. los tuyos)
 //   UndertowPresetTests --update-references   reescribe tests/reference/factory-presets.txt (ver "Huellas")
+//   UndertowPresetTests --render <archivo.mid> <carpeta>   toca el MIDI con 4 presets y guarda un WAV por preset
+//                                                        (no corre los tests; ver "Render de referencia")
 //
 // Fase 11: además comprueba que processBlock no reserva memoria (operator new contado, abajo), mide la CPU de cada
 // preset de fábrica y compara su sonido con una huella de referencia guardada en el repositorio.
@@ -21,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 #include <juce_events/juce_events.h>
@@ -362,6 +365,95 @@ float fingerprintDifference (const Fingerprint& a, const Fingerprint& b)
     return worst;
 }
 
+// --- Render de referencia (--render) -------------------------------------------------------------------------------
+//
+// Toca un archivo MIDI con varios presets y guarda cada resultado como WAV (float de 32 bits, sin pérdida). Sirve para
+// refactors que NO deben cambiar el sonido (p. ej. la migración al monorepo): se renderiza antes y después y se restan
+// los archivos (null test). Un procesador nuevo por preset: el contador de notas (semilla del unison y del ruido) y el
+// reloj de los LFO libres empiezan siempre igual, así que el mismo código produce exactamente las mismas muestras.
+const std::array<const char*, 4> referencePresets { "Supersaw Trance", "Sync Lead 80s", "Bajo Fuzz Indie", "Pad Shoegaze" };
+
+int renderReferences (const juce::File& midiFile, const juce::File& outputFolder)
+{
+    constexpr double sampleRate = 48000.0;
+    constexpr int blockSize = 512;
+    constexpr double tailSeconds = 6.0; // cola de release, delay y reverb después de la última nota
+
+    juce::MidiFile midi;
+    juce::FileInputStream stream (midiFile);
+    if (! stream.openedOk() || ! midi.readFrom (stream))
+    {
+        std::printf ("No se pudo leer %s\n", midiFile.getFullPathName().toRawUTF8());
+        return 1;
+    }
+    midi.convertTimestampTicksToSeconds();
+    juce::MidiMessageSequence events;
+    for (int t = 0; t < midi.getNumTracks(); ++t)
+        events.addSequence (*midi.getTrack (t), 0.0);
+    events.updateMatchedPairs();
+
+    outputFolder.createDirectory();
+    const int total = static_cast<int> ((events.getEndTime() + tailSeconds) * sampleRate);
+
+    for (const auto* name : referencePresets)
+    {
+        TemporaryFolder temp;
+        auto processor = makeProcessor (temp.folder);
+        auto& manager = processor->getPresetManager();
+        const auto* preset = findPreset (manager, name);
+        if (preset == nullptr)
+        {
+            std::printf ("Falta el preset %s\n", name);
+            return 1;
+        }
+        manager.load (*preset);
+
+        processor->setPlayConfigDetails (0, 2, sampleRate, blockSize);
+        processor->prepareToPlay (sampleRate, blockSize);
+        juce::AudioBuffer<float> output (2, total);
+        juce::AudioBuffer<float> buffer (2, blockSize);
+        juce::MidiBuffer block;
+        int nextEvent = 0;
+
+        for (int start = 0; start < total; start += blockSize)
+        {
+            const int count = std::min (blockSize, total - start);
+            buffer.setSize (2, count, false, false, true);
+            block.clear();
+            for (; nextEvent < events.getNumEvents(); ++nextEvent)
+            {
+                const auto& message = events.getEventPointer (nextEvent)->message;
+                const int position = static_cast<int> (std::llround (message.getTimeStamp() * sampleRate));
+                if (position >= start + count)
+                    break;
+                if (! message.isMetaEvent())
+                    block.addEvent (message, position - start);
+            }
+            processor->processBlock (buffer, block);
+            for (int channel = 0; channel < 2; ++channel)
+                output.copyFrom (channel, start, buffer, channel, 0, count);
+        }
+        processor->releaseResources();
+
+        const auto file = outputFolder.getChildFile (juce::String (name).removeCharacters (" ") + ".wav");
+        file.deleteFile();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> out (file.createOutputStream());
+        auto writer = wav.createWriterFor (out, juce::AudioFormatWriterOptions{}.withSampleRate (sampleRate)
+                                                                              .withNumChannels (2)
+                                                                              .withBitsPerSample (32)
+                                                                              .withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint));
+        if (writer == nullptr || ! writer->writeFromAudioSampleBuffer (output, 0, total))
+        {
+            std::printf ("No se pudo escribir %s\n", file.getFullPathName().toRawUTF8());
+            return 1;
+        }
+        std::printf ("%-18s -> %s (pico %.1f dBFS)\n", name, file.getFullPathName().toRawUTF8(),
+                     toDb (output.getMagnitude (0, total)));
+    }
+    return 0;
+}
+
 } // namespace
 
 int main (int argc, char* argv[])
@@ -373,6 +465,11 @@ int main (int argc, char* argv[])
         updateReferences = updateReferences || argument == "--update-references";
         if (argument == "--user" && i + 1 < argc)
             measuredUserFolder = juce::File (juce::String (argv[++i]));
+        if (argument == "--render" && i + 2 < argc)
+        {
+            const juce::ScopedJuceInitialiser_GUI init;
+            return renderReferences (juce::File (juce::String (argv[i + 1])), juce::File (juce::String (argv[i + 2])));
+        }
         if (argument == "--notes")
         {
             // Imprime las notas de los presets de fábrica tal como las muestra el navegador (y no corre los tests).
