@@ -7,7 +7,7 @@ llegar al nivel de sintes como Serum o Vital.
 ![Interfaz de Undertow Synth](docs/screenshot.png)
 
 > **Estado:** las 11 fases de la hoja de ruta están completadas. Es usable en un DAW: tiene efectos, una interfaz
-> escalable con modulación por arrastre, una librería de 22 presets que explican cómo se construyó cada sonido y un
+> escalable con modulación por arrastre, una librería de 43 presets que explican cómo se construyó cada sonido y un
 > motor optimizado con SIMD. Ver la [hoja de ruta](#hoja-de-ruta) y los [límites conocidos](#límites-conocidos).
 
 ## Qué tiene hoy
@@ -39,8 +39,9 @@ llegar al nivel de sintes como Serum o Vital.
   anillo del color de su fuente y un punto muestra el valor modulado en vivo.
 - **Visor 3D del wavetable** con todos los frames apilados y el frame que suena, con el warp aplicado y la modulación
   en vivo (o en 2D: original y deformada). Visores de la curva del filtro y de los LFOs.
-- **Presets:** navegador con categorías y búsqueda, guardar tus propios sonidos (con notas) y **22 presets de fábrica**
-  (bajos, leads, pads, plucks, keys y FX) con el volumen igualado. Cada uno trae notas que explican cómo se construyó y
+- **Presets:** navegador con categorías y búsqueda, guardar tus propios sonidos (con notas) y **43 presets de fábrica**
+  (bajos, leads, pads, plucks, keys y FX), 21 de ellos pensados para géneros concretos (reggaeton, synthwave, EDM,
+  electropop y alternativo), con el volumen igualado. Cada uno trae notas que explican cómo se construyó y
   qué perilla probar: la librería es también material de estudio. El proyecto del DAW recuerda qué preset cargaste y si
   lo modificaste.
 - **Optimizado con SIMD (SSE2):** el unison y los filtros de oversampling procesan 4 valores por instrucción. Un pad
@@ -101,7 +102,7 @@ Hay dos ejecutables de tests:
 - `UndertowTests` (`tests/DspTests.cpp`, sin JUCE) mide afinación, aliasing, respuesta del filtro, ausencia de clics,
   tiempos de los ecos y de la reverb, y coste de CPU, a las 4 frecuencias de muestreo.
 - `UndertowPresetTests` (`tests/PresetTests.cpp`, con JUCE) valida cada preset de fábrica, guardar y cargar, el estado
-  del proyecto, y renderiza los 22 presets para comprobar que no hay NaN ni picos y que los volúmenes están igualados.
+  del proyecto, y renderiza los 43 presets para comprobar que no hay NaN ni picos y que los volúmenes están igualados.
   Además:
   - compara la **huella espectral** de cada preset (24 bandas de 40 Hz a 20 kHz) con la guardada en
     [`tests/reference/factory-presets.txt`](tests/reference/factory-presets.txt): si un cambio en el código altera el
@@ -182,12 +183,23 @@ lee como una receta.
 | Categoría | Presets |
 |---|---|
 | Init | Init |
-| Bass | Sub Profundo, Bajo Moog, Acid Squelch, Wobble 140, Reese DnB, Bajo FM Gruñido, Bajo Medio Tube |
-| Lead | Supersaw Trance, Sync Lead 80s, Lead Galopante, Lead Vocal Expresivo |
-| Pad | Pad que Habla, Pad Juno, Pad con Aire, Pad que Respira |
-| Pluck | Pluck House, Marimba FM |
-| Keys | Campana FM, E-Piano FM |
-| FX | Riser de Ruido, Lluvia S&H |
+| Bass | Sub Profundo, Bajo Moog, Acid Squelch, Wobble 140, Reese DnB, Bajo FM Gruñido, Bajo Medio Tube, Bajo 808 Perreo, Bajo Synthwave Octavas, Bajo Future House, Bajo Electropop, Bajo Fuzz Indie |
+| Lead | Supersaw Trance, Sync Lead 80s, Lead Galopante, Lead Vocal Expresivo, Lead Silbido, Lead Outrun, Lead Big Room, Lead Vocal Chop, Lead Fuzz Shoegaze |
+| Pad | Pad que Habla, Pad Juno, Pad con Aire, Pad que Respira, Pad Noche Urbana, Pad Neón, Pad Sidechain, Pad Brillo Pop, Pad Shoegaze |
+| Pluck | Pluck House, Marimba FM, Pluck Dembow, Arpegio Retrowave |
+| Keys | Campana FM, E-Piano FM, Brass Ochentero, Stab Electropop |
+| FX | Riser de Ruido, Lluvia S&H, Riser Supersaw, Textura Cinta Rota |
+
+Los presets por género dicen su género en la primera línea de las notas, así que en el navegador basta con buscar
+"reggaeton", "synthwave", "EDM", "electropop" o "alternativo":
+
+| Género | Presets |
+|---|---|
+| Reggaeton | Bajo 808 Perreo, Pluck Dembow, Pad Noche Urbana, Lead Silbido |
+| Synthwave | Bajo Synthwave Octavas, Lead Outrun, Pad Neón, Brass Ochentero, Arpegio Retrowave |
+| EDM | Lead Big Room, Bajo Future House, Pad Sidechain, Riser Supersaw |
+| Electropop | Bajo Electropop, Stab Electropop, Lead Vocal Chop, Pad Brillo Pop |
+| Alternativo | Bajo Fuzz Indie, Lead Fuzz Shoegaze, Pad Shoegaze, Textura Cinta Rota |
 
 ![Filtro con una envolvente conectada al Cutoff ("Bajo Moog")](docs/screenshot-modulacion.png)
 
