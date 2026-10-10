@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pad de vocales: dos LFO lentos con periodos distintos (2 y 4 compases) recorren la tabla y el cutoff. -->
+<UndertowPreset formatVersion="1" name="Pad que Habla" category="Pad" author="Undertow">
+  <Notes>
+    Pad que "dice" vocales (ambient, chill, 80 BPM).
+
+    Cómo se construyó:
+    - Osc A: tabla Vowels en 50 %, Unison 4, Detune 20 %, Width 80 %.
+    - Low Pass 12 dB a 1.5 kHz, Resonance 20 %, Key Track 30 %.
+    - Env 1: Attack 800 ms, Decay 1 s, Sustain 80 %, Release 2 s. Voices 8.
+    - LFO 1 (Triangle, Free, Sync, 2 bars) → Position +45 %: recorre las vocales lento y sin reiniciarse, así que
+      cada acorde "dice" algo distinto. Position 50 % + anillo de 45 % = casi toda la tabla sin quedarse pegado.
+    - LFO 2 (Sine, Free, Sync, 4 bars) → Cutoff +8 % (menos de una octava a cada lado). Con periodos distintos (2 y 4
+      compases) el movimiento nunca se repite igual.
+    - Velocity → Cutoff +15 %: los acordes tocados fuerte se abren un poco más (expresión sin cambiar el volumen).
+    - Chorus (0.4 Hz, Depth 40 %, Mix 40 %) y Reverb (Size 80 %, Decay 6 s, Damping 60 %, Mix 35 %).
+
+    Tócalo: acordes de 4 compases (Dm9 – Bbmaj7) entre C4 y C6.
+    Prueba a mover: la Position de Osc A (es el centro del vaivén) y el anillo de LFO 1 (el radio).
+    Viene de: Fase 9 (receta 1).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAWavetable" value="Vowels"/>
+    <PARAM id="oscAPosition" value="0.5"/>
+    <PARAM id="oscAUnison" value="4"/>
+    <PARAM id="oscADetune" value="0.2"/>
+    <PARAM id="oscAWidth" value="0.8"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.8"/>
+    <PARAM id="decay" value="1"/>
+    <PARAM id="sustain" value="0.8"/>
+    <PARAM id="release" value="2"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="1500"/>
+    <PARAM id="filter1Resonance" value="0.2"/>
+    <PARAM id="filter1KeyTrack" value="0.3"/>
+
+    <PARAM id="lfo1Shape" value="Triangle"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="On"/>
+    <PARAM id="lfo1Division" value="2 bars"/>
+    <PARAM id="lfo2Shape" value="Sine"/>
+    <PARAM id="lfo2Mode" value="Free"/>
+    <PARAM id="lfo2Sync" value="On"/>
+    <PARAM id="lfo2Division" value="4 bars"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Osc A Position"/>
+    <PARAM id="mod1Amount" value="0.45"/>
+    <PARAM id="mod2Source" value="LFO 2"/>
+    <PARAM id="mod2Destination" value="Filter Cutoff"/>
+    <PARAM id="mod2Amount" value="0.08"/>
+    <PARAM id="mod3Source" value="Velocity"/>
+    <PARAM id="mod3Destination" value="Filter Cutoff"/>
+    <PARAM id="mod3Amount" value="0.15"/>
+
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.4"/>
+    <PARAM id="fxChorusDepth" value="0.4"/>
+    <PARAM id="fxChorusMix" value="0.4"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.8"/>
+    <PARAM id="fxReverbDecay" value="6"/>
+    <PARAM id="fxReverbDamping" value="0.6"/>
+    <PARAM id="fxReverbMix" value="0.35"/>
+    <PARAM id="master" value="3.5"/>
+  </Parameters>
+</UndertowPreset>

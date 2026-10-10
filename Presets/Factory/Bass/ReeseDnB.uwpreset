@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Reese: dos sierras casi iguales (Fine +15 ct) que laten entre sí, sub mono debajo y filtro oscuro con drive. -->
+<UndertowPreset formatVersion="1" name="Reese DnB" category="Bass" author="Undertow">
+  <Notes>
+    Reese bass de drum &amp; bass (174 BPM): el bajo que "rueda".
+
+    Cómo se construyó:
+    - Osc A y Osc B: dos sierras iguales, Osc B con Fine +15 cents. Las dos ondas se adelantan y se atrasan una
+      respecto a la otra: sus armónicos se refuerzan y se cancelan varias veces por segundo (batido). Ese batido es
+      el reese.
+    - Sin unison: el bajo queda mono y centrado, como debe ir un bajo en una pista de club.
+    - Sub seno una octava abajo (70 %): sostiene la fundamental aunque el batido la cancele por momentos.
+    - Low Pass 24 dB a 350 Hz, Resonance 20 %, Drive 35 %: oscuro y agresivo.
+    - LFO 1 (Triangle, Free, Sync, 2 bars) → Cutoff +12 %: el filtro respira despacio (±1.2 octavas).
+    - LFO 1 → Osc B Pitch +0.4 % (±0.1 semitonos): el batido se acelera y se frena, y el reese "se mueve".
+    - Voices 1, Attack 3 ms, Sustain 100 %, Release 80 ms.
+
+    Tócalo: a 174 BPM, notas largas (1–2 compases) en F3 (87 Hz), E3 (82 Hz) y G3 (98 Hz).
+    Prueba a mover: Osc B Fine (5 ct = batido lento y profundo; 40 ct = nervioso). Pon el Mixer en mono: el sub
+    mantiene el bajo en su sitio.
+    Viene de: Fase 6 (receta 2).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0.6667"/>
+    <PARAM id="oscBFine" value="15"/>
+    <PARAM id="subOn" value="On"/>
+    <PARAM id="subShape" value="Sine"/>
+    <PARAM id="subOctave" value="-1"/>
+    <PARAM id="subLevel" value="0.7"/>
+
+    <PARAM id="voices" value="1"/>
+    <PARAM id="attack" value="0.003"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.08"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="350"/>
+    <PARAM id="filter1Resonance" value="0.2"/>
+    <PARAM id="filter1Drive" value="0.35"/>
+
+    <PARAM id="lfo1Shape" value="Triangle"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="On"/>
+    <PARAM id="lfo1Division" value="2 bars"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Filter Cutoff"/>
+    <PARAM id="mod1Amount" value="0.12"/>
+    <PARAM id="mod2Source" value="LFO 1"/>
+    <PARAM id="mod2Destination" value="Osc B Pitch"/>
+    <PARAM id="mod2Amount" value="0.004"/>
+    <PARAM id="master" value="-1.5"/>
+  </Parameters>
+</UndertowPreset>

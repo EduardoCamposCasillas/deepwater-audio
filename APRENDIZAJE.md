@@ -1377,3 +1377,216 @@ Inténtalo primero; las pistas vendrán después.
 
 ### Retos completados
 - [ ] Reto Fase 9 — bajo reese
+
+---
+
+## Fase 10 — Presets: guardar, cargar y una librería para estudiar
+
+### Conceptos aprendidos
+**Un preset es una receta, no una grabación.** No guarda audio. Guarda el valor de cada parámetro (117) más un
+nombre, una categoría y unas notas. Al cargarlo, el sinte vuelve a girar todas sus perillas a esos valores y el sonido
+se genera de nuevo, en vivo. Por eso un preset ocupa 5 KB y una muestra de audio, megas. También por eso puedes abrir
+cualquier preset y ver (y cambiar) exactamente cómo está hecho.
+
+**El archivo se puede leer.** Los presets son archivos `.uwpreset` en XML. Puedes abrirlos con el Bloc de notas:
+```xml
+<UndertowPreset formatVersion="1" name="Bajo Moog" category="Bass" author="Undertow">
+  <Notes>Bajo analógico redondo y con "voz"…</Notes>
+  <Parameters>
+    <PARAM id="filter1Cutoff" value="450"/>        <!-- 450 Hz, en unidades reales -->
+    <PARAM id="filter1Type" value="Low Pass"/>     <!-- las listas, por su nombre -->
+    <PARAM id="mod1Amount" value="0.15"/>          <!-- 15 % -->
+  </Parameters>
+</UndertowPreset>
+```
+
+**Valor normalizado vs valor real.** Para FL, cada parámetro va de 0 a 1 (así funcionan la automatización y los
+plugins en general). Pero 0.567 no le dice nada a una persona, y además depende de la escala de la perilla: el cutoff
+es logarítmico y 0.5 no es la mitad de 20 kHz, sino 632 Hz. El preset guarda **unidades reales** (450 Hz, 0.002 s,
+"Low Pass"). Así se lee como una receta, y sigue siendo correcto aunque algún día cambie la escala de una perilla.
+
+**Init y los presets "dispersos".** Los presets de fábrica solo escriben lo que cambia respecto a **Init** (el seno
+puro con todo apagado). Lo que no aparece en el archivo toma su valor por defecto. Esto tiene dos ventajas:
+- Leer un preset es leer **la diferencia** entre el sonido y el punto de partida. Esa diferencia ES el diseño del
+  sonido. El *Bajo Moog* son 21 líneas, con comentarios donde hace falta.
+- Cuando llegue un parámetro nuevo (en la Fase 11 o después), los presets viejos lo tomarán en su valor por defecto,
+  que siempre es "apagado". Suenan igual que antes.
+
+Tus presets guardan **todos** los parámetros: no dependen de cuáles sean los valores por defecto de cada versión.
+
+**El preset y el proyecto de FL son cosas distintas.** El proyecto guarda el estado completo del plugin: los
+parámetros, el zoom de la ventana, el nombre del preset y si lo modificaste (el `*`). El preset solo guarda el sonido.
+Si cargas un preset no cambia tu zoom, y si mueves una perilla, el preset de la biblioteca no se toca hasta que pulses
+*Guardar*.
+
+**El asterisco (`*`).** Al cargar un preset, el plugin hace una "foto" de los valores. Si tocas algo, el nombre
+muestra `Bajo Moog *`: ya no es el preset original. Si devuelves la perilla a su valor, el `*` desaparece. Sirve para
+no perder un cambio que te gustó: si ves el `*` y te gusta cómo suena, guárdalo con otro nombre.
+
+**Igualar el volumen: el truco más importante al comparar sonidos.** El oído tiene un sesgo muy fuerte: **lo que suena
+más fuerte parece mejor** (más lleno, más brillante, más "caro"). Si un preset sonara 3 dB más fuerte que otro, te
+parecería mejor solo por eso. Por eso los 22 presets de fábrica están igualados. Un programa de test mide cada uno con
+una frase musical típica de su categoría, y todos quedan entre **−17.5 y −19.6 dBFS RMS** (Init: −18.3). Con tus
+propios sonidos, haz lo mismo: antes de decidir si un cambio "mejora" el sonido, iguala el volumen con el Master.
+
+**RMS, pico y factor de cresta.** El **pico** es el punto más alto de la onda. El **RMS** es el volumen "medio" (en
+una ventana de tiempo, aquí 300 ms), y se parece más a lo fuerte que lo percibimos. La distancia entre los dos es el
+**factor de cresta**. Con los sonidos sostenidos el RMS funciona bien. Con los muy cortos, no: una nota de un pluck
+dura 200 ms y después hay silencio, así que el RMS de la ventana sale bajo (*Pluck House*: pico −10, RMS −24) aunque
+el golpe suene tan fuerte como un pad (pico −5, RMS −18). El oído juzga los golpes cortos sobre todo por su pico. Por
+eso los plucks de fábrica se igualan por pico y no por RMS.
+
+**Por qué no hay "programas" del host.** FL tiene sus propias flechas de presets en la barra del plugin (los
+"programas" de VST). Undertow no los usa a propósito: en VST3 el host puede cambiar de programa **desde el hilo de
+audio**, y cargar un preset reserva memoria y lee texto, justo lo que está prohibido ahí (provocaría cortes de audio).
+Los presets se cargan solo desde la interfaz, en el hilo de mensajes. Los cambios de parámetros llegan al audio por los
+atómicos de siempre, que ya se suavizan sin clics.
+
+### Qué hace cada control
+| Control | Qué hace |
+|---|---|
+| **◀ / ▶** (cabecera) | Preset anterior / siguiente de toda la biblioteca (da la vuelta). Para "hojear" sonidos con un loop sonando. |
+| **Nombre del preset** | Abre o cierra el navegador. Muestra la categoría (BASS, PAD…) y un `*` si lo modificaste. |
+| **Categorías** (navegador) | Filtra la lista. El número es cuántos presets hay. *Mis presets* = solo los tuyos. |
+| **Buscar** | Busca en el nombre, la categoría **y las notas**. Prueba "FM", "Env 2", "Sync" o "wobble". |
+| **Clic en la lista** | Carga el preset al instante, para escucharlo. Las **flechas ↑ ↓** del teclado recorren la lista cargando cada uno. |
+| **Doble clic / Enter** | Carga y cierra el navegador. **Esc** cierra sin más. |
+| **Cómo se construyó** | Las notas del preset: qué es, por qué está cada ajuste, qué tocar y qué perilla probar. |
+| **Borrar preset** | Solo los tuyos. Pide confirmación (segundo clic) y mueve el archivo a la **papelera de reciclaje**. |
+| **Guardar** | Abre el panel de guardar: nombre, categoría, autor y notas. Si partiste de un preset de fábrica, las notas empiezan con "Basado en «…»". Si el nombre ya existe, el botón dice *Reemplazar*. |
+| **···** | *Init* (empezar desde cero), *Guardar como…*, abrir tu carpeta de presets en el Explorador y volver a leerla. |
+
+Tus presets están en **`Documentos\Undertow\Presets`**. Puedes crear subcarpetas, copiar presets de otra persona o
+hacer copias de seguridad: el navegador lee todo lo que haya dentro. Los de fábrica viven dentro del plugin y no se
+pueden borrar por error.
+
+### Mapa de la librería de fábrica
+Casi todos los presets son las recetas de las fases anteriores, ya montadas. Ábrelos con este cuaderno al lado.
+
+| Preset | Categoría | Qué enseña | Viene de |
+|---|---|---|---|
+| Init | Init | El punto de partida: seno puro, todo apagado. | Fase 2 |
+| Sub Profundo | Bass | Sub mono + distorsión Tube para los altavoces pequeños (la fundamental ausente). | Fases 1 y 8 |
+| Bajo Moog | Bass | Sierra + low-pass 24 dB + drive + key tracking + envolvente de filtro. | Fases 4 y 5 |
+| Acid Squelch | Bass | Resonancia alta + envolvente rápida + velocity como acento (TB-303). | Fases 4 y 5 |
+| Wobble 140 | Bass | Un LFO a tempo moviendo el filtro y el warp a la vez. | Fases 5 y 9 |
+| Reese DnB | Bass | Batido entre dos sierras + sub mono. | Fase 6 |
+| Bajo FM Gruñido | Bass | FM 1:1 con el índice movido por un LFO. | Fase 7 |
+| Bajo Medio Tube | Bass | Distorsión después del filtro: armónicos nuevos arriba. | Fase 8 |
+| Supersaw Trance | Lead | Unison de 7 + capa una octava arriba. | Fase 6 |
+| Sync Lead 80s | Lead | Warp Sync barrido por una envolvente. | Fase 7 |
+| Lead Galopante | Lead | Delay 1/8 con puntillo en ping-pong. | Fase 8 |
+| Lead Vocal Expresivo | Lead | **Nuevo.** Tocar con la rueda (vocal), el aftertouch y la velocity (filtro). | — |
+| Pad que Habla | Pad | Dos LFO lentos de periodos distintos (vocales y filtro). | Fase 9 |
+| Pad Juno | Pad | Una sierra + chorus lento = "analógico". | Fase 8 |
+| Pad con Aire | Pad | Dos tablas a una octava + un soplido de ruido. | Fase 6 |
+| Pad que Respira | Pad | Tres movimientos a velocidades distintas. | Fase 5 |
+| Pluck House | Pluck | **Nuevo.** Sin sustain + envolvente de filtro más corta que la de volumen. | Fase 2 (pluck) |
+| Marimba FM | Pluck | **Nuevo.** FM 4:1 solo en los primeros 60 ms = el golpe de la baqueta. | — |
+| Campana FM | Keys | Ratio no entera = parciales inarmónicos (metal). | Fase 7 |
+| E-Piano FM | Keys | **Nuevo.** FM 1:1 que depende de la velocity (DX7). | — |
+| Riser de Ruido | FX | **Nuevo.** Env 3 lenta (8 s) abriendo el filtro y subiendo el tono. | — |
+| Lluvia S&H | FX | **Nuevo.** LFO Sample & Hold a 1/16 en un filtro resonante. | — |
+
+Los retos pendientes (lead de 8 bits, pad "detrás de la pared", sidechain falso, chord stab de future bass, growl,
+lead de synthwave y el reese con 3 rutas) **no están** en la librería a propósito: son tuyos. Cuando los resuelvas,
+guárdalos como presets con sus notas.
+
+### Ejercicio de escucha guiado
+Montaje: un patrón de 4 compases en el Piano Roll (por ejemplo, la línea de bajo **C3 – C3 – D#3 – F3** en corcheas)
+en bucle, y **Fruity Parametric EQ 2** + **Wave Candy** en el canal del Mixer, como siempre.
+
+1. **Hojear igualados.** Con el loop sonando, pulsa **▶** varias veces. Pasa por todos los bajos: el volumen apenas
+   cambia, y por eso puedes comparar el **timbre** sin que el volumen te engañe. Mira el analizador: Sub Profundo es
+   casi una sola línea; Bajo Medio Tube llena hasta los 5 kHz.
+2. **El sesgo del volumen.** Carga *Bajo Moog*. Sube el **Master** de +2.5 a **+5.5 dB** y vuelve a bajarlo varias
+   veces. ¿Verdad que "más fuerte" parece "mejor", más gordo? No cambió nada del sonido: solo el volumen. Recuérdalo
+   cada vez que compares dos ajustes.
+3. **Ingeniería inversa: quitar piezas.** Carga *Acid Squelch* y toca semicorcheas en C3–C4. En la pestaña
+   *Modulación*, pon a **0 %** el amount de la ruta 1 (Env 2 → Cutoff): el squelch desaparece y queda un bajo plano.
+   Devuélvelo a 40 %. Ahora pon a 0 la ruta 2 (Velocity): todas las notas "gritan" igual. Quitar una pieza y escuchar
+   qué falta es **la** forma de aprender de un preset ajeno.
+4. **El asterisco.** Con *Bajo Moog*, mueve el Cutoff: el nombre muestra `Bajo Moog *`. Doble clic en la perilla
+   (vuelve a su valor por defecto, 2 kHz): el `*` sigue ahí, porque el preset tenía 450 Hz, no 2 kHz. Haz clic en el
+   número de la perilla, escribe **450** y pulsa Enter: el `*` desaparece.
+5. **Buscar por técnica.** Abre el navegador y escribe **"FM"**: aparecen todos los presets cuyas notas hablan de FM.
+   Prueba con **"Env 2"**: todos los que usan una envolvente de filtro o de FM. Así puedes estudiar una técnica en
+   varios sonidos distintos.
+6. **Tu primer preset.** Desde *Init* (menú **···**), construye un sonido sencillo, por ejemplo la receta de la
+   Fase 3 "Bajo de sierra clásico". Pulsa **Guardar**, ponle nombre, categoría *Bass* y rellena las notas con el
+   porqué de cada ajuste. Ábrelo en *Mis presets*.
+7. **Artefactos a buscar.**
+   - Cambiar de preset con notas sonando (mantén un acorde y pulsa ▶ varias veces): el sonido cambia, pero **sin
+     clics fuertes ni golpes de volumen**. Puede oírse un "morph" corto mientras los valores viajan, y es normal.
+   - Guarda el proyecto de FL con un preset modificado, ciérralo y ábrelo: debe mostrar el mismo nombre con `*`.
+   - Un proyecto de la Fase 9 debe sonar **exactamente igual** que antes y mostrar "Sin nombre".
+   - Cierra y vuelve a abrir el plugin: tu preset sigue en *Mis presets* (vive en tu carpeta, no en el proyecto).
+
+### Recetas
+**1. Variación de un preset: de "Bajo Moog" a bajo de house "pluckeado" (124 BPM)**
+1. Carga *Bajo Moog*. Pulsa **Guardar** y llámalo "Bajo House". Guardar primero te da una copia en la que puedes
+   romper cosas sin miedo.
+2. Env 1: **Sustain 0 %**, **Decay 250 ms**, Release 80 ms. El bajo ya no se sostiene: cada nota es un golpe.
+3. Arrastra **ENV 2** al Cutoff y deja el anillo en **+35 %**. Env 2: **Decay 150 ms**. Ahora el filtro se abre
+   mucho y se cierra antes que el volumen: "bom-bom" con ataque.
+4. **Key Track 70 %** y Resonance **35 %**.
+5. Pulsa **Guardar** de nuevo (te propone el mismo nombre: *Reemplazar*). En las notas escribe qué cambiaste y por qué.
+6. Piano Roll: corcheas a contratiempo (en la "y" de cada tiempo) en **A2–A3**. Es el bajo de house clásico, el que
+   va entre los bombos.
+7. *Por qué funciona:* el bajo de house deja sitio al bombo con su silencio. El sustain 0 corta cada nota, y la
+   envolvente de filtro le da el ataque que la hace entenderse en un sistema pequeño.
+
+**2. Capas (layering) en FL: Sub Profundo + Bajo Medio Tube**
+1. Dos canales de Undertow en el Channel Rack. En uno carga *Sub Profundo*; en el otro, *Bajo Medio Tube* con el
+   **Sub apagado** (pestaña *Osciladores*). Guárdalo como "Bajo Medio sin sub".
+2. Mismo patrón en los dos canales: notas largas en **E2–G2** (FL; 41–49 Hz).
+3. En el Mixer, pon un **Fruity Parametric EQ 2** en el canal del medio con un **high-pass a 120 Hz**, y otro en el
+   del sub con un **low-pass a 120 Hz**.
+4. Mezcla los dos faders mirando el analizador del bus: el sub llena por debajo de 120 Hz y el medio por encima.
+5. *Por qué funciona:* cada capa hace un solo trabajo. El sub (mono, limpio) da el peso en el club; el medio
+   (distorsionado) hace que el bajo se oiga en un móvil. Con dos sonidos que se pisan en los graves, sus fases se
+   suman y se restan al azar y el bajo "va y viene". Repartir las frecuencias lo evita. Así se construyen casi todos
+   los bajos de la música electrónica moderna.
+
+### Reto sin receta
+**Un pluck de tropical house** (referencias: Kygo – "Firestone", Thomas Jack, el "pan flute pluck").
+
+Tu reto, a **110 BPM**, con una melodía de corcheas entre **C5 y C6**:
+- construye el sonido **desde Init**, sin abrir *Pluck House* ni *Marimba FM* (¡no vale copiar!);
+- debe sonar suave, "de madera" o "de flauta", con un ataque claro y una cola corta pero con espacio;
+- guárdalo como preset en la categoría *Pluck*, **con notas** que expliquen cada ajuste;
+- después **compáralo** con *Marimba FM* y *Pluck House* **igualando el volumen** con el Master (mira el pico en Wave
+  Candy). ¿Qué hace cada uno que no hace el otro?
+
+Pista para empezar: piensa qué tienen en común todos los instrumentos que se golpean o se pulsan (Fase 2): ¿qué pasa
+con el volumen y qué pasa con los armónicos agudos después del golpe?
+Inténtalo primero; las pistas vendrán después.
+
+### Vocabulario
+- **Preset / patch.** Un sonido guardado como lista de ajustes. *Ejemplo:* los presets de fábrica de un DX7 ("E.PIANO
+  1") se oyen en cientos de discos de los 80; muchos productores famosos usan presets apenas retocados.
+- **Init (patch inicial).** El preset "vacío" desde el que se construye. *Ejemplo:* en Serum y Vital, el preset inicial
+  suele ser una sierra sin efectos; en Undertow, un seno.
+- **Librería / banco de presets.** Una colección organizada por categorías. *Ejemplo:* los bancos de presets que venden
+  los productores de EDM (los "sound packs").
+- **Valor normalizado.** La posición del parámetro de 0 a 1, la que ve el host. *Ejemplo:* un clip de automatización
+  de FL dibuja valores de 0 a 1, aunque la perilla muestre "450 Hz".
+- **Gain staging (estructura de ganancia).** Controlar el nivel en cada etapa para comparar y mezclar sin engaños.
+  *Ejemplo:* igualar los presets a −18 dBFS RMS deja margen y permite compararlos con justicia.
+- **RMS.** El volumen "medio" de una señal, cercano a lo que se percibe. *Ejemplo:* un pad y un bajo con el mismo RMS
+  suenan parecido de fuertes en el Mixer.
+- **Pico (peak).** El valor más alto de la onda. Si pasa de 0 dBFS, recorta. *Ejemplo:* el medidor del Mixer de FL
+  se pone rojo con los picos, no con el RMS.
+- **Factor de cresta.** La distancia entre el pico y el RMS. *Ejemplo:* una caja de batería tiene mucho (un golpe
+  breve); un pad, poco. Los compresores y limitadores reducen el factor de cresta (por eso el EDM "suena fuerte").
+- **Sesgo del volumen (loudness bias).** Lo más fuerte parece mejor. *Ejemplo:* por esto los ingenieros comparan
+  siempre "A/B" a igual volumen; también por esto los anuncios de la tele suenan más fuertes.
+- **Comparación A/B.** Alternar entre dos versiones para elegir. *Ejemplo:* cargar el preset original y tu versión
+  (con el `*`) y alternarlos con el mismo patrón sonando.
+- **Ingeniería inversa (de un sonido).** Desmontar un preset quitando piezas para entender qué hace cada una.
+  *Ejemplo:* poner a 0 una ruta de la matriz y escuchar qué falta.
+- **Layering (capas).** Sumar dos sonidos que hacen trabajos distintos. *Ejemplo:* casi cualquier bajo de dubstep o de
+  drum & bass moderno: un sub limpio debajo de un medio distorsionado.
+
+### Retos completados
+- [ ] Reto Fase 10 — pluck de tropical house

@@ -35,13 +35,26 @@ juce_add_plugin(UndertowSynth
     VST3_CATEGORIES          Instrument Synth
 )
 
-target_sources(UndertowSynth
-    PRIVATE
-        Source/PluginProcessor.cpp
-        Source/PluginEditor.cpp
-        Source/dsp/Wavetable.cpp
-        Source/synth/VoiceManager.cpp
-        Source/synth/WavetableBank.cpp
+# Todo el código del plugin (también lo compila UndertowPresetTests).
+set(UNDERTOW_PLUGIN_SOURCES
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/dsp/Wavetable.cpp
+    Source/presets/PresetManager.cpp
+    Source/synth/VoiceManager.cpp
+    Source/synth/WavetableBank.cpp
+)
+
+target_sources(UndertowSynth PRIVATE ${UNDERTOW_PLUGIN_SOURCES})
+
+# --- Presets de fábrica ----------------------------------------------------------
+# Los .uwpreset de Presets/Factory se compilan DENTRO del plugin (BinaryData.h): no hay que instalar archivos aparte
+# y nadie puede borrarlos por error. CONFIGURE_DEPENDS: un preset nuevo se detecta al compilar, sin reconfigurar a mano.
+file(GLOB_RECURSE UNDERTOW_FACTORY_PRESETS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Factory/*.uwpreset")
+juce_add_binary_data(UndertowPresetData
+    HEADER_NAME BinaryData.h
+    NAMESPACE   BinaryData
+    SOURCES     ${UNDERTOW_FACTORY_PRESETS}
 )
 
 target_include_directories(UndertowSynth PRIVATE Source)
@@ -57,6 +70,7 @@ target_link_libraries(UndertowSynth
     PRIVATE
         juce::juce_audio_utils         # incluye audio_processors, audio_devices, gui, etc.
         juce::juce_dsp
+        UndertowPresetData
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -86,4 +100,26 @@ if(UNDERTOW_BUILD_TESTS)
     endif()
 
     add_test(NAME UndertowTests COMMAND UndertowTests)
+
+    # Tests de presets: necesitan JUCE (parámetros, estado, XML), así que son una app de consola aparte que compila el
+    # procesador completo. Validan cada preset de fábrica, guardar/cargar, el estado del proyecto y renderizan cada
+    # preset para medir su nivel.
+    juce_add_console_app(UndertowPresetTests PRODUCT_NAME "UndertowPresetTests")
+    target_sources(UndertowPresetTests PRIVATE tests/PresetTests.cpp ${UNDERTOW_PLUGIN_SOURCES})
+    target_include_directories(UndertowPresetTests PRIVATE Source)
+    target_compile_definitions(UndertowPresetTests
+        PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            "JucePlugin_Name=\"Undertow Synth\""
+    )
+    target_link_libraries(UndertowPresetTests
+        PRIVATE
+            juce::juce_audio_utils
+            juce::juce_dsp
+            UndertowPresetData
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
+    )
+    add_test(NAME UndertowPresetTests COMMAND UndertowPresetTests)
 endif()

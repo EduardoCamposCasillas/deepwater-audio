@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Línea ácida al estilo TB-303: filtro muy resonante + envolvente rápida en el cutoff + velocity como "acento". -->
+<UndertowPreset formatVersion="1" name="Acid Squelch" category="Bass" author="Undertow">
+  <Notes>
+    El "squelch" de la Roland TB-303: acid house, acid techno.
+
+    Cómo se construyó:
+    - Sierra (Basic Shapes 67 %) y Voices 1: la 303 era monofónica.
+    - Low Pass 24 dB a 250 Hz con Resonance 75 %: el filtro "chilla" en el cutoff. El Drive 45 % endurece ese chillido.
+    - Env 2 → Cutoff +40 % (decay 180 ms): cada nota abre el filtro 4 octavas (de 250 Hz a 4 kHz) y lo cierra. El
+      pico de resonancia barre los armónicos en cada nota: ese barrido ES el squelch.
+    - Velocity → Cutoff +20 %: las notas tocadas fuerte "gritan" 2 octavas más. Es el "accent" de la 303.
+    - Env 1: Attack 1 ms, Decay 200 ms, Sustain 40 %, Release 40 ms: notas cortas y con golpe.
+    - Key Track 30 %: el riff suena parejo al saltar de octava.
+
+    Tócalo: a 125 BPM, semicorcheas sobre C3–C4 con alguna octava arriba. Deja casi todas las notas con velocity baja
+    y pon acentos (velocity alta) en 1 de cada 3 o 4.
+    Prueba a mover: automatiza el Cutoff de 150 Hz a 1 kHz a lo largo de 8 compases (clic derecho → Create automation
+    clip). Esa curva lenta más el squelch de cada nota es el sonido acid completo.
+    Viene de: Fase 4 (línea ácida) + Fase 5 (receta 1).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="voices" value="1"/>
+    <PARAM id="attack" value="0.001"/>
+    <PARAM id="decay" value="0.2"/>
+    <PARAM id="sustain" value="0.4"/>
+    <PARAM id="release" value="0.04"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="250"/>
+    <PARAM id="filter1Resonance" value="0.75"/>
+    <PARAM id="filter1Drive" value="0.45"/>
+    <PARAM id="filter1KeyTrack" value="0.3"/>
+
+    <PARAM id="env2Attack" value="0.001"/>
+    <PARAM id="env2Decay" value="0.18"/>
+    <PARAM id="env2Sustain" value="0"/>
+    <PARAM id="env2Release" value="0.04"/>
+    <PARAM id="mod1Source" value="Env 2"/>
+    <PARAM id="mod1Destination" value="Filter Cutoff"/>
+    <PARAM id="mod1Amount" value="0.4"/>
+    <PARAM id="mod2Source" value="Velocity"/>
+    <PARAM id="mod2Destination" value="Filter Cutoff"/>
+    <PARAM id="mod2Amount" value="0.2"/>
+    <PARAM id="master" value="6"/>
+  </Parameters>
+</UndertowPreset>

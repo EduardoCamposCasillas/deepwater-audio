@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Supersaw: 7 sierras desafinadas + una capa de 5 una octava arriba, abiertas a todo el panorama. -->
+<UndertowPreset formatVersion="1" name="Supersaw Trance" category="Lead" author="Undertow">
+  <Notes>
+    El supersaw del trance (138 BPM), para leads o acordes enormes.
+
+    Cómo se construyó:
+    - Osc A: sierra con Unison 7, Detune 35 % y Width 100 %. Siete copias desafinadas ±12 cents dan el "coro" del
+      Roland JP-8000, el sinte que inventó este sonido.
+    - Osc B: otra sierra una octava arriba (Unison 5, Detune 25 %, Level 45 %): el brillo "que corta".
+    - Low Pass 12 dB a 7 kHz, Resonance 10 %: quita la "arena" de arriba sin apagarlo.
+    - Env 1: Attack 5 ms, Sustain 100 %, Release 350 ms. Voices 8.
+    - Reverb (Size 60 %, Decay 2.5 s, Mix 18 %): un poco de sala para que no suene "pegado" al altavoz.
+    - No hace falta bajar el volumen por usar 12 copias: el unison baja cada copia a 1/√N y la potencia total se
+      mantiene (Fase 6).
+
+    Tócalo: acordes A4-C5-E5 / F4-A4-C5 / C5-E5-G5 / G4-B4-D5, un compás cada uno.
+    Prueba a mover: el Detune de Osc A (10 % = limpio y fino; 60 % = desafinado, "de feria") y el Mixer en mono: con
+    tanto unison el sonido pierde algo de volumen y de brillo (la ley de paneo, Fase 6).
+    Viene de: Fase 6 (receta 1).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="7"/>
+    <PARAM id="oscADetune" value="0.35"/>
+    <PARAM id="oscAWidth" value="1"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0.6667"/>
+    <PARAM id="oscBOctave" value="1"/>
+    <PARAM id="oscBUnison" value="5"/>
+    <PARAM id="oscBDetune" value="0.25"/>
+    <PARAM id="oscBWidth" value="1"/>
+    <PARAM id="oscBLevel" value="0.45"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="attack" value="0.005"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.35"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="7000"/>
+    <PARAM id="filter1Resonance" value="0.1"/>
+
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.6"/>
+    <PARAM id="fxReverbDecay" value="2.5"/>
+    <PARAM id="fxReverbDamping" value="0.4"/>
+    <PARAM id="fxReverbMix" value="0.18"/>
+    <PARAM id="master" value="3"/>
+  </Parameters>
+</UndertowPreset>

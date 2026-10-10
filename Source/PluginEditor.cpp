@@ -11,6 +11,8 @@ constexpr int rowHeight = 174;
 constexpr int wavetableColumnWidth = 170;
 constexpr int filterDisplayWidth = 280;
 constexpr int headerHeight = 32;
+constexpr int tabRowHeight = 30;     // Fase 10: las pestañas bajan a su propia fila; arriba va la barra de presets
+constexpr int titleAreaWidth = 170;  // "UNDERTOW SYNTH"
 constexpr int lfoOptionsWidth = 130;
 constexpr int lfoRateWidth = 84;
 constexpr int matrixRowHeight = 30;
@@ -31,13 +33,14 @@ constexpr int pageHeight = 3 * rowHeight + 2 * groupPadding;
 
 // Tamaño del diseño (zoom 100 %). La ventana real es este tamaño × zoom.
 constexpr int baseWidth = pageWidth + 2 * groupPadding;
-constexpr int baseHeight = headerHeight + pageHeight + modBarHeight + 4 * groupPadding;
+constexpr int baseHeight = headerHeight + tabRowHeight + 8 + pageHeight + modBarHeight + 4 * groupPadding;
 
 constexpr float minZoom = 0.7f;
 constexpr float maxZoom = 2.0f;
 constexpr std::array<int, 9> zoomSteps { 70, 80, 90, 100, 115, 130, 150, 175, 200 };
 constexpr const char* zoomPropertyId = "uiZoom"; // propiedad del estado (se guarda con el proyecto de FL)
 constexpr juce::uint32 messageSeconds = 8;
+constexpr const char* authorPropertyId = "presetAuthor"; // último autor escrito al guardar un preset
 
 std::unique_ptr<juce::PropertiesFile> openSettings()
 {
@@ -52,7 +55,8 @@ std::unique_ptr<juce::PropertiesFile> openSettings()
 } // namespace
 
 UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p), router (p.getParameters()), settings (openSettings())
+    : AudioProcessorEditor (p), processor (p), router (p.getParameters()), settings (openSettings()),
+      presetBrowser (p.getPresetManager())
 {
     namespace id = undertow::params;
     auto& apvts = processor.getParameters();
@@ -61,6 +65,12 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     addAndMakeVisible (content);
     content.setSize (baseWidth, baseHeight);
     content.onModulationDrag = [this] (std::optional<undertow::synth::ModSource> source) {
+        if (source.has_value())
+        {
+            // Arrastrar una fuente es trabajar sobre las perillas: los paneles de presets estorban.
+            showPresetBrowser (false);
+            showSaveDialog (false);
+        }
         for (auto* knob : modulationKnobs)
             knob->setDragInProgress (source);
 
@@ -113,6 +123,45 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
                                                    "inferior derecha."));
     zoomButton.onClick = [this] { showZoomMenu(); };
     content.addAndMakeVisible (zoomButton);
+
+    // --- Fase 10: presets ---
+    presetBar.onStep = [this] (int delta) {
+        if (const auto* preset = processor.getPresetManager().step (delta))
+        {
+            showMessage ("Preset: " + preset->name + juce::String::fromUTF8 (" \xc2\xb7 ") + preset->category);
+            if (presetBrowser.isVisible())
+                presetBrowser.refresh();
+        }
+        updatePresetBar();
+    };
+    presetBar.onToggleBrowser = [this] { showPresetBrowser (! presetBrowser.isVisible()); };
+    presetBar.onSave = [this] { showSaveDialog (true); };
+    presetBar.onMenu = [this] (juce::Component& anchor) { showPresetMenu (anchor); };
+    content.addAndMakeVisible (presetBar);
+
+    presetBrowser.onLoad = [this] (const undertow::presets::Preset& preset) { loadPreset (preset); };
+    presetBrowser.onClose = [this] { showPresetBrowser (false); };
+    presetBrowser.onMessage = [this] (const juce::String& message) {
+        showMessage (message);
+        updatePresetBar();
+    };
+    content.addChildComponent (presetBrowser);
+
+    saveDialog.setFolder (processor.getPresetManager().getUserFolder());
+    saveDialog.exists = [this] (const juce::String& name) { return processor.getPresetManager().userPresetExists (name); };
+    saveDialog.onSave = [this] (const juce::String& name, const juce::String& category, const juce::String& author,
+                                const juce::String& notes) -> juce::String {
+        const auto result = processor.getPresetManager().save (name, category, author, notes);
+        if (result.failed())
+            return result.getErrorMessage();
+        if (settings != nullptr)
+            settings->setValue (authorPropertyId, author.trim());
+        showMessage ("Preset guardado: " + name.trim());
+        updatePresetBar();
+        return {};
+    };
+    saveDialog.onClose = [this] { showSaveDialog (false); };
+    content.addChildComponent (saveDialog);
 
     // ================= Página "Osciladores": Osc A, Osc B, sub y ruido =================
     for (size_t o = 0; o < oscillators.size(); ++o)
@@ -398,11 +447,125 @@ void UndertowAudioProcessorEditor::showMessage (const juce::String& message)
 
 void UndertowAudioProcessorEditor::showPage (Page page)
 {
+    showPresetBrowser (false);
+    showSaveDialog (false);
     oscillatorPage.setVisible (page == Page::oscillators);
     warpPage.setVisible (page == Page::warp);
     soundPage.setVisible (page == Page::sound);
     modulationPage.setVisible (page == Page::modulation);
     effectsPage.setVisible (page == Page::effects);
+}
+
+// ================= Fase 10: presets =================
+
+void UndertowAudioProcessorEditor::loadPreset (const undertow::presets::Preset& preset)
+{
+    const auto problems = processor.getPresetManager().load (preset);
+    if (problems.isEmpty())
+        showMessage ("Preset: " + preset.name + juce::String::fromUTF8 (" \xc2\xb7 ") + preset.category);
+    else // un preset de otra versión o editado a mano: se carga lo que se entiende y se avisa del resto
+        showMessage (preset.name + ": " + juce::String (problems.size()) + " valor(es) no se entendieron (" + problems[0] + ")");
+    updatePresetBar();
+}
+
+void UndertowAudioProcessorEditor::showPresetBrowser (bool show)
+{
+    if (show == presetBrowser.isVisible())
+        return;
+    if (show)
+    {
+        showSaveDialog (false);
+        presetBrowser.refresh();
+        presetBrowser.toFront (false);
+    }
+    presetBrowser.setVisible (show);
+    presetBar.setBrowserOpen (show);
+    if (show)
+        presetBrowser.focusList();
+}
+
+void UndertowAudioProcessorEditor::showSaveDialog (bool show)
+{
+    if (show == saveDialog.isVisible())
+        return;
+    if (! show)
+    {
+        saveDialog.setVisible (false);
+        return;
+    }
+
+    showPresetBrowser (false);
+    auto& manager = processor.getPresetManager();
+    const juce::String lastAuthor = settings != nullptr ? settings->getValue (authorPropertyId) : juce::String();
+
+    // Si el sonido es un preset tuyo, se propone actualizarlo. Si partiste de uno de fábrica, las notas empiezan
+    // diciendo de cuál: así queda escrito qué cambiaste respecto al original.
+    saveDialog.toFront (false);
+    saveDialog.setVisible (true); // antes de open(): un componente invisible no puede recibir el foco del teclado
+    const auto* current = manager.getCurrentPreset();
+    if (current != nullptr && ! current->factory)
+        saveDialog.open (current->name, current->category, current->author.isNotEmpty() ? current->author : lastAuthor,
+                         current->notes);
+    else if (current != nullptr && current->category != "Init")
+        saveDialog.open ({}, current->category, lastAuthor,
+                         juce::String::fromUTF8 ("Basado en \xc2\xab") + current->name
+                             + juce::String::fromUTF8 ("\xc2\xbb (f\xc3\xa1" "brica).\n\nQu\xc3\xa9 cambi\xc3\xa9 y por qu\xc3\xa9:\n- "));
+    else
+        saveDialog.open ({}, "Otros", lastAuthor,
+                         juce::String::fromUTF8 ("Qu\xc3\xa9 es:\n\nC\xc3\xb3mo se construy\xc3\xb3:\n- \n\nT\xc3\xb3" "calo:\n"));
+}
+
+void UndertowAudioProcessorEditor::showPresetMenu (juce::Component& anchor)
+{
+    enum Items { init = 1, saveAs, openFolder, rescan };
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Presets");
+    menu.addItem (init, "Init (empezar desde cero)");
+    menu.addItem (saveAs, juce::String::fromUTF8 ("Guardar como\xe2\x80\xa6"));
+    menu.addSeparator();
+    menu.addItem (openFolder, "Abrir la carpeta de mis presets");
+    menu.addItem (rescan, "Volver a leer la carpeta");
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&anchor),
+                        [safeThis = juce::Component::SafePointer<UndertowAudioProcessorEditor> (this)] (int result) {
+                            if (safeThis == nullptr || result == 0)
+                                return;
+                            auto& manager = safeThis->processor.getPresetManager();
+                            switch (result)
+                            {
+                                case init:
+                                    manager.loadInit();
+                                    safeThis->showMessage ("Init: todos los controles en su valor por defecto.");
+                                    break;
+                                case saveAs:
+                                    safeThis->showSaveDialog (true);
+                                    break;
+                                case openFolder:
+                                {
+                                    const auto folder = manager.getUserFolder();
+                                    folder.createDirectory();
+                                    folder.startAsProcess(); // abre la carpeta en el Explorador
+                                    break;
+                                }
+                                case rescan:
+                                    manager.rescan();
+                                    if (safeThis->presetBrowser.isVisible())
+                                        safeThis->presetBrowser.refresh();
+                                    safeThis->showMessage (juce::String (static_cast<int> (manager.getPresets().size()))
+                                                           + " presets en la biblioteca.");
+                                    break;
+                                default:
+                                    break;
+                            }
+                            safeThis->updatePresetBar();
+                        });
+}
+
+void UndertowAudioProcessorEditor::updatePresetBar()
+{
+    auto& manager = processor.getPresetManager();
+    const auto* current = manager.getCurrentPreset();
+    presetBar.setPreset (current != nullptr ? current->category : juce::String(), manager.getCurrentName(), manager.isModified());
 }
 
 void UndertowAudioProcessorEditor::setUpKnob (Knob& knob, juce::Component& page, const char* parameterId,
@@ -459,6 +622,8 @@ void UndertowAudioProcessorEditor::layoutKnob (Knob& knob, juce::Rectangle<int> 
 
 void UndertowAudioProcessorEditor::timerCallback()
 {
+    updatePresetBar();
+
     const int count = processor.getActiveVoiceCount();
     if (count != lastShownVoiceCount)
     {
@@ -573,16 +738,20 @@ void UndertowAudioProcessorEditor::resized()
 void UndertowAudioProcessorEditor::layoutContent()
 {
     auto area = content.getLocalBounds().reduced (groupPadding);
+
+    // Fila 1: título (lo dibuja Content), barra de presets y zoom.
     auto header = area.removeFromTop (headerHeight);
-    activeVoicesLabel.setBounds (header.removeFromRight (voicesLabelWidth));
-    header.removeFromRight (8);
-    zoomButton.setBounds (header.removeFromRight (zoomButtonWidth).reduced (0, 4));
+    header.removeFromLeft (titleAreaWidth);
+    zoomButton.setBounds (header.removeFromRight (zoomButtonWidth).reduced (0, 3));
     header.removeFromRight (groupPadding);
-    effectsTab.setBounds (header.removeFromRight (tabWidth).reduced (0, 2));
-    modulationTab.setBounds (header.removeFromRight (tabWidth).reduced (0, 2));
-    soundTab.setBounds (header.removeFromRight (tabWidth).reduced (0, 2));
-    warpTab.setBounds (header.removeFromRight (tabWidth).reduced (0, 2));
-    oscillatorTab.setBounds (header.removeFromRight (tabWidth).reduced (0, 2));
+    presetBar.setBounds (header.reduced (0, 1));
+    area.removeFromTop (8);
+
+    // Fila 2: pestañas y contador de voces.
+    auto tabRow = area.removeFromTop (tabRowHeight);
+    for (auto* tab : { &oscillatorTab, &warpTab, &soundTab, &modulationTab, &effectsTab })
+        tab->setBounds (tabRow.removeFromLeft (tabWidth).reduced (2, 1));
+    activeVoicesLabel.setBounds (tabRow.removeFromRight (voicesLabelWidth));
     area.removeFromTop (groupPadding);
 
     modBar.setBounds (area.removeFromBottom (modBarHeight));
@@ -593,6 +762,8 @@ void UndertowAudioProcessorEditor::layoutContent()
     soundPage.setBounds (area);
     modulationPage.setBounds (area);
     effectsPage.setBounds (area);
+    presetBrowser.setBounds (area);
+    saveDialog.setBounds (area);
 
     const auto innerOf = [] (juce::Rectangle<int> groupArea) {
         return groupArea.reduced (groupPadding, 0).withTrimmedTop (22).withTrimmedBottom (groupPadding);

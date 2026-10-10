@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pad de los 80: una sierra + una cuadrada una octava abajo, filtro con key tracking, chorus lento y reverb oscura. -->
+<UndertowPreset formatVersion="1" name="Pad Juno" category="Pad" author="Undertow">
+  <Notes>
+    Pad "Juno" de los 80 (synthwave, 100 BPM).
+
+    Cómo se construyó:
+    - Osc A: una sola sierra, sin unison. Osc B: cuadrada una octava abajo (Level 50 %): cuerpo hueco debajo.
+    - Low Pass 24 dB a 2.2 kHz, Resonance 15 %, Key Track 40 %: las notas altas no chillan.
+    - Env 1: Attack 400 ms, Decay 1 s, Sustain 80 %, Release 1.5 s. Voices 8.
+    - LFO 1 (Triangle, Free, 0.2 Hz) → Cutoff +6 %: una respiración lenta.
+    - Chorus: Rate 0.5 Hz, Depth 60 %, Mix 50 %. Una sola sierra con chorus suena más "analógica" que un unison: el
+      chorus se mueve lento y de forma continua, justo como el del Juno-60 (ese chorus ES el sonido de ese sinte).
+    - Reverb: Size 70 %, Decay 4 s, Damping 50 %, Pre-Delay 20 ms, Mix 30 %. Larga pero oscura: crea espacio sin
+      tapar el acorde siguiente.
+
+    Tócalo: acordes de 2 compases (Am – F – C – G) en la octava 4–5.
+    Prueba a mover: apaga el chorus y vuelve a encenderlo. Esa es la diferencia entre "sinte de software" y "Juno".
+    Viene de: Fase 8 (receta 1).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="1"/>      <!-- cuadrada -->
+    <PARAM id="oscBOctave" value="-1"/>
+    <PARAM id="oscBLevel" value="0.5"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.4"/>
+    <PARAM id="decay" value="1"/>
+    <PARAM id="sustain" value="0.8"/>
+    <PARAM id="release" value="1.5"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="2200"/>
+    <PARAM id="filter1Resonance" value="0.15"/>
+    <PARAM id="filter1KeyTrack" value="0.4"/>
+
+    <PARAM id="lfo1Shape" value="Triangle"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.2"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Filter Cutoff"/>
+    <PARAM id="mod1Amount" value="0.06"/>
+
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.5"/>
+    <PARAM id="fxChorusDepth" value="0.6"/>
+    <PARAM id="fxChorusFeedback" value="0"/>
+    <PARAM id="fxChorusMix" value="0.5"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.7"/>
+    <PARAM id="fxReverbDecay" value="4"/>
+    <PARAM id="fxReverbDamping" value="0.5"/>
+    <PARAM id="fxReverbPreDelay" value="0.02"/>
+    <PARAM id="fxReverbMix" value="0.3"/>
+    <PARAM id="master" value="0"/>
+  </Parameters>
+</UndertowPreset>

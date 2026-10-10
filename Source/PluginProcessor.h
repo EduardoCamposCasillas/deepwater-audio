@@ -6,13 +6,15 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "presets/PresetManager.h"
 #include "synth/Effects.h"
 #include "synth/VoiceManager.h"
 #include "synth/WavetableBank.h"
 
-// Fase 8: sintetizador polifónico estéreo: 2 osciladores wavetable con unison, warp y FM/RM + sub + ruido →
+// Fase 10: sintetizador polifónico estéreo: 2 osciladores wavetable con unison, warp y FM/RM + sub + ruido →
 // filtro ZDF → envolvente ADSR de amplitud, con 2 envolventes y 2 LFOs de modulación conectados mediante una
 // matriz de 8 rutas. La suma de las voces pasa por los efectos globales: distorsión → chorus → delay → reverb.
+// Los sonidos se guardan y cargan como presets (PresetManager).
 class UndertowAudioProcessor final : public juce::AudioProcessor
 {
 public:
@@ -45,6 +47,9 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState& getParameters() noexcept { return parameters; }
+
+    // Fase 10: biblioteca de presets, preset actual y guardar/cargar (solo desde el hilo de mensajes).
+    undertow::presets::PresetManager& getPresetManager() noexcept { return presetManager; }
 
     // Lo lee la GUI para mostrar cuántas voces suenan (útil para ver el voice stealing).
     int getActiveVoiceCount() const noexcept { return activeVoiceCount.load (std::memory_order_relaxed); }
@@ -84,6 +89,7 @@ private:
     void updateTransport() noexcept;
 
     juce::AudioProcessorValueTreeState parameters;
+    undertow::presets::PresetManager presetManager { parameters }; // después de 'parameters': los necesita
 
     // Punteros a los valores atómicos de cada parámetro: leerlos en el hilo de audio es seguro y sin locks.
     std::atomic<float>* attackParam = nullptr;

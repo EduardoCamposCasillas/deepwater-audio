@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pad de dos tablas a una octava de distancia + un soplido de ruido; un LFO muy lento mueve la vocal y el detune. -->
+<UndertowPreset formatVersion="1" name="Pad con Aire" category="Pad" author="Undertow">
+  <Notes>
+    Pad envolvente con "aire" (ambient, lo-fi).
+
+    Cómo se construyó:
+    - Osc A: Vowels en 40 %, Unison 5, Detune 20 %, Width 100 %.
+    - Osc B: Harmonic Build en 30 %, una octava abajo, Unison 3, Detune 15 %, Width 60 %, Level 50 %. Dos tablas
+      distintas a una octava de distancia dan un timbre que ninguna tiene sola.
+    - Ruido: Level 12 %, Color 75 %: un soplido fino, como el aire de una voz o de una flauta.
+    - Env 1: Attack 900 ms, Decay 1 s, Sustain 100 %, Release 2 s. Voices 8.
+    - Low Pass 12 dB a 3 kHz.
+    - LFO 1 (Sine, Free, 0.1 Hz: un ciclo cada 10 s) → Osc A Position +25 % y → Osc A Detune +10 %: el coro se
+      abre y se cierra con el cambio de vocal. El pad parece respirar.
+    - Reverb: Size 75 %, Decay 5 s, Damping 55 %, Mix 30 %.
+
+    Tócalo: acordes de 4 compases en la zona C4–C6.
+    Prueba a mover: el Color del ruido (0 % = un rumor grave; 100 % = un siseo fino) y su Level.
+    Viene de: Fase 6 (receta 3).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAWavetable" value="Vowels"/>
+    <PARAM id="oscAPosition" value="0.4"/>
+    <PARAM id="oscAUnison" value="5"/>
+    <PARAM id="oscADetune" value="0.2"/>
+    <PARAM id="oscAWidth" value="1"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Harmonic Build"/>
+    <PARAM id="oscBPosition" value="0.3"/>
+    <PARAM id="oscBOctave" value="-1"/>
+    <PARAM id="oscBUnison" value="3"/>
+    <PARAM id="oscBDetune" value="0.15"/>
+    <PARAM id="oscBWidth" value="0.6"/>
+    <PARAM id="oscBLevel" value="0.5"/>
+    <PARAM id="noiseOn" value="On"/>
+    <PARAM id="noiseLevel" value="0.12"/>
+    <PARAM id="noiseColor" value="0.75"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.9"/>
+    <PARAM id="decay" value="1"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="2"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="3000"/>
+
+    <PARAM id="lfo1Shape" value="Sine"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.1"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Osc A Position"/>
+    <PARAM id="mod1Amount" value="0.25"/>
+    <PARAM id="mod2Source" value="LFO 1"/>
+    <PARAM id="mod2Destination" value="Osc A Detune"/>
+    <PARAM id="mod2Amount" value="0.1"/>
+
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.75"/>
+    <PARAM id="fxReverbDecay" value="5"/>
+    <PARAM id="fxReverbDamping" value="0.55"/>
+    <PARAM id="fxReverbMix" value="0.3"/>
+    <PARAM id="master" value="-3.5"/>
+  </Parameters>
+</UndertowPreset>

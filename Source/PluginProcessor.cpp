@@ -786,7 +786,9 @@ void UndertowAudioProcessor::handleMidiMessage (const juce::MidiMessage& message
 void UndertowAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // Se ejecuta en el hilo de mensajes (al guardar el proyecto de FL), no en el de audio.
-    if (auto xml = parameters.copyState().createXml())
+    auto state = parameters.copyState();
+    presetManager.writeStateProperties (state); // nombre del preset y si estaba modificado
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
@@ -794,7 +796,10 @@ void UndertowAudioProcessor::setStateInformation (const void* data, int sizeInBy
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (parameters.state.getType()))
+        {
             parameters.replaceState (juce::ValueTree::fromXml (*xml));
+            presetManager.stateRestored();
+        }
 }
 
 juce::AudioProcessorEditor* UndertowAudioProcessor::createEditor()

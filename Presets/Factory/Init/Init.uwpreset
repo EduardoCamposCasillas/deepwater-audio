@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Init: no escribe ningún parámetro, así que TODOS toman su valor por defecto. Es el punto de partida "en blanco". -->
+<UndertowPreset formatVersion="1" name="Init" category="Init" author="Undertow">
+  <Notes>
+    El punto de partida en blanco: Osc A con un seno puro, sin filtro, sin modulación y sin efectos.
+    Es exactamente el sonido de la Fase 2 (la tabla Basic Shapes en 0 %).
+
+    Para construir un sonido desde cero, sigue este orden:
+    1. La fuente: tabla y Position de Osc A. ¿Cuántos armónicos quieres?
+    2. La forma en el tiempo: Env 1. ¿Es un golpe, una nota sostenida o un fondo?
+    3. El brillo: el filtro. ¿Qué parte del espectro sobra?
+    4. La vida: arrastra un LFO o una envolvente a lo que deba moverse.
+    5. El espacio: chorus, delay y reverb, al final.
+
+    Cuando te guste, pulsa Guardar y escribe en las notas por qué hiciste cada cosa.
+  </Notes>
+  <Parameters/>
+</UndertowPreset>

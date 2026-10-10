@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Riser: Env 3 con un attack de 8 s abre el filtro y sube la afinación mientras se mantiene la nota. -->
+<UndertowPreset formatVersion="1" name="Riser de Ruido" category="FX" author="Undertow">
+  <Notes>
+    Riser (subida) para los build-ups de EDM: crece en brillo, en altura y en espacio hasta el drop.
+
+    Cómo se construyó:
+    - Ruido: Level 100 %, Color 50 % (blanco): el "whoosh".
+    - Osc A: supersaw (Unison 7, Detune 50 %, Width 100 %) a Level 60 %: le da tono a la subida.
+    - Low Pass 12 dB a 150 Hz, Resonance 35 %.
+    - Env 3: Attack 8 s, Sustain 100 %. Es una "rampa" de 8 segundos que empieza en cada nota.
+    - Env 3 → Cutoff +65 %: el filtro se abre 6.5 octavas (de 150 Hz a ~14 kHz) a lo largo de la rampa.
+    - Env 3 → Global Pitch +50 % (+12 semitonos): la supersaw sube una octava. Subir de tono = tensión.
+    - Env 1: Attack 500 ms, Sustain 100 %, Release 1.5 s. Voices 4.
+    - Delay ping-pong 1/8 (Mix 15 %) y Reverb enorme (Size 90 %, Decay 6 s, Mix 35 %): el espacio crece con el brillo.
+
+    Tócalo: una nota larga (C5) de 4 compases a 128 BPM (7.5 s) que termine justo en el drop.
+    Prueba a mover: el Attack de Env 3 para ajustar la duración (a 140 BPM, 4 compases = 6.9 s) y el Color del ruido.
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="7"/>
+    <PARAM id="oscADetune" value="0.5"/>
+    <PARAM id="oscAWidth" value="1"/>
+    <PARAM id="oscALevel" value="0.6"/>
+    <PARAM id="noiseOn" value="On"/>
+    <PARAM id="noiseLevel" value="1"/>
+    <PARAM id="noiseColor" value="0.5"/>
+
+    <PARAM id="voices" value="4"/>
+    <PARAM id="attack" value="0.5"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="1.5"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="150"/>
+    <PARAM id="filter1Resonance" value="0.35"/>
+
+    <PARAM id="env3Attack" value="8"/>
+    <PARAM id="env3Decay" value="1"/>
+    <PARAM id="env3Sustain" value="1"/>
+    <PARAM id="env3Release" value="1.5"/>
+    <PARAM id="mod1Source" value="Env 3"/>
+    <PARAM id="mod1Destination" value="Filter Cutoff"/>
+    <PARAM id="mod1Amount" value="0.65"/>
+    <PARAM id="mod2Source" value="Env 3"/>
+    <PARAM id="mod2Destination" value="Global Pitch"/>
+    <PARAM id="mod2Amount" value="0.5"/>     <!-- 100 % = 24 semitonos: 50 % = una octava -->
+
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/8"/>
+    <PARAM id="fxDelayFeedback" value="0.35"/>
+    <PARAM id="fxDelayPingPong" value="On"/>
+    <PARAM id="fxDelayMix" value="0.15"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.9"/>
+    <PARAM id="fxReverbDecay" value="6"/>
+    <PARAM id="fxReverbDamping" value="0.3"/>
+    <PARAM id="fxReverbMix" value="0.35"/>
+    <PARAM id="master" value="6"/>
+  </Parameters>
+</UndertowPreset>

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Wobble de dubstep: un LFO sincronizado (1/8, Retrigger) mueve a la vez el cutoff y la deformación de la onda. -->
+<UndertowPreset formatVersion="1" name="Wobble 140" category="Bass" author="Undertow">
+  <Notes>
+    Wobble bass de dubstep (140 BPM): el "wub-wub" de 2010 (Rusko, Caspa, Skrillex).
+
+    Cómo se construyó:
+    - Osc A: sierra con Unison 3, Detune 12 % y Width 30 %: algo de grosor sin abrirse demasiado (es un bajo).
+    - Sub seno una octava abajo (Level 70 %): el grave que NO pasa por el wobble. El bajo mantiene el peso aunque el
+      filtro se cierre.
+    - Low Pass 24 dB a 250 Hz, Resonance 45 %, Drive 30 %.
+    - LFO 1: Sine, Retrigger, Sync, 1/8. Con Retrigger el wobble empieza igual en cada nota, siempre "a tempo".
+    - LFO 1 → Cutoff +35 % (±3.5 octavas) y LFO 1 → Osc A Warp +40 % con el warp Bend +: el mismo LFO abre el
+      filtro y cambia la forma de la onda. El movimiento es de timbre, no solo de brillo.
+    - Mod Wheel → Cutoff +25 %: con la rueda (o automatizando el CC 1) el bajo se abre más en los momentos fuertes.
+    - Distorsión Soft Clip (Drive 45 %, Tone 60 %, Mix 80 %): armónicos arriba para que se oiga en cualquier altavoz.
+
+    Tócalo: a 140 BPM, notas largas en F3 (87 Hz) y G#3 (104 Hz).
+    Prueba a mover: LFO 1 Division (1/16, 1/8 T). Automatízala para "frasear" el wobble. Mira el punto blanco del
+    Cutoff: va y viene exactamente a una corchea.
+    Viene de: Fase 5 (receta 2) y Fase 9 (receta 2).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="3"/>
+    <PARAM id="oscADetune" value="0.12"/>
+    <PARAM id="oscAWidth" value="0.3"/>
+    <PARAM id="subOn" value="On"/>
+    <PARAM id="subShape" value="Sine"/>
+    <PARAM id="subOctave" value="-1"/>
+    <PARAM id="subLevel" value="0.7"/>
+    <PARAM id="oscAWarpMode" value="Bend +"/>
+    <PARAM id="oscAWarpAmount" value="0.1"/>
+
+    <PARAM id="voices" value="1"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.08"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="250"/>
+    <PARAM id="filter1Resonance" value="0.45"/>
+    <PARAM id="filter1Drive" value="0.3"/>
+
+    <PARAM id="lfo1Shape" value="Sine"/>
+    <PARAM id="lfo1Mode" value="Retrigger"/>
+    <PARAM id="lfo1Sync" value="On"/>
+    <PARAM id="lfo1Division" value="1/8"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Filter Cutoff"/>
+    <PARAM id="mod1Amount" value="0.35"/>
+    <PARAM id="mod2Source" value="LFO 1"/>
+    <PARAM id="mod2Destination" value="Osc A Warp"/>
+    <PARAM id="mod2Amount" value="0.4"/>
+    <PARAM id="mod3Source" value="Mod Wheel"/>
+    <PARAM id="mod3Destination" value="Filter Cutoff"/>
+    <PARAM id="mod3Amount" value="0.25"/>
+
+    <PARAM id="fxDistOn" value="On"/>
+    <PARAM id="fxDistMode" value="Soft Clip"/>
+    <PARAM id="fxDistDrive" value="0.45"/>
+    <PARAM id="fxDistTone" value="0.6"/>
+    <PARAM id="fxDistMix" value="0.8"/>
+    <PARAM id="master" value="-1.5"/>
+  </Parameters>
+</UndertowPreset>

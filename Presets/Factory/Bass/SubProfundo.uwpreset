@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sub bass: el seno de Init, monofónico, con un poco de distorsión Tube para que se oiga en altavoces pequeños.
+     Solo se escriben los parámetros que cambian respecto a Init. -->
+<UndertowPreset formatVersion="1" name="Sub Profundo" category="Bass" author="Undertow">
+  <Notes>
+    Sub bass limpio para trap, future bass o house: el grave que se siente más que se oye.
+
+    Cómo se construyó:
+    - Osc A con el seno de Init: una sola frecuencia, sin armónicos que ensucien los medios.
+    - Voices 1: el bajo es monofónico. Dos notas graves a la vez solo hacen barro.
+    - Attack 3 ms y Release 60 ms: arranque firme sin clic y un corte limpio que deja sitio al bombo.
+    - Sustain 100 % y Velocity 20 %: el volumen del sub debe ser estable, no depender de la fuerza.
+    - Distorsión Tube con Mix 35 %: añade el 2.º y el 3.er armónico (82 y 123 Hz para un sub de 41 Hz). En un móvil
+      no suena el sub, pero sí esos armónicos, y el oído "reconstruye" la nota (la fundamental ausente, Fase 1).
+
+    Tócalo: notas largas entre C2 y G2 (33–49 Hz) siguiendo la raíz de los acordes.
+    Prueba a mover: el Mix de la distorsión. 0 % = sub puro, invisible en un portátil; 60 % = más presencia.
+    En el analizador, con la distorsión aparecen líneas en 2× y 3× la fundamental.
+    Viene de: Fase 1 (sub bass) + Fase 8 (distorsión).
+  </Notes>
+  <Parameters>
+    <PARAM id="voices" value="1"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.003"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.06"/>
+
+    <PARAM id="fxDistOn" value="On"/>
+    <PARAM id="fxDistMode" value="Tube"/>      <!-- asimétrica: armónicos pares, más "gordos" -->
+    <PARAM id="fxDistDrive" value="0.3"/>
+    <PARAM id="fxDistTone" value="0.45"/>      <!-- quita el fizz de arriba -->
+    <PARAM id="fxDistMix" value="0.35"/>       <!-- la mayor parte sigue siendo el seno limpio -->
+    <PARAM id="master" value="-2.5"/>
+  </Parameters>
+</UndertowPreset>

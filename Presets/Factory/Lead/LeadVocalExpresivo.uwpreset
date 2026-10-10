@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lead "para tocar": la rueda de modulación cambia la vocal, el aftertouch y la velocity abren el filtro. -->
+<UndertowPreset formatVersion="1" name="Lead Vocal Expresivo" category="Lead" author="Undertow">
+  <Notes>
+    Un lead pensado para TOCARLO, no solo programarlo: cada gesto del teclado cambia el timbre.
+
+    Cómo se construyó:
+    - Osc A: tabla Vowels en 25 % (entre "a" y "e"), Unison 2, Detune 8 %, Width 40 %: una voz con algo de cuerpo.
+    - Osc B: sierra una octava abajo, Level 50 %: le da base y "empuje" a las notas graves.
+    - Low Pass 12 dB a 4 kHz, Resonance 20 %, Key Track 30 %.
+    - Mod Wheel → Osc A Position +60 %: al subir la rueda la vocal pasa de "a-e" a "o-u". Es como abrir y cerrar
+      la boca mientras cantas.
+    - Aftertouch → Cutoff +15 %: apretar la tecla después de pulsarla abre el filtro 1.5 octavas.
+    - Velocity → Cutoff +10 %: tocar fuerte = más brillo, como en un instrumento real.
+    - LFO 2 (Sine, Retrigger, 5.5 Hz) → Global Pitch +0.6 % (±0.15 semitonos): un vibrato suave y constante que le
+      quita lo "de máquina".
+    - Voices 1; Attack 10 ms, Sustain 85 %, Release 250 ms. Delay 1/4 ping-pong y reverb discretos.
+
+    Tócalo: una melodía lenta entre C5 y C6, moviendo la rueda de modulación en las notas largas. Sin teclado con
+    rueda: dibuja en FL un clip de automatización del CC 1 (Mod Wheel).
+    Prueba a mover: la tabla de Osc A (Harmonic Build o Hard Sync cambian por completo lo que hace la rueda).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAWavetable" value="Vowels"/>
+    <PARAM id="oscAPosition" value="0.25"/>
+    <PARAM id="oscAUnison" value="2"/>
+    <PARAM id="oscADetune" value="0.08"/>
+    <PARAM id="oscAWidth" value="0.4"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0.6667"/>
+    <PARAM id="oscBOctave" value="-1"/>
+    <PARAM id="oscBLevel" value="0.5"/>
+
+    <PARAM id="voices" value="1"/>
+    <PARAM id="velocity" value="0.4"/>
+    <PARAM id="attack" value="0.01"/>
+    <PARAM id="decay" value="0.4"/>
+    <PARAM id="sustain" value="0.85"/>
+    <PARAM id="release" value="0.25"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="4000"/>
+    <PARAM id="filter1Resonance" value="0.2"/>
+    <PARAM id="filter1KeyTrack" value="0.3"/>
+
+    <PARAM id="lfo2Shape" value="Sine"/>
+    <PARAM id="lfo2Mode" value="Retrigger"/>
+    <PARAM id="lfo2Sync" value="Off"/>
+    <PARAM id="lfo2Rate" value="5.5"/>
+    <PARAM id="mod1Source" value="Mod Wheel"/>
+    <PARAM id="mod1Destination" value="Osc A Position"/>
+    <PARAM id="mod1Amount" value="0.6"/>
+    <PARAM id="mod2Source" value="Aftertouch"/>
+    <PARAM id="mod2Destination" value="Filter Cutoff"/>
+    <PARAM id="mod2Amount" value="0.15"/>
+    <PARAM id="mod3Source" value="Velocity"/>
+    <PARAM id="mod3Destination" value="Filter Cutoff"/>
+    <PARAM id="mod3Amount" value="0.1"/>
+    <PARAM id="mod4Source" value="LFO 2"/>
+    <PARAM id="mod4Destination" value="Global Pitch"/>
+    <PARAM id="mod4Amount" value="0.006"/>    <!-- 100 % = ±24 semitonos: 0.6 % = ±0.15 st -->
+
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/4"/>
+    <PARAM id="fxDelayFeedback" value="0.3"/>
+    <PARAM id="fxDelayPingPong" value="On"/>
+    <PARAM id="fxDelayTone" value="0.5"/>
+    <PARAM id="fxDelayMix" value="0.18"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.55"/>
+    <PARAM id="fxReverbDecay" value="2.2"/>
+    <PARAM id="fxReverbPreDelay" value="0.03"/>
+    <PARAM id="fxReverbMix" value="0.2"/>
+    <PARAM id="master" value="6"/>
+  </Parameters>
+</UndertowPreset>

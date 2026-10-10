@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Piano eléctrico FM al estilo DX7: ratio 1:1, índice de FM que decae y que depende mucho de la velocity. -->
+<UndertowPreset formatVersion="1" name="E-Piano FM" category="Keys" author="Undertow">
+  <Notes>
+    Piano eléctrico FM, el "DX7 E.Piano" de las baladas de los 80 (Whitney Houston, Phil Collins) y del lo-fi actual.
+
+    Cómo se construyó:
+    - Osc A: seno con FM: Osc B, Amount 12 %: un poco de "cuerpo" aunque toques suave.
+    - Osc B (apagado, solo modula): seno a la misma altura, ratio 1:1. Con 1:1 aparecen todos los armónicos, pares e
+      impares, y el tono queda afinado.
+    - Env 2 (Decay 900 ms, Sustain 10 %) → Osc A FM/RM +25 %: el ataque tiene "ladrido" (bark) y la nota se
+      vuelve redonda al sostenerla.
+    - Velocity → Osc A FM/RM +20 % y Velocity Sens 70 %: la clave de un piano eléctrico. Suave = redondo y dulce;
+      fuerte = brillante y con mordida.
+    - Env 1: Attack 2 ms, Decay 2.5 s, Sustain 15 %, Release 350 ms: la nota decae como una lengüeta golpeada.
+      Voices 12 (los acordes con pedal necesitan voces).
+    - Chorus (0.6 Hz, Depth 35 %, Mix 35 %): el chorus clásico de los pianos eléctricos de los 80.
+    - Reverb: Size 45 %, Decay 1.6 s, Mix 15 %.
+
+    Tócalo: acordes de séptima (Cmaj7, Am9, Fmaj7) entre C4 y C6, con velocity variada y pedal de sustain.
+    Prueba a mover: el anillo de Velocity en el FM/RM Amount (pestaña Warp y FM): es la "dinámica" del piano.
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAFmMode" value="FM: Osc B"/>
+    <PARAM id="oscAFmAmount" value="0.12"/>
+    <PARAM id="oscBOn" value="Off"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0"/>
+
+    <PARAM id="voices" value="12"/>
+    <PARAM id="velocity" value="0.7"/>
+    <PARAM id="attack" value="0.002"/>
+    <PARAM id="decay" value="2.5"/>
+    <PARAM id="sustain" value="0.15"/>
+    <PARAM id="release" value="0.35"/>
+
+    <PARAM id="env2Attack" value="0.001"/>
+    <PARAM id="env2Decay" value="0.9"/>
+    <PARAM id="env2Sustain" value="0.1"/>
+    <PARAM id="env2Release" value="0.3"/>
+    <PARAM id="mod1Source" value="Env 2"/>
+    <PARAM id="mod1Destination" value="Osc A FM/RM"/>
+    <PARAM id="mod1Amount" value="0.25"/>
+    <PARAM id="mod2Source" value="Velocity"/>
+    <PARAM id="mod2Destination" value="Osc A FM/RM"/>
+    <PARAM id="mod2Amount" value="0.2"/>
+
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.6"/>
+    <PARAM id="fxChorusDepth" value="0.35"/>
+    <PARAM id="fxChorusMix" value="0.35"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.45"/>
+    <PARAM id="fxReverbDecay" value="1.6"/>
+    <PARAM id="fxReverbMix" value="0.15"/>
+    <PARAM id="master" value="1"/>
+  </Parameters>
+</UndertowPreset>

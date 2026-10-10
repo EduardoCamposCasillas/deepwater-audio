@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bajo FM: un seno modulado en fase por una sierra (Osc B, apagado: solo modula) con el índice movido por un LFO. -->
+<UndertowPreset formatVersion="1" name="Bajo FM Gruñido" category="Bass" author="Undertow">
+  <Notes>
+    Bajo FM que "habla" (dubstep, bass music, 140 BPM).
+
+    Cómo se construyó:
+    - Osc A: seno con FM: Osc B, Amount 30 %. Osc B está APAGADO: no se oye, solo empuja la fase de Osc A.
+    - Osc B: sierra a la misma altura (ratio 1:1). Modular con una sierra da muchos más armónicos que con un seno, y
+      con ratio 1:1 el tono sigue claro (todas las bandas laterales caen en armónicos).
+    - LFO 1 (Sine, Retrigger, Sync, 1/8) → Osc A FM/RM +25 %: el índice de FM sube y baja a ritmo de corchea. El
+      bajo pasa de redondo a rasposo y vuelve: "habla".
+    - Low Pass 24 dB a 1.5 kHz, Resonance 30 %, Drive 40 %; LFO 1 → Cutoff +15 %: el filtro acompaña el movimiento
+      y lo acentúa, como una vocal.
+    - Sub seno una octava abajo (70 %): la base limpia que no se mueve. La FM debilita la fundamental en algunos
+      momentos (J₀ = 0 con β = 2.4, Fase 7) y el sub la sostiene.
+    - Voices 1, Attack 2 ms, Sustain 100 %, Release 80 ms.
+
+    Tócalo: a 140 BPM, notas largas en F2 (43.7 Hz) y G2 (49 Hz), con alguna nota a la octava.
+    Prueba a mover: la perilla FM/RM Amount de Osc A (0 % = seno puro; 60 % = metal) y Osc B Semi (+7 st = ratio
+    no entera: el bajo se vuelve inarmónico, metálico).
+    Viene de: Fase 7 (receta 3).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAFmMode" value="FM: Osc B"/>
+    <PARAM id="oscAFmAmount" value="0.3"/>
+    <PARAM id="oscBOn" value="Off"/>           <!-- apagado: modula sin sonar -->
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0.6667"/>  <!-- sierra -->
+    <PARAM id="subOn" value="On"/>
+    <PARAM id="subShape" value="Sine"/>
+    <PARAM id="subOctave" value="-1"/>
+    <PARAM id="subLevel" value="0.7"/>
+
+    <PARAM id="voices" value="1"/>
+    <PARAM id="attack" value="0.002"/>
+    <PARAM id="decay" value="0.3"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.08"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="24 dB"/>
+    <PARAM id="filter1Cutoff" value="1500"/>
+    <PARAM id="filter1Resonance" value="0.3"/>
+    <PARAM id="filter1Drive" value="0.4"/>
+
+    <PARAM id="lfo1Shape" value="Sine"/>
+    <PARAM id="lfo1Mode" value="Retrigger"/>
+    <PARAM id="lfo1Sync" value="On"/>
+    <PARAM id="lfo1Division" value="1/8"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Osc A FM/RM"/>
+    <PARAM id="mod1Amount" value="0.25"/>
+    <PARAM id="mod2Source" value="LFO 1"/>
+    <PARAM id="mod2Destination" value="Filter Cutoff"/>
+    <PARAM id="mod2Amount" value="0.15"/>
+    <PARAM id="master" value="-1.5"/>
+  </Parameters>
+</UndertowPreset>

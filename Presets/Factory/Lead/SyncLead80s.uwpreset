@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sync lead: warp Sync barrido por una envolvente (Env 2 → Osc A Warp) + capa una octava abajo. -->
+<UndertowPreset formatVersion="1" name="Sync Lead 80s" category="Lead" author="Undertow">
+  <Notes>
+    Lead con "sync" barrido, el sonido de muchos leads de los 80 (The Cars – "Let's Go"; synth-pop a 120 BPM).
+
+    Cómo se construyó:
+    - Osc A: sierra con Unison 3 y Detune 12 %; Warp Sync con Amount 25 %. El sync "reinicia" la onda varias veces
+      por ciclo y crea un pico de timbre que no depende de la nota.
+    - Env 2 (decay 350 ms, sustain 15 %) → Osc A Warp +45 %: cada nota empieza con el sync muy alto (brillante y
+      agresivo) y baja hasta un timbre más redondo. Ese barrido es el sonido.
+    - LFO 1 (Sine, Retrigger, Sync, 1/8) → Osc A Warp +5 %: un leve "wah" rítmico.
+    - Osc B: sierra una octava abajo, Level 40 %: cuerpo debajo del sync.
+    - Low Pass 12 dB a 6 kHz, Resonance 10 %.
+    - Voices 1; Attack 3 ms, Sustain 80 %, Release 200 ms.
+    - Delay (1/4, Feedback 25 %, Mix 15 %) y reverb (Mix 15 %): un espacio discreto.
+
+    Tócalo: una melodía en corcheas entre C5 y C6.
+    Prueba a mover: el anillo de Env 2 en el Warp Amount (pestaña Warp y FM). Mira el visor 2D: el seno se
+    "comprime" en cada nota y vuelve.
+    Viene de: Fase 7 (receta 1).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAPosition" value="0.6667"/>
+    <PARAM id="oscAUnison" value="3"/>
+    <PARAM id="oscADetune" value="0.12"/>
+    <PARAM id="oscAWarpMode" value="Sync"/>
+    <PARAM id="oscAWarpAmount" value="0.25"/>
+    <PARAM id="oscBOn" value="On"/>
+    <PARAM id="oscBWavetable" value="Basic Shapes"/>
+    <PARAM id="oscBPosition" value="0.6667"/>
+    <PARAM id="oscBOctave" value="-1"/>
+    <PARAM id="oscBLevel" value="0.4"/>
+
+    <PARAM id="voices" value="1"/>
+    <PARAM id="attack" value="0.003"/>
+    <PARAM id="sustain" value="0.8"/>
+    <PARAM id="release" value="0.2"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="6000"/>
+    <PARAM id="filter1Resonance" value="0.1"/>
+
+    <PARAM id="env2Attack" value="0.001"/>
+    <PARAM id="env2Decay" value="0.35"/>
+    <PARAM id="env2Sustain" value="0.15"/>
+    <PARAM id="env2Release" value="0.2"/>
+    <PARAM id="lfo1Shape" value="Sine"/>
+    <PARAM id="lfo1Mode" value="Retrigger"/>
+    <PARAM id="lfo1Sync" value="On"/>
+    <PARAM id="lfo1Division" value="1/8"/>
+    <PARAM id="mod1Source" value="Env 2"/>
+    <PARAM id="mod1Destination" value="Osc A Warp"/>
+    <PARAM id="mod1Amount" value="0.45"/>
+    <PARAM id="mod2Source" value="LFO 1"/>
+    <PARAM id="mod2Destination" value="Osc A Warp"/>
+    <PARAM id="mod2Amount" value="0.05"/>
+
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/4"/>
+    <PARAM id="fxDelayFeedback" value="0.25"/>
+    <PARAM id="fxDelayTone" value="0.5"/>
+    <PARAM id="fxDelayMix" value="0.15"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.5"/>
+    <PARAM id="fxReverbDecay" value="1.8"/>
+    <PARAM id="fxReverbMix" value="0.15"/>
+    <PARAM id="master" value="6"/>
+  </Parameters>
+</UndertowPreset>

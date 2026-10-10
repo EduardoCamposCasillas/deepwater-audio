@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pad cinemático: tres movimientos a velocidades distintas (LFO 0.15 Hz, Env 3 de 2 s y vibrato de 4.5 Hz). -->
+<UndertowPreset formatVersion="1" name="Pad que Respira" category="Pad" author="Undertow">
+  <Notes>
+    Pad cinemático que nunca está quieto (ambient, bandas sonoras).
+
+    Cómo se construyó:
+    - Osc A: Vowels en 50 %. Voices 8. Env 1: Attack 800 ms, Decay 1 s, Sustain 90 %, Release 1.5 s.
+    - Low Pass 12 dB a 1.5 kHz, Resonance 20 %.
+    - LFO 1 (Triangle, Free, 0.15 Hz, un ciclo cada ~7 s) → Position +40 %: recorre las vocales despacio.
+    - Env 3 (Attack 2 s, Sustain 100 %) → Cutoff +15 %: al mantener el acorde el pad se abre 1.5 octavas poco a poco.
+    - LFO 2 (Sine, Retrigger, 4.5 Hz) → Osc A Pitch +0.8 % (±0.2 semitonos): un vibrato casi imperceptible que le
+      quita lo "de máquina".
+    - Chorus suave (Mix 30 %) y Reverb grande (Size 85 %, Decay 7 s, Mix 35 %).
+
+    Tres movimientos lentos a velocidades distintas (7 s, 2 s y 4.5 Hz) no se repiten nunca igual, y el oído lo
+    percibe como algo orgánico.
+
+    Tócalo: acordes largos (4 compases cada uno) en la zona C4–C6.
+    Prueba a mover: el Attack de Env 3 (es lo que tarda en "abrirse" el pad mientras mantienes el acorde).
+    Viene de: Fase 5 (receta 3).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAWavetable" value="Vowels"/>
+    <PARAM id="oscAPosition" value="0.5"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.8"/>
+    <PARAM id="decay" value="1"/>
+    <PARAM id="sustain" value="0.9"/>
+    <PARAM id="release" value="1.5"/>
+
+    <PARAM id="filter1On" value="On"/>
+    <PARAM id="filter1Type" value="Low Pass"/>
+    <PARAM id="filter1Slope" value="12 dB"/>
+    <PARAM id="filter1Cutoff" value="1500"/>
+    <PARAM id="filter1Resonance" value="0.2"/>
+
+    <PARAM id="env3Attack" value="2"/>
+    <PARAM id="env3Decay" value="1"/>
+    <PARAM id="env3Sustain" value="1"/>
+    <PARAM id="env3Release" value="1.5"/>
+    <PARAM id="lfo1Shape" value="Triangle"/>
+    <PARAM id="lfo1Mode" value="Free"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.15"/>
+    <PARAM id="lfo2Shape" value="Sine"/>
+    <PARAM id="lfo2Mode" value="Retrigger"/>
+    <PARAM id="lfo2Sync" value="Off"/>
+    <PARAM id="lfo2Rate" value="4.5"/>
+    <PARAM id="mod1Source" value="LFO 1"/>
+    <PARAM id="mod1Destination" value="Osc A Position"/>
+    <PARAM id="mod1Amount" value="0.4"/>
+    <PARAM id="mod2Source" value="Env 3"/>
+    <PARAM id="mod2Destination" value="Filter Cutoff"/>
+    <PARAM id="mod2Amount" value="0.15"/>
+    <PARAM id="mod3Source" value="LFO 2"/>
+    <PARAM id="mod3Destination" value="Osc A Pitch"/>
+    <PARAM id="mod3Amount" value="0.008"/>
+
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusRate" value="0.3"/>
+    <PARAM id="fxChorusDepth" value="0.4"/>
+    <PARAM id="fxChorusMix" value="0.3"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.85"/>
+    <PARAM id="fxReverbDecay" value="7"/>
+    <PARAM id="fxReverbDamping" value="0.55"/>
+    <PARAM id="fxReverbPreDelay" value="0.03"/>
+    <PARAM id="fxReverbMix" value="0.35"/>
+    <PARAM id="master" value="3"/>
+  </Parameters>
+</UndertowPreset>

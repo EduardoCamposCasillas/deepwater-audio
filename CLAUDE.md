@@ -100,7 +100,7 @@ Source/
       y con control de aliasing (oversampling o técnicas band-limited donde haga falta).
 - [x] Fase 8 — Efectos internos: distorsión (con oversampling), chorus, delay, reverb.
 - [x] Fase 9 — GUI profesional: visualización del wavetable (mostrando el warp aplicado), arrastrar para modular, escalable.
-- [ ] Fase 10 — Presets: guardado/carga, navegador, librería inicial de sonidos.
+- [x] Fase 10 — Presets: guardado/carga, navegador, librería inicial de sonidos.
 - [ ] Fase 11 — Pulido: optimización de CPU (SIMD), pluginval estricto, comparación contra referencias.
 
 ## Estado actual
@@ -341,4 +341,37 @@ Fase 9 COMPLETADA (2026-10-08). Probada por el usuario en FL Studio. El audio no
 - Pendiente para más adelante: modular el amount de una ruta con otra fuente, macros, ver los LFO/envolventes como
   fuentes arrastrables también desde sus paneles, accesibilidad con teclado del anillo.
 
-Siguiente: Fase 10 (presets), pendiente de que el usuario la inicie.
+Fase 10 COMPLETADA (2026-10-08). Probada por el usuario en FL Studio. El audio no cambia.
+- `presets/PresetManager.h/.cpp` (JUCE, solo hilo de mensajes): formato `.uwpreset` = XML legible
+  (`<UndertowPreset formatVersion name category author><Notes/><Parameters><PARAM id value/>`). Valores en UNIDADES
+  REALES; las listas aceptan índice o nombre de la opción y los bool On/Off. Lo que falta = valor por defecto (los de
+  fábrica solo escriben lo que cambia respecto a Init); ids desconocidos se ignoran con aviso; fuera de rango se limita.
+  Los del usuario guardan TODOS los parámetros (listas por índice). Cargar = `setValueNotifyingHost` solo de los que
+  cambian (el audio ya suaviza). Categorías (orden del navegador): Init, Bass, Lead, Pad, Pluck, Keys, FX, Otros.
+- Fábrica: `Presets/Factory/<Categoría>/*.uwpreset` compilados en el plugin con `juce_add_binary_data`
+  (`UndertowPresetData`, GLOB CONFIGURE_DEPENDS). 22 presets (Init + 7 Bass, 4 Lead, 4 Pad, 2 Pluck, 2 Keys, 2 FX):
+  las recetas de las fases 2–9 + 6 nuevos. Notas en español; en el XML se parten a ~118 columnas y `reflowNotes` junta
+  los párrafos (solo fábrica). Ninguno resuelve los retos pendientes. Nivel igualado con Master: RMS −17.5…−19.6 dBFS
+  (Init −18.3); los Pluck se igualan por pico (−9…−11 dBFS).
+- Usuario: `Documentos\Undertow\Presets` (recursivo). Guardar con el nombre de uno de fábrica está prohibido; mismo
+  nombre = reemplazar ese archivo. Borrar = papelera de reciclaje.
+- Proyecto de FL: propiedades del estado `presetName`, `presetFactory`, `presetModified` (como `uiZoom`; no son
+  parámetros). "Modificado" = algún parámetro difiere > 1e-4 (normalizado) de la foto tomada al cargar. Proyecto sin
+  esas propiedades (Fase 9) → "Sin nombre". No se usan los programas del host (en VST3 pueden llegar en el hilo de audio).
+- GUI: ventana 858 × 704 (antes 666): fila 1 = título + `gui/PresetBar.h` (◀ ▶, nombre con categoría y `*`, Guardar,
+  menú ··· con Init / Guardar como / abrir carpeta / releer) + zoom; fila 2 = pestañas + voces. `gui/PresetBrowser.h`
+  (encima de las páginas: categorías con contador, búsqueda en nombre/categoría/notas, lista —clic o flechas = cargar,
+  doble clic/Enter = cargar y cerrar, Esc—, notas, borrar con doble confirmación) y `gui/PresetSaveDialog.h` (nombre,
+  categoría, autor —se recuerda en la configuración—, notas; "Basado en «X»" si se parte de uno de fábrica). Sin
+  ventanas modales. Cambiar de pestaña o arrastrar una fuente de modulación cierra los paneles.
+- Tests: `UndertowPresetTests` (app de consola con JUCE que compila el procesador; en ctest). Valida cada preset de
+  fábrica (ids, opciones, rangos, nombres únicos, notas), carga/defectos/Init, `*`, guardar (ida y vuelta exacta,
+  reemplazar, nombres prohibidos, borrar), archivos rotos, estado del proyecto, siguiente/anterior, render de los 22
+  presets (sin NaN, pico < −0.5 dBFS, RMS en −22…−14) a 48 kHz y sin NaN a 44.1/96 kHz, y cambiar de preset cada 100 ms
+  con un acorde sonando (pico −0.3 dBFS). `--verbose` = tabla de niveles; `--user <carpeta>` mide también esos
+  presets; `--notes` imprime las notas como las muestra el navegador. Usa una carpeta temporal (nunca Documentos).
+- Release con 0 warnings (build limpio en `out/pv`); ctest 2/2; pluginval strictness 10 (con tests de editor): SUCCESS.
+  Revisado con capturas del Standalone (barra, navegador, notas, guardar, borrar, menú, páginas).
+- Pendiente para más adelante: favoritos/etiquetas, arrastrar un .uwpreset a la ventana, preset aleatorio, A/B.
+
+Siguiente: Fase 11 (pulido), pendiente de que el usuario la inicie.
