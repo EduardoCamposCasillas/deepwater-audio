@@ -85,7 +85,7 @@ plugins/riptide/
 - [x] Fase 3 — Modos de saturación con carácter: cinta (suave, compresión, realce de graves),
       bulbo (asimétrico, armónicos pares), transistor (más duro, impares), clip duro, rectificador y wavefold.
       Cada modo con su propia curva y comportamiento según el nivel de entrada.
-- [ ] Fase 4 — Tono: filtros pre y post saturación (HP/LP), tilt EQ y control de "emphasis"
+- [x] Fase 4 — Tono: filtros pre y post saturación (HP/LP), tilt EQ y control de "emphasis"
       para decidir qué frecuencias se saturan más.
 - [ ] Fase 5 — Mix dry/wet con compensación de fase/latencia, compensación automática de volumen
       (auto gain) y modo delta (escuchar solo lo que agrega la saturación).
@@ -98,7 +98,7 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 4 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+Fase 4 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena: entrada → × input (drive) → tono pre → [medidor IN] → modo → tono post → filtro DC → × output → fundido de
   bypass → × fundido de factor → [medidor OUT]. IN mide ahora justo antes de la curva (con los cortes PRE y el
   emphasis): lo que la curva "ve".
@@ -215,4 +215,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: que el usuario pruebe la Fase 4 en FL; después, Fase 5 (mix dry/wet, auto gain, delta).
+Siguiente: Fase 5 (mix dry/wet, auto gain, delta).
