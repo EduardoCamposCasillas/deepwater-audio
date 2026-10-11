@@ -81,7 +81,7 @@ como fuente nueva por voz (como el sub y el ruido), no como tipo de oscilador: c
 warp/FM), un solo juego de parámetros, y apagada no se calcula.
 - [x] Fase 12 — Núcleo: retardo fraccionario Lagrange en libs/dsp, cuerda con ruido blanco, Decay (T60), Damping,
       note-off con "palma", afinación < 1 cent (MIDI 12–96, 4 sample rates), pestaña "Cuerda".
-- [ ] Fase 13 — Excitación: Pick Position (peine en la excitación), ruido filtrado (tono de la púa) e impulso;
+- [x] Fase 13 — Excitación: Pick Position (peine en la excitación), ruido filtrado (tono de la púa) e impulso;
       destinos de la matriz (al final): String Level, Pitch, Decay, Damping, Pick Position, Pick Tone.
 - [ ] Fase 14 — Presets de cuerda (guitarra, koto, arpa, plucks) con notas, y APRENDIZAJE.md.
 - [ ] Fase 15 (opcional) — Stiffness / inharmonicidad (all-pass de dispersión en el lazo).
@@ -491,7 +491,7 @@ bit a bit).
   la cola varía levemente de nota a nota por encima de ~10 kHz); en notas muy agudas con Decay largo el Damping alto se
   ablanda solo (límite de la continua); por encima de fs/8 (5.5 kHz a 44.1 kHz) la cuerda no sube más.
 
-Fase 13 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Lo existente suena igual (null test bit a bit) y
+Fase 13 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. Lo existente suena igual (null test bit a bit) y
 la cuerda con White Noise y Pick Position 0 % suena igual que en la Fase 12 (huella bit a bit, ver abajo).
 - `dsp/PluckedString.h`: `StringExcitation` (orden guardado: White Noise, Filtered Noise, Impulse) y `PluckShape`
   (excitación, Pick Position 0–0.5, Pick Tone 200 Hz–20 kHz) que se pasa a `pluck (seed, shape)`. La excitación:
