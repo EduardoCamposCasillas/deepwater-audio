@@ -84,7 +84,7 @@ warp/FM), un solo juego de parámetros, y apagada no se calcula.
 - [x] Fase 13 — Excitación: Pick Position (peine en la excitación), ruido filtrado (tono de la púa) e impulso;
       destinos de la matriz (al final): String Level, Pitch, Decay, Damping, Pick Position, Pick Tone.
 - [x] Fase 14 — Presets de cuerda (guitarra, koto, arpa, plucks) con notas, y APRENDIZAJE.md.
-- [ ] Fase 15 (opcional) — Stiffness / inharmonicidad (all-pass de dispersión en el lazo).
+- [x] Fase 15 (opcional) — Stiffness / inharmonicidad (all-pass de dispersión en el lazo).
 - [ ] Fase 16 (opcional) — La cuerda como resonador: excitación = las fuentes de la voz (opción al final de la lista).
 
 ## Estado actual
@@ -554,7 +554,7 @@ Fase 14 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. 
 - Límite que se nota en estos presets: el note-off siempre apaga la cuerda con la palma (~0.1 s), así que arpa y koto
   necesitan notas largas o el pedal (CC 64). Un control para elegir cuánto apaga la palma sería una mejora posible.
 
-Fase 15 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Lo existente suena igual: con Stiffness 0 la cuerda
+Fase 15 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. Lo existente suena igual: con Stiffness 0 la cuerda
 no tiene all-pass (huella FNV de `PluckedString` idéntica bit a bit, scratch) y null test de los 6 presets de referencia
 (`out/render-fase14` vs `out/render-fase15`): idéntico bit a bit. Huellas de los 49 presets: iguales.
 - `dsp/PluckedString.h`: rigidez = cascada de M all-pass de 1.er orden iguales, (a + z⁻¹) / (1 + a·z⁻¹) con a ≤ 0,
