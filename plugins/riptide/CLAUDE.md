@@ -96,14 +96,14 @@ plugins/riptide/
       (auto gain) y modo delta (escuchar solo lo que agrega la saturación).
 - [x] Fase 6 — Multibanda: crossovers Linkwitz-Riley (hasta 4 bandas), modo y drive por banda,
       solo/mute por banda, suma plana cuando no hay saturación.
-- [ ] Fase 7 — Dinámica y modulación: envelope follower y LFO que modulan el drive u otros parámetros.
+- [x] Fase 7 — Dinámica y modulación: envelope follower y LFO que modulan el drive u otros parámetros.
 - [ ] Fase 8 — GUI profesional: curva de transferencia en vivo, analizador de espectro antes/después,
       visualización de bandas, escalable.
 - [ ] Fase 9 — Presets con notas educativas (batería, bajo, voz, bus, master, efectos creativos).
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 7 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+Fase 7 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena: igual que la Fase 6, más dos fuentes que se calculan una vez por muestra (compartidas por los canales: la
   imagen estéreo no se mueve) y mueven una perilla cada una: envolvente (de lo que llega al plugin, el mayor |x| de los
   canales, antes de Input y del tono) y LFO. Destinos (`ModTarget`, índice guardado: solo añadir al final): Drive (el
@@ -353,4 +353,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: que el usuario pruebe la Fase 7 en FL; después, Fase 8 (GUI profesional).
+Siguiente: Fase 8 (GUI profesional).
