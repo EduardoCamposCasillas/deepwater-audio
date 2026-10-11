@@ -98,13 +98,13 @@ plugins/riptide/
 - [x] Fase 6 — Multibanda: crossovers Linkwitz-Riley (hasta 4 bandas), modo y drive por banda,
       solo/mute por banda, suma plana cuando no hay saturación.
 - [x] Fase 7 — Dinámica y modulación: envelope follower y LFO que modulan el drive u otros parámetros.
-- [ ] Fase 8 — GUI profesional: curva de transferencia en vivo, analizador de espectro antes/después,
+- [x] Fase 8 — GUI profesional: curva de transferencia en vivo, analizador de espectro antes/después,
       visualización de bandas, escalable.
 - [ ] Fase 9 — Presets con notas educativas (batería, bajo, voz, bus, master, efectos creativos).
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 8 IMPLEMENTADA (2026-10-11), pendiente de que el usuario la pruebe en FL Studio. El audio no cambia.
+Fase 8 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. El audio no cambia.
 - Librería (nuevo, sin tocar las piezas existentes: Undertow no cambia): `AnalyzerTap.h` = buffer circular que se pisa,
   muestras `std::atomic<float>` relajadas (sin carrera de datos), el audio mezcla a mono (L + R) / 2; detección de
   pisado al estilo seqlock (`claimed` antes de escribir + fences release/acquire, `written` después): la GUI copia las
@@ -383,4 +383,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: que el usuario pruebe la Fase 8 en FL; después, Fase 9 (presets con notas educativas).
+Siguiente: Fase 9 (presets con notas educativas).
