@@ -7,6 +7,7 @@
 
 add_library(deepwater_dsp STATIC
     src/Fft.cpp
+    src/SpectrumAnalyzer.cpp
 )
 add_library(deepwater::dsp ALIAS deepwater_dsp)
 

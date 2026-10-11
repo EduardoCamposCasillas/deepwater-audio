@@ -50,7 +50,8 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
   (`Oversampler.h`), filtro DC (`DcBlocker.h`), SVF TPT/ZDF (`Svf.h`), crossover Linkwitz-Riley y divisor multibanda
   (`Crossover.h`), filtro de 1 polo TPT y tilt EQ (`OnePole.h`), suavizado de parámetros y fundidos
   (`Smoothing.h`), línea de retardo con lectura lineal, cúbica y Lagrange (`DelayLine.h`), SIMD SSE2 (`Simd.h`),
-  `fastTanh` (`FastMath.h`), FFT (`Fft.h`), `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de
+  `fastTanh` (`FastMath.h`), FFT (`Fft.h`), toma de señal lock-free audio → GUI (`AnalyzerTap.h`), analizador de
+  espectro calibrado, fuera del audio (`SpectrumAnalyzer.h`, venía de Riptide), `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de
   pico/RMS (`LevelMeter.h`), LFO con divisiones de tempo (`Lfo.h`, venía de Undertow) y seguidor de envolvente
   (`EnvelopeFollower.h`).
 - Suavizado: usar `LinearRamp` (llega exacto al objetivo). `SmoothedParameter` tiene un bug conocido (nunca termina de

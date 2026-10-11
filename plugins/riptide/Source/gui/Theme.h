@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <juce_graphics/juce_graphics.h>
 
 // Colores de toda la interfaz en un solo sitio. La base es la misma que la de Undertow (la suite se reconoce como
@@ -21,4 +23,11 @@ inline const juce::Colour modulation { 0xff4fc3d9 }; // lo que mueven la envolve
 inline const juce::Colour meterSafe { 0xff4caf7d };
 inline const juce::Colour meterHot { 0xffffb74d };
 inline const juce::Colour meterClip { 0xffef5350 };
+
+// Fase 8: los visores. Antes = lo que entra (gris, de referencia); después = lo que sale (el acento). Cada banda tiene su
+// color, de cálido (graves) a frío (agudos), el mismo en el espectro, en la curva y en su columna.
+inline const juce::Colour spectrumBefore { 0xff9aa7b4 };
+inline const juce::Colour grid { 0xff1c232b };
+inline const std::array<juce::Colour, 4> bands { juce::Colour { 0xffff8a5c }, juce::Colour { 0xffe8c35a },
+                                                 juce::Colour { 0xff7fc98f }, juce::Colour { 0xff6fa8ff } };
 } // namespace riptide::gui::theme

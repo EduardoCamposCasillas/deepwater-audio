@@ -8,16 +8,23 @@
 #include "dsp/Modulation.h"
 #include "dsp/Saturator.h"
 
+#include "gui/DisplayState.h"
 #include "gui/LevelMeterView.h"
 #include "gui/RiptideLookAndFeel.h"
+#include "gui/SpectrumView.h"
+#include "gui/TransferCurveView.h"
 
 class RiptideAudioProcessor;
 
-// GUI funcional (la profesional llega en la Fase 8). Medidor IN | modos, tono (cortes con PRE/POST, emphasis, tilt),
-// bandas (número de bandas, cruces entre ellas y, por banda, modo, drive, solo, mute y su auto gain), nivel y mezcla
-// (Input, Mix, Output, AUTO GAIN, DELTA) | modulación (envolvente y LFO) | medidor OUT; en la cabecera, el selector de
-// oversampling y el bypass.
-// Un temporizador a 30 cuadros por segundo recoge los niveles que publicó el audio y redibuja los medidores.
+// Fase 8: GUI profesional y escalable. Medidor IN | arriba los visores (curva de transferencia y espectro antes/después
+// con las bandas encima); debajo los modos, el tono (cortes con PRE/POST, emphasis, tilt) junto al nivel y la mezcla
+// (Input, Mix, Output, AUTO GAIN, DELTA) y las bandas (número, cruces y, por banda, modo, drive, solo, mute y su auto
+// gain) | modulación (envolvente y LFO) | medidor OUT; en la cabecera, el oversampling, el zoom y el bypass.
+// Un temporizador a 30 cuadros por segundo recoge lo que publicó el audio y redibuja medidores y visores.
+//
+// Escalado (como Undertow): toda la interfaz vive en 'content', que siempre mide lo mismo (el diseño en píxeles fijos) y
+// se dibuja con una transformación de escala. Todo es vectorial, así que cualquier zoom (70-200 %) se ve nítido. El zoom
+// se guarda en el proyecto (propiedad "uiZoom" del estado) y como preferencia para instancias nuevas.
 class RiptideAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -32,6 +39,17 @@ private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    // El lienzo de tamaño fijo que se escala; su paint lo hace el editor.
+    struct Content final : public juce::Component
+    {
+        std::function<void (juce::Graphics&)> onPaint;
+        void paint (juce::Graphics& g) override
+        {
+            if (onPaint)
+                onPaint (g);
+        }
+    };
+
     struct Knob
     {
         juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
@@ -40,6 +58,12 @@ private:
     };
 
     void timerCallback() override;
+    void layOutContent();
+    void paintContent (juce::Graphics& g);
+    void setZoom (float newZoom);
+    void showZoomMenu();
+    [[nodiscard]] float initialZoom() const;
+    [[nodiscard]] riptide::gui::DisplayState makeDisplayState() const;
     void setUpKnob (Knob& knob, const char* parameterId, const juce::String& name, const juce::String& tooltip);
     void setUpPositionButton (juce::TextButton& button, std::unique_ptr<ButtonAttachment>& attachment, const char* parameterId);
     void setUpSectionLabel (juce::Label& label, const juce::String& text);
@@ -53,7 +77,16 @@ private:
 
     RiptideAudioProcessor& processor;
     riptide::gui::RiptideLookAndFeel lookAndFeel;
-    juce::TooltipWindow tooltips { this, 600 };
+    std::unique_ptr<juce::PropertiesFile> settings; // preferencias del usuario (el zoom para instancias nuevas)
+    Content content;
+    juce::TooltipWindow tooltips { &content, 600 }; // hija del contenido: se escala con él
+    float zoom = 1.0f;
+    bool rememberZoom = false; // hasta terminar el constructor los cambios de tamaño no son una elección del usuario
+    juce::TextButton zoomButton;
+
+    // Visores (Fase 8).
+    riptide::gui::TransferCurveView curveView;
+    riptide::gui::SpectrumView spectrumView;
 
     riptide::gui::LevelMeterView inputMeter;
     riptide::gui::LevelMeterView outputMeter;
@@ -134,6 +167,7 @@ private:
     juce::TextButton lfoSyncButton { "SYNC" };
     std::unique_ptr<ButtonAttachment> lfoSyncAttachment;
     juce::Rectangle<int> mainArea, modulationArea, envelopeBar, lfoBar; // fondos y barras (paint)
+    juce::Rectangle<int> toneArea, levelArea;                           // separador entre TONO y NIVEL (paint)
     int separatorY = 0;
     float shownEnvelope = 0.0f, shownLfo = 0.0f;
 

@@ -873,3 +873,157 @@ en FL y sin que el estribillo salte de volumen respecto de los versos. Inténtal
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 8 — Ver la saturación: curva en vivo, espectro antes/después y bandas
+
+Hasta ahora, para ver lo que hacía Riptide había que poner el Parametric EQ 2 después y adivinar qué parte del cambio
+venía de qué perilla. Esta fase le da ojos propios: una **curva de transferencia** que se dobla mientras mueves Input o
+cambias de modo, un **analizador de espectro** que muestra a la vez lo que entra y lo que sale (con las bandas encima;
+los cruces se arrastran ahí mismo) y una ventana **escalable**. El sonido no cambia nada: es la misma Fase 7.
+
+### Conceptos aprendidos
+
+- **Curva de transferencia.** La "huella" de una saturación: para cada valor que entra (eje horizontal) dice qué valor
+  sale (vertical). La línea punteada es y = x, salir igual que entró: **todo lo que la curva se separa de ella es
+  saturación**. Se lee así:
+  - **la rodilla** (dónde deja de ser recta): Tape se curva muy pronto y muy suave; Transistor sigue recta casi hasta
+    arriba y dobla de golpe; Hard Clip es recta y después plana (la esquina);
+  - **el techo** (la altura máxima): de ahí no pasa la salida, por fuerte que entre la señal;
+  - **la simetría**: si la mitad de abajo es la de arriba dada vuelta, solo hay armónicos impares. Tube tiene el techo
+    de arriba más bajo que el de abajo: esa asimetría que **se ve** es la que crea los armónicos pares que **se oyen**;
+  - Fold sube y vuelve a bajar (se dobla); Rectify da vuelta la mitad negativa (la curva queda toda arriba).
+- **Drive = comprimir la curva hacia el centro.** El eje horizontal es la señal tal cual llega (los bordes son 0 dBFS) y
+  la curva dibujada es f(drive · x). Subir Input no mueve tu señal: **trae la rodilla hacia ella**. Por eso el mismo
+  modo es "limpio" o "destrozado" según el drive.
+- **El tramo brillante = dónde vive tu señal.** Va de −pico a +pico de lo que entra (el pie del visor dice cuánto). Una
+  voz a −18 dBFS solo usa el centro recto: aunque la curva se doble mucho más afuera, esa voz casi no se satura. Es el
+  gain staging de la Fase 1, ahora visible.
+- **Espectro y FFT.** Un sonido se puede describir como una suma de senos, cada uno con su frecuencia y su nivel. La FFT
+  (transformada rápida de Fourier) toma un trozo de señal (las últimas 4096 muestras, unos 93 ms) y calcula cuánto de
+  cada frecuencia hay en él. El resultado son **bins**: casilleros de frecuencia de sampleRate / 4096 = 10.8 Hz a
+  44.1 kHz (a 88.2/96 kHz se usan 8192 muestras para que el trozo dure lo mismo).
+- **Ventana de Hann.** La FFT supone que el trozo se repite sin fin; si no contiene ciclos enteros, el final no empalma
+  con el principio y ese "salto" ensucia todas las frecuencias (**fuga espectral**). La ventana lleva los bordes del
+  trozo suavemente a 0. Precio: cada tono se ve como un monte de unos 4 bins de ancho, con un poco de "falda" a los
+  lados (por eso, alrededor de una fundamental muy grave y fuerte, el piso del espectro sube).
+- **Resolución contra rapidez.** Más muestras = bins más juntos (más detalle en graves) pero el trozo dura más (reacciona
+  más lento). Con 10.8 Hz por bin, dos notas de bajo a un semitono (55 y 58 Hz) se ven como un solo monte; en agudos,
+  donde un semitono son cientos de Hz, sobra resolución.
+- **Calibración.** Un seno de 0 dBFS marca 0 dB en su frecuencia (medido en los tests: ±0.01 dB; entre dos bins hasta
+  1.4 dB menos). Ojo: la **música** se ve mucho más abajo que en el medidor, porque su energía se reparte entre miles de
+  bins; el analizador sirve para **comparar** zonas y ver qué aparece, no para medir volumen.
+- **Eje logarítmico y balística.** Cada octava ocupa el mismo ancho (como la oye el oído): 20–40 Hz mide lo mismo que
+  10–20 kHz. Cada punto sube casi al instante y baja a 40 dB/s: así la música se lee sin que el dibujo tiemble.
+- **Antes/después = qué agregó la saturación.** ANTES (gris) es lo que entra a Riptide; DESPUÉS (relleno) lo que sale.
+  Con un tono puro: en ANTES un solo pico; en DESPUÉS, la **serie armónica** encima. Con AUTO GAIN puesto los dos
+  quedan al mismo nivel y la comparación es justa (sin él, la salida más fuerte se ve "más arriba en todo").
+- **Leer armónicos.** Los armónicos caen en múltiplos de la fundamental. Un A3 de FL (110 Hz): 2.º = 220 Hz (A4),
+  3.º = 330 Hz (E5), 4.º = 440 Hz (A5), 5.º = 550 Hz (C#6). Pasa el mouse por el visor: arriba se lee la frecuencia, la
+  nota (con los nombres de FL) y el nivel. Los pares (220, 440...) son octavas de la nota: Tube y Rectify. Los impares
+  (330, 550...) son una quinta y una tercera mayor, octavas más arriba: Tape, Transistor, Clip, Fold.
+- **Ver el aliasing.** Un armónico que pasaría de la mitad de la frecuencia de muestreo "rebota" y aparece en una
+  frecuencia que **no** es múltiplo de la nota. En el visor: picos fuera de la serie, a veces por debajo de la
+  fundamental. Con Oversampling en Off y notas agudas se ven; en 4x desaparecen.
+- **Las bandas en el espectro.** Con 2 o más bandas cada zona se tiñe del color de su banda (el mismo de su columna y de
+  su curva), con su número, su modo y su drive arriba. Cada cruce es una línea con un asa abajo: **se arrastra** (doble
+  clic = valor por defecto) y es la misma perilla Cruce de abajo (FL graba el movimiento como automatización). Las
+  bandas que no se oyen (mute, o fuera del solo) se oscurecen.
+- **Por qué la GUI no le pregunta al audio.** El hilo de audio no puede esperar a nadie (ni a la GUI). Riptide deja una
+  copia de lo que entra y de lo que sale en una "toma" circular que se pisa sola; la GUI copia las últimas muestras
+  cuando quiere dibujar y después comprueba si el audio las pisó mientras copiaba (si pasó, descarta la copia y lo
+  intenta en el cuadro siguiente). Sin locks: el audio nunca se entera de que alguien mira. Esa pieza
+  (`AnalyzerTap.h`) y el analizador (`SpectrumAnalyzer.h`) quedaron en la librería: el EQ (plugin 3) los va a reusar.
+
+### Qué hace cada control
+
+- **CURVA** (arriba a la izquierda): no tiene perillas propias. Cambia con **Input**, el **modo** (los botones de justo
+  debajo), el **drive y el modo de cada banda** y la **modulación** (con un LFO en el drive, la curva "respira"). Con 1
+  banda: una curva naranja con el tramo de tu señal brillante y dos puntos en el pico. Con varias: una curva por banda,
+  en su color (sin tramo: cada banda recibe solo una parte de la señal).
+- **ESPECTRO**: **ANTES** y **DESPUÉS** encienden o apagan cada trazo. Mouse encima = frecuencia, nota y nivel. Las asas
+  de los cruces se arrastran.
+- **Zoom** (en la cabecera, junto a BYPASS): 70–200 %, o arrastrando la esquina inferior derecha. Se guarda con el
+  proyecto de FL y como preferencia para las instancias nuevas.
+- Todo lo demás está donde estaba, reacomodado: los modos en una fila bajo los visores, TONO junto a NIVEL Y MEZCLA y
+  las BANDAS con una franja de su color.
+
+### Ejercicio de escucha guiado: ver y oír cada modo (con volumen igualado)
+
+1. Un canal con un seno: 3x Osc con solo el oscilador 1 en Sine (o Undertow en su sonido por defecto). Deja sostenida
+   **A3 (110 Hz)**. Riptide en el insert, **AUTO GAIN puesto**, Oversampling 4x, 1 banda.
+2. Con **Input 0 dB** mira la CURVA: el tramo brillante queda en la parte casi recta. En el ESPECTRO, ANTES y DESPUÉS
+   son casi iguales: un solo pico en 110 Hz. Escucha: casi idéntico al bypass.
+3. Sube **Input a +12 dB**. La curva se comprime hacia el centro y el tramo brillante llega a la rodilla. En DESPUÉS
+   aparecen picos en 330, 550, 770 Hz (Tape: impares). Pasa el mouse para leerlos: E5, C#6...
+4. Cambia a **Tube**: aparecen además 220 y 440 Hz (pares). Mira la curva: el techo de arriba es más bajo que el de
+   abajo. Escucha: más "lleno", como si sumaras la octava.
+5. **Transistor** y luego **Hard Clip**: los armónicos impares altos (los de la derecha) suben mucho más. La rodilla es
+   más corta. Escucha: más áspero, más "cuadrado".
+6. **Fold** con Input en +18 dB: la curva se dobla dentro del tramo brillante y el espectro se llena de armónicos que
+   cambian al mover Input. **Rectify**: el pico de 110 Hz casi desaparece y la serie empieza en 220 Hz (una octava
+   arriba).
+7. Vuelve a Hard Clip, pon **Oversampling Off** y toca más agudo (A6, 880 Hz): aparecen picos sueltos fuera de la serie
+   (aliasing). Pasa a 4x: se van. Ahora lo puedes **ver** además de oír.
+8. En todo el ejercicio, compara con BYPASS: con AUTO GAIN el volumen apenas cambia; lo que cambia es el carácter.
+
+### Receta de uso: elegir los cruces de un bus de batería mirando el espectro
+
+1. Riptide en el bus de la batería, **3 bandas**, AUTO GAIN puesto, solo **ANTES** encendido.
+2. Reproduce el loop y busca con el mouse el monte del bombo (casi siempre 45–70 Hz) y el cuerpo de la caja
+   (150–250 Hz). Arrastra el **Cruce 1** justo por encima de la fundamental del bombo (p. ej. 90–110 Hz): la banda 1
+   queda con el bombo solo.
+3. Busca dónde empiezan los platillos (el piso que sube a la derecha, desde 5–8 kHz) y lleva el **Cruce 2** a ese punto.
+   La banda 2 queda con la caja, los toms y el cuerpo de todo.
+4. Banda 1 **Tube +3 dB** (cuerpo, pares), banda 2 **Tape +6 dB** (densidad), banda 3 **sin drive** o con −3 dB
+   (platillos limpios). Enciende **DESPUÉS**: los armónicos nuevos tienen que aparecer en graves y medios, y la zona de
+   los platillos tiene que quedar casi igual que en ANTES.
+5. Usa **S** de cada banda para oír lo que estás separando: si en el solo de la banda 1 se oye el golpe de la caja, el
+   Cruce 1 está muy arriba.
+6. Por qué funciona: el espectro te dice **dónde** está cada instrumento; poner los cruces entre ellos (no encima) hace
+   que cada banda sature un instrumento y que el bombo deje de "empujar" la saturación de la caja y los platillos.
+
+### Reto sin receta
+
+Pídele a alguien (o hazlo tú tapando la parte de abajo de la ventana) que elija un modo al azar con el mismo Input, sobre
+un seno sostenido. Mirando **solo el espectro** (no la curva ni los botones), di cuál es. Después al revés: mirando
+**solo la curva**, di qué armónicos van a aparecer antes de mirar el espectro. Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Curva de transferencia**: la función entrada → salida de un saturador. *En música:* la "curva de compresión" de un
+  compresor es lo mismo, en dB; los manuales de pedales de distorsión también la dibujan.
+- **Rodilla (knee) / techo**: dónde la curva deja de ser recta y hasta dónde llega. *En música:* el "soft knee" de un
+  compresor de voz (empieza a actuar de a poco) contra el "brick wall" de un limitador de master.
+- **FFT / bin**: el cálculo que pasa una señal a frecuencias y cada casillero que resulta. *En música:* lo que hay detrás
+  de Wave Candy, del Parametric EQ 2 y de cualquier analizador.
+- **Ventana / fuga espectral**: el suavizado de los bordes del trozo que se analiza y la "suciedad" que evita. *En
+  música:* por eso un analizador nunca muestra un seno como una raya finita, sino como un monte.
+- **Resolución en frecuencia**: qué tan juntos están los bins. *En música:* por qué en un analizador el sub de un 808 se
+  ve como un manchón y los armónicos agudos de una voz como picos claros.
+- **Serie armónica**: la fundamental y sus múltiplos (×2, ×3, ×4...). *En música:* lo que hace que un A3 de piano y uno
+  de guitarra sean "la misma nota" con distinto timbre: la misma serie, con distintos niveles.
+- **Balística (de un visor)**: lo rápido que sube y baja lo dibujado. *En música:* la diferencia entre un medidor VU
+  (lento) y uno de picos (rápido).
+- **Escala logarítmica**: cada octava ocupa lo mismo. *En música:* el teclado del piano: cada octava son 12 teclas,
+  aunque en Hz cada una sea el doble de ancha que la anterior.
+
+### Errores comunes
+
+- **Mezclar con los ojos.** El espectro dice qué cambió, no si suena mejor. Decide escuchando; usa el visor para
+  entender lo que oíste o para encontrar una frecuencia.
+- **Comparar ANTES y DESPUÉS sin igualar el volumen.** Si la salida es 6 dB más fuerte, todo el relleno se ve más arriba
+  y parece que "agregó de todo". Con AUTO GAIN (o igualando con Output) lo que sobresale es lo que de verdad se agregó.
+- **Esperar que el espectro coincida con el medidor.** Un bin de música marca mucho menos que el medidor (la energía se
+  reparte); el pico de un seno sí coincide.
+- **Leer graves finos.** Debajo de 100 Hz los bins están a 10.8 Hz: dos notas de bajo cercanas se ven juntas y el monte
+  de una fundamental grave ensancha el piso alrededor. Para afinar un 808, mejor el oído (o un afinador).
+- **Analizador en mono.** Se mide (L + R) / 2: algo en contrafase entre los canales (un estéreo muy abierto) se ve más
+  bajo de lo que suena.
+- **La música se ve inclinada.** Casi toda la música tiene mucha más energía en graves que en agudos: un espectro que cae
+  hacia la derecha es lo normal, no un problema de la mezcla.
+- **Cuándo NO mirarlo:** al decidir cuánto drive "suena bien" en una mezcla. Ahí cierra los ojos, iguala el volumen y
+  compara con el bypass.
+
+### Retos completados
+
+(Ninguno todavía.)

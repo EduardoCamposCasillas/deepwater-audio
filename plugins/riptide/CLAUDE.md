@@ -29,7 +29,8 @@ un plugin de nivel profesional y que él entienda cada parte y sepa cuándo y c�
 - `OnePole.h`: filtro de 1 polo TPT (pre/de-énfasis de Tape, high-pass de Rectify) y `TiltFilter` (Fase 4).
 - `Smoothing.h`: suavizado de gain, drive y mix; fundidos de bypass.
 - `Lfo.h` (Fase 7, movido desde Undertow) y `EnvelopeFollower.h` (Fase 7): las fuentes de modulación.
-- `FastMath.h` (`fastTanh`), `Fft.h` (analizador fuera del hilo de audio), `Simd.h`.
+- `FastMath.h` (`fastTanh`), `Fft.h`, `Simd.h`.
+- `AnalyzerTap.h` y `SpectrumAnalyzer.h` (Fase 8): la toma lock-free audio → GUI y el analizador FFT (fuera del audio).
 
 Todo DSP nuevo que sirva para futuros plugins (EQ, compresor, delay, reverb) va en la librería, con tests. Candidato
 que hoy está en Undertow y podría moverse cuando haga falta: el ADAA de `Distortion.h`. Moverlo exige el null test de
@@ -75,7 +76,7 @@ plugins/riptide/
     dsp/AutoGain.h           # auto gain: tabla de pérdida de volumen de cada curva + nivel lento con puerta
     dsp/Bands.h              # multibanda: ajustes por banda, separación de los cruces y sus coeficientes suavizados
     dsp/Modulation.h         # envolvente y LFO: destinos, rutas (destino + amount) y el modulador por muestra
-    gui/                     # tema, LookAndFeel, medidores
+    gui/                     # tema, LookAndFeel, medidores, visores (curva y espectro), DisplayState, formatos
   tests/EngineTests.cpp    # tests del motor (sin JUCE)
 ```
 
@@ -103,6 +104,35 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
+Fase 8 IMPLEMENTADA (2026-10-11), pendiente de que el usuario la pruebe en FL Studio. El audio no cambia.
+- Librería (nuevo, sin tocar las piezas existentes: Undertow no cambia): `AnalyzerTap.h` = buffer circular que se pisa,
+  muestras `std::atomic<float>` relajadas (sin carrera de datos), el audio mezcla a mono (L + R) / 2; detección de
+  pisado al estilo seqlock (`claimed` antes de escribir + fences release/acquire, `written` después): la GUI copia las
+  últimas N y descarta la copia si el audio reclamó esa zona. `SpectrumAnalyzer` (src/) = Hann periódica + `fft`,
+  calibrado 4/N (seno de 0 dBFS = 0 dB), piso −140 dB; `orderForSampleRate`: 4096 a 44.1/48 kHz, 8192 a 88.2/96
+  (~93 ms); `levelDb (low, high)`: lo interpolado en el centro o el bin más fuerte dentro de la zona.
+- Procesador: `inputTap` (antes del motor) y `outputTap` (después), de 16384; pico de la entrada (máximo atómico, la GUI
+  lo recoge con exchange), frecuencia de muestreo atómica para la GUI. Los cruces publicados arrancan en los valores por
+  defecto (antes del primer prepareToPlay la GUI leía 0 Hz: "0 Hz - 0 Hz" en las columnas).
+- `Saturator.h`: `curves::forMode` = la curva estática que se dibuja (Rectify = tanh(|x|), sin el high-pass).
+- GUI 1386 × 860 (base) escalable 70–200 % como Undertow: `Content` de tamaño fijo con `AffineTransform::scale`,
+  esquina + menú de zoom, proporción fija, zoom en la propiedad `uiZoom` del estado y en
+  `%APPDATA%\Deepwater\Riptide.settings`; al abrir, el mayor zoom ≤ 100 % que cabe en pantalla. Arriba: CURVA
+  (`gui/TransferCurveView.h`: y = f(drive·x) con x = lo que llega, ±1 = 0 dBFS, y = ±1.5; drive = Input + banda +
+  modulación, como el motor; y = x punteada; tramo de ±pico brillante con caída τ 300 ms; una curva por banda en su
+  color con 2+ bandas) y ESPECTRO (`gui/SpectrumView.h`: 20 Hz–20 kHz log, +6…−90 dB, un punto cada 2 px, sube 70 %
+  por cuadro y baja 40 dB/s, a silencio tras 0.25 s sin audio nuevo; ANTES gris / DESPUÉS relleno; bandas teñidas con
+  número, modo y drive, oscurecidas si no se oyen; cruces arrastrables con gesto de automatización y doble clic =
+  defecto; lectura de Hz, nota de FL y dB bajo el mouse; tooltips solo en el título y en los cruces). Debajo: modos en
+  una fila, TONO | NIVEL Y MEZCLA en una fila, BANDAS con el color de cada una. `gui/DisplayState.h` (lo que suena,
+  resuelto por el editor como el motor) y `gui/Format.h` (Hz, dB, nota). Cabecera "Fase 8".
+- Tests: `DeepwaterDspTests` (+2: toma mono/estéreo, orden al dar la vuelta, sin datos = false; analizador: 0 dB y −6 dB
+  en su bin a ±0.01 dB en 4 sample rates, scalloping < 1.5 dB, nada a 40 bins, interpolación en graves, piso) y
+  `RiptideTests` (`forMode` = la curva que suena en los 6 modos).
+- Release con 0 warnings; ctest 4/4; pluginval strictness 10 ampliado: SUCCESS. GUI revisada con capturas del
+  Standalone (en este entorno no tiene audio: para ver los visores con señal se usó un parche temporal, no incluido,
+  que llamaba a processBlock con un tono de 110 Hz desde el temporizador).
+
 Fase 7 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena: igual que la Fase 6, más dos fuentes que se calculan una vez por muestra (compartidas por los canales: la
   imagen estéreo no se mueve) y mueven una perilla cada una: envolvente (de lo que llega al plugin, el mayor |x| de los
@@ -353,4 +383,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 8 (GUI profesional).
+Siguiente: que el usuario pruebe la Fase 8 en FL; después, Fase 9 (presets con notas educativas).

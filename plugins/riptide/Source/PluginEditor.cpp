@@ -5,41 +5,53 @@
 namespace
 {
 constexpr int modulationWidth = 250;
-constexpr int editorWidth = 900 + modulationWidth + 12;
-constexpr int editorHeight = 760;
+constexpr int centreWidth = 900;   // visores, modos, tono, nivel y bandas
 constexpr int headerHeight = 44;
 constexpr int padding = 12;
-constexpr int meterWidth = 96;
-constexpr int knobSize = 104;
+constexpr int meterWidth = 88;
+constexpr int displayHeight = 290; // fila de los visores
+constexpr int curveWidth = 290;    // la curva es cuadrada
 constexpr int toneKnobSize = 70;
 constexpr int sectionLabelHeight = 18;
 constexpr int positionButtonHeight = 22;
 constexpr int framesPerSecond = 30;
 constexpr int modeButtonHeight = 26;
-constexpr int modeDescriptionHeight = 34;
-constexpr int signalFlowHeight = 28;
+constexpr int modeDescriptionHeight = 20;
+constexpr int signalFlowHeight = 24;
 constexpr int toggleWidth = 96;
 constexpr int toggleHeight = 26;
 constexpr int crossoverColumnWidth = 76;
 constexpr int bandKnobSize = 54;
 constexpr int bandStripHeight = 186;
-constexpr int levelKnobsHeight = 132;
+constexpr int toneLevelHeight = 18 + toneKnobSize + 20 + 4 + positionButtonHeight + 8;
 constexpr int modKnobSize = 50;
 constexpr int modRowHeight = 16 + modKnobSize + 18;
+constexpr int zoomButtonWidth = 64;
 
-// "80 Hz", "2.5 kHz" o "20 kHz".
-juce::String formatHz (float hz)
+// Tamaño del diseño (zoom 100 %). La ventana real es este tamaño × zoom.
+constexpr int mainPanelHeight = padding + modeButtonHeight + 4 + modeDescriptionHeight + 6 + sectionLabelHeight
+                                + toneLevelHeight + 6 + 22 + 4 + bandStripHeight + signalFlowHeight + padding;
+constexpr int baseWidth = padding + meterWidth + padding + centreWidth + padding + modulationWidth + padding + meterWidth + padding;
+constexpr int baseHeight = headerHeight + padding + displayHeight + padding + mainPanelHeight + padding;
+
+constexpr float minZoom = 0.7f;
+constexpr float maxZoom = 2.0f;
+constexpr std::array<int, 9> zoomSteps { 70, 80, 90, 100, 115, 130, 150, 175, 200 };
+constexpr const char* zoomPropertyId = "uiZoom"; // propiedad del estado (se guarda con el proyecto de FL)
+
+std::unique_ptr<juce::PropertiesFile> openSettings()
 {
-    if (hz < 999.5f)
-        return juce::String (juce::roundToInt (hz)) + " Hz";
-    return hz < 9950.0f ? juce::String (hz / 1000.0f, 1) + " kHz" : juce::String (juce::roundToInt (hz / 1000.0f)) + " kHz";
+    // %APPDATA%\Deepwater\Riptide.settings (en Windows). Solo guarda preferencias de la interfaz.
+    juce::PropertiesFile::Options options;
+    options.applicationName = "Riptide";
+    options.filenameSuffix = ".settings";
+    options.folderName = "Deepwater";
+    options.osxLibrarySubFolder = "Application Support";
+    return std::make_unique<juce::PropertiesFile> (options);
 }
 
-juce::String formatDb (float db)
-{
-    const float rounded = std::round (db * 10.0f) / 10.0f;
-    return (rounded > 0.0f ? "+" : "") + juce::String (rounded == 0.0f ? 0.0f : rounded, 1) + " dB";
-}
+using riptide::gui::format::db;
+using riptide::gui::format::hz;
 
 // Qué hace cada modo, en lenguaje musical (se muestra debajo de los botones y como tooltip). En UTF-8 escapado: MSVC
 // no garantiza la codificación de los literales del código fuente.
@@ -59,13 +71,24 @@ const std::array<const char*, riptide::dsp::numModes> modeDescriptions {
 } // namespace
 
 RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p), inputMeter ("IN", p.getInputMeter()), outputMeter ("OUT", p.getOutputMeter())
+    : AudioProcessorEditor (p), processor (p), settings (openSettings()), spectrumView (p), inputMeter ("IN", p.getInputMeter()),
+      outputMeter ("OUT", p.getOutputMeter())
 {
     namespace id = riptide::params;
     setLookAndFeel (&lookAndFeel);
+    addAndMakeVisible (content);
+    content.setSize (baseWidth, baseHeight);
+    content.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
 
-    addAndMakeVisible (inputMeter);
-    addAndMakeVisible (outputMeter);
+    content.addAndMakeVisible (curveView);
+    content.addAndMakeVisible (spectrumView);
+    zoomButton.setTooltip (juce::String::fromUTF8 ("TamaÃ±o de la ventana. TambiÃ©n puedes arrastrar la esquina "
+                                                   "inferior derecha. Se guarda con el proyecto."));
+    zoomButton.onClick = [this] { showZoomMenu(); };
+    content.addAndMakeVisible (zoomButton);
+
+    content.addAndMakeVisible (inputMeter);
+    content.addAndMakeVisible (outputMeter);
     setUpKnob (inputKnob, id::inputGain, "Input",
                juce::String::fromUTF8 ("Drive: nivel con el que la se\xc3\xb1" "al entra a la curva (lo que mide IN, despu\xc3\xa9s de los cortes PRE y el emphasis). Subirlo = saturar m\xc3\xa1s: m\xc3\xa1s arm\xc3\xb3nicos, m\xc3\xa1s densidad, menos pegada."));
     setUpKnob (outputKnob, id::outputGain, "Output",
@@ -80,7 +103,7 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
                  juce::String::fromUTF8 ("Escuchar solo lo que Riptide le agrega (o le quita) a la se\xc3\xb1" "al: la salida menos la original. Sin drive, silencio. Sirve para o\xc3\xad" "r los arm\xc3\xb3nicos, el fizz o el barro que agrega cada ajuste. No lo dejes puesto al exportar."));
     autoGainReadout.setJustificationType (juce::Justification::centred);
     autoGainReadout.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-    addAndMakeVisible (autoGainReadout);
+    content.addAndMakeVisible (autoGainReadout);
     updateAutoGainReadout();
 
     setUpSectionLabel (levelSection, "NIVEL Y MEZCLA");
@@ -96,21 +119,21 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
     bypassButton.setClickingTogglesState (true);
     bypassButton.setTooltip (juce::String::fromUTF8 ("Escuchar la se\xc3\xb1" "al original. Es el mismo bypass que el de FL "
                                                      "y entra con un fundido de 20 ms (sin clics)."));
-    addAndMakeVisible (bypassButton);
+    content.addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), id::bypass, bypassButton);
 
     oversamplingLabel.setText ("OVERSAMPLING", juce::dontSendNotification);
     oversamplingLabel.setJustificationType (juce::Justification::centredRight);
     oversamplingLabel.setFont (juce::FontOptions (11.0f, juce::Font::bold));
     oversamplingLabel.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
-    addAndMakeVisible (oversamplingLabel);
+    content.addAndMakeVisible (oversamplingLabel);
     // Las opciones salen del propio parámetro (Off, 2x, 4x, 8x, 16x): el attachment asocia la opción N con el índice N.
     oversamplingBox.addItemList (processor.getParameters().getParameter (id::oversampling)->getAllValueStrings(), 1);
     oversamplingBox.setTooltip (juce::String::fromUTF8 (
         "Calcula la saturaci\xc3\xb3n a 2, 4, 8 o 16 veces la frecuencia de muestreo para que los arm\xc3\xb3nicos que "
         "pasan de Nyquist no se reflejen como aliasing. M\xc3\xa1s factor = menos aliasing, m\xc3\xa1s CPU y algo "
         "m\xc3\xa1s de latencia (FL la compensa). Off = sin oversampling: \xc3\xbasalo para o\xc3\xad" "r el aliasing."));
-    addAndMakeVisible (oversamplingBox);
+    content.addAndMakeVisible (oversamplingBox);
     oversamplingAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), id::oversampling, oversamplingBox);
 
     auto* modeParameter = processor.getParameters().getParameter (id::mode);
@@ -124,13 +147,13 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
         button.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::accent.withAlpha (0.55f));
         button.setTooltip (juce::String::fromUTF8 (modeDescriptions[i]));
         button.onClick = [this, i] { modeAttachment->setValueAsCompleteGesture (static_cast<float> (i)); };
-        addAndMakeVisible (button);
+        content.addAndMakeVisible (button);
     }
     modeDescription.setJustificationType (juce::Justification::centred);
     modeDescription.setFont (juce::FontOptions (12.0f));
     modeDescription.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
     modeDescription.setMinimumHorizontalScale (1.0f);
-    addAndMakeVisible (modeDescription);
+    content.addAndMakeVisible (modeDescription);
     modeAttachment->sendInitialUpdate();
 
     // Bandas.
@@ -146,7 +169,7 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
         button.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::accent.withAlpha (0.55f));
         button.setTooltip (juce::String::fromUTF8 ("N\xc3\xba" "mero de bandas. 1 = toda la se\xc3\xb1" "al junta (como hasta la Fase 5). Con m\xc3\xa1s, cada banda se satura por separado: lo fuerte de una (el bombo, el bajo) ya no empuja ni ensucia a las otras. Cambiarlo hace un fundido corto a silencio."));
         button.onClick = [this, i] { bandCountAttachment->setValueAsCompleteGesture (static_cast<float> (i)); };
-        addAndMakeVisible (button);
+        content.addAndMakeVisible (button);
     }
 
     const auto modeChoices = processor.getParameters().getParameter (id::bandMode[0])->getAllValueStrings();
@@ -156,39 +179,39 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
         strip.title.setText ("BANDA " + juce::String (b + 1), juce::dontSendNotification);
         strip.title.setJustificationType (juce::Justification::centred);
         strip.title.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-        strip.title.setColour (juce::Label::textColourId, riptide::gui::theme::text);
-        addAndMakeVisible (strip.title);
+        strip.title.setColour (juce::Label::textColourId, riptide::gui::theme::bands[b]); // el color de su zona en el espectro
+        content.addAndMakeVisible (strip.title);
         strip.range.setJustificationType (juce::Justification::centred);
         strip.range.setFont (juce::FontOptions (11.0f));
         strip.range.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
-        addAndMakeVisible (strip.range);
+        content.addAndMakeVisible (strip.range);
 
         strip.mode.addItemList (modeChoices, 1);
         strip.mode.setTooltip (juce::String::fromUTF8 ("Modo de esta banda. Global = el de los botones de arriba. Ejemplo: graves en Tube (cuerpo, pares) y agudos en Tape (suaves) o en Transistor (mordida)."));
-        addAndMakeVisible (strip.mode);
+        content.addAndMakeVisible (strip.mode);
         strip.modeAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), id::bandMode[b], strip.mode);
 
         strip.drive.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 18);
         strip.drive.setTooltip (juce::String::fromUTF8 ("Drive de esta banda, sumado al Input. Subirlo satura m\xc3\xa1s solo esta zona; bajarlo la deja m\xc3\xa1s limpia que el resto. Con AUTO GAIN el volumen de la banda se mantiene."));
-        addAndMakeVisible (strip.drive);
+        content.addAndMakeVisible (strip.drive);
         strip.driveAttachment = std::make_unique<SliderAttachment> (processor.getParameters(), id::bandDrive[b], strip.drive);
         strip.drive.setDoubleClickReturnValue (true, 0.0);
 
         strip.solo.setClickingTogglesState (true);
         strip.solo.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::meterHot.withAlpha (0.6f));
         strip.solo.setTooltip (juce::String::fromUTF8 ("Solo: escuchar solo esta banda (tambi\xc3\xa9n en la original del mix y en el delta). Sirve para ajustar el drive y los cruces de cada banda. Varias en solo = suenan todas ellas."));
-        addAndMakeVisible (strip.solo);
+        content.addAndMakeVisible (strip.solo);
         strip.soloAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), id::bandSolo[b], strip.solo);
         strip.mute.setClickingTogglesState (true);
         strip.mute.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::meterClip.withAlpha (0.6f));
         strip.mute.setTooltip (juce::String::fromUTF8 ("Mute: quitar esta banda de la salida. Con una banda en solo, el solo manda."));
-        addAndMakeVisible (strip.mute);
+        content.addAndMakeVisible (strip.mute);
         strip.muteAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), id::bandMute[b], strip.mute);
 
         strip.autoGain.setJustificationType (juce::Justification::centred);
         strip.autoGain.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         strip.autoGain.setTooltip (juce::String::fromUTF8 ("Compensaci\xc3\xb3n de AUTO GAIN de esta banda (tenue si AUTO GAIN est\xc3\xa1 apagado)."));
-        addAndMakeVisible (strip.autoGain);
+        content.addAndMakeVisible (strip.autoGain);
     }
     for (size_t i = 0; i < crossoverKnobs.size(); ++i)
         setUpKnob (crossoverKnobs[i], id::crossover[i], "Cruce " + juce::String (i + 1),
@@ -210,7 +233,7 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
     setUpCaption (lfoShapeLabel, "FORMA");
     lfoShapeBox.addItemList (processor.getParameters().getParameter (id::lfoShape)->getAllValueStrings(), 1);
     lfoShapeBox.setTooltip (juce::String::fromUTF8 ("Forma del LFO. Sine/Triangle: un vaiv\xc3\xa9n suave. Saw: sube (o baja) y vuelve de golpe. Square: salta entre dos valores (redondeado 2 ms, sin clics). Sample & Hold: un valor al azar en cada ciclo."));
-    addAndMakeVisible (lfoShapeBox);
+    content.addAndMakeVisible (lfoShapeBox);
     lfoShapeAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), id::lfoShape, lfoShapeBox);
     setUpToggle (lfoSyncButton, lfoSyncAttachment, id::lfoSync, juce::String::fromUTF8 ("SYNC encendido: la velocidad es una figura musical (1/4, 1/8 T...) al tempo de FL, y con la canci\xc3\xb3n sonando el LFO cae en el pulso. Apagado: velocidad libre en Hz."));
     lfoSyncButton.onStateChange = [this] { showLfoSync (lfoSyncButton.getToggleState()); };
@@ -218,7 +241,7 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
     setUpCaption (lfoDivisionLabel, juce::String::fromUTF8 ("DIVISI\xc3\x93N"));
     lfoDivisionBox.addItemList (processor.getParameters().getParameter (id::lfoDivision)->getAllValueStrings(), 1);
     lfoDivisionBox.setTooltip (juce::String::fromUTF8 ("Duraci\xc3\xb3n de un ciclo del LFO en figuras musicales: 1/4 = una negra, 1 bar = un comp\xc3\xa1s. T = tresillo, D = con puntillo."));
-    addAndMakeVisible (lfoDivisionBox);
+    content.addAndMakeVisible (lfoDivisionBox);
     lfoDivisionAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), id::lfoDivision, lfoDivisionBox);
     setUpRoute (lfoRoute, id::lfoTarget, id::lfoAmount, "el LFO");
     showLfoSync (lfoSyncButton.getToggleState());
@@ -228,16 +251,72 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
     modulationHelp.setFont (juce::FontOptions (11.0f));
     modulationHelp.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
     modulationHelp.setJustificationType (juce::Justification::topLeft);
-    addAndMakeVisible (modulationHelp);
+    content.addAndMakeVisible (modulationHelp);
 
-    setSize (editorWidth, editorHeight);
+    layOutContent();
+
+    // El zoom se decide ANTES de poner los límites: setResizeLimits ya redimensiona la ventana (aún de 0 × 0) y eso no
+    // debe guardarse como el zoom elegido.
+    const float startZoom = initialZoom();
+    // Ventana redimensionable (esquina inferior derecha) con la proporción del diseño fija.
+    setResizable (true, true);
+    setResizeLimits (juce::roundToInt (baseWidth * minZoom), juce::roundToInt (baseHeight * minZoom),
+                     juce::roundToInt (baseWidth * maxZoom), juce::roundToInt (baseHeight * maxZoom));
+    if (auto* windowConstrainer = getConstrainer())
+        windowConstrainer->setFixedAspectRatio (static_cast<double> (baseWidth) / baseHeight);
+    rememberZoom = true;
+    setZoom (startZoom);
+    resized(); // por si el tamaño ya era ese (setSize no llamaría a resized y el zoom no se guardaría)
+
     lastFrameMs = juce::Time::getMillisecondCounterHiRes();
     startTimerHz (framesPerSecond);
 }
 
 RiptideAudioProcessorEditor::~RiptideAudioProcessorEditor()
 {
+    stopTimer();
+    if (settings != nullptr)
+        settings->saveIfNeeded();
     setLookAndFeel (nullptr);
+}
+
+float RiptideAudioProcessorEditor::initialZoom() const
+{
+    // 1.º el zoom guardado en el proyecto; 2.º el último que usó el usuario; 3.º el mayor (≤ 100 %) que cabe en pantalla.
+    const auto saved = processor.getParameters().state.getProperty (zoomPropertyId);
+    if (! saved.isVoid())
+        return static_cast<float> (saved);
+    if (settings != nullptr && settings->containsKey (zoomPropertyId))
+        return static_cast<float> (settings->getDoubleValue (zoomPropertyId, 1.0));
+
+    float zoomThatFits = 1.0f;
+    if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+    {
+        const auto area = display->userBounds.toFloat();
+        zoomThatFits = juce::jmin (1.0f, 0.92f * area.getWidth() / baseWidth, 0.88f * area.getHeight() / baseHeight);
+    }
+    return std::floor (zoomThatFits * 20.0f) / 20.0f; // en pasos de 5 %
+}
+
+void RiptideAudioProcessorEditor::setZoom (float newZoom)
+{
+    newZoom = juce::jlimit (minZoom, maxZoom, newZoom);
+    setSize (juce::roundToInt (baseWidth * newZoom), juce::roundToInt (baseHeight * newZoom));
+}
+
+void RiptideAudioProcessorEditor::showZoomMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Zoom");
+    const int current = juce::roundToInt (zoom * 100.0f);
+    for (const int step : zoomSteps)
+        menu.addItem (step, juce::String (step) + " %", true, step == current);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&zoomButton),
+                        [safeThis = juce::Component::SafePointer<RiptideAudioProcessorEditor> (this)] (int result)
+                        {
+                            if (safeThis != nullptr && result > 0)
+                                safeThis->setZoom (static_cast<float> (result) / 100.0f);
+                        });
 }
 
 void RiptideAudioProcessorEditor::setUpKnob (Knob& knob, const char* parameterId, const juce::String& name,
@@ -245,7 +324,7 @@ void RiptideAudioProcessorEditor::setUpKnob (Knob& knob, const char* parameterId
 {
     knob.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 20);
     knob.slider.setTooltip (tooltip);
-    addAndMakeVisible (knob.slider);
+    content.addAndMakeVisible (knob.slider);
     knob.attachment = std::make_unique<SliderAttachment> (processor.getParameters(), parameterId, knob.slider);
     // Doble clic = valor por defecto (0 dB en las ganancias, apagado en los cortes).
     auto* parameter = processor.getParameters().getParameter (parameterId);
@@ -255,7 +334,7 @@ void RiptideAudioProcessorEditor::setUpKnob (Knob& knob, const char* parameterId
     knob.label.setJustificationType (juce::Justification::centred);
     knob.label.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     knob.label.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
-    addAndMakeVisible (knob.label);
+    content.addAndMakeVisible (knob.label);
 }
 
 void RiptideAudioProcessorEditor::setUpPositionButton (juce::TextButton& button, std::unique_ptr<ButtonAttachment>& attachment,
@@ -266,7 +345,7 @@ void RiptideAudioProcessorEditor::setUpPositionButton (juce::TextButton& button,
     button.setTooltip (juce::String::fromUTF8 ("PRE = el filtro act\xc3\xba" "a antes de la curva (decide qu\xc3\xa9 se satura). POST = act\xc3\xba" "a despu\xc3\xa9s (solo cambia lo que se oye). Cambiarlo cruza los dos en 20 ms, sin clics."));
     // El texto sigue al estado (también cuando lo cambia la automatización o un preset).
     button.onStateChange = [&button] { button.setButtonText (button.getToggleState() ? "POST" : "PRE"); };
-    addAndMakeVisible (button);
+    content.addAndMakeVisible (button);
     attachment = std::make_unique<ButtonAttachment> (processor.getParameters(), parameterId, button);
     button.onStateChange();
 }
@@ -277,7 +356,7 @@ void RiptideAudioProcessorEditor::setUpToggle (juce::TextButton& button, std::un
     button.setClickingTogglesState (true);
     button.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::accent.withAlpha (0.55f));
     button.setTooltip (tooltip);
-    addAndMakeVisible (button);
+    content.addAndMakeVisible (button);
     attachment = std::make_unique<ButtonAttachment> (processor.getParameters(), parameterId, button);
 }
 
@@ -286,7 +365,7 @@ void RiptideAudioProcessorEditor::updateAutoGainReadout()
     // Encendido: la compensación que se aplica. Apagado: la que se aplicaría, tenue (útil para ver cuánto cambia el
     // volumen el drive).
     // Con varias bandas cada una tiene la suya (en su columna).
-    autoGainReadout.setText (shownBands > 1 ? "por banda" : formatDb (processor.getAutoGainDb()), juce::dontSendNotification);
+    autoGainReadout.setText (shownBands > 1 ? "por banda" : db (processor.getAutoGainDb()), juce::dontSendNotification);
     autoGainReadout.setColour (juce::Label::textColourId, autoGainButton.getToggleState() ? riptide::gui::theme::accent
                                                                                            : riptide::gui::theme::dimText.withAlpha (0.6f));
 }
@@ -320,7 +399,7 @@ void RiptideAudioProcessorEditor::showBandCount (int count)
         }
     }
     updateBandReadouts();
-    repaint();
+    content.repaint();
 }
 
 void RiptideAudioProcessorEditor::updateBandReadouts()
@@ -333,9 +412,9 @@ void RiptideAudioProcessorEditor::updateBandReadouts()
         const int band = static_cast<int> (b);
         const float low = band == 0 ? 20.0f : processor.getCrossoverHz (band - 1);
         const float high = band >= shownBands - 1 ? 20000.0f : processor.getCrossoverHz (band);
-        strip.range.setText (static_cast<int> (b) < shownBands ? formatHz (low) + " - " + formatHz (high) : juce::String ("-"),
+        strip.range.setText (static_cast<int> (b) < shownBands ? hz (low) + " - " + hz (high) : juce::String ("-"),
                              juce::dontSendNotification);
-        strip.autoGain.setText ("auto " + formatDb (processor.getAutoGainDb (band)), juce::dontSendNotification);
+        strip.autoGain.setText ("auto " + db (processor.getAutoGainDb (band)), juce::dontSendNotification);
         strip.autoGain.setColour (juce::Label::textColourId, colour);
     }
 }
@@ -346,7 +425,7 @@ void RiptideAudioProcessorEditor::setUpRoute (RouteControls& route, const char* 
     setUpCaption (route.targetLabel, "DESTINO");
     route.target.addItemList (processor.getParameters().getParameter (targetId)->getAllValueStrings(), 1);
     route.target.setTooltip (juce::String::fromUTF8 ("Qu\xc3\xa9 perilla mueve ") + source + juce::String::fromUTF8 (". Drive = el Input (cu\xc3\xa1nto satura todo); Band N Drive = solo esa banda; Mix, Emphasis, Emph Freq y Tilt = esas perillas. Cambiarlo hace un fundido de 20 ms."));
-    addAndMakeVisible (route.target);
+    content.addAndMakeVisible (route.target);
     route.targetAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), targetId, route.target);
     setUpKnob (route.amount, amountId, "Amount",
                juce::String::fromUTF8 ("Cu\xc3\xa1nto mueve ") + source + juce::String::fromUTF8 (" al destino. 100 % = todo el recorrido de su perilla (en Drive, 48 dB); 25 % = un cuarto. Negativo = en sentido contrario (con la envolvente: lo fuerte satura MENOS). En 0 no hace nada."));
@@ -359,7 +438,7 @@ void RiptideAudioProcessorEditor::setUpCaption (juce::Label& label, const juce::
     label.setJustificationType (juce::Justification::centredLeft);
     label.setFont (juce::FontOptions (10.0f, juce::Font::bold));
     label.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
-    addAndMakeVisible (label);
+    content.addAndMakeVisible (label);
 }
 
 void RiptideAudioProcessorEditor::showLfoSync (bool sync)
@@ -400,8 +479,8 @@ void RiptideAudioProcessorEditor::updateModulation()
     {
         shownEnvelope = envelope;
         shownLfo = lfo;
-        repaint (envelopeBar.expanded (2));
-        repaint (lfoBar.expanded (2));
+        content.repaint (envelopeBar.expanded (2));
+        content.repaint (lfoBar.expanded (2));
     }
 
     // El arco de cada perilla destino: su valor + la modulación, en las unidades de esa perilla y dentro de su rango.
@@ -445,7 +524,7 @@ void RiptideAudioProcessorEditor::setUpSectionLabel (juce::Label& label, const j
     label.setText (text, juce::dontSendNotification);
     label.setFont (juce::FontOptions (11.0f, juce::Font::bold));
     label.setColour (juce::Label::textColourId, riptide::gui::theme::accent);
-    addAndMakeVisible (label);
+    content.addAndMakeVisible (label);
 }
 
 void RiptideAudioProcessorEditor::showMode (int index)
@@ -468,23 +547,63 @@ void RiptideAudioProcessorEditor::timerCallback()
     updateAutoGainReadout();
     updateBandReadouts();
     updateModulation();
+
+    const auto display = makeDisplayState();
+    curveView.setState (display, processor.takeInputPeak(), elapsed);
+    spectrumView.update (display, elapsed);
+}
+
+riptide::gui::DisplayState RiptideAudioProcessorEditor::makeDisplayState() const
+{
+    // Lo mismo que hace el motor con los parámetros (Engine::setBandSettings y modulateDrive), para dibujar lo que suena.
+    namespace id = riptide::params;
+    namespace dsp = riptide::dsp;
+    auto& apvts = processor.getParameters();
+    const auto value = [&apvts] (const char* parameterId) { return apvts.getRawParameterValue (parameterId)->load(); };
+
+    riptide::gui::DisplayState state;
+    state.numBands = shownBands;
+    const auto globalMode = static_cast<dsp::Mode> (juce::jlimit (0, dsp::numModes - 1, juce::roundToInt (value (id::mode))));
+    const float inputDb = juce::jlimit (-dsp::maxDriveDb, dsp::maxDriveDb, value (id::inputGain) + processor.getModulation (dsp::ModTarget::drive));
+    bool anySolo = false;
+    for (size_t b = 0; b < static_cast<size_t> (shownBands); ++b)
+        anySolo = anySolo || value (id::bandSolo[b]) >= 0.5f;
+
+    for (size_t b = 0; b < state.bands.size(); ++b)
+    {
+        auto& band = state.bands[b];
+        const int bandMode = juce::roundToInt (value (id::bandMode[b]));
+        band.mode = bandMode > 0 ? static_cast<dsp::Mode> (juce::jlimit (0, dsp::numModes - 1, bandMode - 1)) : globalMode;
+        const auto target = static_cast<dsp::ModTarget> (static_cast<int> (dsp::ModTarget::band1Drive) + static_cast<int> (b));
+        band.bandDriveDb = juce::jlimit (-dsp::maxBandDriveDb, dsp::maxBandDriveDb, value (id::bandDrive[b]) + processor.getModulation (target));
+        band.driveDb = inputDb + band.bandDriveDb;
+        band.audible = anySolo ? value (id::bandSolo[b]) >= 0.5f : value (id::bandMute[b]) < 0.5f;
+    }
+    for (size_t i = 0; i < state.crossoverHz.size(); ++i)
+        state.crossoverHz[i] = processor.getCrossoverHz (static_cast<int> (i));
+    return state;
 }
 
 void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
 {
+    // Todo se dibuja en 'content' (paintContent); esto solo cubre el borde que puede quedar al redondear la escala.
+    g.fillAll (riptide::gui::theme::background);
+}
+
+void RiptideAudioProcessorEditor::paintContent (juce::Graphics& g)
+{
     using namespace riptide::gui;
     g.fillAll (theme::background);
 
-    auto header = getLocalBounds().removeFromTop (headerHeight).reduced (padding, 0);
+    auto header = content.getLocalBounds().removeFromTop (headerHeight).reduced (padding, 0);
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
     g.drawText ("RIPTIDE", header.removeFromLeft (110), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("saturador  -  Fase 7", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
-                juce::Justification::centredLeft);
+    g.drawText ("saturador  -  Fase 8", header.withRight (oversamplingLabel.getX() - padding), juce::Justification::centredLeft);
 
-    // Paneles de las perillas y de la modulación, entre los dos medidores.
+    // Paneles de las perillas y de la modulación, entre los dos medidores (los visores dibujan el suyo).
     auto knobsPanel = mainArea.toFloat();
     for (const auto panel : { knobsPanel, modulationArea.toFloat() })
     {
@@ -493,6 +612,10 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
         g.setColour (theme::panelOutline);
         g.drawRoundedRectangle (panel.reduced (0.5f), 8.0f, 1.0f);
     }
+    // Separador entre TONO y NIVEL Y MEZCLA.
+    g.setColour (theme::panelOutline);
+    g.drawVerticalLine ((toneArea.getRight() + levelArea.getX()) / 2, static_cast<float> (toneArea.getY() + 4),
+                        static_cast<float> (toneArea.getBottom() - 4));
     paintBands (g);
     paintModulation (g);
 
@@ -500,7 +623,7 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
     g.drawText (juce::String::fromUTF8 ("input \xe2\x86\x92 PRE \xe2\x86\x92 emphasis \xe2\x86\x92 BANDAS (drive \xc2\xb7 modo \xc2\xb7 auto gain) \xe2\x86\x92 de-emph. \xe2\x86\x92 POST \xe2\x86\x92 tilt \xe2\x86\x92 mix \xe2\x86\x92 delta \xe2\x86\x92 output"),
-                knobsPanel.removeFromBottom (static_cast<float> (signalFlowHeight)), juce::Justification::centred);
+                knobsPanel.removeFromBottom (static_cast<float> (signalFlowHeight + 4)), juce::Justification::centred);
 }
 
 void RiptideAudioProcessorEditor::paintModulation (juce::Graphics& g)
@@ -555,23 +678,50 @@ void RiptideAudioProcessorEditor::paintBands (juce::Graphics& g)
         g.fillRoundedRectangle (area, 6.0f);
         g.setColour (active ? theme::panelOutline : theme::panelOutline.withAlpha (0.4f));
         g.drawRoundedRectangle (area.reduced (0.5f), 6.0f, 1.0f);
+        // Una franja con el color de la banda (el mismo que su zona en el espectro y su curva).
+        g.setColour (theme::bands[b].withAlpha (active ? 0.8f : 0.25f));
+        g.fillRoundedRectangle (area.withHeight (3.0f).reduced (8.0f, 0.0f).translated (0.0f, 1.0f), 1.5f);
     }
 }
 
 void RiptideAudioProcessorEditor::resized()
 {
-    auto header = getLocalBounds().removeFromTop (headerHeight).reduced (padding, 8);
+    // El contenido siempre mide lo mismo: solo cambia la escala con la que se dibuja.
+    zoom = static_cast<float> (getWidth()) / static_cast<float> (baseWidth);
+    content.setTransform (juce::AffineTransform::scale (zoom));
+    zoomButton.setButtonText (juce::String (juce::roundToInt (zoom * 100.0f)) + " %");
+
+    // Se recuerda en el proyecto y como preferencia para la próxima instancia.
+    if (! rememberZoom)
+        return;
+    processor.getParameters().state.setProperty (zoomPropertyId, zoom, nullptr);
+    if (settings != nullptr)
+        settings->setValue (zoomPropertyId, zoom);
+}
+
+void RiptideAudioProcessorEditor::layOutContent()
+{
+    auto header = content.getLocalBounds().removeFromTop (headerHeight).reduced (padding, 8);
     bypassButton.setBounds (header.removeFromRight (90));
+    header.removeFromRight (padding);
+    zoomButton.setBounds (header.removeFromRight (zoomButtonWidth));
     header.removeFromRight (padding);
     oversamplingBox.setBounds (header.removeFromRight (70));
     oversamplingLabel.setBounds (header.removeFromRight (100));
 
-    auto body = getLocalBounds().withTrimmedTop (headerHeight).reduced (padding);
+    auto body = content.getLocalBounds().withTrimmedTop (headerHeight).reduced (padding);
     inputMeter.setBounds (body.removeFromLeft (meterWidth));
     outputMeter.setBounds (body.removeFromRight (meterWidth));
     body.reduce (padding, 0);
     modulationArea = body.removeFromRight (modulationWidth);
     body.removeFromRight (padding);
+
+    // Visores: la curva (cuadrada) y el espectro.
+    auto displays = body.removeFromTop (displayHeight);
+    curveView.setBounds (displays.removeFromLeft (curveWidth));
+    displays.removeFromLeft (padding);
+    spectrumView.setBounds (displays);
+    body.removeFromTop (padding);
     mainArea = body;
 
     // Modulación: ENVOLVENTE (título y barra, Attack | Release | Sens, destino y Amount) y LFO (título y barra, forma y
@@ -595,9 +745,9 @@ void RiptideAudioProcessorEditor::resized()
         column.removeFromTop (6);
         layOutRoute (envelopeRoute, column.removeFromTop (modRowHeight));
 
-        column.removeFromTop (10);
+        column.removeFromTop (14);
         separatorY = column.getY();
-        column.removeFromTop (10);
+        column.removeFromTop (14);
         auto lfoHeader = column.removeFromTop (20);
         lfoBar = lfoHeader.removeFromRight (110).withSizeKeepingCentre (110, 8);
         lfoTitle.setBounds (lfoHeader);
@@ -617,37 +767,59 @@ void RiptideAudioProcessorEditor::resized()
         column.removeFromTop (6);
         layOutRoute (lfoRoute, column.removeFromTop (modRowHeight));
 
-        column.removeFromTop (14);
-        modulationHelp.setBounds (column.removeFromTop (70));
+        column.removeFromTop (20);
+        modulationHelp.setBounds (column.removeFromTop (90));
     }
 
-    // Modos: dos filas de tres botones y la descripción del activo.
-    auto panel = mainArea.reduced (0, padding);
-    for (int row = 0; row < 2; ++row)
+    // Modos: una fila de seis botones (justo debajo de la curva que dibujan) y la descripción del activo.
+    auto panel = mainArea.reduced (padding, padding);
     {
         auto line = panel.removeFromTop (modeButtonHeight);
-        const int width = line.getWidth() / 3;
-        for (int column = 0; column < 3; ++column)
-            modeButtons[static_cast<size_t> (row * 3 + column)].setBounds (line.removeFromLeft (width).reduced (2, 0));
+        const int width = line.getWidth() / riptide::dsp::numModes;
+        for (auto& button : modeButtons)
+            button.setBounds (line.removeFromLeft (width).reduced (2, 0));
         panel.removeFromTop (4);
+        modeDescription.setBounds (panel.removeFromTop (modeDescriptionHeight));
     }
-    modeDescription.setBounds (panel.removeFromTop (modeDescriptionHeight));
 
-    // Tono: cinco perillas en el orden de la señal; debajo de los cortes, su interruptor PRE/POST.
-    panel.removeFromTop (4);
-    toneSection.setBounds (panel.removeFromTop (sectionLabelHeight));
-    auto toneRow = panel.removeFromTop (18 + toneKnobSize + 20 + 4 + positionButtonHeight);
-    const int toneWidth = toneRow.getWidth() / 5;
-    for (auto* knob : { &lowCutKnob, &highCutKnob, &emphasisKnob, &emphasisFreqKnob, &tiltKnob })
+    // Tono (cinco perillas en el orden de la señal; debajo de los cortes, su PRE/POST) | nivel y mezcla (Input, Mix,
+    // Output y la columna de AUTO GAIN, con su lectura, y DELTA).
+    panel.removeFromTop (6);
     {
-        auto column = toneRow.removeFromLeft (toneWidth);
-        knob->label.setBounds (column.removeFromTop (18));
-        knob->slider.setBounds (column.removeFromTop (toneKnobSize + 20));
-        column.removeFromTop (4);
-        if (knob == &lowCutKnob)
-            lowCutPositionButton.setBounds (column.withSizeKeepingCentre (56, positionButtonHeight));
-        else if (knob == &highCutKnob)
-            highCutPositionButton.setBounds (column.withSizeKeepingCentre (56, positionButtonHeight));
+        auto row = panel.removeFromTop (sectionLabelHeight + toneLevelHeight);
+        toneArea = row.removeFromLeft (5 * 92);
+        row.removeFromLeft (16);
+        levelArea = row;
+
+        auto tone = toneArea;
+        toneSection.setBounds (tone.removeFromTop (sectionLabelHeight));
+        const int toneWidth = tone.getWidth() / 5;
+        for (auto* knob : { &lowCutKnob, &highCutKnob, &emphasisKnob, &emphasisFreqKnob, &tiltKnob })
+        {
+            auto column = tone.removeFromLeft (toneWidth);
+            knob->label.setBounds (column.removeFromTop (18));
+            knob->slider.setBounds (column.removeFromTop (toneKnobSize + 20));
+            column.removeFromTop (4);
+            if (knob == &lowCutKnob)
+                lowCutPositionButton.setBounds (column.withSizeKeepingCentre (56, positionButtonHeight));
+            else if (knob == &highCutKnob)
+                highCutPositionButton.setBounds (column.withSizeKeepingCentre (56, positionButtonHeight));
+        }
+
+        auto level = levelArea;
+        levelSection.setBounds (level.removeFromTop (sectionLabelHeight).withTrimmedLeft (8));
+        auto toggles = level.removeFromRight (toggleWidth + 14).withSizeKeepingCentre (toggleWidth, toggleHeight * 2 + 20 + 12);
+        autoGainButton.setBounds (toggles.removeFromTop (toggleHeight));
+        autoGainReadout.setBounds (toggles.removeFromTop (20));
+        toggles.removeFromTop (12);
+        deltaButton.setBounds (toggles.removeFromTop (toggleHeight));
+        const int knobWidth = level.getWidth() / 3;
+        for (auto* knob : { &inputKnob, &mixKnob, &outputKnob })
+        {
+            auto column = level.removeFromLeft (knobWidth);
+            knob->label.setBounds (column.removeFromTop (18));
+            knob->slider.setBounds (column.reduced (0, 2));
+        }
     }
 
     // Bandas: el título con el selector 1-4 a la derecha; debajo, banda | cruce | banda | cruce | ...
@@ -679,27 +851,9 @@ void RiptideAudioProcessorEditor::resized()
         if (b < crossoverKnobs.size())
         {
             auto crossoverColumn = bandRow.removeFromLeft (crossoverColumnWidth);
-            auto content = crossoverColumn.withSizeKeepingCentre (crossoverColumnWidth, 18 + bandKnobSize + 20);
-            crossoverKnobs[b].label.setBounds (content.removeFromTop (18));
-            crossoverKnobs[b].slider.setBounds (content);
+            auto knobArea = crossoverColumn.withSizeKeepingCentre (crossoverColumnWidth, 18 + bandKnobSize + 20);
+            crossoverKnobs[b].label.setBounds (knobArea.removeFromTop (18));
+            crossoverKnobs[b].slider.setBounds (knobArea);
         }
     }
-
-    // Nivel y mezcla: Input (drive), Mix, Output y la columna de AUTO GAIN (con su lectura) y DELTA.
-    panel.removeFromTop (6);
-    levelSection.setBounds (panel.removeFromTop (sectionLabelHeight));
-    auto knobs = panel.removeFromTop (levelKnobsHeight);
-    const int knobWidth = knobs.getWidth() / 4;
-    for (auto* knob : { &inputKnob, &mixKnob, &outputKnob })
-    {
-        auto column = knobs.removeFromLeft (knobWidth);
-        auto content = column.withSizeKeepingCentre (column.getWidth(), juce::jmin (column.getHeight(), knobSize + 20 + 24));
-        knob->label.setBounds (content.removeFromTop (20));
-        knob->slider.setBounds (content);
-    }
-    auto toggles = knobs.withSizeKeepingCentre (toggleWidth, toggleHeight * 2 + 20 + 16);
-    autoGainButton.setBounds (toggles.removeFromTop (toggleHeight));
-    autoGainReadout.setBounds (toggles.removeFromTop (20));
-    toggles.removeFromTop (16);
-    deltaButton.setBounds (toggles.removeFromTop (toggleHeight));
 }

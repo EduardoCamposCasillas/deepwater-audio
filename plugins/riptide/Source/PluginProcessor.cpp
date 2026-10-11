@@ -180,6 +180,9 @@ RiptideAudioProcessor::RiptideAudioProcessor()
     lfoDivisionParam = parameters.getRawParameterValue (id::lfoDivision);
     lfoTargetParam = parameters.getRawParameterValue (id::lfoTarget);
     lfoAmountParam = parameters.getRawParameterValue (id::lfoAmount);
+    // Antes del primer prepareToPlay la GUI ya muestra los cruces: que lean los valores por defecto, no 0 Hz.
+    for (size_t i = 0; i < crossoverHz.size(); ++i)
+        crossoverHz[i].store (riptide::dsp::defaultCrossoverHz[i]);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
     startTimerHz (20);
@@ -374,6 +377,7 @@ void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBl
         }
     engineLatency.store (engine.getLatency());
     setLatencySamples (engine.getLatency());
+    analyzerSampleRate.store (sampleRate);
     publishBands();
 }
 
@@ -397,9 +401,18 @@ void RiptideAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     for (int ch = getTotalNumInputChannels(); ch < buffer.getNumChannels(); ++ch)
         buffer.clear (ch, 0, buffer.getNumSamples());
 
+    // Para la GUI: la entrada tal cual llega (el motor procesa en el sitio, así que antes de procesar).
+    const int numSamples = buffer.getNumSamples();
+    inputTap.push (buffer.getArrayOfReadPointers(), numChannels, numSamples);
+    float peak = 0.0f;
+    for (int ch = 0; ch < numChannels; ++ch)
+        peak = juce::jmax (peak, buffer.getMagnitude (ch, 0, numSamples));
+    publishPeak (inputPeak, peak);
+
     engine.setSettings (readSettings());
     engine.setTransport (readTransport());
-    engine.process (buffer.getArrayOfWritePointers(), numChannels, buffer.getNumSamples());
+    engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples);
+    outputTap.push (buffer.getArrayOfReadPointers(), numChannels, numSamples);
     engineLatency.store (engine.getLatency(), std::memory_order_relaxed);
     publishBands();
     publishMeters (numChannels);

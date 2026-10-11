@@ -170,6 +170,14 @@ void testCurves()
 
     // Wavefold: pasado π/2 la salida BAJA al subir la entrada (se dobla).
     CHECK (curves::fold (2.5f) < curves::fold (1.5f));
+
+    // Fase 8: la curva que dibuja la GUI es la misma que suena (Rectify: |x| y tanh, sin el high-pass de la DC).
+    for (size_t m = 0; m < shapes.size(); ++m)
+        for (const float x : { -3.0f, -0.7f, -0.1f, 0.0f, 0.2f, 0.9f, 4.0f })
+        {
+            const float expected = allModes[m] == Mode::rectify ? dw::fastTanh (std::abs (x)) : shapes[m] (x);
+            CHECK (curves::forMode (allModes[m], x) == expected);
+        }
 }
 
 void testTapeEmphasisCancels()

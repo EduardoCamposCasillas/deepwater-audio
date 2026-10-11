@@ -13,6 +13,7 @@
 #include <string_view>
 #include <vector>
 
+#include "deepwater/dsp/AnalyzerTap.h"
 #include "deepwater/dsp/Crossover.h"
 #include "deepwater/dsp/DcBlocker.h"
 #include "deepwater/dsp/Decibels.h"
@@ -28,6 +29,7 @@
 #include "deepwater/dsp/Pitch.h"
 #include "deepwater/dsp/Simd.h"
 #include "deepwater/dsp/Smoothing.h"
+#include "deepwater/dsp/SpectrumAnalyzer.h"
 #include "deepwater/dsp/Svf.h"
 
 namespace
@@ -999,6 +1001,102 @@ void testLfoDivisions()
     CHECK (lfo.getPhase() < 1.0e-6 || lfo.getPhase() > 1.0 - 1.0e-6);
 }
 
+void testAnalyzerTap()
+{
+    std::printf ("AnalyzerTap: mezcla a mono, ultimas N en orden (tambien al dar la vuelta), sin datos = false\n");
+
+    static dw::AnalyzerTap<16> tap; // static: 16 atómicos + contadores, nada grande, pero así no vive en la pila
+    std::array<float, 64> buffer {};
+    CHECK (! tap.copyLatest (buffer.data(), 4)); // aún no hay muestras
+    CHECK (! tap.copyLatest (buffer.data(), 17)); // más que la capacidad
+
+    // Estéreo: L = n, R = −n + 2 → (L + R) / 2 = 1 siempre; después mono: el valor tal cual.
+    std::array<float, 10> left {}, right {};
+    for (size_t i = 0; i < left.size(); ++i)
+    {
+        left[i] = static_cast<float> (i);
+        right[i] = 2.0f - static_cast<float> (i);
+    }
+    const std::array<const float*, 2> stereo { left.data(), right.data() };
+    tap.push (stereo.data(), 2, 10);
+    CHECK (tap.getWritten() == 10);
+    CHECK (tap.copyLatest (buffer.data(), 10));
+    bool allOne = true;
+    for (size_t i = 0; i < 10; ++i)
+        allOne = allOne && buffer[i] == 1.0f;
+    CHECK (allOne);
+
+    // 13 muestras más en mono (en total 23: el buffer de 16 ya dio la vuelta). Las últimas 16 = 1, 1, 1, 0, 1, ..., 12.
+    std::array<float, 13> ramp {};
+    for (size_t i = 0; i < ramp.size(); ++i)
+        ramp[i] = static_cast<float> (i);
+    const float* mono = ramp.data();
+    tap.push (&mono, 1, 13);
+    CHECK (tap.getWritten() == 23);
+    CHECK (tap.copyLatest (buffer.data(), 16));
+    bool ordered = buffer[0] == 1.0f && buffer[1] == 1.0f && buffer[2] == 1.0f;
+    for (size_t i = 3; i < 16; ++i)
+        ordered = ordered && buffer[i] == static_cast<float> (i - 3);
+    CHECK (ordered);
+    CHECK (tap.copyLatest (buffer.data(), 5) && buffer[0] == 8.0f && buffer[4] == 12.0f);
+}
+
+void testSpectrumAnalyzer()
+{
+    std::printf ("SpectrumAnalyzer: seno de 0 dBFS = 0 dB en su bin, -6 dB con amplitud 0.5, scalloping < 1.5 dB, "
+                 "fuga lejos del tono < -90 dB, silencio en el piso\n");
+
+    CHECK (dw::SpectrumAnalyzer::orderForSampleRate (44100.0) == 12);
+    CHECK (dw::SpectrumAnalyzer::orderForSampleRate (48000.0) == 12);
+    CHECK (dw::SpectrumAnalyzer::orderForSampleRate (88200.0) == 13);
+    CHECK (dw::SpectrumAnalyzer::orderForSampleRate (96000.0) == 13);
+
+    for (const double sampleRate : sampleRates)
+    {
+        dw::SpectrumAnalyzer analyzer;
+        analyzer.prepare (dw::SpectrumAnalyzer::orderForSampleRate (sampleRate));
+        const auto size = static_cast<size_t> (analyzer.getSize());
+        const double binHz = sampleRate / static_cast<double> (size);
+        CHECK (analyzer.binsDb().size() == size / 2 + 1);
+
+        // Un seno justo en el bin 93 (~1 kHz), con amplitud 1 y 0.5.
+        for (const float amplitude : { 1.0f, 0.5f })
+        {
+            auto signal = sineSignal (93.0 * binHz, sampleRate, size);
+            for (auto& sample : signal)
+                sample *= amplitude;
+            analyzer.analyze (signal.data());
+            const double expected = toDb (amplitude);
+            CHECK (std::abs (analyzer.binsDb()[93] - expected) < 0.01);
+            CHECK (std::abs (analyzer.levelDb (85.0 * binHz, 100.0 * binHz, sampleRate) - expected) < 0.01);
+            // Lejos del tono (40 bins = más de 2 octavas de los lóbulos laterales) casi nada: la ventana evita la fuga.
+            CHECK (analyzer.binsDb()[93 + 40] < expected - 90.0);
+            CHECK (analyzer.binsDb()[93 - 40] < expected - 90.0);
+        }
+
+        // Entre dos bins: el pico se reparte; el más fuerte de los dos queda a menos de 1.5 dB (Hann pierde 1.42 dB).
+        {
+            const auto signal = sineSignal (200.5 * binHz, sampleRate, size);
+            analyzer.analyze (signal.data());
+            const float strongest = std::max (analyzer.binsDb()[200], analyzer.binsDb()[201]);
+            CHECK (strongest < 0.0f && strongest > -1.5f);
+        }
+
+        // Zona más angosta que un bin (graves): interpolada, entre los dos bins vecinos.
+        {
+            const auto signal = sineSignal (10.0 * binHz, sampleRate, size);
+            analyzer.analyze (signal.data());
+            const float between = analyzer.levelDb (10.2 * binHz, 10.4 * binHz, sampleRate);
+            CHECK (between <= analyzer.binsDb()[10] + 1.0e-4f && between >= analyzer.binsDb()[11] - 1.0e-4f);
+        }
+
+        const std::vector<float> silence (size, 0.0f);
+        analyzer.analyze (silence.data());
+        CHECK (analyzer.binsDb()[93] == dw::SpectrumAnalyzer::floorDb);
+        CHECK (analyzer.levelDb (20.0, 20000.0, sampleRate) == dw::SpectrumAnalyzer::floorDb);
+    }
+}
+
 } // namespace
 
 int main()
@@ -1028,6 +1126,8 @@ int main()
     testMidiNoteToHz();
     testEnvelopeFollower();
     testLfoDivisions();
+    testAnalyzerTap();
+    testSpectrumAnalyzer();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de deepwater::dsp pasaron.\n");

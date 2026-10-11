@@ -68,6 +68,23 @@ namespace curves
     // aplanarse, la onda "se dobla" hacia abajo, y con más drive se dobla otra vez. Cada pliegue agrega picos nuevos:
     // el timbre cambia (y se vuelve metálico) al subir el nivel. Simétrica: solo impares.
     [[nodiscard]] inline float fold (float x) noexcept { return std::sin (x); }
+
+    // Fase 8: la curva "estática" de cada modo, la que dibuja la GUI. Es la misma función que suena, sin los filtros
+    // que la rodean: Tape sin el énfasis ni la campana de graves (dependen de la frecuencia, no del nivel) y Rectify sin
+    // el high-pass que le quita la DC (depende de la señal), o sea tanh(|x|).
+    [[nodiscard]] inline float forMode (Mode mode, float x) noexcept
+    {
+        switch (mode)
+        {
+            case Mode::tape:       return tape (x);
+            case Mode::tube:       return tube (x);
+            case Mode::transistor: return transistor (x);
+            case Mode::hardClip:   return hardClip (x);
+            case Mode::rectify:    return deepwater::dsp::fastTanh (rectify (x));
+            case Mode::fold:       return fold (x);
+        }
+        return x;
+    }
 } // namespace curves
 
 // Pre-énfasis y de-énfasis de la cinta. Una grabadora real sube los agudos antes de grabar y los baja al reproducir

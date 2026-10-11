@@ -5,8 +5,12 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "deepwater/dsp/AnalyzerTap.h"
 #include "dsp/Engine.h"
 
+// Fase 8: además, el audio deja una copia de lo que entra y de lo que sale en dos tomas lock-free (AnalyzerTap) para el
+// analizador de espectro de la GUI, y publica el pico de la entrada para la curva de transferencia.
+//
 // Fase 7: efecto mono/estéreo: input (drive) → tono pre (cortes, emphasis) → 1-4 bandas Linkwitz-Riley, cada una con su
 // modo, drive, auto gain y solo/mute (saturación con oversampling) → tono post (de-emphasis, cortes, tilt) → filtro DC →
 // mix con la original alineada → delta → output, con medidores de entrada y salida y bypass con fundido. Una envolvente
@@ -27,6 +31,9 @@ public:
         std::atomic<float> rms { 0.0f };
     };
     using StereoMeter = std::array<MeterChannel, riptide::dsp::Engine::maxChannels>;
+    // 16384 muestras: la FFT más grande del analizador (8192 a 96 kHz) con margen para que el audio no pise lo que la
+    // GUI está copiando.
+    using AnalyzerTap = deepwater::dsp::AnalyzerTap<16384>;
 
     RiptideAudioProcessor();
     ~RiptideAudioProcessor() override;
@@ -74,6 +81,13 @@ public:
     {
         return crossoverHz[static_cast<size_t> (index)].load (std::memory_order_relaxed);
     }
+    // Analizador (Fase 8): lo que entra al plugin (antes de todo) y lo que sale, mezclados a mono.
+    const AnalyzerTap& getInputTap() const noexcept { return inputTap; }
+    const AnalyzerTap& getOutputTap() const noexcept { return outputTap; }
+    double getAnalyzerSampleRate() const noexcept { return analyzerSampleRate.load (std::memory_order_relaxed); }
+    // El pico de la entrada (el mayor |x| de los canales, antes del Input) desde la última lectura; la GUI lo pone a 0.
+    float takeInputPeak() noexcept { return inputPeak.exchange (0.0f, std::memory_order_relaxed); }
+
     // Modulación (al final del último bloque): el valor de la envolvente (0..1) y del LFO (−1..+1), y cuánto mueve cada
     // destino en sus unidades (dB, mezcla 0..1 u octavas).
     float getEnvelopeValue() const noexcept { return envelopeValue.load (std::memory_order_relaxed); }
@@ -134,6 +148,9 @@ private:
     std::array<std::atomic<float>, riptide::dsp::maxCrossovers> crossoverHz {}; // los cruces que suenan, para la GUI
     std::atomic<float> envelopeValue { 0.0f }, lfoValue { 0.0f };
     std::array<std::atomic<float>, riptide::dsp::numModTargets> modulation {};  // cuánto se mueve cada destino
+    AnalyzerTap inputTap, outputTap;
+    std::atomic<double> analyzerSampleRate { 44100.0 };
+    std::atomic<float> inputPeak { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RiptideAudioProcessor)
 };
