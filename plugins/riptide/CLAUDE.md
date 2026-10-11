@@ -87,6 +87,7 @@ plugins/riptide/
   Presets/Factory/         # .rtpreset de fábrica por categoría (compilados dentro del plugin)
   tests/EngineTests.cpp    # tests del motor (sin JUCE)
   tests/PresetTests.cpp    # tests de presets (con JUCE: compila el procesador)
+  docs/                    # capturas para el README (README.md = guía de uso)
 ```
 
 ## Hoja de ruta
