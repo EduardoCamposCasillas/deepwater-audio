@@ -146,6 +146,10 @@ UndertowAudioProcessor::UndertowAudioProcessor()
     noiseOnParam = parameters.getRawParameterValue (id::noiseOn);
     noiseLevelParam = parameters.getRawParameterValue (id::noiseLevel);
     noiseColorParam = parameters.getRawParameterValue (id::noiseColor);
+    stringParams = { parameters.getRawParameterValue (id::stringOn),    parameters.getRawParameterValue (id::stringOctave),
+                     parameters.getRawParameterValue (id::stringSemi),  parameters.getRawParameterValue (id::stringFine),
+                     parameters.getRawParameterValue (id::stringLevel), parameters.getRawParameterValue (id::stringDecay),
+                     parameters.getRawParameterValue (id::stringDamping) };
     filterOnParam = parameters.getRawParameterValue (id::filter1On);
     filterTypeParam = parameters.getRawParameterValue (id::filter1Type);
     filterSlopeParam = parameters.getRawParameterValue (id::filter1Slope);
@@ -499,6 +503,33 @@ juce::AudioProcessorValueTreeState::ParameterLayout UndertowAudioProcessor::crea
                                                              preDelayRange, reverb.parameters.preDelaySeconds, timeAttributes()));
     addPercent (id::reverbMix, "Reverb Mix", reverb.parameters.mix);
 
+    // --- Fase 12: cuerda pulsada. Apagada por defecto: un proyecto de la Fase 11 suena igual. ---
+    constexpr int v12 = id::versionHintString;
+    const auto& string = sourceDefaults.string;
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::stringOn, v12 }, "String On", string.enabled));
+    layout.add (std::make_unique<juce::AudioParameterInt> (
+        juce::ParameterID { id::stringOctave, v12 }, "String Octave", -2, 2, string.octave,
+        juce::AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return signedText (v, " oct"); })));
+    layout.add (std::make_unique<juce::AudioParameterInt> (
+        juce::ParameterID { id::stringSemi, v12 }, "String Semi", -12, 12, string.semitones,
+        juce::AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int) { return signedText (v, " st"); })));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::stringFine, v12 }, "String Fine", juce::NormalisableRange<float> (-100.0f, 100.0f), string.fineCents,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("ct")
+            .withStringFromValueFunction ([] (float v, int) { return signedText (juce::roundToInt (v), " ct"); })));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id::stringLevel, v12 }, "String Level",
+                                                             juce::NormalisableRange<float> (0.0f, 1.0f), string.level,
+                                                             percentAttributes()));
+    // Decay en escala logarítmica: de 50 ms (un pizzicato apagado) a 30 s (una cuerda metálica que no para).
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::stringDecay, v12 }, "String Decay",
+        logRange (undertow::dsp::PluckedString::minDecaySeconds, undertow::dsp::PluckedString::maxDecaySeconds),
+        string.decaySeconds, timeAttributes()));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id::stringDamping, v12 }, "String Damping",
+                                                             juce::NormalisableRange<float> (0.0f, 1.0f), string.damping,
+                                                             percentAttributes()));
+
     return layout;
 }
 
@@ -577,6 +608,10 @@ undertow::synth::SourceSettings UndertowAudioProcessor::readSourceSettings() con
     settings.sub = { subOnParam->load() >= 0.5f, choiceToEnum<synth::SubShape> (subShapeParam),
                      static_cast<int> (subOctaveParam->load()), subLevelParam->load() };
     settings.noise = { noiseOnParam->load() >= 0.5f, noiseLevelParam->load(), noiseColorParam->load() };
+    const auto& s = stringParams;
+    settings.string = { s.on->load() >= 0.5f,  static_cast<int> (s.octave->load()), static_cast<int> (s.semitones->load()),
+                        s.fine->load(),        s.level->load(),                     s.decay->load(),
+                        s.damping->load() };
     settings.subTable = &wavetableBank->get (0); // Basic Shapes: seno, triángulo, sierra, cuadrada
     return settings;
 }

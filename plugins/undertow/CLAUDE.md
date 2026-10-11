@@ -35,7 +35,7 @@ para que funcionen también como material de estudio.
 Desde la raíz del repositorio (ver también los comandos generales en el `CLAUDE.md` raíz):
 ```
 cmake --build build --config Release --target UndertowSynth_VST3        # solo el plugin
-build/plugins/undertow/Release/UndertowTests.exe                         # tests de DSP y voces (--fase7/8/9, --verbose)
+build/plugins/undertow/Release/UndertowTests.exe                         # tests de DSP y voces (--fase7/8/9/12, --verbose)
 build/plugins/undertow/Release/UndertowTests.exe --cpu                   # tabla de CPU (Fase 11)
 build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe   # presets, huellas, memoria
 UndertowPresetTests --render plugins/undertow/tests/reference/migration-test.mid <carpeta>   # WAV para null tests
@@ -75,6 +75,17 @@ plugins/undertow/
 - [x] Fase 9 — GUI profesional: visualización del wavetable (mostrando el warp aplicado), arrastrar para modular, escalable.
 - [x] Fase 10 — Presets: guardado/carga, navegador, librería inicial de sonidos.
 - [x] Fase 11 — Pulido: optimización de CPU (SIMD), pluginval estricto, comparación contra referencias.
+
+Ampliación: cuerda pulsada (Karplus-Strong, Jaffe & Smith; desde la literatura publicada, sin código ajeno). Elegida
+como fuente nueva por voz (como el sub y el ruido), no como tipo de oscilador: corre a 1× (no depende del camino de
+warp/FM), un solo juego de parámetros, y apagada no se calcula.
+- [ ] Fase 12 — Núcleo: retardo fraccionario Lagrange en libs/dsp, cuerda con ruido blanco, Decay (T60), Damping,
+      note-off con "palma", afinación < 1 cent (MIDI 12–96, 4 sample rates), pestaña "Cuerda".
+- [ ] Fase 13 — Excitación: Pick Position (peine en la excitación), ruido filtrado (tono de la púa) e impulso;
+      destinos de la matriz (al final): String Level, Decay, Damping, Pick Position, Pitch.
+- [ ] Fase 14 — Presets de cuerda (guitarra, koto, arpa, plucks) con notas, y APRENDIZAJE.md.
+- [ ] Fase 15 (opcional) — Stiffness / inharmonicidad (all-pass de dispersión en el lazo).
+- [ ] Fase 16 (opcional) — La cuerda como resonador: excitación = las fuentes de la voz (opción al final de la lista).
 
 ## Estado actual
 Fase 1 COMPLETADA (2026-09-24): CMake + JUCE 9.0.2, VST3 + Standalone, seno monofónico (prioridad a la última
@@ -441,4 +452,40 @@ Cambio desde Riptide Fase 7 (2026-10-10). El sonido no cambia (null test: idént
   cambió. `Source/dsp/Lfo.h` quedó como un header que declara `using deepwater::dsp::Lfo/LfoPhase/LfoShape`, y
   `synth/Modulation.h` toma las formas y las divisiones con `using`.
 
-Siguiente: todas las fases de la hoja de ruta están hechas. Próximos pasos posibles, a decidir con el usuario.
+Fase 12 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Lo existente suena igual (null test bit a bit).
+- `libs/dsp` `DelayLine.h`: `LagrangeTaps` (Lagrange de 3.er orden, fracción en [1, 2): ganancia ≤ 1; `forDelay`,
+  `response`, `phaseDelay`, `magnitude`) y `DelayLine::readLagrange`. Solo se añadió: chorus/delay/reverb idénticos.
+  Test en DeepwaterDspTests (cúbicas exactas, retardo exacto en graves, |H| ≤ 1, fase medida = teoría).
+- `dsp/PluckedString.h`: línea (Lagrange) → paso bajo de 1 polo → × g, realimentada; punteo = 1 período de ruido
+  blanco sin media, SUMADO a lo que ya vibra (redisparar no hace clic). Decay = T60 del fundamental (igual en todas las
+  notas: g por vuelta compensa el filtro y Lagrange en f0). Damping: T60 a 2.5 kHz (o al 2.º armónico si la nota está
+  por encima) = Decay × 0.003^damping; el polo sale de esos dos tiempos (`poleForSquaredGain`, forma estable).
+  Afinación: vuelta = 1 + línea + retardo de fase del filtro en f0, con la desviación de Lagrange medida y corregida, y
+  la corrección del "resbalón" del modo con pérdidas (Δω = −ln|G|·m / (τg² + m²), desarrollo de 1.er orden del polo);
+  la caída por muestra ln|G|·τg / (τg² + m²) es la que se ajusta al T60. Límites del polo: continua ≤ passGain^(1/4)
+  (cae como mucho 4× más lento que el fundamental; sin esto quedaba continua a −83 dB tras el note-off) y retardo del
+  filtro ≤ período − 4. Si la ganancia toca el límite (Lagrange también quita en f0) se ablanda el filtro y se repite.
+  Coeficientes cada 32 muestras con rampa lineal de g y del polo; el largo de la línea sigue al tono en cada muestra
+  (sin esto, Semi +12 hacía clic). Note-off = palma: en ~15 ms Decay → 0.1 s y Damping → 85 %. Por debajo de −100 dB
+  durante una vuelta deja de calcularse. Rango 8 Hz … fs/8; línea reservada en prepare para 8 Hz (12 000 muestras a
+  96 kHz por voz). `Voice::prepare` y `VoiceManager::prepare` ya no son noexcept (reservan memoria).
+- Voz: `StringSettings` en `SourceSettings` (on, octave −2..2, semi, fine, level 80 %, decay 2 s, damping 50 %).
+  Mono, a 1×; en el camino de warp/FM se suma después del decimador (como el ruido). Sigue a la nota, su afinación
+  (suavizada 5 ms) y Global Pitch. Se puntea en cada noteOn si está On; `release()` aplica la palma; el pedal la deja
+  sonar. Pasa por el filtro, Env 1 y los efectos como las demás fuentes.
+- Parámetros nuevos (versionHint 8, al final): stringOn (off), stringOctave, stringSemi, stringFine, stringLevel,
+  stringDecay (0.05–30 s log), stringDamping. Sin destinos de matriz todavía (Fase 13). Huellas de los 43 presets: iguales.
+- GUI: pestaña "Cuerda" (6.ª): On + Octave, Semi, Fine, Level, Decay, Damping, y un texto que explica la cuerda.
+- Tests (`UndertowTests --fase12`): afinación MIDI 12–96 × 4 sample rates × Damping 0/50/100 %: peor 0.012 cents
+  (ingenuo en C8 de FL a 44.1 kHz: 47.5 cents); en la voz con Octave/Semi/Fine/Global Pitch: 0.0002 cents; T60 medido
+  del fundamental (C4–C8 de FL, Decay 0.5/2/8 s, 3 Damping, 44.1 y 96 kHz): peor 0.13 %; Damping con la FFT de libs/dsp
+  (A3 de FL): sin Damping todos los armónicos −20 dB/s; con 25 % h16 −54 y h23 −87 dB/s (diseño a 2.5 kHz: −85);
+  extremos (frecuencia 0.5 Hz–50 kHz, Decay y Damping al azar cada 37 muestras, S&H → Global Pitch 100 %, bloques
+  1–4095): sin NaN y todo se apaga sin punteos; cambios de Decay/Damping/Semi/Level y note-off sin clic (segunda
+  diferencia ≤ 1.11× la de antes); cuerda apagada = voz idéntica bit a bit. CPU (48 kHz, 16 notas): cuerda sola 3 %,
+  con vibrato (Global Pitch) 9 %, cuerda + Osc A + filtro 24 dB 6 %.
+- Release con 0 warnings; ctest 4/4; null test (`out/reference-pre-string` vs `out/render-fase12`): idéntico bit a
+  bit; pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS.
+- Límites conocidos: Lagrange atenúa un poco los agudos cuando la fracción cae cerca de 0.5 (con Damping 0 el brillo de
+  la cola varía levemente de nota a nota por encima de ~10 kHz); en notas muy agudas con Decay largo el Damping alto se
+  ablanda solo (límite de la continua); por encima de fs/8 (5.5 kHz a 44.1 kHz) la cuerda no sube más.

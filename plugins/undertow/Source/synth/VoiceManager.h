@@ -22,7 +22,7 @@ public:
     // Ganancia por voz: deja margen para que un acorde de varias notas no sature la salida.
     static constexpr float voiceLevel = 0.25f;
 
-    void prepare (double sampleRate) noexcept;
+    void prepare (double sampleRate); // fuera del hilo de audio (reserva las líneas de las cuerdas)
     void setEnvelopeParameters (const dsp::AdsrParameters& parameters) noexcept;
     void setPolyphony (int numVoices) noexcept;
     void setVelocitySensitivity (float amount) noexcept; // 0 = ignora la velocity, 1 = sensibilidad total

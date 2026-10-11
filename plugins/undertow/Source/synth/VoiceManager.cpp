@@ -6,7 +6,7 @@
 namespace undertow::synth
 {
 
-void VoiceManager::prepare (double newSampleRate) noexcept
+void VoiceManager::prepare (double newSampleRate)
 {
     sampleRate = newSampleRate;
     for (auto& voice : voices)

@@ -148,6 +148,15 @@ inline constexpr const char* reverbDamping = "fxReverbDamping";
 inline constexpr const char* reverbPreDelay = "fxReverbPreDelay";
 inline constexpr const char* reverbMix = "fxReverbMix";
 
+// Fase 12: cuerda pulsada (Karplus-Strong).
+inline constexpr const char* stringOn = "stringOn";
+inline constexpr const char* stringOctave = "stringOctave";
+inline constexpr const char* stringSemi = "stringSemi";
+inline constexpr const char* stringFine = "stringFine";
+inline constexpr const char* stringLevel = "stringLevel";
+inline constexpr const char* stringDecay = "stringDecay";
+inline constexpr const char* stringDamping = "stringDamping";
+
 // Versión con la que se introdujeron los parámetros (la usa VST3 para compatibilidad hacia atrás).
 inline constexpr int versionHint = 1;
 // Los parámetros añadidos en una versión posterior llevan un número mayor.
@@ -157,4 +166,5 @@ inline constexpr int versionHintModulation = 4;
 inline constexpr int versionHintSources = 5;
 inline constexpr int versionHintWarp = 6;
 inline constexpr int versionHintEffects = 7;
+inline constexpr int versionHintString = 8;
 } // namespace undertow::params

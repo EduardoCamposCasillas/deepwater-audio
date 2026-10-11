@@ -9,6 +9,7 @@
 #include "dsp/Filter.h"
 #include "dsp/Lfo.h"
 #include "dsp/NoiseGenerator.h"
+#include "dsp/PluckedString.h"
 #include "dsp/WavetableOscillator.h"
 #include "synth/Modulation.h"
 #include "synth/SourceSettings.h"
@@ -108,19 +109,21 @@ struct SourcePathConfig
     bool operator== (const SourcePathConfig&) const = default;
 };
 
-// Una voz = fuentes (Osc A, Osc B, sub, ruido) → filtro → amplificador (envolvente), más sus fuentes de
+// Una voz = fuentes (Osc A, Osc B, sub, ruido, cuerda) → filtro → amplificador (envolvente), más sus fuentes de
 // modulación propias (Env 2, Env 3, LFOs). El VoiceManager decide qué nota toca cada una.
 // Desde la Fase 6 la voz es estéreo: el unison y el paneo reparten las copias entre los dos canales.
 class Voice
 {
 public:
-    void prepare (double sampleRate) noexcept
+    // Fuera del hilo de audio: la cuerda (Fase 12) reserva aquí su línea de retardo.
+    void prepare (double sampleRate)
     {
         baseSampleRate = sampleRate;
         for (auto& decimator : decimators)
             decimator.prepare (sampleRate);
         applyPathConfig ({}); // fija también la frecuencia de muestreo de los osciladores y el sub
         noise.setSampleRate (sampleRate);
+        string.prepare (sampleRate);
         duckStage = DuckStage::none;
         duckGain = 1.0f;
         duckStep = static_cast<float> (1.0 / (duckSeconds * sampleRate));
@@ -167,6 +170,8 @@ public:
         subOscillator.setWavetable (settings.subTable);
         subOscillator.setPosition (static_cast<float> (settings.sub.shape) / 3.0f);
         noise.setColor (settings.noise.color);
+        string.setDecay (settings.string.decaySeconds);
+        string.setDamping (settings.string.damping);
     }
 
     void setFilterSettings (const FilterSettings& settings) noexcept
@@ -192,6 +197,7 @@ public:
         keyHeld = true;
         sustainedByPedal = false;
         const double hz = deepwater::dsp::midiNoteToHz (midiNote);
+        noteFrequency = hz;
         for (auto& oscillator : oscillators)
             oscillator.setFrequency (hz);
         subOscillator.setFrequency (hz);
@@ -227,6 +233,9 @@ public:
             subOscillator.setPitchOffset (subTuning);
             noise.reset (seed);
             noiseLevel.snap (sourceSettings.noise.enabled, sourceSettings.noise.level);
+            string.reset();
+            stringLevel.snap (sourceSettings.string.enabled, sourceSettings.string.level);
+            stringTuning = sourceSettings.string.tuningSemitones();
 
             filter.reset();
             filterStereo = false;
@@ -241,6 +250,14 @@ public:
         }
         // Si la voz ya sonaba (redisparo de la misma nota) NO se reinicia la fase ni el filtro:
         // saltar a mitad de ciclo sería una discontinuidad (clic). Las envolventes siguen desde su nivel.
+
+        // La cuerda se puntea en cada nota (también al redisparar: el golpe se suma a lo que ya vibra, como volver a
+        // puntear una cuerda que todavía suena). Apagada no se puntea: encenderla después no suena hasta la nota siguiente.
+        if (sourceSettings.string.enabled)
+        {
+            setStringFrequency (stringTuning + lastGlobalPitch);
+            string.pluck (seed ^ 0x5D1A6E2Bu);
+        }
 
         // Retrigger / One Shot: cada nota reinicia el LFO. (En modo Free, render lo vuelve a alinear con el reloj común.)
         for (size_t l = 0; l < lfos.size(); ++l)
@@ -258,6 +275,7 @@ public:
         envelope.noteOff();
         envelope2.noteOff();
         envelope3.noteOff();
+        string.release(); // apagar la cuerda con la palma (ver PluckedString::release)
     }
 
     // Tecla soltada con el pedal pisado: la nota sigue en sustain hasta levantar el pedal.
@@ -515,7 +533,8 @@ private:
         std::array<float, numOscillators> fmDepth {}; // FM: ciclos de desplazamiento por unidad de señal; RM: 0..1
         bool subAudible = false, subComputed = false;
         bool noiseAudible = false, noiseComputed = false;
-        float subGain = 0.0f, noiseGain = 0.0f;
+        bool stringAudible = false;
+        float subGain = 0.0f, noiseGain = 0.0f, stringGain = 0.0f;
     };
 
     void renderSources (float& left, float& right, bool stereo) noexcept
@@ -583,6 +602,16 @@ private:
             frame.noiseGain = noiseLevel.next (sourceSettings.noise.enabled, sourceSettings.noise.level,
                                                modulationOf (ModDestination::noiseLevel), smoothingCoef);
 
+        // Cuerda: sigue a la nota, a su afinación propia (suavizada) y a Global Pitch.
+        lastGlobalPitch = globalPitch;
+        SourceLevel::glide (stringTuning, sourceSettings.string.tuningSemitones(), smoothingCoef);
+        frame.stringAudible = ! stringLevel.isSilent (sourceSettings.string.enabled);
+        if (frame.stringAudible)
+        {
+            frame.stringGain = stringLevel.next (sourceSettings.string.enabled, sourceSettings.string.level, 0.0f, smoothingCoef);
+            setStringFrequency (stringTuning + globalPitch);
+        }
+
         if (! complexPath)
         {
             mixSources (frame, left, right, stereo);
@@ -607,9 +636,13 @@ private:
             fastRight[s] *= duckGain;
         }
 
-        const float noiseOut = frame.noiseAudible ? frame.noiseGain * noiseSignal * duckGain : 0.0f;
-        left += decimators[0].process (fastLeft[0], fastLeft[1]) + noiseOut;
-        right += noiseOut;
+        // Ruido y cuerda van a la frecuencia del host: se suman después del decimador.
+        float centre = frame.noiseAudible ? frame.noiseGain * noiseSignal : 0.0f;
+        if (frame.stringAudible)
+            centre += frame.stringGain * string.processSample();
+        centre *= duckGain;
+        left += decimators[0].process (fastLeft[0], fastLeft[1]) + centre;
+        right += centre;
         if (stereo)
             right += decimators[1].process (fastRight[0], fastRight[1]);
     }
@@ -641,6 +674,8 @@ private:
             centre += frame.subGain * subOscillator.processSample();
         if (frame.noiseAudible)
             centre += frame.noiseGain * noise.processSample();
+        if (frame.stringAudible)
+            centre += frame.stringGain * string.processSample();
 
         left += centre;
         right += centre;
@@ -775,6 +810,17 @@ private:
         }
     }
 
+    // La cuerda toca la nota desplazada 'semitones' (su afinación + Global Pitch). exp2 solo si cambió.
+    void setStringFrequency (float semitones) noexcept
+    {
+        if (semitones != appliedStringPitch || noteFrequency != appliedStringNote)
+        {
+            appliedStringPitch = semitones;
+            appliedStringNote = noteFrequency;
+            string.setFrequency (noteFrequency * std::exp2 (static_cast<double> (semitones) / 12.0));
+        }
+    }
+
     void updateFilterCutoff() noexcept
     {
         auto parameters = filterSettings.parameters;
@@ -796,9 +842,17 @@ private:
     dsp::NoiseGenerator noise;
     SourceSettings sourceSettings;
     std::array<SourceLevel, numOscillators> oscillatorLevels;
-    SourceLevel subLevel, noiseLevel;
+    SourceLevel subLevel, noiseLevel, stringLevel;
     std::array<float, numOscillators> tuning {}; // semitonos, suavizados
     float subTuning = -12.0f;
+
+    // Fase 12: cuerda pulsada.
+    dsp::PluckedString string;
+    double noteFrequency = 440.0;
+    float stringTuning = 0.0f;      // semitonos, suavizados
+    float lastGlobalPitch = 0.0f;   // Global Pitch de la última muestra (para puntear ya con el tono correcto)
+    float appliedStringPitch = 0.0f;
+    double appliedStringNote = 0.0;
     float smoothingCoef = 1.0f; // 5 ms, para niveles y afinación
 
     // Fase 7: warp, FM/RM y el camino sobremuestreado.

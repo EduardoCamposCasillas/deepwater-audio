@@ -1927,3 +1927,157 @@ Inténtalo primero; las pistas vendrán después.
 
 ### Retos completados
 - [ ] Reto librería por géneros — reggaeton de los 80
+
+---
+
+## Fase 12 — Cuerda pulsada (Karplus-Strong): el núcleo
+
+Hasta ahora todo el sonido salía de **ondas guardadas en tablas**: el oscilador lee una forma de onda y la repite. La
+cuerda es otra familia: **síntesis por modelado físico**. No se guarda ninguna onda. Se imita *lo que hace* una cuerda
+de verdad y el sonido sale solo. Por eso el ataque, la caída y el brillo cambian juntos y de forma natural, algo muy
+difícil de conseguir con envolventes (el preset *Guitarra Oscura* lo intentaba con Env 3 → Noise Level y Env 2 →
+Cutoff).
+
+### Conceptos aprendidos
+**La cuerda como un eco muy rápido.** Al puntear una cuerda, la deformación viaja hasta el puente, rebota, vuelve a la
+cejuela, rebota otra vez… Una vuelta completa dura exactamente **un período** de la nota: en un A4 de FL (220 Hz),
+4.5 ms. Karplus-Strong (1983) lo imita con una **línea de retardo** de esa duración que se **realimenta**: lo que sale
+por un extremo vuelve a entrar por el otro.
+
+1. Al tocar la nota, entra en la línea **un golpe de ruido** que dura un período: es la púa.
+2. Ese ruido da vueltas. Como se repite idéntico cada período, el oído ya no lo oye como ruido sino como **una nota**
+   (cualquier cosa que se repite f veces por segundo suena a f Hz).
+3. En cada vuelta pasa por un **filtro paso bajo suave** (el original promediaba dos muestras seguidas) y por una
+   ganancia un poco menor que 1.
+
+**Por qué los agudos mueren primero.** El filtro quita *un poco* de agudos en cada vuelta, y una nota da cientos de
+vueltas por segundo. Un armónico que pierde el 1 % por vuelta, tras 220 vueltas (1 s de un A4), queda en
+0.99²²⁰ ≈ 11 %. Uno que pierde el 5 % queda en 0.001 %. Por eso el ataque es brillante (todo el ruido) y la cola es
+redonda (casi solo el fundamental), como en una guitarra: el filtro de cada vuelta *es* el "barrido de filtro" que
+antes imitábamos con una envolvente.
+
+**El gran problema: la afinación.** La línea solo puede durar un número **entero** de muestras. En notas graves da
+igual: C2 de FL (32.7 Hz) son 1349 muestras a 44.1 kHz, y media muestra de error es 0.6 cents. En notas agudas es un
+desastre: C8 de FL (2093 Hz) son 21.07 muestras, y la versión ingenua (21 + ½ del promedio) desafina **47 cents**
+(medido en los tests), casi un cuarto de tono. La solución (Jaffe & Smith, 1983) tiene dos partes:
+- **Retardo fraccionario.** Para leer "entre dos muestras" se traza el polinomio que pasa por las 4 muestras vecinas
+  (**interpolación de Lagrange** de 3.er orden) y se evalúa en el punto exacto. Elegimos Lagrange y no un all-pass
+  porque es un filtro sin memoria: el largo de la línea puede moverse en cada muestra (vibrato, Global Pitch) sin
+  transitorios. Está en la librería compartida (`DelayLine::readLagrange`) porque el delay y la reverb también la
+  pueden usar.
+- **Compensar el retardo del filtro.** El filtro de cada vuelta también *retrasa* la señal, y cuánto depende del
+  Damping y de la nota. Se calcula ese retraso exacto en la frecuencia de la nota y la línea se acorta lo mismo.
+
+Resultado medido: **0.01 cents** de error en el peor caso, en todas las notas de C1 a C8 de FL, a 44.1, 48, 88.2 y
+96 kHz y con cualquier Damping. El oído distingue unos 3–5 cents en notas largas.
+
+**Un detalle fino: el modo que "resbala".** Con mucha pérdida por vuelta (notas graves con Damping alto), la nota
+medida salía casi 1 cent baja aunque la fase estuviera bien calculada. Un modo que se apaga deprisa se corre un poco
+hacia donde el filtro deja pasar más (hacia los graves). La corrección sale de la misma matemática que da su caída: con
+el retardo de grupo y la pendiente del filtro en la nota se calcula cuánto resbala y se afina un poco más arriba para
+compensar. Con eso el error bajó de 0.9 a 0.01 cents, y el T60 medido quedó a 0.1 % del pedido.
+
+**Decay igual en todas las notas.** En el Karplus-Strong original las notas agudas se apagan muchísimo antes, porque
+dan más vueltas por segundo y en cada vuelta pierden lo mismo. Aquí Decay es el **T60 del fundamental** en segundos
+(el tiempo que tarda en caer 60 dB, igual que el Decay de la reverb). Una nota aguda pierde **menos en cada vuelta**,
+exactamente lo necesario: ganancia por vuelta = 10^(−3 / (T60 · f)).
+
+**Damping en segundos, no por vuelta.** Damping fija cuánto antes mueren los agudos: el T60 a 2.5 kHz es
+Decay × 0.003^Damping. Con 0 %, los agudos duran lo mismo que el fundamental (cuerda metálica, casi una campana); con
+50 %, 18 veces menos; con 100 %, 300 veces menos (nylon apagado). El filtro de cada vuelta se diseña para cumplir esos
+dos tiempos, así que el brillo de la cola se comporta parecido en todo el teclado.
+
+**El límite que apareció en los tests: la continua.** Un paso bajo deja pasar la **continua** (0 Hz) más que
+cualquier otra frecuencia. Si el filtro quita mucho en la nota y la ganancia lo compensa, la continua queda con una
+ganancia casi de 1 y no se apaga nunca. Lo encontró el test del note-off: quedaba un resto constante a −83 dB. Ahora la
+continua cae como mucho 4 veces más lento que el fundamental. Por eso, en notas muy agudas con Decay largo, el Damping
+alto se ablanda solo (allí hay pocos armónicos y mueren deprisa de todas formas).
+
+**El note-off: la palma.** Al soltar la tecla, la cuerda se apaga como cuando apoyas la palma: en unos 15 ms el Decay
+baja hacia 0.1 s y el Damping sube hacia el 85 %. No es un corte (sería un clic); es una caída muy rápida y oscura.
+La envolvente de amplitud (Env 1) sigue mandando encima: con Release corto el final lo corta ella; con Release largo,
+lo que oyes es la palma.
+
+**Detalles de tiempo real.** La línea de cada voz se reserva al preparar el plugin para la nota más grave posible
+(8 Hz; a 96 kHz son 12 000 muestras por voz, unos 2 MB entre las 32 ranuras). Tocar solo escribe y lee. Cuando la
+cuerda cae por debajo de −100 dB deja de calcularse hasta el siguiente punteo. Las cuentas caras (filtro, ganancia,
+corrección de afinación) se hacen cada 32 muestras con rampa; el largo de la línea sigue al tono en cada muestra, así
+que un glissando no salta.
+
+### Qué hace cada control al sonido
+Pestaña **Cuerda**. La cuerda es una fuente más, como el sub o el ruido: se mezcla con Osc A, Osc B, sub y ruido, y
+todo pasa por el filtro, Env 1 y los efectos.
+
+| Control | Qué oyes | En el analizador y el osciloscopio |
+|---|---|---|
+| **On** | La cuerda suena en cada nota. Encenderla con una nota sonando no hace nada hasta la nota siguiente (no se ha punteado). | — |
+| **Octave / Semi / Fine** | Afinación propia, como en los osciladores. Útil para una cuerda una octava arriba de un pad (efecto "12 cuerdas") o una quinta (+7 st). | El pico del fundamental se mueve. |
+| **Level** | Volumen de la cuerda dentro de la mezcla de fuentes. | — |
+| **Decay** | Cuánto suena la cuerda. 0.1–0.3 s: pizzicato, koto apagado. 1–3 s: guitarra, arpa. 8–30 s: cuerda metálica que no para, campana. | El fundamental baja en línea recta (en dB) hasta perderse. |
+| **Damping** | El *color* de la caída. Bajo: metálico, brillante, con "zumbido" largo (arpa, clavecín, dulcémele). Medio: guitarra acústica. Alto: nylon, "palm mute", golpe redondo. | Con Damping alto los picos de arriba desaparecen enseguida y solo queda el de abajo. En el osciloscopio, la onda pasa de "ruido puntiagudo" a casi un seno. |
+
+Regla para la envolvente de amplitud con la cuerda: **Attack 1 ms, Sustain 100 %, Release 150–400 ms**. La cuerda ya
+tiene su propia caída; si el Sustain es bajo, Env 1 la apaga antes de tiempo y el Decay pierde sentido.
+
+### Ejercicio de escucha guiado
+Prepara el canal como en la Fase 1: **Fruity Parametric EQ 2** (para mirar) y **Wave Candy** (osciloscopio). Carga
+*Init*, apaga Osc A, ve a la pestaña **Cuerda** y pon On. En Env 1: Attack 1 ms, Sustain 100 %, Release 300 ms.
+1. **Una nota, tres tiempos.** Toca un **A4** (220 Hz) largo. Escucha el ataque (un "chasquido" de ruido), el cuerpo
+   (la nota) y la cola (cada vez más redonda). En el EQ los picos altos se apagan primero; al final queda casi solo
+   el de 220 Hz.
+2. **Decay.** Con la misma nota, prueba Decay 0.2 s, 2 s y 15 s. Fíjate en que el *color* del ataque no cambia: solo
+   cuánto dura.
+3. **Damping.** Decay 3 s. Prueba Damping 0 %, 50 % y 100 % tocando la misma nota. 0 % suena a cuerda metálica con un
+   "brillo" que no se va; 100 % suena a nylon con la palma apoyada. Mira el EQ: cambia la rapidez con que se apagan
+   los picos de arriba, no la del pico de abajo.
+4. **Todo el teclado.** Damping 50 %, Decay 2 s. Toca C3, C5 y C7 (65, 262 y 1047 Hz). Las tres duran lo mismo (eso
+   hace Decay). En el Karplus-Strong original el C7 duraría un instante.
+5. **La palma.** Pon Release a 2 s y toca notas cortas: el corte que oyes al soltar es la palma de la cuerda (rápido
+   pero sin clic). Vuelve a 300 ms.
+6. **Contra la imitación.** Si tienes *Guitarra Oscura* (el preset con Env 3 → Noise Level y Env 2 → Cutoff), ponlo
+   en otro canal y toca lo mismo. La imitación oscurece *todo* a la vez con el filtro; en la cuerda cada armónico se
+   apaga a su ritmo, y por eso suena "de madera".
+
+### Recetas
+**1. Guitarra de nylon (arpegio).** Init, Osc A off. Cuerda On, Level 80 %, Decay 2.5 s, Damping 65 %. Env 1:
+Attack 1 ms, Sustain 100 %, Release 250 ms. Voices 8. Efectos: Reverb On, Size 35 %, Decay 1.2 s, Mix 18 %.
+*Por qué:* el Damping alto da la cola redonda del nylon; el Decay de 2–3 s es el de una guitarra real; el Release
+corto hace que al soltar se apague como al levantar el dedo. Tócala en arpegios (C5–E5–G5–C6) y deja que las notas
+se solapen.
+
+**2. Arpa / koto brillante.** Igual, pero Damping 15 %, Decay 6 s, Octave +1 y Release 1.5 s. Chorus On (Mix 20 %)
+y Delay 1/8 D con Mix 15 %. *Por qué:* con poco Damping los agudos sobreviven y dan el "zumbido" metálico; subir una
+octava la saca del registro de una voz; el chorus y el delay le dan el aire de un arpa en una sala.
+
+**3. Pluck "orgánico" en capa (house / pop).** Cuerda On (Decay 0.8 s, Damping 45 %, Level 70 %) **más** Osc A con
+*Basic Shapes* en sierra (Position 67 %), Level 35 %, Unison 3, Detune 20 %. Filtro LP 24 dB, Cutoff 3 kHz.
+*Por qué:* la cuerda pone el ataque y la caída naturales; la sierra con unison pone el "ancho" de sintetizador. Juntas
+suenan a pluck moderno con cuerpo real.
+
+### Reto sin receta
+**Contrabajo pizzicato de jazz.** Un bajo punteado con los dedos: ataque redondo, sin chasquido de púa, notas de
+E2 a G3 de FL (41–98 Hz), que en un walking bass a 120 BPM se oigan separadas sin cortarse en seco. Pista para
+empezar: ¿qué perilla controla que el ataque no "chasquee", y cuál que la nota no se arrastre sobre la siguiente?
+Inténtalo primero; las pistas vendrán después.
+
+### Vocabulario
+- **Modelado físico (physical modeling).** Sintetizar imitando el mecanismo que produce el sonido, no la forma de
+  onda. *Ejemplo:* las guitarras y bajos de los teclados Yamaha VL1 y los instrumentos de Pianoteq.
+- **Karplus-Strong.** El algoritmo de cuerda pulsada con línea de retardo realimentada. *Ejemplo:* el "pluck" de
+  muchos sintetizadores modernos (Ableton Collision, el oscilador de cuerda de Vital).
+- **Línea de retardo / realimentación (feedback).** Un buffer que devuelve la señal más tarde; con realimentación, la
+  salida vuelve a entrar. *Ejemplo:* es la misma pieza que el delay de la Fase 8, pero tan corta que ya no oyes ecos
+  sino una nota.
+- **T60.** Tiempo que tarda un sonido en caer 60 dB (de fuerte a inaudible). *Ejemplo:* el "Decay" de una reverb y de
+  esta cuerda.
+- **Amortiguamiento (damping).** Cuánta energía pierde la cuerda en cada vuelta, sobre todo en agudos. *Ejemplo:* una
+  guitarra de nylon está mucho más amortiguada que una de acero.
+- **Retardo fraccionario / interpolación de Lagrange.** Leer "entre muestras" con un polinomio que pasa por las
+  vecinas. *Ejemplo:* sin esto, las notas agudas de una cuerda digital desafinan.
+- **Parcial.** Cada componente de frecuencia de un sonido. En una cuerda casi coinciden con los armónicos, y cada uno
+  se apaga a su ritmo. *Ejemplo:* la cola "redonda" de una guitarra es que solo quedan los parciales graves.
+- **Palm mute.** Apagar las cuerdas apoyando la palma junto al puente. *Ejemplo:* los riffs de guitarra del metal y del
+  pop-punk.
+
+### Retos completados
+- [ ] Reto Fase 12 — contrabajo pizzicato de jazz

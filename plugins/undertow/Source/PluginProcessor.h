@@ -159,6 +159,19 @@ private:
     std::atomic<float>* noiseLevelParam = nullptr;
     std::atomic<float>* noiseColorParam = nullptr;
 
+    // Fase 12: cuerda pulsada.
+    struct StringParams
+    {
+        std::atomic<float>* on = nullptr;
+        std::atomic<float>* octave = nullptr;
+        std::atomic<float>* semitones = nullptr;
+        std::atomic<float>* fine = nullptr;
+        std::atomic<float>* level = nullptr;
+        std::atomic<float>* decay = nullptr;
+        std::atomic<float>* damping = nullptr;
+    };
+    StringParams stringParams;
+
     std::array<EnvelopeParams, 2> modEnvelopeParams {};
     std::array<LfoParams, undertow::synth::numLfos> lfoParams {};
     std::array<ModSlotParams, undertow::synth::numModSlots> modSlotParams {};

@@ -3392,15 +3392,467 @@ void printCpuTable()
     effectRow ("Efectos: los cuatro a la vez", effectCpu (effects));
 }
 
+// --- Fase 12: cuerda pulsada (Karplus-Strong) -------------------------------------------------------------------
+
+using undertow::dsp::PluckedString;
+
+// Componente de frecuencia 'hz' de una ventana de Hann que empieza en 'start'. La fase está referida al índice ABSOLUTO
+// de la muestra: así, entre dos ventanas, la fase avanza 2π·(f real − hz)·distancia / fs.
+Complex partialAt (const std::vector<float>& signal, double hz, double sampleRate, size_t start, size_t length)
+{
+    Complex sum {};
+    const double w = 2.0 * pi * hz / sampleRate;
+    for (size_t i = 0; i < length; ++i)
+    {
+        const double window = 0.5 - 0.5 * std::cos (2.0 * pi * static_cast<double> (i) / static_cast<double> (length));
+        sum += window * static_cast<double> (signal[start + i]) * std::polar (1.0, -w * static_cast<double> (start + i));
+    }
+    return sum;
+}
+
+// Frecuencia del fundamental (cerca de 'approxHz') medida por la fase: dos ventanas de 8 períodos; primero separadas 2
+// períodos (cubre ±25 % de error), después 16 con la estimación corregida (precisión de milésimas de cent).
+// Necesita 'start' + 24 períodos de señal.
+double measurePartialFrequency (const std::vector<float>& signal, double sampleRate, double approxHz, size_t start)
+{
+    const double period = sampleRate / approxHz;
+    const auto length = static_cast<size_t> (8.0 * period);
+    double hz = approxHz;
+    for (const double gapPeriods : { 2.0, 16.0 })
+    {
+        const auto gap = static_cast<size_t> (gapPeriods * period);
+        const double phase = std::arg (partialAt (signal, hz, sampleRate, start + gap, length)
+                                       / partialAt (signal, hz, sampleRate, start, length));
+        hz += phase * sampleRate / (2.0 * pi * static_cast<double> (gap));
+    }
+    return hz;
+}
+
+std::vector<float> renderString (PluckedString& string, double hz, float decay, float damping, size_t numSamples,
+                                 std::uint32_t seed = 1)
+{
+    string.setDecay (decay);
+    string.setDamping (damping);
+    string.setFrequency (hz);
+    string.reset();
+    string.pluck (seed);
+    std::vector<float> signal (numSamples);
+    for (auto& s : signal)
+        s = string.processSample();
+    return signal;
+}
+
+void testStringTuning()
+{
+    std::printf ("Cuerda: afinación medida del fundamental, MIDI 12-96 (C1 de FL a C7 científico), 4 sample rates, "
+                 "Damping 0 / 50 / 100 %%\n");
+
+    double worstOverall = 0.0;
+    for (const double sr : sampleRates)
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        double worst = 0.0;
+        int worstNote = 0;
+        float worstDamping = 0.0f;
+        for (int note = 12; note <= 96; ++note)
+        {
+            const double hz = deepwater::dsp::midiNoteToHz (note);
+            const double period = sr / hz;
+            for (const float damping : { 0.0f, 0.5f, 1.0f })
+            {
+                const auto signal = renderString (*string, hz, 4.0f, damping, static_cast<size_t> (30.0 * period));
+                const double cents = centsBetween (measurePartialFrequency (signal, sr, hz, static_cast<size_t> (4.0 * period)), hz);
+                if (verbose && damping == 0.5f)
+                    std::printf ("    %5.0f Hz  nota %3d  %+.4f cents\n", sr, note, cents);
+                if (std::abs (cents) > worst)
+                {
+                    worst = std::abs (cents);
+                    worstNote = note;
+                    worstDamping = damping;
+                }
+            }
+        }
+        std::printf ("  %5.0f Hz: peor %.4f cents (nota %d, damping %.0f %%)\n", sr, worst, worstNote, 100.0f * worstDamping);
+        worstOverall = std::max (worstOverall, worst);
+    }
+    CHECK (worstOverall < 1.0);
+
+    // Referencia: Karplus-Strong ingenuo (retardo entero + el promedio de 2 muestras) en C7 a 44.1 kHz.
+    const double period = 44100.0 / deepwater::dsp::midiNoteToHz (96);
+    std::printf ("  (ingenuo, C7 a 44.1 kHz: periodo %.2f muestras -> %.1f cents de error)\n", period,
+                 centsBetween (44100.0 / (std::floor (period - 0.5) + 0.5), 44100.0 / period));
+}
+
+void testStringTuningInVoice()
+{
+    std::printf ("Cuerda en la voz: Octave / Semi / Fine y Global Pitch (matriz) afinados\n");
+
+    struct Case
+    {
+        int note, octave, semitones;
+        float fine, globalSemitones;
+    };
+    double worst = 0.0;
+    for (const double sr : { 44100.0, 96000.0 })
+        for (const auto& c : { Case { 57, 0, 0, 0.0f, 0.0f }, Case { 45, 1, 7, 25.0f, 0.0f }, Case { 69, -2, -5, -50.0f, 0.0f },
+                               Case { 60, 0, 0, 0.0f, 7.0f }, Case { 84, 0, 3, 10.0f, -12.0f } })
+        {
+            auto sources = sineSources();
+            sources.oscillators[0].enabled = false;
+            sources.string.enabled = true;
+            sources.string.octave = c.octave;
+            sources.string.semitones = c.semitones;
+            sources.string.fineCents = c.fine;
+            sources.string.decaySeconds = 6.0f;
+            auto manager = std::make_unique<VoiceManager>();
+            prepareWithSources (*manager, sr, sources);
+            ModulationSettings modulation;
+            modulation.slots[0] = { ModSource::modWheel, ModDestination::globalPitch, c.globalSemitones / 24.0f };
+            manager->setModulationSettings (modulation);
+            manager->setModWheel (1.0f);
+            manager->noteOn (c.note, 1.0f);
+
+            const double hz = deepwater::dsp::midiNoteToHz (c.note)
+                              * std::exp2 ((12.0 * c.octave + c.semitones + c.fine / 100.0 + c.globalSemitones) / 12.0);
+            const double period = sr / hz;
+            std::vector<float> signal (static_cast<size_t> (30.0 * period + 0.05 * sr), 0.0f);
+            manager->render (signal.data(), static_cast<int> (signal.size()));
+            const double cents = centsBetween (measurePartialFrequency (signal, sr, hz, static_cast<size_t> (0.05 * sr)), hz);
+            worst = std::max (worst, std::abs (cents));
+        }
+    std::printf ("  peor desviación: %.4f cents\n", worst);
+    CHECK (worst < 1.0);
+}
+
+// Pendiente de caída de un parcial (dB por segundo) entre dos ventanas. Con una caída exponencial, la ventana pesa
+// igual a las dos: el cociente es exacto aunque el nivel cambie dentro de la ventana.
+double partialSlopeDbPerSecond (const std::vector<float>& signal, double sampleRate, double hz, size_t first, size_t second,
+                                size_t length)
+{
+    const double a = std::abs (partialAt (signal, hz, sampleRate, first, length));
+    const double b = std::abs (partialAt (signal, hz, sampleRate, second, length));
+    return (toDb (b) - toDb (a)) * sampleRate / static_cast<double> (second - first);
+}
+
+void testStringDecayMatchesT60()
+{
+    std::printf ("Cuerda: T60 medido del fundamental = Decay (+-10 %%), de C4 a C7, Damping 0 / 50 / 100 %%\n");
+
+    double worstError = 0.0;
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (const int note : { 48, 57, 81, 96 })
+            for (const float decay : { 0.5f, 2.0f, 8.0f })
+                for (const float damping : { 0.0f, 0.5f, 1.0f })
+                {
+                    const double hz = deepwater::dsp::midiNoteToHz (note);
+                    const double period = sr / hz;
+                    const auto length = static_cast<size_t> (8.0 * period);
+                    const auto first = static_cast<size_t> (4.0 * period);
+                    const auto second = first + static_cast<size_t> (0.5 * decay * sr); // 30 dB más abajo
+                    const auto signal = renderString (*string, hz, decay, damping, second + length + 16);
+                    const double measured = -60.0 / partialSlopeDbPerSecond (signal, sr, hz, first, second, length);
+                    const double error = measured / decay - 1.0;
+                    if (verbose)
+                        std::printf ("    %5.0f Hz  nota %d  Decay %.1f s  damping %.0f %%: T60 %.3f s (%+.1f %%)\n", sr, note,
+                                     decay, 100.0f * damping, measured, 100.0 * error);
+                    worstError = std::max (worstError, std::abs (error));
+                }
+    }
+    std::printf ("  peor error: %.2f %%\n", 100.0 * worstError);
+    CHECK (worstError < 0.10);
+}
+
+void testStringDampingKillsHighsFirst()
+{
+    std::printf ("Cuerda: el Damping apaga antes los armónicos altos (FFT de libs/dsp, A2 = 110 Hz a 48 kHz)\n");
+
+    constexpr double sr = 48000.0;
+    constexpr double hz = 110.0;
+    constexpr size_t fftSize = 4096; // 85 ms: separa bien armónicos a 110 Hz
+    const auto first = static_cast<size_t> (0.02 * sr);
+    const auto second = static_cast<size_t> (0.12 * sr);
+    constexpr std::array<int, 6> harmonics { 1, 2, 4, 8, 16, 23 };
+
+    auto string = std::make_unique<PluckedString>();
+    string->prepare (sr);
+    const auto slopes = [&] (float damping) {
+        const auto signal = renderString (*string, hz, 3.0f, damping, second + fftSize);
+        const auto a = magnitudeSpectrum (std::vector<float> (signal.begin() + static_cast<long> (first),
+                                                              signal.begin() + static_cast<long> (first + fftSize)));
+        const auto b = magnitudeSpectrum (std::vector<float> (signal.begin() + static_cast<long> (second),
+                                                              signal.begin() + static_cast<long> (second + fftSize)));
+        std::array<double, harmonics.size()> result {};
+        for (size_t h = 0; h < harmonics.size(); ++h)
+        {
+            const double f = hz * harmonics[h];
+            result[h] = (toDb (componentLevel (b, f, sr / fftSize)) - toDb (componentLevel (a, f, sr / fftSize))) / 0.1;
+        }
+        return result;
+    };
+
+    const auto none = slopes (0.0f);
+    const auto quarter = slopes (0.25f);
+    const auto half = slopes (0.5f);
+    for (const auto* row : { &none, &quarter, &half })
+    {
+        std::printf ("  damping %3.0f %%: dB/s", row == &none ? 0.0 : row == &quarter ? 25.0 : 50.0);
+        for (size_t h = 0; h < harmonics.size(); ++h)
+            std::printf ("  h%d %.0f", harmonics[h], (*row)[h]);
+        std::printf ("\n");
+    }
+
+    // Sin Damping todos caen como el fundamental (60 dB en 3 s = -20 dB/s); Lagrange quita un poco arriba.
+    for (size_t h = 0; h < 4; ++h)
+        CHECK (std::abs (none[h] + 20.0) < 2.0);
+    // Con Damping, cada armónico cae más rápido que el anterior, y mucho más que sin Damping.
+    for (const auto* row : { &quarter, &half })
+    {
+        for (size_t h = 1; h < harmonics.size(); ++h)
+            CHECK ((*row)[h] < (*row)[h - 1]);
+        CHECK ((*row)[4] < 2.0 * (*row)[0]);
+    }
+    for (size_t h = 1; h < harmonics.size(); ++h)
+        CHECK (half[h] < quarter[h]);
+    // A 2.5 kHz el T60 es Decay × 0.003^damping: con 25 %, 3 s × 0.234 = 0.70 s (-85 dB/s). h23 = 2530 Hz, muy cerca.
+    const double expected = -60.0 / (3.0 * std::pow (0.003, 0.25));
+    std::printf ("  damping 25 %%, h23: %.0f dB/s (diseño a 2.5 kHz: %.0f dB/s)\n", quarter[5], expected);
+    CHECK (std::abs (quarter[5] / expected - 1.0) < 0.15);
+}
+
+void testStringExtremesAreSafe()
+{
+    std::printf ("Cuerda: sin NaN ni explosiones con parámetros extremos, aleatorios y bloques de cualquier tamaño\n");
+
+    std::mt19937 rng (12);
+    std::uniform_real_distribution<float> unit (0.0f, 1.0f);
+    float peak = 0.0f;
+    bool finite = true;
+    for (const double sr : sampleRates)
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        string->pluck (3);
+        for (int i = 0; i < static_cast<int> (2.0 * sr); ++i)
+        {
+            if (i % 37 == 0)
+            {
+                string->setFrequency (0.5 * std::pow (1.0e5, unit (rng))); // 0.5 Hz .. 50 kHz (fuera de rango a propósito)
+                string->setDecay (0.01f + 40.0f * unit (rng) * unit (rng));
+                string->setDamping (unit (rng));
+            }
+            if (i % 1999 == 0)
+                string->pluck (static_cast<std::uint32_t> (i));
+            if (i % 3001 == 0)
+                string->release();
+            const float y = string->processSample();
+            finite = finite && std::isfinite (y);
+            peak = std::max (peak, std::abs (y));
+        }
+
+        // Sin punteos y con la cuerda soltada, aunque los parámetros sigan saltando, todo se apaga: nada se realimenta
+        // de más (los punteos de arriba sí se suman: con Decay largo el pico crece como √(número de punteos)).
+        string->release();
+        float tail = 0.0f;
+        for (int i = 0; i < static_cast<int> (2.0 * sr); ++i)
+        {
+            if (i % 37 == 0)
+            {
+                string->setFrequency (0.5 * std::pow (1.0e5, unit (rng)));
+                string->setDecay (0.01f + 40.0f * unit (rng) * unit (rng));
+                string->setDamping (unit (rng));
+            }
+            const float y = string->processSample();
+            finite = finite && std::isfinite (y);
+            if (i > static_cast<int> (1.5 * sr))
+                tail = std::max (tail, std::abs (y));
+        }
+        CHECK (tail < 1.0e-4f);
+    }
+
+    // En la voz: Global Pitch con un S&H rápido al 100 % (±24 st), perillas al azar en cada bloque, notas al azar.
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        auto sources = sineSources();
+        sources.oscillators[0].enabled = false;
+        sources.string.enabled = true;
+        auto manager = std::make_unique<VoiceManager>();
+        prepareWithSources (*manager, sr, sources);
+        manager->setPolyphony (16);
+        ModulationSettings modulation;
+        modulation.lfos[0] = { LfoShape::sampleAndHold, LfoMode::free, false, 40.0f, 5 };
+        modulation.slots[0] = { ModSource::lfo1, ModDestination::globalPitch, 1.0f };
+        manager->setModulationSettings (modulation);
+        std::vector<float> left (4096), right (4096);
+        for (int block = 0; block < 400; ++block)
+        {
+            sources.string.octave = static_cast<int> (unit (rng) * 5.0f) - 2;
+            sources.string.semitones = static_cast<int> (unit (rng) * 25.0f) - 12;
+            sources.string.decaySeconds = 0.05f + 29.95f * unit (rng);
+            sources.string.damping = unit (rng);
+            sources.string.level = unit (rng);
+            manager->setSourceSettings (sources);
+            if (unit (rng) < 0.3f)
+                manager->noteOn (static_cast<int> (unit (rng) * 128.0f) % 128, unit (rng));
+            if (unit (rng) < 0.2f)
+                manager->noteOff (static_cast<int> (unit (rng) * 128.0f) % 128);
+            const int n = 1 + static_cast<int> (unit (rng) * 4095.0f);
+            std::fill (left.begin(), left.end(), 0.0f);
+            std::fill (right.begin(), right.end(), 0.0f);
+            manager->render (left.data(), right.data(), n);
+            for (size_t i = 0; i < static_cast<size_t> (n); ++i)
+            {
+                finite = finite && std::isfinite (left[i]) && std::isfinite (right[i]);
+                peak = std::max (peak, std::abs (left[i]));
+            }
+        }
+    }
+    std::printf ("  pico: %.2f\n", peak);
+    CHECK (finite);
+    CHECK (peak < 30.0f);
+}
+
+// Mayor segunda diferencia |x[n] − 2x[n−1] + x[n−2]| en [from, to): un salto (clic) la dispara; una onda suave no.
+float maxSecondDifference (const std::vector<float>& signal, size_t from, size_t to)
+{
+    float worst = 0.0f;
+    for (size_t i = std::max<size_t> (from, 2); i < to; ++i)
+        worst = std::max (worst, std::abs (signal[i] - 2.0f * signal[i - 1] + signal[i - 2]));
+    return worst;
+}
+
+void testStringChangesAreClickFree()
+{
+    std::printf ("Cuerda: mover Decay / Damping / afinación y soltar la tecla no hace clic\n");
+
+    constexpr double sr = 48000.0;
+    const auto settle = static_cast<size_t> (0.4 * sr);
+    const auto window = static_cast<size_t> (0.02 * sr);
+
+    auto sources = sineSources();
+    sources.oscillators[0].enabled = false;
+    sources.string.enabled = true;
+    sources.string.decaySeconds = 8.0f;
+    sources.string.damping = 0.4f;
+
+    struct Change
+    {
+        const char* name;
+        std::function<void (SourceSettings&)> apply;
+    };
+    const std::array<Change, 5> changes { {
+        { "Damping 40 -> 100 %", [] (SourceSettings& s) { s.string.damping = 1.0f; } },
+        { "Damping 40 -> 0 %", [] (SourceSettings& s) { s.string.damping = 0.0f; } },
+        { "Decay 8 s -> 0.05 s", [] (SourceSettings& s) { s.string.decaySeconds = 0.05f; } },
+        { "Semi 0 -> +12", [] (SourceSettings& s) { s.string.semitones = 12; } },
+        { "Level 80 -> 0 %", [] (SourceSettings& s) { s.string.level = 0.0f; } },
+    } };
+
+    float worstRatio = 0.0f;
+    for (const auto& change : changes)
+    {
+        auto manager = std::make_unique<VoiceManager>();
+        prepareWithSources (*manager, sr, sources);
+        manager->setEnvelopeParameters ({ 0.001f, 0.001f, 1.0f, 2.0f });
+        manager->noteOn (57, 1.0f);
+        std::vector<float> signal (settle + window, 0.0f);
+        manager->render (signal.data(), static_cast<int> (settle));
+        auto changed = sources;
+        change.apply (changed);
+        manager->setSourceSettings (changed);
+        manager->render (signal.data() + settle, static_cast<int> (window));
+        // Subir una octava multiplica por 4 la segunda diferencia de la misma onda (va como la frecuencia al
+        // cuadrado): se descuenta para comparar solo lo que sería un salto.
+        const float pitchFactor = change.name[0] == 'S' ? 4.0f : 1.0f;
+        const float ratio = maxSecondDifference (signal, settle, settle + window)
+                            / (pitchFactor * maxSecondDifference (signal, settle - window, settle));
+        std::printf ("  %-22s segunda diferencia después / antes: %.2f\n", change.name, ratio);
+        worstRatio = std::max (worstRatio, ratio);
+    }
+
+    // Note-off con la envolvente de amplitud sosteniendo (release de 2 s): lo que se oye es solo la palma.
+    auto manager = std::make_unique<VoiceManager>();
+    prepareWithSources (*manager, sr, sources);
+    manager->setEnvelopeParameters ({ 0.001f, 0.001f, 1.0f, 2.0f });
+    manager->noteOn (57, 1.0f);
+    std::vector<float> signal (settle + static_cast<size_t> (0.3 * sr), 0.0f);
+    manager->render (signal.data(), static_cast<int> (settle));
+    manager->noteOff (57);
+    manager->render (signal.data() + settle, static_cast<int> (signal.size() - settle));
+    const float releaseRatio = maxSecondDifference (signal, settle, settle + window / 4)
+                               / maxSecondDifference (signal, settle - window, settle);
+    const double before = rmsOf (std::vector<float> (signal.begin() + static_cast<long> (settle - window),
+                                                     signal.begin() + static_cast<long> (settle)));
+    const double after = rmsOf (std::vector<float> (signal.end() - static_cast<long> (window), signal.end()));
+    std::printf ("  note-off: segunda diferencia %.2f; 0.28 s después la cuerda está %.0f dB más abajo\n", releaseRatio,
+                 toDb (after / before));
+    worstRatio = std::max (worstRatio, releaseRatio);
+    CHECK (worstRatio < 1.25f);
+    CHECK (toDb (after / before) < -60.0);
+}
+
+void testStringOffKeepsTheSound()
+{
+    std::printf ("Cuerda apagada: la voz suena idéntica (bit a bit) aunque sus perillas se muevan\n");
+
+    auto base = sineSources();
+    base.noise.enabled = true;
+    auto moved = base;
+    moved.string = { false, 2, -7, 33.0f, 0.1f, 25.0f, 0.9f };
+
+    const auto renderWith = [] (const SourceSettings& sources) {
+        auto manager = std::make_unique<VoiceManager>();
+        prepareWithSources (*manager, 48000.0, sources);
+        manager->noteOn (60, 0.8f);
+        manager->noteOn (67, 0.6f);
+        std::vector<float> left (24000, 0.0f), right (24000, 0.0f);
+        manager->render (left.data(), right.data(), 12000);
+        manager->noteOff (60);
+        manager->render (left.data() + 12000, right.data() + 12000, 12000);
+        return std::pair { left, right };
+    };
+    CHECK (renderWith (base) == renderWith (moved));
+}
+
+void testStringCpuCost()
+{
+    std::printf ("CPU de la cuerda (48 kHz, 16 notas, bloques de 256)\n");
+
+    SourceSettings strings = sineSources();
+    strings.oscillators[0].enabled = false;
+    strings.string.enabled = true;
+    strings.string.decaySeconds = 30.0f; // que siga sonando todo el segundo medido
+    const undertow::synth::FilterSettings filter { true, { FilterType::lowPass, FilterSlope::db24, 3000.0f, 0.2f, 0.0f }, 0.0f };
+    ModulationSettings none;
+    ModulationSettings vibrato; // la afinación cambia en cada muestra: los coeficientes se recalculan cada 32
+    vibrato.lfos[0] = { LfoShape::sine, LfoMode::retrigger, false, 5.0f, 5 };
+    vibrato.slots[0] = { ModSource::lfo1, ModDestination::globalPitch, 0.02f };
+
+    const double alone = voiceScenarioCpu (strings, {}, none, 16);
+    const double withVibrato = voiceScenarioCpu (strings, {}, vibrato, 16);
+    auto layered = strings;
+    layered.oscillators[0].enabled = true;
+    layered.oscillators[0].table = &factoryBank().get (0);
+    layered.oscillators[0].position = 2.0f / 3.0f;
+    const double layer = voiceScenarioCpu (layered, filter, none, 16);
+    std::printf ("  cuerda sola %.1f %% | con vibrato (Global Pitch) %.1f %% | cuerda + Osc A + filtro 24 dB %.1f %%\n",
+                 100.0 * alone, 100.0 * withVibrato, 100.0 * layer);
+    CHECK (alone < 0.10);
+    CHECK (withVibrato < 0.15);
+}
+
 } // namespace
 
 
 int main (int argc, char** argv)
 {
     std::setvbuf (stdout, nullptr, _IONBF, 0); // sin buffer: si el programa se cae, se ve en qué test fue
-    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 (solo los tests de esa fase);
-    // --cpu (solo la tabla de CPU de la Fase 11, sin tests).
-    bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false;
+    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 / --fase12 (solo los tests de esa
+    // fase); --cpu (solo la tabla de CPU de la Fase 11, sin tests).
+    bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false, onlyPhase12 = false;
     for (int i = 1; i < argc; ++i)
     {
         if (std::string_view (argv[i]) == "--cpu")
@@ -3412,8 +3864,9 @@ int main (int argc, char** argv)
         onlyPhase7 = onlyPhase7 || std::string_view (argv[i]) == "--fase7";
         onlyPhase8 = onlyPhase8 || std::string_view (argv[i]) == "--fase8";
         onlyPhase9 = onlyPhase9 || std::string_view (argv[i]) == "--fase9";
+        onlyPhase12 = onlyPhase12 || std::string_view (argv[i]) == "--fase12";
     }
-    const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9;
+    const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9 && ! onlyPhase12;
     if (all)
     {
         testSegmentTimesAreExactAtEverySampleRate();
@@ -3513,6 +3966,18 @@ int main (int argc, char** argv)
     {
         testModulationTargets();
         testModulationRings();
+    }
+
+    if (all || onlyPhase12)
+    {
+        testStringTuning();
+        testStringTuningInVoice();
+        testStringDecayMatchesT60();
+        testStringDampingKillsHighsFirst();
+        testStringExtremesAreSafe();
+        testStringChangesAreClickFree();
+        testStringOffKeepsTheSound();
+        testStringCpuCost();
     }
 
     if (failures == 0)

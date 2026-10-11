@@ -49,9 +49,10 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 - Contiene: oversampling halfband ×2 (`Halfband.h`) y en cascada ×2–×16 alrededor de una curva, con latencia entera
   (`Oversampler.h`), filtro DC (`DcBlocker.h`), SVF TPT/ZDF (`Svf.h`), crossover Linkwitz-Riley y divisor multibanda
   (`Crossover.h`), filtro de 1 polo TPT y tilt EQ (`OnePole.h`), suavizado de parámetros y fundidos
-  (`Smoothing.h`), línea de retardo (`DelayLine.h`), SIMD SSE2 (`Simd.h`), `fastTanh` (`FastMath.h`), FFT (`Fft.h`),
-  `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de pico/RMS (`LevelMeter.h`), LFO con divisiones
-  de tempo (`Lfo.h`, venía de Undertow) y seguidor de envolvente (`EnvelopeFollower.h`).
+  (`Smoothing.h`), línea de retardo con lectura lineal, cúbica y Lagrange (`DelayLine.h`), SIMD SSE2 (`Simd.h`),
+  `fastTanh` (`FastMath.h`), FFT (`Fft.h`), `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de
+  pico/RMS (`LevelMeter.h`), LFO con divisiones de tempo (`Lfo.h`, venía de Undertow) y seguidor de envolvente
+  (`EnvelopeFollower.h`).
 - Suavizado: usar `LinearRamp` (llega exacto al objetivo). `SmoothedParameter` tiene un bug conocido (nunca termina de
   llegar) y solo lo usa Undertow; arreglarlo cambiaría su sonido.
 - Sin JUCE ni GUI, C++20 estándar. Lo que corre en el hilo de audio va en headers (para que se inlinee); lo que corre
@@ -63,7 +64,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 ## Plan de plugins (orden acordado)
 | # | Plugin | Referencia de nivel | Estado |
 |---|--------|---------------------|--------|
-| 1 | Undertow — sintetizador wavetable (FM, warp, unison, matriz de modulación, FX) | Serum 2, Vital | ✅ Terminado |
+| 1 | Undertow — sintetizador wavetable (FM, warp, unison, matriz de modulación, FX) | Serum 2, Vital | ✅ Terminado (ampliación en curso: cuerda pulsada) |
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | 🔨 En curso |
 | 3 | EQ paramétrico con analizador de espectro | FabFilter Pro-Q | Pendiente |
 | 4 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |

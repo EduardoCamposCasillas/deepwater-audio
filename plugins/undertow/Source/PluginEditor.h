@@ -41,7 +41,7 @@ public:
     void resized() override;
 
 private:
-    enum class Page { oscillators, warp, sound, modulation, effects };
+    enum class Page { oscillators, warp, sound, modulation, effects, string };
 
     void timerCallback() override;
     void showPage (Page page);
@@ -130,12 +130,13 @@ private:
     Content content;
     juce::TooltipWindow tooltipWindow { &content, 700 };
 
-    juce::Component oscillatorPage, warpPage, soundPage, modulationPage, effectsPage;
+    juce::Component oscillatorPage, warpPage, soundPage, modulationPage, effectsPage, stringPage;
     TabButton oscillatorTab { "Osciladores" };
     TabButton warpTab { "Warp y FM" };
     TabButton soundTab { "Filtro y Amp" };
     TabButton modulationTab;
     TabButton effectsTab { "Efectos" };
+    TabButton stringTab { "Cuerda" };
     juce::TextButton zoomButton;
     undertow::gui::PresetBar presetBar;
     undertow::gui::PresetBrowser presetBrowser;
@@ -266,6 +267,13 @@ private:
     std::atomic<float>* delaySyncParam = nullptr;
 
     std::array<Knob, 5> reverbKnobs; // Size, Decay, Damping, Pre-Delay, Mix
+
+    // --- Fase 12: cuerda pulsada ---
+    juce::GroupComponent stringGroup;
+    juce::ToggleButton stringOnButton { "On" };
+    std::unique_ptr<ButtonAttachment> stringOnAttachment;
+    std::array<Knob, 6> stringKnobs; // Octave, Semi, Fine, Level, Decay, Damping
+    juce::Label stringHelp;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UndertowAudioProcessorEditor)
 };

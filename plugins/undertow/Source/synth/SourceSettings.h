@@ -102,12 +102,33 @@ struct NoiseSettings
     bool operator== (const NoiseSettings&) const = default;
 };
 
+// Fase 12: cuerda pulsada (Karplus-Strong). Una fuente más de la voz, como el sub y el ruido: mono, a la frecuencia del
+// host (no pasa por el camino sobremuestreado del warp/FM) y apagada por defecto.
+struct StringSettings
+{
+    bool enabled = false;
+    int octave = 0;         // -2..+2
+    int semitones = 0;      // -12..+12
+    float fineCents = 0.0f; // -100..+100
+    float level = 0.8f;
+    float decaySeconds = 2.0f; // T60 del fundamental, igual en todas las notas
+    float damping = 0.5f;      // 0 = los agudos duran como el fundamental; 1 = mueren 300 veces antes
+
+    [[nodiscard]] float tuningSemitones() const noexcept
+    {
+        return static_cast<float> (12 * octave + semitones) + fineCents / 100.0f;
+    }
+
+    bool operator== (const StringSettings&) const = default;
+};
+
 struct SourceSettings
 {
     // Osc A encendido y Osc B apagado: el sonido por defecto es el de la Fase 5.
     std::array<OscillatorSettings, 2> oscillators { OscillatorSettings {}, OscillatorSettings { .enabled = false } };
     SubSettings sub;
     NoiseSettings noise;
+    StringSettings string;
 
     // Tabla del sub: debe ser "Basic Shapes" (4 frames: seno, triángulo, sierra, cuadrada). Así el sub es
     // tan libre de aliasing como los osciladores principales sin escribir otro oscilador.

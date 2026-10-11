@@ -101,7 +101,7 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     // --- Pestañas ---
     // Los literales con tildes se pasan con fromUTF8: un const char* suelto JUCE lo lee como Latin-1.
     modulationTab.setButtonText (juce::String::fromUTF8 ("Modulaci\xc3\xb3n"));
-    for (auto* tab : { &oscillatorTab, &warpTab, &soundTab, &modulationTab, &effectsTab })
+    for (auto* tab : { &oscillatorTab, &warpTab, &soundTab, &modulationTab, &effectsTab, &stringTab })
     {
         tab->setClickingTogglesState (true);
         tab->setRadioGroupId (1);
@@ -112,11 +112,13 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     soundTab.onClick = [this] { showPage (Page::sound); };
     modulationTab.onClick = [this] { showPage (Page::modulation); };
     effectsTab.onClick = [this] { showPage (Page::effects); };
+    stringTab.onClick = [this] { showPage (Page::string); };
     content.addChildComponent (oscillatorPage);
     content.addChildComponent (warpPage);
     content.addChildComponent (soundPage);
     content.addChildComponent (modulationPage);
     content.addChildComponent (effectsPage);
+    content.addChildComponent (stringPage);
     content.addAndMakeVisible (modBar);
 
     zoomButton.setTooltip (juce::String::fromUTF8 ("Tama\xc3\xb1o de la ventana. Tambi\xc3\xa9n puedes arrastrar la esquina "
@@ -366,6 +368,32 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     for (size_t k = 0; k < reverbKnobs.size(); ++k)
         setUpKnob (reverbKnobs[k], effectsPage, reverbInfos[k].parameterId, reverbInfos[k].name, knobWidth);
 
+    // ================= Página "Cuerda" (Fase 12) =================
+    stringGroup.setText ("Cuerda pulsada (Karplus-Strong)");
+    stringPage.addAndMakeVisible (stringGroup);
+    stringPage.addAndMakeVisible (stringOnButton);
+    stringOnAttachment = std::make_unique<ButtonAttachment> (apvts, id::stringOn, stringOnButton);
+    const std::array<KnobInfo, 6> stringInfos { { { id::stringOctave, "Octave" },
+                                                  { id::stringSemi, "Semi" },
+                                                  { id::stringFine, "Fine" },
+                                                  { id::stringLevel, "Level" },
+                                                  { id::stringDecay, "Decay" },
+                                                  { id::stringDamping, "Damping" } } };
+    for (size_t k = 0; k < stringKnobs.size(); ++k)
+        setUpKnob (stringKnobs[k], stringPage, stringInfos[k].parameterId, stringInfos[k].name, knobWidth);
+    stringHelp.setText (juce::String::fromUTF8 (
+                            "Cada nota puntea la cuerda: un golpe de ruido entra en una lÃ­nea de retardo que se "
+                            "realimenta y pierde agudos en cada vuelta. Decay = cuÃ¡nto tarda el fundamental en caer "
+                            "60 dB (igual en todas las notas). Damping = cuÃ¡nto antes mueren los agudos: poco = "
+                            "metÃ¡lica y brillante (arpa, clavecÃ­n); mucho = apagada y redonda (nylon, koto "
+                            "con la palma). Al soltar la tecla la cuerda se apaga como con la palma; el Release de Env 1 "
+                            "sigue mandando sobre el final. Suena junto con los osciladores, el sub y el ruido, y pasa por "
+                            "el mismo filtro y los efectos."),
+                        juce::dontSendNotification);
+    stringHelp.setJustificationType (juce::Justification::topLeft);
+    stringHelp.setColour (juce::Label::textColourId, undertow::gui::theme::dimText);
+    stringPage.addAndMakeVisible (stringHelp);
+
     activeVoicesLabel.setJustificationType (juce::Justification::centredRight);
     activeVoicesLabel.setColour (juce::Label::textColourId, undertow::gui::theme::dimText);
     content.addAndMakeVisible (activeVoicesLabel);
@@ -454,6 +482,7 @@ void UndertowAudioProcessorEditor::showPage (Page page)
     soundPage.setVisible (page == Page::sound);
     modulationPage.setVisible (page == Page::modulation);
     effectsPage.setVisible (page == Page::effects);
+    stringPage.setVisible (page == Page::string);
 }
 
 // ================= Fase 10: presets =================
@@ -749,7 +778,7 @@ void UndertowAudioProcessorEditor::layoutContent()
 
     // Fila 2: pestañas y contador de voces.
     auto tabRow = area.removeFromTop (tabRowHeight);
-    for (auto* tab : { &oscillatorTab, &warpTab, &soundTab, &modulationTab, &effectsTab })
+    for (auto* tab : { &oscillatorTab, &warpTab, &soundTab, &modulationTab, &effectsTab, &stringTab })
         tab->setBounds (tabRow.removeFromLeft (tabWidth).reduced (2, 1));
     activeVoicesLabel.setBounds (tabRow.removeFromRight (voicesLabelWidth));
     area.removeFromTop (groupPadding);
@@ -762,6 +791,7 @@ void UndertowAudioProcessorEditor::layoutContent()
     soundPage.setBounds (area);
     modulationPage.setBounds (area);
     effectsPage.setBounds (area);
+    stringPage.setBounds (area);
     presetBrowser.setBounds (area);
     saveDialog.setBounds (area);
 
@@ -1005,5 +1035,19 @@ void UndertowAudioProcessorEditor::layoutContent()
             for (auto& knob : reverbKnobs)
                 layoutKnob (knob, inner.removeFromLeft (knobWidth));
         }
+    }
+
+    // ================= Página "Cuerda" =================
+    // Una fila: On y después las perillas (afinación, nivel y las dos de la cuerda). Debajo, la explicación.
+    {
+        auto page = stringPage.getLocalBounds();
+        auto groupArea = page.removeFromTop (rowHeight);
+        page.removeFromTop (groupPadding);
+        stringGroup.setBounds (groupArea);
+        auto inner = innerOf (groupArea);
+        stringOnButton.setBounds (inner.removeFromLeft (effectColumnWidth).removeFromTop (24));
+        for (auto& knob : stringKnobs)
+            layoutKnob (knob, inner.removeFromLeft (knobWidth));
+        stringHelp.setBounds (page.removeFromTop (rowHeight).reduced (groupPadding, 0));
     }
 }

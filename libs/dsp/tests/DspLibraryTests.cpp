@@ -767,6 +767,66 @@ void testDelayLine()
     CHECK (worst < 1.0e-4);
 }
 
+void testLagrangeDelay()
+{
+    std::printf ("Lagrange 3.er orden: cúbicas exactas, retardo exacto en graves, ganancia <= 1, fase medida = teoría\n");
+
+    // Un polinomio de grado 3 se reproduce exactamente (salvo el redondeo del float).
+    dw::DelayLine line;
+    line.prepare (64);
+    const auto cubic = [] (double t) { return 1.0e-4 * (0.5 * t * t * t - 3.0 * t * t + 2.0 * t + 7.0); };
+    for (int n = 0; n < 40; ++n)
+        line.push (static_cast<float> (cubic (n)));
+    double worstCubic = 0.0;
+    for (const double delay : { 1.0, 1.25, 2.5, 7.75, 13.999, 20.0 })
+        worstCubic = std::max (worstCubic, std::abs (line.readLagrange (dw::LagrangeTaps::forDelay (delay)) - cubic (39.0 - delay)));
+    CHECK (worstCubic < 2.0e-6); // valores de hasta 2.5: el límite es la resolución del float
+
+    // Retardo entero: pesos 0, 1, 0, 0 (la lectura entera, bit a bit).
+    const auto whole = dw::LagrangeTaps::forDelay (9.0);
+    CHECK (whole.first == 8 && whole.weights[1] == 1.0f && whole.weights[0] == 0.0f && whole.weights[2] == 0.0f
+           && whole.weights[3] == 0.0f);
+    CHECK (line.readLagrange (whole) == line.read (9));
+
+    // Fracción en [1, 2): ganancia <= 1 en todo el espectro y retardo de fase exacto en graves.
+    double worstGain = 0.0, worstLowDelay = 0.0;
+    for (int f = 0; f <= 100; ++f)
+    {
+        const double delay = 30.0 + f / 100.0;
+        const auto taps = dw::LagrangeTaps::forDelay (delay);
+        CHECK (taps.fraction >= 1.0 && taps.fraction < 2.0);
+        for (int k = 1; k <= 200; ++k)
+            worstGain = std::max (worstGain, taps.magnitude (pi * k / 200.0));
+        worstLowDelay = std::max (worstLowDelay, std::abs (taps.phaseDelay (1.0e-3) - delay));
+    }
+    std::printf ("  ganancia máxima %.6f, error del retardo a w = 0.001: %.2e muestras\n", worstGain, worstLowDelay);
+    CHECK (worstGain <= 1.0 + 1.0e-6);
+    CHECK (worstLowDelay < 1.0e-5);
+
+    // Un seno de 3 kHz a 44.1 kHz leído con retardo 12.5: el retardo medido coincide con phaseDelay().
+    constexpr double w = 2.0 * pi * 3000.0 / 44100.0;
+    const auto taps = dw::LagrangeTaps::forDelay (12.5);
+    line.reset();
+    Complex in {}, out {};
+    for (int n = 0; n < 100 + 29 * 147; ++n) // 147 muestras = 10 ciclos exactos: sin fuga de la frecuencia negativa
+    {
+        const double x = std::sin (w * n);
+        line.push (static_cast<float> (x));
+        if (n >= 100)
+        {
+            in += x * std::polar (1.0, -w * n);
+            out += static_cast<double> (line.readLagrange (taps)) * std::polar (1.0, -w * n);
+        }
+    }
+    // La fase solo dice el retardo módulo un período (14.7 muestras): se lleva al período de la teoría.
+    const double period = 2.0 * pi / w;
+    double measuredDelay = -std::arg (out / in) / w;
+    measuredDelay += period * std::round ((taps.phaseDelay (w) - measuredDelay) / period);
+    std::printf ("  retardo a 3 kHz: medido %.5f, teoría %.5f muestras\n", measuredDelay, taps.phaseDelay (w));
+    CHECK (std::abs (measuredDelay - taps.phaseDelay (w)) < 1.0e-3);
+    CHECK (std::abs (std::abs (out / in) - taps.magnitude (w)) < 1.0e-3);
+}
+
 // --- Utilidades -----------------------------------------------------------------------------------------------------
 
 void testFastTanh()
@@ -962,6 +1022,7 @@ int main()
     testLevelMeter();
     testPeakDisplay();
     testDelayLine();
+    testLagrangeDelay();
     testFastTanh();
     testSimdMatchesScalar();
     testMidiNoteToHz();
