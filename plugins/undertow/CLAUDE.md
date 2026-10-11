@@ -35,7 +35,7 @@ para que funcionen también como material de estudio.
 Desde la raíz del repositorio (ver también los comandos generales en el `CLAUDE.md` raíz):
 ```
 cmake --build build --config Release --target UndertowSynth_VST3        # solo el plugin
-build/plugins/undertow/Release/UndertowTests.exe                         # tests de DSP y voces (--fase7/8/9/12, --verbose)
+build/plugins/undertow/Release/UndertowTests.exe                         # tests de DSP y voces (--fase7/8/9/12/13, --verbose)
 build/plugins/undertow/Release/UndertowTests.exe --cpu                   # tabla de CPU (Fase 11)
 build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe   # presets, huellas, memoria
 UndertowPresetTests --render plugins/undertow/tests/reference/migration-test.mid <carpeta>   # WAV para null tests
@@ -82,21 +82,7 @@ warp/FM), un solo juego de parámetros, y apagada no se calcula.
 - [x] Fase 12 — Núcleo: retardo fraccionario Lagrange en libs/dsp, cuerda con ruido blanco, Decay (T60), Damping,
       note-off con "palma", afinación < 1 cent (MIDI 12–96, 4 sample rates), pestaña "Cuerda".
 - [ ] Fase 13 — Excitación: Pick Position (peine en la excitación), ruido filtrado (tono de la púa) e impulso;
-      destinos de la matriz (al final): String Level, Decay, Damping, Pick Position, Pitch.
-      Diseño acordado (ya explicado al usuario; falta implementar):
-      - Parámetros nuevos al final, versionHint 9: stringExcitation (lista, orden guardado: White Noise, Filtered
-        Noise, Impulse; por defecto White Noise = sonido de la Fase 12), stringPickPosition (0–50 % del largo, def. 0)
-        y stringPickTone (corte del paso bajo de la excitación, 200 Hz–20 kHz log; solo en Filtered Noise e Impulse).
-      - Pick Position = peine x[n] − w·x[n − βP] en la excitación (Jaffe & Smith), con D = round(β·período). 0 % = sin
-        peine (Fase 12); el peso w sube de 0 a 1 en el primer 5 % para que sea continuo; energía normalizada con
-        1/√(1 + w²). 50 % = punteo en el centro: sin armónicos pares (hueco).
-      - Impulso: un golpe de 1 muestra (con la media quitada, como el ruido) pasado por el paso bajo de Pick Tone.
-      - El punteo se aplaza a la primera muestra de la nota (después de computeModulation), para que la matriz
-        (p. ej. Velocity → Pick Tone) actúe al puntear y la longitud ya incluya Global Pitch.
-      - Destinos al final de modDestinationNames: String Level, String Pitch (±24 st, anillo sobre Semi), String Decay
-        (100 % = toda la perilla en su escala log), String Damping, String Pick Pos, String Pick Tone (estos dos solo
-        se leen al puntear). Añadirlos a gui/ModulationTargets.h (el test de Fase 9 exige perilla para cada destino).
-        Llamar a setDecay/setDamping solo cuando cambie el valor modulado (setDecay hace un log).
+      destinos de la matriz (al final): String Level, Pitch, Decay, Damping, Pick Position, Pick Tone.
 - [ ] Fase 14 — Presets de cuerda (guitarra, koto, arpa, plucks) con notas, y APRENDIZAJE.md.
 - [ ] Fase 15 (opcional) — Stiffness / inharmonicidad (all-pass de dispersión en el lazo).
 - [ ] Fase 16 (opcional) — La cuerda como resonador: excitación = las fuentes de la voz (opción al final de la lista).
@@ -504,3 +490,50 @@ bit a bit).
 - Límites conocidos: Lagrange atenúa un poco los agudos cuando la fracción cae cerca de 0.5 (con Damping 0 el brillo de
   la cola varía levemente de nota a nota por encima de ~10 kHz); en notas muy agudas con Decay largo el Damping alto se
   ablanda solo (límite de la continua); por encima de fs/8 (5.5 kHz a 44.1 kHz) la cuerda no sube más.
+
+Fase 13 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Lo existente suena igual (null test bit a bit) y
+la cuerda con White Noise y Pick Position 0 % suena igual que en la Fase 12 (huella bit a bit, ver abajo).
+- `dsp/PluckedString.h`: `StringExcitation` (orden guardado: White Noise, Filtered Noise, Impulse) y `PluckShape`
+  (excitación, Pick Position 0–0.5, Pick Tone 200 Hz–20 kHz) que se pasa a `pluck (seed, shape)`. La excitación:
+  fuente de un período (el ruido de la Fase 12, misma secuencia, o un golpe de 1 muestra) → Pick Tone: paso bajo TPT de
+  1 polo CIRCULAR (estado inicial periódico S / (1 − aᴺ), sin transitorio; solo Filtered Noise e Impulse) → quitar la
+  media → peine de Pick Position → nivel. Peine (Jaffe & Smith) x[n] − w·x[n − D], D = β·período REAL, fraccionario
+  (Lagrange de 3.er orden por posición) y LINEAL: la excitación dura N + D + 2 muestras (buffer de 1.5 períodos). Probado
+  y descartado: D redondeado (lo acordado en el diseño) y el peine circular dentro de las N muestras enteras: los huecos
+  se quedaban en −14…−20 dB (el período no es entero); lineal + fraccionario: −57…−79 dB. w sube de 0 a 1 en el
+  primer 5 %. Nivel: White Noise se divide por √(energía esperada del peine) = √(1 + w²·Σℓ² − 2w·ℓ₀) (con 1/√(1 + w²)
+  quedaba 0.7 dB bajo por el suavizado de Lagrange); Filtered Noise e Impulse: energía exacta = la del ruido (N/3); pico
+  limitado a 4 (× 0.25 × Level en la voz: 0.8 como mucho). Por ese límite un Impulse brillante en graves suena más suave:
+  con Pick Tone 2.5 kHz −6 dB en A3 de FL (110 Hz), −9 dB en A2 (55 Hz), −13 dB en A1 (27.5 Hz); a 20 kHz hasta −16 dB.
+  `setDecay (seconds, modulation)`: modulación en la escala log (100 % = ×600). `getExcitation()` solo para tests.
+- Voz: el punteo se aplaza a la primera muestra de la nota (`pendingPluck`), después de `computeModulation`: la matriz
+  (Velocity → Pick Tone, String Pitch, Global Pitch) ya vale lo de esa nota al puntear. Decay y Damping se pasan a la
+  cuerda en `renderSources` (perilla + matriz) solo si cambian (`updateStringLoss`); ya no en `setSourceSettings`.
+  `lastGlobalPitch` eliminado (con vibrato en Global Pitch el punteo usa el valor de la muestra actual: único cambio
+  medible respecto a la Fase 12, solo con modulación de Global Pitch).
+- Destinos nuevos (al final de `modDestinationNames`): String Level, String Pitch (±24 st, anillo sobre Semi), String
+  Decay (100 % = toda la perilla log), String Damping, String Pick Pos (100 % = 0–50 %), String Pick Tone (100 % = ×100);
+  los dos últimos solo se leen al puntear. En `gui/ModulationTargets.h` (23 perillas destino).
+- Parámetros nuevos (versionHint 9, al final): stringExcitation (White Noise), stringPickPosition (0–50 %, def. 0 %),
+  stringPickTone (200 Hz–20 kHz log, def. 2.5 kHz).
+- GUI: pestaña "Cuerda", fila 2: grupo "Punteo" (Excitation, Pick Pos, Pick Tone; Pick Tone atenuado con White Noise) y
+  su explicación al lado. Arreglado: el texto de ayuda de la Fase 12 estaba guardado con doble codificación UTF-8
+  ("lÃ­nea" en la GUI); ahora con escapes, como el resto del editor.
+- Tests (`UndertowTests --fase13`): Pick Position con Impulse plano (MIDI 45/57/69 × 4 sample rates): a 50 % los pares
+  −61 dB respecto a los impares, a 33 % los múltiplos de 3 −57 dB; Pick Tone (agudos respecto a graves, 500 Hz / 2.5 kHz
+  / 20 kHz): Filtered Noise −15.9 / −4.3 / +0.9 dB, Impulse −16.8 / −5.3 / −0.1 dB; White Noise no depende de Pick Tone;
+  Impulse no depende de la semilla; energía: Filtered Noise 0.00 dB, White Noise con peine (media de 300) ≤ 0.25 dB,
+  pico ≤ 4; los 6 destinos con la Mod Wheel = mover la perilla (bit a bit); Velocity → Pick Tone (+13.8 dB de agudos);
+  cambiar el punteo con la nota sonando no la cambia (bit a bit) y la siguiente sí; LFO cuadrado en Decay / Damping /
+  Level sin clics; extremos al azar sin NaN; CPU. Fase 9: String Pitch sobre su Semi.
+- CPU (48 kHz salvo indicación): 16 punteos de A1 de FL (27.5 Hz) a 96 kHz (el peor caso, ~3500 muestras por período): White Noise
+  266 µs, Filtered Noise + Pick Position 816 µs, una vez por nota; 16 notas con LFO → String Decay, Damping y Pitch: 9.6 %.
+- Verificación de "mismo sonido": huella FNV de la cuerda antes/después (scratch, no en el repo): `PluckedString`
+  directa (6 notas × 3 Damping × 4 sample rates, con re-punteo y note-off) y en la voz sin modulación: idénticas bit a
+  bit. Null test de los 4 presets (`out/render-fase12` vs `out/render-fase13`): idéntico bit a bit. Huellas de los 43
+  presets: iguales.
+- Release con 0 warnings (build limpio); ctest 4/4; pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096,
+  `--repeat 3 --randomise`): SUCCESS.
+- Límites conocidos: Impulse brillante en graves más suave (límite de pico, arriba); el punteo cuesta ~3× el de la
+  Fase 12 (bucles dependientes: paso bajo, sumas); con D < 2 muestras (Pick Position muy bajo en notas muy agudas) la
+  compensación de nivel es aproximada.

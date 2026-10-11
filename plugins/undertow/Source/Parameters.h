@@ -157,6 +157,11 @@ inline constexpr const char* stringLevel = "stringLevel";
 inline constexpr const char* stringDecay = "stringDecay";
 inline constexpr const char* stringDamping = "stringDamping";
 
+// Fase 13: el punteo de la cuerda.
+inline constexpr const char* stringExcitation = "stringExcitation";
+inline constexpr const char* stringPickPosition = "stringPickPosition";
+inline constexpr const char* stringPickTone = "stringPickTone";
+
 // Versión con la que se introdujeron los parámetros (la usa VST3 para compatibilidad hacia atrás).
 inline constexpr int versionHint = 1;
 // Los parámetros añadidos en una versión posterior llevan un número mayor.
@@ -167,4 +172,5 @@ inline constexpr int versionHintSources = 5;
 inline constexpr int versionHintWarp = 6;
 inline constexpr int versionHintEffects = 7;
 inline constexpr int versionHintString = 8;
+inline constexpr int versionHintPluck = 9;
 } // namespace undertow::params

@@ -43,10 +43,12 @@ enum class ModDestination
     // Fase 6
     oscBPosition, oscBPitch, oscALevel, oscBLevel, subLevel, noiseLevel, oscADetune, oscBDetune, globalPitch,
     // Fase 7
-    oscAWarp, oscBWarp, oscAFm, oscBFm
+    oscAWarp, oscBWarp, oscAFm, oscBFm,
+    // Fase 13: la cuerda
+    stringLevel, stringPitch, stringDecay, stringDamping, stringPickPosition, stringPickTone
 };
 
-inline constexpr std::array<const char*, 20> modDestinationNames {
+inline constexpr std::array<const char*, 26> modDestinationNames {
     "None",
     "Osc A Position",
     "Osc A Pitch",
@@ -67,6 +69,12 @@ inline constexpr std::array<const char*, 20> modDestinationNames {
     "Osc B Warp",
     "Osc A FM/RM",  // amount de la FM o del ring mod (100 % = toda la perilla)
     "Osc B FM/RM",
+    "String Level",
+    "String Pitch",     // como los Pitch de los osciladores: 100 % = ±24 semitonos
+    "String Decay",     // 100 % = toda la perilla, en su escala logarítmica
+    "String Damping",
+    "String Pick Pos",  // Pick Position y Pick Tone solo se leen al puntear (el valor de la nota cuando empieza)
+    "String Pick Tone", // 100 % = toda la perilla (200 Hz - 20 kHz, logarítmica)
 };
 
 inline constexpr int numModSources = static_cast<int> (modSourceNames.size());

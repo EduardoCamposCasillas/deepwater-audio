@@ -3193,6 +3193,12 @@ void testModulationTargets()
     const auto pitch = gui::targetForParameter (id::oscillators[1].semitones);
     CHECK (pitch.has_value() && pitch->destination == ModDestination::oscBPitch && pitch->scale == 1.0f);
 
+    // Fase 13: String Pitch también se dibuja sobre su Semi; Pick Position y Pick Tone son destinos.
+    const auto stringPitch = gui::targetForParameter (id::stringSemi);
+    CHECK (stringPitch.has_value() && stringPitch->destination == ModDestination::stringPitch && stringPitch->scale == 1.0f);
+    CHECK (gui::targetForParameter (id::stringPickTone).has_value());
+    CHECK (! gui::targetForParameter (id::stringFine).has_value());
+
     CHECK (! gui::targetForParameter (id::master).has_value());
     CHECK (! gui::targetForParameter (id::oscillators[0].fine).has_value());
 }
@@ -3844,6 +3850,467 @@ void testStringCpuCost()
     CHECK (withVibrato < 0.15);
 }
 
+
+// --- Fase 13: el punteo (excitación, Pick Position, Pick Tone) y los destinos de la cuerda -------------------------
+
+using undertow::dsp::PluckShape;
+using undertow::dsp::StringExcitation;
+
+// La cuerda punteada con 'shape', sin pérdidas que cambien el color al principio (Damping 0, Decay largo).
+std::vector<float> renderPluck (PluckedString& string, double hz, const PluckShape& shape, size_t numSamples,
+                                std::uint32_t seed = 1, float damping = 0.0f, float decay = 20.0f)
+{
+    string.setDecay (decay);
+    string.setDamping (damping);
+    string.setFrequency (hz);
+    string.reset();
+    string.pluck (seed, shape);
+    std::vector<float> signal (numSamples);
+    for (auto& s : signal)
+        s = string.processSample();
+    return signal;
+}
+
+// Nivel (lineal) de los armónicos 1..count, medido con una ventana de 8 períodos desde el período 2.
+std::vector<double> harmonicLevels (const std::vector<float>& signal, double sampleRate, double hz, int count)
+{
+    const double period = sampleRate / hz;
+    std::vector<double> levels;
+    for (int h = 1; h <= count; ++h)
+        levels.push_back (std::abs (partialAt (signal, h * hz, sampleRate, static_cast<size_t> (2.0 * period),
+                                               static_cast<size_t> (8.0 * period))));
+    return levels;
+}
+
+double meanPowerDb (const std::vector<double>& levels, int from, int to, int step)
+{
+    double sum = 0.0;
+    int count = 0;
+    for (int h = from; h <= to; h += step)
+    {
+        sum += levels[static_cast<size_t> (h - 1)] * levels[static_cast<size_t> (h - 1)];
+        ++count;
+    }
+    return 10.0 * std::log10 (std::max (sum / count, 1.0e-30));
+}
+
+void testPickPositionRemovesHarmonics()
+{
+    std::printf ("Pick Position: el peine quita los armónicos múltiplos de 1/beta (Impulse plano, 4 sample rates)\n");
+
+    double worstHalf = -300.0, worstThird = -300.0;
+    for (const double sr : sampleRates)
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (const int note : { 45, 57, 69 })
+        {
+            const double hz = deepwater::dsp::midiNoteToHz (note);
+            const auto length = static_cast<size_t> (12.0 * sr / hz);
+            const PluckShape flat { StringExcitation::impulse, 0.0f, 20000.0f };
+
+            // 50 %: punteo en el centro, sin armónicos pares.
+            auto shape = flat;
+            shape.pickPosition = 0.5f;
+            const auto half = harmonicLevels (renderPluck (*string, hz, shape, length), sr, hz, 12);
+            const double evenBelowOdd = meanPowerDb (half, 2, 12, 2) - meanPowerDb (half, 1, 11, 2);
+
+            // 1/3: sin el 3.º, el 6.º, el 9.º y el 12.º.
+            shape.pickPosition = 1.0f / 3.0f;
+            const auto third = harmonicLevels (renderPluck (*string, hz, shape, length), sr, hz, 12);
+            const double thirdsBelowRest = meanPowerDb (third, 3, 12, 3) - meanPowerDb (third, 1, 2, 1);
+
+            if (verbose)
+                std::printf ("    %5.0f Hz nota %d: 50 %% pares %+.1f dB | 33 %% múltiplos de 3 %+.1f dB\n", sr, note,
+                             evenBelowOdd, thirdsBelowRest);
+            worstHalf = std::max (worstHalf, evenBelowOdd);
+            worstThird = std::max (worstThird, thirdsBelowRest);
+        }
+    }
+    std::printf ("  50 %%: pares respecto a impares, peor %+.1f dB | 33 %%: múltiplos de 3 respecto a h1-h2, peor %+.1f dB\n",
+                 worstHalf, worstThird);
+    CHECK (worstHalf < -30.0);
+    CHECK (worstThird < -30.0);
+
+    // Sin peine (0 %) los armónicos de un Impulse brillante son parejos; el 5 % ya es el peine completo cerca del puente:
+    // solo quita armónicos muy altos (múltiplos de 20) y deja el resto casi igual.
+    auto string = std::make_unique<PluckedString>();
+    string->prepare (48000.0);
+    const double hz = 220.0;
+    const auto length = static_cast<size_t> (12.0 * 48000.0 / hz);
+    const auto none = harmonicLevels (renderPluck (*string, hz, { StringExcitation::impulse, 0.0f, 20000.0f }, length), 48000.0, hz, 8);
+    double spread = 0.0;
+    for (const double level : none)
+        spread = std::max (spread, std::abs (toDb (level / none[0])));
+    std::printf ("  0 %%: armónicos 1-8 de un Impulse a 20 kHz dentro de %.2f dB\n", spread);
+    CHECK (spread < 1.5);
+}
+
+void testPickToneDarkens()
+{
+    std::printf ("Pick Tone: menos corte = menos agudos; Impulse es siempre igual; White Noise no lo usa\n");
+
+    constexpr double sr = 48000.0;
+    constexpr double hz = 110.0;
+    auto string = std::make_unique<PluckedString>();
+    string->prepare (sr);
+    const auto length = static_cast<size_t> (12.0 * sr / hz);
+
+    // Agudos (armónicos 30-40, 3.3-4.4 kHz) respecto a los graves (1-4), promediando 6 punteos de ruido.
+    const auto brightness = [&] (StringExcitation excitation, float toneHz) {
+        double sum = 0.0;
+        for (std::uint32_t seed = 1; seed <= 6; ++seed)
+        {
+            const auto levels = harmonicLevels (renderPluck (*string, hz, { excitation, 0.0f, toneHz }, length, seed), sr, hz, 40);
+            sum += meanPowerDb (levels, 30, 40, 1) - meanPowerDb (levels, 1, 4, 1);
+        }
+        return sum / 6.0;
+    };
+    for (const auto excitation : { StringExcitation::filteredNoise, StringExcitation::impulse })
+    {
+        const double dark = brightness (excitation, 500.0f), mid = brightness (excitation, 2500.0f),
+                     bright = brightness (excitation, 20000.0f);
+        std::printf ("  %-14s agudos respecto a graves: 500 Hz %+.1f dB, 2.5 kHz %+.1f dB, 20 kHz %+.1f dB\n",
+                     excitation == StringExcitation::impulse ? "Impulse" : "Filtered Noise", dark, mid, bright);
+        CHECK (dark < mid - 10.0 && mid < bright - 2.0);
+        // Un paso bajo de 1 polo baja 6 dB por octava: de 500 Hz a 20 kHz, los armónicos 30-40 ganan unos 20 dB.
+        CHECK (bright - dark > 15.0);
+    }
+    const double whiteDark = brightness (StringExcitation::whiteNoise, 500.0f);
+    const double whiteBright = brightness (StringExcitation::whiteNoise, 20000.0f);
+    std::printf ("  White Noise: %+.2f dB con Pick Tone 500 Hz y %+.2f dB con 20 kHz\n", whiteDark, whiteBright);
+    CHECK (whiteDark == whiteBright);
+
+    // Impulse no depende de la semilla: dos punteos dan la misma onda (el ruido no).
+    const PluckShape impulse { StringExcitation::impulse, 0.3f, 3000.0f };
+    CHECK (renderPluck (*string, hz, impulse, 4000, 1) == renderPluck (*string, hz, impulse, 4000, 77));
+    CHECK (renderPluck (*string, hz, { StringExcitation::filteredNoise, 0.3f, 3000.0f }, 4000, 1)
+           != renderPluck (*string, hz, { StringExcitation::filteredNoise, 0.3f, 3000.0f }, 4000, 77));
+}
+
+void testExcitationLevels()
+{
+    std::printf ("Nivel de la excitación: la energía del ruido blanco con cualquier excitación, Pick Tone o Pick Position "
+                 "(pico <= 4)\n");
+
+    // 0 dB = la energía media de un período de ruido blanco sin peine (período / 3).
+    double worstNoise = 0.0, worstComb = 0.0, worstImpulse = 0.0, worstDefaultImpulse = 0.0;
+    float peak = 0.0f;
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (const int note : { 21, 33, 45, 57, 81, 96 })
+        {
+            const double hz = deepwater::dsp::midiNoteToHz (note);
+            string->setFrequency (hz);
+            string->reset();
+            const double reference = std::round (string->getPeriod()) / 3.0;
+            const auto energyDb = [&] (const PluckShape& shape, std::uint32_t seed) {
+                string->reset();
+                string->pluck (seed, shape);
+                double energy = 0.0;
+                for (const float s : string->getExcitation())
+                {
+                    energy += static_cast<double> (s) * s;
+                    peak = std::max (peak, std::abs (s));
+                }
+                return 10.0 * std::log10 (energy / reference);
+            };
+            for (const float tone : { 200.0f, 1000.0f, 2500.0f, 5000.0f, 20000.0f })
+                for (const float position : { 0.0f, 0.13f, 0.5f })
+                {
+                    worstNoise = std::max (worstNoise, std::abs (energyDb ({ StringExcitation::filteredNoise, position, tone }, 5)));
+                    const double impulse = energyDb ({ StringExcitation::impulse, position, tone }, 1);
+                    worstImpulse = std::min (worstImpulse, impulse);
+                    if (tone == 2500.0f)
+                        worstDefaultImpulse = std::min (worstDefaultImpulse, impulse);
+                    if (verbose && position == 0.0f)
+                        std::printf ("    %5.0f Hz nota %3d, Pick Tone %5.0f Hz: Impulse %+.1f dB\n", sr, note, tone, impulse);
+                }
+            // White Noise con peine: la media de muchos punteos queda en el nivel del ruido sin peine.
+            for (const float position : { 0.02f, 0.1f, 1.0f / 3.0f, 0.5f })
+            {
+                double sum = 0.0;
+                for (std::uint32_t seed = 1; seed <= 300; ++seed)
+                    sum += std::pow (10.0, energyDb ({ StringExcitation::whiteNoise, position, 2500.0f }, seed) / 10.0);
+                worstComb = std::max (worstComb, std::abs (10.0 * std::log10 (sum / 300.0)));
+            }
+        }
+    }
+    std::printf ("  Filtered Noise: peor %.2f dB | White Noise con peine (media de 300): peor %.2f dB | Impulse: hasta %.1f dB "
+                 "(Pick Tone 2.5 kHz: hasta %.1f dB; el pico se limita en graves brillantes) | pico máximo %.2f\n",
+                 worstNoise, worstComb, worstImpulse, worstDefaultImpulse, peak);
+    CHECK (worstNoise < 0.01);
+    CHECK (worstComb < 0.3);
+    CHECK (peak <= 4.0001f);
+}
+
+// Voz con la cuerda sola (sin oscilador), lista para tocar.
+std::unique_ptr<VoiceManager> stringVoice (double sampleRate, const SourceSettings& sources, const ModulationSettings& modulation)
+{
+    auto manager = std::make_unique<VoiceManager>();
+    prepareWithSources (*manager, sampleRate, sources);
+    manager->setModulationSettings (modulation);
+    manager->setModWheel (1.0f);
+    return manager;
+}
+
+SourceSettings stringOnlySources()
+{
+    auto sources = sineSources();
+    sources.oscillators[0].enabled = false;
+    sources.string.enabled = true;
+    return sources;
+}
+
+std::vector<float> playString (VoiceManager& manager, int note, float velocity, size_t numSamples)
+{
+    manager.noteOn (note, velocity);
+    std::vector<float> signal (numSamples, 0.0f);
+    manager.render (signal.data(), static_cast<int> (numSamples));
+    return signal;
+}
+
+void testStringDestinations()
+{
+    std::printf ("Destinos de la cuerda: la Mod Wheel al máximo equivale a mover la perilla\n");
+
+    constexpr double sr = 48000.0;
+    constexpr size_t length = 24000;
+    struct Case
+    {
+        const char* name;
+        ModDestination destination;
+        float amount;
+        std::function<void (SourceSettings&)> knob, moved;
+    };
+    const std::array<Case, 6> cases { {
+        { "Level 40 % + 40 %", ModDestination::stringLevel, 0.4f, [] (SourceSettings& s) { s.string.level = 0.4f; },
+          [] (SourceSettings& s) { s.string.level = 0.8f; } },
+        { "Pitch +50 % = Semi +12", ModDestination::stringPitch, 0.5f, [] (SourceSettings&) {},
+          [] (SourceSettings& s) { s.string.semitones = 12; } },
+        { "Damping 0 + 50 %", ModDestination::stringDamping, 0.5f, [] (SourceSettings& s) { s.string.damping = 0.0f; },
+          [] (SourceSettings& s) { s.string.damping = 0.5f; } },
+        { "Pick Pos 0 + 50 %", ModDestination::stringPickPosition, 0.5f, [] (SourceSettings& s) { s.string.pluck.pickPosition = 0.0f; },
+          [] (SourceSettings& s) { s.string.pluck.pickPosition = 0.25f; } },
+        { "Pick Tone 500 Hz + 50 %", ModDestination::stringPickTone, 0.5f,
+          [] (SourceSettings& s) { s.string.pluck.pickToneHz = 500.0f; }, [] (SourceSettings& s) { s.string.pluck.pickToneHz = 5000.0f; } },
+        { "Decay 0.5 s + 50 %", ModDestination::stringDecay, 0.5f, [] (SourceSettings& s) { s.string.decaySeconds = 0.5f; },
+          [] (SourceSettings& s) { s.string.decaySeconds = 0.5f * std::sqrt (600.0f); } },
+    } };
+
+    double worst = -300.0;
+    for (const auto& c : cases)
+    {
+        auto sources = stringOnlySources();
+        sources.string.pluck.excitation = StringExcitation::filteredNoise;
+        auto withRoute = sources, withKnob = sources;
+        c.knob (withRoute);
+        c.moved (withKnob);
+        ModulationSettings route;
+        route.slots[0] = { ModSource::modWheel, c.destination, c.amount };
+        const auto modulated = playString (*stringVoice (sr, withRoute, route), 57, 1.0f, length);
+        const auto reference = playString (*stringVoice (sr, withKnob, {}), 57, 1.0f, length);
+        std::vector<float> difference (length);
+        for (size_t i = 0; i < length; ++i)
+            difference[i] = modulated[i] - reference[i];
+        const double db = toDb (rmsOf (difference) / rmsOf (reference));
+        std::printf ("  %-24s diferencia %s\n", c.name, rmsOf (difference) == 0.0 ? "ninguna (bit a bit)" : (std::to_string (db) + " dB").c_str());
+        worst = std::max (worst, rmsOf (difference) == 0.0 ? -300.0 : db);
+    }
+    CHECK (worst < -80.0);
+
+    // Velocity → Pick Tone: una nota fuerte puntea más brillante que una suave (Impulse, perilla en 300 Hz).
+    auto sources = stringOnlySources();
+    sources.string.damping = 0.0f; // que el filtro de la cuerda no tape la diferencia
+    sources.string.pluck = { StringExcitation::impulse, 0.0f, 300.0f };
+    ModulationSettings velocityRoute;
+    velocityRoute.slots[0] = { ModSource::velocity, ModDestination::stringPickTone, 1.0f };
+    const auto brightness = [&] (float velocity) {
+        const auto signal = playString (*stringVoice (sr, sources, velocityRoute), 45, velocity, 12000);
+        const auto levels = harmonicLevels (signal, sr, 110.0, 40);
+        return meanPowerDb (levels, 30, 40, 1) - meanPowerDb (levels, 1, 4, 1);
+    };
+    const double soft = brightness (0.2f), hard = brightness (1.0f);
+    std::printf ("  Velocity -> Pick Tone: agudos respecto a graves %+.1f dB (velocity 0.2) y %+.1f dB (1.0)\n", soft, hard);
+    CHECK (hard > soft + 10.0);
+}
+
+void testPickSettingsApplyOnNextNote()
+{
+    std::printf ("Pick Position, Pick Tone y Excitation solo cambian el punteo siguiente: la nota que suena sigue igual\n");
+
+    constexpr double sr = 44100.0;
+    auto sources = stringOnlySources();
+    sources.string.decaySeconds = 4.0f;
+    auto moved = sources;
+    moved.string.pluck = { StringExcitation::impulse, 0.4f, 700.0f };
+
+    const auto render = [&] (bool change) {
+        auto manager = stringVoice (sr, sources, {});
+        manager->noteOn (52, 0.9f);
+        std::vector<float> signal (30000, 0.0f);
+        manager->render (signal.data(), 10000);
+        if (change)
+            manager->setSourceSettings (moved);
+        manager->render (signal.data() + 10000, 20000);
+        return signal;
+    };
+    CHECK (render (false) == render (true));
+
+    // Y la nota siguiente sí puntea con lo nuevo.
+    auto manager = stringVoice (sr, sources, {});
+    manager->setSourceSettings (moved);
+    auto newPluck = playString (*manager, 52, 0.9f, 8000);
+    auto again = stringVoice (sr, sources, {});
+    CHECK (newPluck != playString (*again, 52, 0.9f, 8000));
+}
+
+void testModulatedStringIsClickFree()
+{
+    std::printf ("String Decay, Damping y Level con un LFO cuadrado no hacen clic\n");
+
+    // Referencia: la misma nota sin modulación, con la perilla en el extremo más fuerte o más brillante del recorrido del
+    // LFO. Un salto sin suavizar daría una segunda diferencia muchas veces mayor que la de la referencia.
+    constexpr double sr = 48000.0;
+    const auto settle = static_cast<size_t> (0.1 * sr);
+    const auto length = settle + static_cast<size_t> (0.5 * sr);
+    struct Case
+    {
+        ModDestination destination;
+        float amount;
+        std::function<void (SourceSettings&)> loudest;
+    };
+    const std::array<Case, 3> cases { {
+        { ModDestination::stringDecay, 0.2f, [] (SourceSettings& s) { s.string.decaySeconds *= std::pow (600.0f, 0.2f); } },
+        { ModDestination::stringDamping, 0.3f, [] (SourceSettings& s) { s.string.damping = 0.1f; } },
+        { ModDestination::stringLevel, 0.6f, [] (SourceSettings& s) { s.string.level = 1.0f; } },
+    } };
+    float worstRatio = 0.0f;
+    for (const auto& c : cases)
+    {
+        auto sources = stringOnlySources();
+        sources.string.decaySeconds = 2.0f;
+        sources.string.damping = 0.4f;
+        ModulationSettings modulation;
+        modulation.lfos[0] = { LfoShape::square, LfoMode::retrigger, false, 7.0f, 5 };
+        modulation.slots[0] = { ModSource::lfo1, c.destination, c.amount };
+        auto loudest = sources;
+        c.loudest (loudest);
+        auto modulated = stringVoice (sr, sources, modulation);
+        auto reference = stringVoice (sr, loudest, {});
+        const auto a = playString (*modulated, 57, 1.0f, length);
+        const auto b = playString (*reference, 57, 1.0f, length);
+        const float ratio = maxSecondDifference (a, settle, length) / maxSecondDifference (b, settle, length);
+        std::printf ("  %-16s segunda diferencia / la de la referencia: %.2f\n",
+                     undertow::synth::modDestinationNames[static_cast<size_t> (c.destination)], ratio);
+        worstRatio = std::max (worstRatio, ratio);
+    }
+    CHECK (worstRatio < 1.25f);
+}
+
+void testPluckExtremesAreSafe()
+{
+    std::printf ("Punteo con excitaciones y destinos al azar (S&H a los 6 destinos), bloques al azar: sin NaN\n");
+
+    std::mt19937 rng (31);
+    std::uniform_real_distribution<float> unit (0.0f, 1.0f);
+    bool finite = true;
+    float peak = 0.0f;
+    for (const double sr : sampleRates)
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (int i = 0; i < 300; ++i)
+        {
+            string->setFrequency (0.5 * std::pow (1.0e5, unit (rng)));
+            string->setDecay (0.01f + 40.0f * unit (rng), 4.0f * unit (rng) - 2.0f);
+            string->setDamping (unit (rng));
+            string->pluck (static_cast<std::uint32_t> (i),
+                           { static_cast<StringExcitation> (i % 3), 1.2f * unit (rng) - 0.1f, 50000.0f * unit (rng) });
+            for (int k = 0; k < 64; ++k)
+            {
+                const float y = string->processSample();
+                finite = finite && std::isfinite (y);
+            }
+        }
+    }
+
+    auto sources = stringOnlySources();
+    ModulationSettings modulation;
+    modulation.lfos[0] = { LfoShape::sampleAndHold, LfoMode::free, false, 30.0f, 5 };
+    const std::array<ModDestination, 6> destinations { ModDestination::stringLevel, ModDestination::stringPitch,
+                                                       ModDestination::stringDecay, ModDestination::stringDamping,
+                                                       ModDestination::stringPickPosition, ModDestination::stringPickTone };
+    for (size_t d = 0; d < destinations.size(); ++d)
+        modulation.slots[d] = { ModSource::lfo1, destinations[d], d % 2 == 0 ? 1.0f : -1.0f };
+    modulation.slots[6] = { ModSource::velocity, ModDestination::stringPickTone, 1.0f };
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        auto manager = stringVoice (sr, sources, modulation);
+        manager->setPolyphony (16);
+        std::vector<float> left (4096), right (4096);
+        for (int block = 0; block < 300; ++block)
+        {
+            sources.string.pluck = { static_cast<StringExcitation> (block % 3), 0.5f * unit (rng), 200.0f * std::pow (100.0f, unit (rng)) };
+            sources.string.decaySeconds = 0.05f + 29.95f * unit (rng);
+            manager->setSourceSettings (sources);
+            if (unit (rng) < 0.4f)
+                manager->noteOn (static_cast<int> (unit (rng) * 128.0f) % 128, unit (rng));
+            if (unit (rng) < 0.2f)
+                manager->noteOff (static_cast<int> (unit (rng) * 128.0f) % 128);
+            const int n = 1 + static_cast<int> (unit (rng) * 4095.0f);
+            std::fill (left.begin(), left.end(), 0.0f);
+            std::fill (right.begin(), right.end(), 0.0f);
+            manager->render (left.data(), right.data(), n);
+            for (size_t i = 0; i < static_cast<size_t> (n); ++i)
+            {
+                finite = finite && std::isfinite (left[i]) && std::isfinite (right[i]);
+                peak = std::max (peak, std::abs (left[i]));
+            }
+        }
+    }
+    std::printf ("  pico en la voz: %.2f\n", peak);
+    CHECK (finite);
+    CHECK (peak < 30.0f);
+}
+
+void testPluckCpuCost()
+{
+    std::printf ("CPU del punteo (se calcula una vez por nota, en la primera muestra)\n");
+
+    // Lo más caro: un acorde de 16 notas graves a 96 kHz punteado de una vez (cada período, ~3600 muestras).
+    auto string = std::make_unique<PluckedString>();
+    string->prepare (96000.0);
+    string->setFrequency (27.5);
+    const auto pluckTime = [&] (const PluckShape& shape) {
+        return bestOfFive ([&] {
+            const auto start = std::chrono::steady_clock::now();
+            for (std::uint32_t i = 0; i < 16; ++i)
+                string->pluck (i, shape);
+            return std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+        });
+    };
+    const double white = pluckTime ({});
+    const double seconds = pluckTime ({ StringExcitation::filteredNoise, 0.2f, 1500.0f });
+    std::printf ("  16 punteos de A1 de FL (27.5 Hz) a 96 kHz: White Noise (Fase 12) %.0f us, Filtered Noise + Pick Position "
+                 "%.0f us (un bloque de 256 muestras dura 2667 us)\n", white * 1.0e6, seconds * 1.0e6);
+    CHECK (seconds < 0.002);
+
+    // Destinos modulados en cada muestra: Decay y Damping recalculan la cuerda (con su ritmo de control de 32 muestras).
+    SourceSettings strings = stringOnlySources();
+    strings.string.decaySeconds = 30.0f;
+    ModulationSettings moving;
+    moving.lfos[0] = { LfoShape::sine, LfoMode::retrigger, false, 3.0f, 5 };
+    moving.slots[0] = { ModSource::lfo1, ModDestination::stringDecay, 0.1f };
+    moving.slots[1] = { ModSource::lfo1, ModDestination::stringDamping, 0.2f };
+    moving.slots[2] = { ModSource::lfo1, ModDestination::stringPitch, 0.01f };
+    const double cpu = voiceScenarioCpu (strings, {}, moving, 16);
+    std::printf ("  16 notas con LFO -> String Decay, Damping y Pitch: %.1f %% de un núcleo\n", 100.0 * cpu);
+    CHECK (cpu < 0.20);
+}
+
 } // namespace
 
 
@@ -3852,7 +4319,7 @@ int main (int argc, char** argv)
     std::setvbuf (stdout, nullptr, _IONBF, 0); // sin buffer: si el programa se cae, se ve en qué test fue
     // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 / --fase12 (solo los tests de esa
     // fase); --cpu (solo la tabla de CPU de la Fase 11, sin tests).
-    bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false, onlyPhase12 = false;
+    bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false, onlyPhase12 = false, onlyPhase13 = false;
     for (int i = 1; i < argc; ++i)
     {
         if (std::string_view (argv[i]) == "--cpu")
@@ -3865,8 +4332,9 @@ int main (int argc, char** argv)
         onlyPhase8 = onlyPhase8 || std::string_view (argv[i]) == "--fase8";
         onlyPhase9 = onlyPhase9 || std::string_view (argv[i]) == "--fase9";
         onlyPhase12 = onlyPhase12 || std::string_view (argv[i]) == "--fase12";
+        onlyPhase13 = onlyPhase13 || std::string_view (argv[i]) == "--fase13";
     }
-    const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9 && ! onlyPhase12;
+    const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9 && ! onlyPhase12 && ! onlyPhase13;
     if (all)
     {
         testSegmentTimesAreExactAtEverySampleRate();
@@ -3978,6 +4446,18 @@ int main (int argc, char** argv)
         testStringChangesAreClickFree();
         testStringOffKeepsTheSound();
         testStringCpuCost();
+    }
+
+    if (all || onlyPhase13)
+    {
+        testPickPositionRemovesHarmonics();
+        testPickToneDarkens();
+        testExcitationLevels();
+        testStringDestinations();
+        testPickSettingsApplyOnNextNote();
+        testModulatedStringIsClickFree();
+        testPluckExtremesAreSafe();
+        testPluckCpuCost();
     }
 
     if (failures == 0)

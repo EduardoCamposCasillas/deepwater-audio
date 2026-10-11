@@ -275,5 +275,14 @@ private:
     std::array<Knob, 6> stringKnobs; // Octave, Semi, Fine, Level, Decay, Damping
     juce::Label stringHelp;
 
+    // --- Fase 13: el punteo ---
+    juce::GroupComponent pluckGroup;
+    juce::Label excitationLabel;
+    juce::ComboBox excitationBox;
+    std::unique_ptr<ComboBoxAttachment> excitationAttachment;
+    std::array<Knob, 2> pluckKnobs; // Pick Position, Pick Tone
+    juce::Label pluckHelp;
+    std::atomic<float>* excitationParam = nullptr;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UndertowAudioProcessorEditor)
 };

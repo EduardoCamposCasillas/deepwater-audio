@@ -31,7 +31,7 @@ inline constexpr float cutoffKnobScale = synth::cutoffModulationOctaves / 9.9657
 
 // Pitch se dibuja sobre la perilla Semi (−12..+12 = 24 semitonos): 100 % = ±24 st = toda la perilla.
 // Volume y Global Pitch no tienen una perilla propia: solo se conectan desde la matriz.
-inline constexpr std::array<ModulationTarget, 17> modulationTargets { {
+inline constexpr std::array<ModulationTarget, 23> modulationTargets { {
     { synth::ModDestination::oscAPosition, params::oscillators[0].position, 1.0f },
     { synth::ModDestination::oscAPitch, params::oscillators[0].semitones,
       synth::pitchModulationSemitones / 24.0f },
@@ -51,6 +51,13 @@ inline constexpr std::array<ModulationTarget, 17> modulationTargets { {
     { synth::ModDestination::filterCutoff, params::filter1Cutoff, cutoffKnobScale },
     { synth::ModDestination::filterResonance, params::filter1Resonance, 1.0f },
     { synth::ModDestination::filterDrive, params::filter1Drive, 1.0f },
+    // Fase 13: la cuerda. Pitch sobre su Semi, como en los osciladores; las demás, toda la perilla.
+    { synth::ModDestination::stringLevel, params::stringLevel, 1.0f },
+    { synth::ModDestination::stringPitch, params::stringSemi, synth::pitchModulationSemitones / 24.0f },
+    { synth::ModDestination::stringDecay, params::stringDecay, 1.0f },
+    { synth::ModDestination::stringDamping, params::stringDamping, 1.0f },
+    { synth::ModDestination::stringPickPosition, params::stringPickPosition, 1.0f },
+    { synth::ModDestination::stringPickTone, params::stringPickTone, 1.0f },
 } };
 
 [[nodiscard]] inline std::optional<ModulationTarget> targetForParameter (std::string_view parameterId) noexcept

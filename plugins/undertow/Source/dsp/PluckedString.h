@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -11,6 +12,24 @@
 
 namespace undertow::dsp
 {
+
+// Fase 13: con qué se puntea la cuerda. El orden se guarda en los proyectos (índice): solo añadir al final.
+enum class StringExcitation
+{
+    whiteNoise,    // ruido blanco: todos los armónicos con la misma fuerza (el sonido de la Fase 12)
+    filteredNoise, // ruido por el paso bajo de Pick Tone: una púa más blanda, o un dedo
+    impulse,       // un solo golpe (1 muestra) por el mismo paso bajo: siempre igual, sin el "grano" del ruido
+};
+
+// Cómo es el punteo. Se lee solo al puntear: moverlo con la cuerda sonando cambia la nota siguiente, no esta.
+struct PluckShape
+{
+    StringExcitation excitation = StringExcitation::whiteNoise;
+    float pickPosition = 0.0f;  // 0..0.5 del largo de la cuerda (0 = sin peine; 0.5 = en el centro)
+    float pickToneHz = 2500.0f; // corte del paso bajo de la excitación (White Noise no lo usa)
+
+    bool operator== (const PluckShape&) const = default;
+};
 
 // Fase 12: cuerda pulsada (Karplus-Strong, con las extensiones de Jaffe & Smith). Sin dependencias de JUCE.
 //
@@ -47,6 +66,9 @@ public:
     static constexpr double minPeriodSamples = 8.0; // tope agudo: fs/8 (5.5 kHz a 44.1 kHz)
     static constexpr float minDecaySeconds = 0.05f;
     static constexpr float maxDecaySeconds = 30.0f;
+    static constexpr float maxPickPosition = 0.5f;
+    static constexpr float minPickToneHz = 200.0f;
+    static constexpr float maxPickToneHz = 20000.0f;
 
     // Se llama fuera del hilo de audio: reserva la línea y el buffer de la excitación para la nota más grave posible.
     void prepare (double newSampleRate)
@@ -54,7 +76,8 @@ public:
         sampleRate = newSampleRate;
         maxPeriod = static_cast<int> (std::ceil (sampleRate / minFrequency)) + 8;
         line.prepare (maxPeriod + 8);
-        excitation.assign (static_cast<size_t> (maxPeriod), 0.0f);
+        excitation.assign (static_cast<size_t> (maxPeriod + maxPeriod / 2 + 8), 0.0f); // + el peine (medio período)
+        scratch.assign (static_cast<size_t> (maxPeriod), 0.0f);
         smoothingCoef = static_cast<float> (1.0 - std::exp (-1.0 / (smoothingSeconds * sampleRate)));
         muteCoef = static_cast<float> (1.0 - std::exp (-1.0 / (muteSeconds * sampleRate)));
         reset();
@@ -82,9 +105,12 @@ public:
         }
     }
 
-    void setDecay (float seconds) noexcept
+    // 'modulation' (Fase 13, la matriz): 1 = toda la perilla hacia arriba en su escala logarítmica (×600).
+    void setDecay (float seconds, float modulation = 0.0f) noexcept
     {
-        targetLogDecay = std::log (std::clamp (seconds, minDecaySeconds, maxDecaySeconds));
+        const float logSeconds = std::log (std::clamp (seconds, minDecaySeconds, maxDecaySeconds));
+        targetLogDecay = modulation == 0.0f ? logSeconds
+                                            : std::clamp (logSeconds + modulation * logDecayRange, logMinDecay, logMaxDecay);
     }
 
     void setDamping (float amount) noexcept { targetDamping = std::clamp (amount, 0.0f, 1.0f); }
@@ -99,9 +125,9 @@ public:
         jumpToTargets();
     }
 
-    // Puntear: un período de ruido blanco entra en la línea (se SUMA a lo que ya vibra: redisparar no hace clic).
+    // Puntear: un período de excitación entra en la línea (se SUMA a lo que ya vibra: redisparar no hace clic).
     // Se le quita la media: la continua no tiene "armónicos" que el filtro pueda apagar y se quedaría circulando.
-    void pluck (std::uint32_t seed) noexcept
+    void pluck (std::uint32_t seed, const PluckShape& shape = {}) noexcept
     {
         targetMute = 0.0f; // si se estaba apagando, la nota nueva la vuelve a dejar libre
         if (silent)
@@ -115,25 +141,7 @@ public:
         if (silent)
             jumpToTargets();
         const int length = std::clamp (static_cast<int> (std::lround (period)), 1, maxPeriod);
-
-        std::uint32_t state = seed * 2654435761u + 0x9E3779B9u;
-        if (state == 0)
-            state = 1;
-        double sum = 0.0;
-        for (int i = 0; i < length; ++i)
-        {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-            const float white = static_cast<float> (state >> 8) * (2.0f / 16777216.0f) - 1.0f; // uniforme en [-1, 1)
-            excitation[static_cast<size_t> (i)] = white;
-            sum += white;
-        }
-        const auto mean = static_cast<float> (sum / length);
-        for (int i = 0; i < length; ++i)
-            excitation[static_cast<size_t> (i)] -= mean;
-
-        excitationLength = length;
+        excitationLength = makeExcitation (seed, shape, length);
         excitationIndex = 0;
         silent = false;
         silentCount = 0;
@@ -195,6 +203,10 @@ public:
     [[nodiscard]] double getLoopGain() const noexcept { return targetLoopGain; }
     [[nodiscard]] double getPole() const noexcept { return 1.0 - targetFeedforward; }
     [[nodiscard]] bool isSilent() const noexcept { return silent; }
+    [[nodiscard]] std::vector<float> getExcitation() const // el último punteo (reserva memoria: solo tests)
+    {
+        return { excitation.begin(), excitation.begin() + excitationLength };
+    }
 
     // Polo p de un paso bajo de 1 polo con ganancia 1 en continua, H = (1 − p) / (1 − p·z⁻¹), tal que |H(ω)|² = r.
     // De (1 − p)² = r·(1 − 2p·cos ω + p²) sale una cuadrática cuyas raíces multiplican 1: la buena es la menor,
@@ -211,6 +223,163 @@ public:
     }
 
 private:
+    // Fase 13: escribe la excitación en 'excitation' y devuelve cuántas muestras dura. Pasos:
+    //   1. la fuente, de un período: ruido blanco (el de la Fase 12, la misma secuencia) o un golpe de 1 muestra;
+    //   2. Pick Tone: paso bajo de 1 polo (solo Filtered Noise e Impulse), circular: el período se repite en la cuerda;
+    //   3. quitar la media;
+    //   4. Pick Position: el peine x[n] − w·x[n − D], que alarga la excitación D muestras;
+    //   5. ajustar el nivel.
+    int makeExcitation (std::uint32_t seed, const PluckShape& shape, int length) noexcept
+    {
+        const auto n = static_cast<size_t> (length);
+        float* source = scratch.data();
+        float* result = excitation.data();
+
+        if (shape.excitation == StringExcitation::impulse)
+        {
+            std::fill (source, source + n, 0.0f);
+            source[0] = 1.0f;
+        }
+        else
+        {
+            std::uint32_t state = seed * 2654435761u + 0x9E3779B9u;
+            if (state == 0)
+                state = 1;
+            for (size_t i = 0; i < n; ++i)
+            {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                source[i] = static_cast<float> (state >> 8) * (2.0f / 16777216.0f) - 1.0f; // uniforme en [-1, 1)
+            }
+        }
+
+        if (shape.excitation != StringExcitation::whiteNoise)
+            lowPassCircular (source, n, std::clamp (shape.pickToneHz, minPickToneHz, maxPickToneHz));
+
+        double sum = 0.0;
+        for (size_t i = 0; i < n; ++i)
+            sum += source[i];
+        const auto mean = static_cast<float> (sum / length);
+        for (size_t i = 0; i < n; ++i)
+            source[i] -= mean;
+
+        // Pick Position (Jaffe & Smith): puntear a una fracción β del largo manda la deformación hacia los dos extremos;
+        // la parte que va hacia el puente vuelve invertida β períodos después. Restar la señal retrasada D = β·período
+        // anula los armónicos múltiplos de 1/β: en el centro (β = 1/2) todos los pares, el sonido "hueco"; cerca del
+        // puente casi ninguno (brillante y nasal). El peso w sube de 0 a 1 en el primer 5 % para que 0 % no salte.
+        // El peine es LINEAL (la excitación dura N + D muestras): su espectro es exactamente X(f)·(1 − w·e^(−j2πfD)) y,
+        // con D fraccionario sobre el período real, los huecos caen justo en los armónicos. (Con D redondeado, o dando
+        // la vuelta dentro de las N muestras enteras del buffer, se quedaban en −20 dB.)
+        const float beta = std::clamp (shape.pickPosition, 0.0f, maxPickPosition);
+        const float weight = std::min (beta / fullCombPosition, 1.0f);
+        size_t total = n;
+        float combEnergy = 1.0f; // energía que añade el peine, por unidad de energía del ruido blanco
+        if (weight > 0.0f)
+            combEnergy = applyComb (source, result, n, static_cast<double> (beta) * period, weight, total);
+        else
+            std::copy (source, source + n, result);
+
+        // Nivel. Ruido blanco: el de la Fase 12; con el peine se divide por la raíz de la energía que añade (≈ 1 + w²: dos
+        // copias del ruido sin relación entre sí). Filtered Noise e Impulse: la energía se lleva exactamente a la del ruido
+        // blanco (período / 3): cambiar el tipo de excitación o el Pick Tone cambia el color, no el volumen.
+        float gain = 1.0f;
+        if (shape.excitation == StringExcitation::whiteNoise)
+        {
+            if (weight > 0.0f)
+                gain = 1.0f / std::sqrt (combEnergy);
+        }
+        else
+        {
+            double energy = 0.0;
+            for (size_t i = 0; i < total; ++i)
+                energy += static_cast<double> (result[i]) * result[i];
+            if (energy > 0.0)
+                gain = static_cast<float> (std::sqrt (static_cast<double> (length) / (3.0 * energy)));
+        }
+
+        // Un golpe concentra la energía en pocas muestras: con el nivel del ruido, en una nota grave y brillante el pico
+        // pasaría de 20. Se limita a 4 (el ruido llega a 1; en la salida de la voz, × 0.25 × Level: 0.8 como mucho): un
+        // Impulse brillante en notas graves suena algo más suave que el ruido.
+        float peak = 0.0f;
+        for (size_t i = 0; i < total; ++i)
+            peak = std::max (peak, std::abs (result[i]));
+        gain = std::min (gain, maxExcitationPeak / std::max (peak, 1.0e-20f));
+        if (gain != 1.0f)
+            for (size_t i = 0; i < total; ++i)
+                result[i] *= gain;
+        return static_cast<int> (total);
+    }
+
+    // El peine: result[i] = source[i] − w·source(i − D), con source = 0 fuera de sus n muestras. D fraccionario con
+    // Lagrange de 3.er orden (muestras j − 1 … j + 2; las fórmulas de deepwater::dsp::LagrangeTaps escritas por
+    // posición): la fracción es la misma en todas las muestras, así que los pesos se calculan una vez.
+    // 'total' = n + D + 2 (hasta donde llega la copia retrasada). Devuelve la energía de la salida para ruido blanco de
+    // energía 1: 1 + w²·Σℓ² − 2w·(el peso que cae sobre la propia muestra, si D < 2). La interpolación suaviza un poco la
+    // copia (Σℓ² < 1): compensar con 1 + w² dejaba el ruido con peine hasta 0.7 dB más suave.
+    float applyComb (const float* source, float* result, size_t n, double delay, float weight, size_t& total) const noexcept
+    {
+        const double whole = std::floor (-delay);
+        const auto f = static_cast<float> (-delay - whole);
+        const std::array<float, 4> lagrange { -f * (f - 1.0f) * (f - 2.0f) / 6.0f, (f + 1.0f) * (f - 1.0f) * (f - 2.0f) / 2.0f,
+                                              -(f + 1.0f) * f * (f - 2.0f) / 2.0f, (f + 1.0f) * f * (f - 1.0f) / 6.0f };
+        const auto shift = static_cast<long long> (whole) - 1; // primera de las 4 muestras = i + shift
+        const auto size = static_cast<long long> (n);
+
+        total = std::min (excitation.size(), n + static_cast<size_t> (std::ceil (delay)) + 2);
+        for (size_t i = 0; i < total; ++i)
+        {
+            const auto base = static_cast<long long> (i) + shift;
+            float delayed = 0.0f;
+            if (base >= 0 && base + 3 < size)
+            {
+                const float* x = source + base;
+                delayed = lagrange[0] * x[0] + lagrange[1] * x[1] + lagrange[2] * x[2] + lagrange[3] * x[3];
+            }
+            else
+            {
+                for (long long k = 0; k < 4; ++k)
+                    if (base + k >= 0 && base + k < size)
+                        delayed += lagrange[static_cast<size_t> (k)] * source[base + k];
+            }
+            result[i] = (i < n ? source[i] : 0.0f) - weight * delayed;
+        }
+
+        double energy = 1.0;
+        for (size_t k = 0; k < lagrange.size(); ++k)
+        {
+            energy += static_cast<double> (weight) * weight * lagrange[k] * lagrange[k];
+            if (shift + static_cast<long long> (k) == 0) // la toma cae sobre la propia muestra
+                energy -= 2.0 * weight * lagrange[k];
+        }
+        return static_cast<float> (energy);
+    }
+
+    // Paso bajo TPT de 1 polo (el de deepwater::dsp::OnePole) sobre una señal periódica, sin transitorio de arranque:
+    // empieza con el estado que tendría tras infinitos períodos. Desde 0, una vuelta deja el estado en S; sin entrada,
+    // una vuelta lo multiplica por aᴺ (a = 1 − 2G es el polo). El estado periódico cumple s = aᴺ·s + S → s = S / (1 − aᴺ).
+    // Una pasada para medir S y otra para filtrar.
+    void lowPassCircular (float* signal, size_t n, float cutoffHz) const noexcept
+    {
+        const double cutoff = std::min (static_cast<double> (cutoffHz), 0.49 * sampleRate);
+        const auto g = static_cast<float> (std::tan (std::numbers::pi * cutoff / sampleRate));
+        const float G = g / (1.0f + g);
+
+        float state = 0.0f;
+        for (size_t i = 0; i < n; ++i)
+            state += 2.0f * G * (signal[i] - state);
+        const double turn = std::pow (1.0 - 2.0 * static_cast<double> (G), static_cast<double> (n));
+        state = static_cast<float> (state / (1.0 - turn));
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            const float v = (signal[i] - state) * G;
+            const float low = v + state;
+            state = low + v;
+            signal[i] = low;
+        }
+    }
+
     static void glide (float& value, float target, float coef) noexcept
     {
         if (value == target)
@@ -348,10 +517,16 @@ private:
     static constexpr double maxDcGain = 1.0 - 1.0e-5;  // la continua nunca se queda circulando para siempre
     static constexpr double maxDcDecayRatio = 4.0;     // ... y cae como mucho 4 veces más lento que el fundamental
     static constexpr float silenceThreshold = 1.0e-5f; // −100 dB
+    static constexpr float fullCombPosition = 0.05f;   // desde aquí el peine de Pick Position es completo (w = 1)
+    static constexpr float maxExcitationPeak = 4.0f;
+    static inline const float logMinDecay = std::log (minDecaySeconds);
+    static inline const float logMaxDecay = std::log (maxDecaySeconds);
+    static inline const float logDecayRange = logMaxDecay - logMinDecay;
     static constexpr int controlInterval = 32; // 0.7 ms a 44.1 kHz: la longitud de la línea sí sigue al tono en cada muestra
 
     deepwater::dsp::DelayLine line;
     std::vector<float> excitation;
+    std::vector<float> scratch; // Fase 13: la fuente de la excitación antes del peine
     deepwater::dsp::LagrangeTaps taps;
     double periodScale = 1.0; // período de diseño / período de la nota (la corrección del "resbalón" del modo)
     double delayOffset = 1.0; // período de diseño − retardo de la línea (realimentación + filtro + corrección de Lagrange)

@@ -2081,3 +2081,131 @@ Inténtalo primero; las pistas vendrán después.
 
 ### Retos completados
 - [ ] Reto Fase 12 — contrabajo pizzicato de jazz
+
+## Fase 13 — El punteo: excitación, Pick Position y Pick Tone
+
+En la Fase 12 la cuerda siempre se punteaba igual: un golpe de **ruido blanco**, todos los armónicos con la misma
+fuerza. Una cuerda real suena distinta según **con qué** la tocas (púa dura, púa blanda, dedo, martillo) y **dónde**
+(junto al puente o en el centro). Esta fase añade esas dos cosas, y conecta la cuerda a la matriz de modulación.
+
+### Conceptos aprendidos
+**La excitación decide el timbre inicial.** La cuerda (línea + filtro de cada vuelta) decide cómo *muere* cada
+armónico; lo que entra al puntear decide con qué fuerza *empieza* cada uno. Si el golpe no tiene agudos, la cuerda
+no los puede inventar: suena redonda desde el primer instante. Es la diferencia entre Damping (los agudos mueren
+pronto) y Pick Tone (los agudos nunca estuvieron).
+
+**Tres excitaciones.**
+- **White Noise:** el ruido de la Fase 12 (suena idéntico, comprobado bit a bit). Todos los armónicos parejos y un
+  poco distintos en cada nota: es lo que hace que dos notas iguales no suenen clónicas.
+- **Filtered Noise:** el mismo ruido pasado por un **paso bajo de 1 polo** (6 dB por octava) con corte en **Pick
+  Tone**. Corte bajo = púa blanda o yema del dedo; corte alto = púa dura.
+- **Impulse:** un solo golpe de 1 muestra por el mismo paso bajo. Es siempre exactamente igual (no tiene azar): suena
+  más "limpio" y percusivo, como un martillo pequeño o un clavecín. Útil cuando quieres que todas las notas ataquen igual
+  (secuencias, arpegios rápidos).
+
+El volumen no cambia al cambiar de excitación o de Pick Tone: la energía del golpe se lleva siempre a la del ruido
+blanco. Excepción: un **Impulse brillante en notas graves** concentra toda esa energía en muy pocas muestras y el pico
+se dispararía (más de 20 veces el del ruido). Se limita, así que ese caso suena más suave: con Pick Tone 2.5 kHz,
+unos −6 dB en A3 de FL (110 Hz) y hasta −13 dB en A1 de FL (27.5 Hz), la nota más grave del piano. Si lo usas en bajos, baja Pick Tone o sube
+Level.
+
+**Pick Position: un peine.** Cuando punteas una cuerda en un punto, ese punto no puede vibrar como un "nodo" (un sitio
+quieto). Los armónicos que tienen un nodo justo ahí no se excitan. Si punteas en el **centro** (50 %), todos los
+armónicos pares tienen un nodo en el centro: desaparecen y el sonido queda **hueco**, parecido a un clarinete o a una
+onda cuadrada. Si punteas a **1/3**, desaparecen el 3.º, el 6.º, el 9.º… Cerca del **puente** (5–10 %), solo
+desaparecen armónicos muy altos: sonido brillante y nasal, el "ponticello".
+
+La matemática (Jaffe & Smith): puntear en una fracción β del largo equivale a restar al golpe una copia de sí mismo
+retrasada β períodos: `x[n] − x[n − β·período]`. Esa resta es un **filtro peine** (comb filter): su respuesta tiene
+huecos regulares, como los dientes de un peine, en las frecuencias múltiplos de 1/β veces la nota. Detalles que
+salieron en los tests:
+- El retraso tiene que ser **fraccionario** (con la misma interpolación de Lagrange de la cuerda) y medirse sobre el
+  período real de la nota. Con un retraso redondeado a muestras enteras los huecos se quedaban en −20 dB (se oía el
+  armónico "quitado"); ahora miden entre −57 y −79 dB: desaparecen de verdad.
+- El peine se aplica al golpe "abierto" (dura un período más el retraso), no dando la vuelta dentro de un período:
+  así su espectro es exacto.
+- De 0 % a 5 % la resta entra poco a poco (0 % = sin peine = el sonido de la Fase 12), para que la perilla no salte.
+
+**Se lee al puntear.** Pick Position, Pick Tone y Excitation solo cambian *el golpe*: moverlos con una nota sonando no
+cambia esa nota (ya fue punteada), cambia la siguiente. Igual que en una guitarra: mover la mano después de puntear no
+cambia lo que ya suena. Por eso el punteo se hace en la **primera muestra** de la nota, *después* de calcular la
+matriz: así una ruta como **Velocity → Pick Tone** ya tiene el valor de esa nota al puntear.
+
+**La cuerda en la matriz.** Seis destinos nuevos (al final de la lista; también arrastrando una fuente a las perillas
+de la pestaña Cuerda):
+| Destino | Escala (amount 100 %) | Cuándo actúa |
+|---|---|---|
+| String Level | toda la perilla | siempre |
+| String Pitch | ±24 semitonos (el anillo se dibuja sobre Semi, como en los osciladores) | siempre |
+| String Decay | toda la perilla, en su escala logarítmica (×600) | siempre (se desliza en 10 ms) |
+| String Damping | toda la perilla | siempre (se desliza en 10 ms) |
+| String Pick Pos | toda la perilla (0–50 %) | solo al puntear |
+| String Pick Tone | toda la perilla (200 Hz – 20 kHz) | solo al puntear |
+
+Medido: la Mod Wheel al máximo con amount X suena **idéntico bit a bit** a mover la perilla esa misma cantidad.
+
+### Qué hace cada control al sonido
+Pestaña **Cuerda**, grupo nuevo **Punteo**.
+
+| Control | Qué oyes | En el analizador y el osciloscopio |
+|---|---|---|
+| **Excitation** | White Noise: ataque con "chasquido" de púa y un poco distinto en cada nota. Filtered Noise: el mismo chasquido pero más blando según Pick Tone. Impulse: ataque seco y siempre igual, como un martillito. | Con Impulse y Pick Tone alto, en el EQ todos los armónicos arrancan a la misma altura (peine perfecto de picos iguales); con ruido, las alturas varían un poco de nota a nota. |
+| **Pick Pos** | 0 %: el sonido de siempre. 5–15 %: brillante, nasal, "junto al puente". 25–35 %: guitarra "normal", cálida. 50 %: hueco, de clarinete o de cuadrada. | Con 50 % los picos pares (2.º, 4.º, 6.º…) desaparecen del EQ; con 33 %, cada tercer pico. En el osciloscopio, a 50 % la onda se vuelve simétrica (la mitad de arriba es la de abajo invertida). |
+| **Pick Tone** | Solo con Filtered Noise e Impulse (con White Noise se ve apagada). Bajo (200–800 Hz): dedo, mazo de fieltro, golpe sordo. Medio (2–4 kHz): púa blanda. Alto (8–20 kHz): púa dura, clavecín. | Los picos de arriba empiezan más bajos: la "pendiente" del espectro al principio de la nota. A diferencia del Damping, no cambia cómo mueren: cambia desde dónde empiezan. |
+
+### Ejercicio de escucha guiado
+Mismo canal que en la Fase 12 (Fruity Parametric EQ 2 para mirar, Wave Candy como osciloscopio). *Init*, Osc A off,
+Cuerda On, Decay 3 s, Damping 20 % (poco, para que los armónicos duren y se vean). Env 1: Attack 1 ms, Sustain 100 %,
+Release 300 ms. Toca siempre un **A4 de FL (220 Hz)**.
+1. **Dónde se puntea.** Excitation en Impulse, Pick Tone 20 kHz. Pick Pos 0 %: mira el EQ, todos los picos parejos.
+   Sube a 50 %: los picos pares (440, 880, 1320 Hz…) desaparecen y el sonido se vuelve hueco. Prueba 33 %: falta cada
+   tercer pico (660, 1320 Hz…). Prueba 8 %: casi todos están, suena brillante y nasal.
+2. **Pick Pos con ruido.** Repite el paso 1 en White Noise. El hueco se oye igual, pero las alturas de los picos que
+   quedan cambian un poco en cada nota: esa variación es la "vida" del ruido.
+3. **Con qué se puntea.** Pick Pos 25 %. Excitation en Filtered Noise. Pick Tone a 300 Hz, 2.5 kHz y 15 kHz: dedo, púa
+   blanda, púa dura. Ahora deja Pick Tone en 15 kHz y sube Damping al 80 %: el ataque sigue siendo brillante pero
+   *muere* enseguida. Esa es la diferencia entre Pick Tone (cómo empieza) y Damping (cómo muere).
+4. **Se lee al puntear.** Toca una nota larga y, mientras suena, gira Pick Pos de punta a punta: la nota no cambia.
+   Vuelve a tocar: la nueva sí.
+5. **Velocity → Pick Tone.** Pick Tone 500 Hz. Arrastra la ficha *Velocity* a la perilla Pick Tone y sube el anillo
+   hasta ~60 %. Toca suave y fuerte (o dibuja velocities distintas en el Piano Roll): fuerte = más brillante, como en
+   un instrumento real. Compáralo con la Fase 12, donde la velocity solo cambiaba el volumen.
+
+### Recetas
+**1. Guitarra acústica de acero (rasgueo).** Init, Osc A off. Cuerda On, Level 80 %, Decay 3 s, Damping 40 %.
+Punteo: Filtered Noise, Pick Pos 18 %, Pick Tone 4 kHz. Matriz: Velocity → String Pick Tone 40 %. Env 1: Attack 1 ms,
+Sustain 100 %, Release 350 ms. Voices 12. Reverb Size 40 %, Mix 15 %. *Por qué:* Pick Pos 18 % es el sitio donde se
+puntea una acústica (entre la boca y el puente): ni hueco ni nasal. Pick Tone 4 kHz es una púa media; la velocity lo
+abre en los golpes fuertes. Para "rasguear" en el Piano Roll, escalona las notas de un acorde 10–20 ms
+(herramienta *Strum* del Piano Roll).
+
+**2. Kalimba / mallet de madera.** Cuerda On, Octave +1, Decay 1.2 s, Damping 55 %. Punteo: Impulse, Pick Pos 50 %,
+Pick Tone 1.2 kHz. Env 1: Release 600 ms. Delay 1/8 D, Mix 12 %. *Por qué:* el Impulse da el ataque idéntico y seco
+de un golpe; el 50 % quita los pares y da el carácter "hueco" de una lengüeta o una barra de madera; Pick Tone bajo
+quita el chasquido. Tócala en patrones de corcheas en la escala pentatónica.
+
+### Reto sin receta
+**Clavecín barroco.** Un clavecín puntea la cuerda con una púa muy dura **cerca del extremo**, todas las notas con
+la misma fuerza (no responde a la velocity) y con un brillo metálico que dura. Toca una progresión de C5 a C6 de FL en
+semicorcheas. Pista para empezar: tres de los controles nuevos de esta fase tienen un valor "obvio" para esta
+descripción; y hay una perilla de la Fase 12 que decide si el brillo *dura*. Inténtalo primero; las pistas vendrán
+después.
+
+### Vocabulario
+- **Excitación (exciter).** Lo que pone en marcha un modelo físico: el golpe, la púa, el arco. *Ejemplo:* en
+  Ableton Collision, el "Mallet" y el "Noise" son excitaciones de los mismos resonadores.
+- **Filtro peine (comb filter).** Sumar o restar una señal con una copia retrasada; la respuesta tiene huecos
+  regulares como dientes de peine. *Ejemplo:* el flanger (un peine que se mueve) y el sonido "hueco" de una guitarra
+  punteada en el centro.
+- **Nodo / vientre.** Puntos de una cuerda que no se mueven (nodo) o que se mueven al máximo (vientre) en un armónico.
+  *Ejemplo:* los armónicos naturales de guitarra (tocar suave en el traste 12 deja sonar solo los armónicos con un
+  vientre ahí).
+- **Sul ponticello / sul tasto.** Tocar cerca del puente (brillante, metálico) o sobre el diapasón (dulce, oscuro).
+  *Ejemplo:* los violines en las bandas sonoras de terror usan ponticello para el sonido "vidrioso".
+- **Impulso.** Una señal de una sola muestra: contiene todas las frecuencias con la misma fuerza. *Ejemplo:* las
+  respuestas al impulso de las reverbs de convolución se graban con un golpe así (un disparo, un globo).
+- **Destino por nota / por punteo.** Parámetros que se leen solo al empezar la nota. *Ejemplo:* en muchos sintes la
+  fase inicial del oscilador o la "posición del mazo" se fijan al tocar y no se pueden mover después.
+
+### Retos completados
+- [ ] Reto Fase 13 — clavecín barroco

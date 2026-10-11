@@ -124,6 +124,8 @@ public:
         applyPathConfig ({}); // fija también la frecuencia de muestreo de los osciladores y el sub
         noise.setSampleRate (sampleRate);
         string.prepare (sampleRate);
+        appliedStringDecay = appliedStringDamping = -1.0f;
+        pendingPluck = false;
         duckStage = DuckStage::none;
         duckGain = 1.0f;
         duckStep = static_cast<float> (1.0 / (duckSeconds * sampleRate));
@@ -170,8 +172,7 @@ public:
         subOscillator.setWavetable (settings.subTable);
         subOscillator.setPosition (static_cast<float> (settings.sub.shape) / 3.0f);
         noise.setColor (settings.noise.color);
-        string.setDecay (settings.string.decaySeconds);
-        string.setDamping (settings.string.damping);
+        // Decay y Damping de la cuerda se aplican en renderSources: allí se suma la modulación de la matriz.
     }
 
     void setFilterSettings (const FilterSettings& settings) noexcept
@@ -253,11 +254,10 @@ public:
 
         // La cuerda se puntea en cada nota (también al redisparar: el golpe se suma a lo que ya vibra, como volver a
         // puntear una cuerda que todavía suena). Apagada no se puntea: encenderla después no suena hasta la nota siguiente.
-        if (sourceSettings.string.enabled)
-        {
-            setStringFrequency (stringTuning + lastGlobalPitch);
-            string.pluck (seed ^ 0x5D1A6E2Bu);
-        }
+        // Fase 13: el punteo se hace en la primera muestra de la nota (en renderSources), después de calcular la
+        // matriz: así Velocity → Pick Tone, String Pitch o Global Pitch ya valen lo de esta nota al puntear.
+        pendingPluck = sourceSettings.string.enabled;
+        pluckSeed = seed ^ 0x5D1A6E2Bu;
 
         // Retrigger / One Shot: cada nota reinicia el LFO. (En modo Free, render lo vuelve a alinear con el reloj común.)
         for (size_t l = 0; l < lfos.size(); ++l)
@@ -602,15 +602,21 @@ private:
             frame.noiseGain = noiseLevel.next (sourceSettings.noise.enabled, sourceSettings.noise.level,
                                                modulationOf (ModDestination::noiseLevel), smoothingCoef);
 
-        // Cuerda: sigue a la nota, a su afinación propia (suavizada) y a Global Pitch.
-        lastGlobalPitch = globalPitch;
-        SourceLevel::glide (stringTuning, sourceSettings.string.tuningSemitones(), smoothingCoef);
-        frame.stringAudible = ! stringLevel.isSilent (sourceSettings.string.enabled);
+        // Cuerda: sigue a la nota, a su afinación propia (suavizada), a Global Pitch y a String Pitch.
+        const auto& stringSettings = sourceSettings.string;
+        SourceLevel::glide (stringTuning, stringSettings.tuningSemitones(), smoothingCoef);
+        frame.stringAudible = ! stringLevel.isSilent (stringSettings.enabled);
         if (frame.stringAudible)
         {
-            frame.stringGain = stringLevel.next (sourceSettings.string.enabled, sourceSettings.string.level, 0.0f, smoothingCoef);
-            setStringFrequency (stringTuning + globalPitch);
+            frame.stringGain = stringLevel.next (stringSettings.enabled, stringSettings.level,
+                                                 modulationOf (ModDestination::stringLevel), smoothingCoef);
+            setStringFrequency (stringTuning + globalPitch
+                                + modulationOf (ModDestination::stringPitch) * pitchModulationSemitones);
+            updateStringLoss (modulationOf (ModDestination::stringDecay), modulationOf (ModDestination::stringDamping));
+            if (pendingPluck && stringSettings.enabled)
+                string.pluck (pluckSeed, modulatedPluckShape());
         }
+        pendingPluck = false;
 
         if (! complexPath)
         {
@@ -810,7 +816,42 @@ private:
         }
     }
 
-    // La cuerda toca la nota desplazada 'semitones' (su afinación + Global Pitch). exp2 solo si cambió.
+    // Decay y Damping de la cuerda: perilla + matriz. Solo se pasan a la cuerda si cambiaron (setDecay hace un log).
+    void updateStringLoss (float decayModulation, float dampingModulation) noexcept
+    {
+        const auto& settings = sourceSettings.string;
+        if (settings.decaySeconds != appliedStringDecay || decayModulation != appliedStringDecayModulation)
+        {
+            appliedStringDecay = settings.decaySeconds;
+            appliedStringDecayModulation = decayModulation;
+            string.setDecay (settings.decaySeconds, decayModulation);
+        }
+        const float damping = std::clamp (settings.damping + dampingModulation, 0.0f, 1.0f);
+        if (damping != appliedStringDamping)
+        {
+            appliedStringDamping = damping;
+            string.setDamping (damping);
+        }
+    }
+
+    // El punteo de esta nota: las perillas + la matriz en la primera muestra. Pick Tone: 100 % = toda la perilla
+    // (200 Hz – 20 kHz = ×100, logarítmica); Pick Position: 100 % = toda la perilla (0–50 %).
+    [[nodiscard]] dsp::PluckShape modulatedPluckShape() const noexcept
+    {
+        using dsp::PluckedString;
+        auto shape = sourceSettings.string.pluck;
+        const float position = destinationValues[index (ModDestination::stringPickPosition)];
+        const float tone = destinationValues[index (ModDestination::stringPickTone)];
+        shape.pickPosition = std::clamp (shape.pickPosition + position * PluckedString::maxPickPosition, 0.0f,
+                                         PluckedString::maxPickPosition);
+        constexpr float toneRange = PluckedString::maxPickToneHz / PluckedString::minPickToneHz; // ×100
+        if (tone != 0.0f)
+            shape.pickToneHz = std::clamp (shape.pickToneHz * std::pow (toneRange, tone), PluckedString::minPickToneHz,
+                                           PluckedString::maxPickToneHz);
+        return shape;
+    }
+
+    // La cuerda toca la nota desplazada 'semitones' (su afinación + Global Pitch + String Pitch). exp2 solo si cambió.
     void setStringFrequency (float semitones) noexcept
     {
         if (semitones != appliedStringPitch || noteFrequency != appliedStringNote)
@@ -850,8 +891,10 @@ private:
     dsp::PluckedString string;
     double noteFrequency = 440.0;
     float stringTuning = 0.0f;      // semitonos, suavizados
-    float lastGlobalPitch = 0.0f;   // Global Pitch de la última muestra (para puntear ya con el tono correcto)
     float appliedStringPitch = 0.0f;
+    float appliedStringDecay = -1.0f, appliedStringDecayModulation = 0.0f, appliedStringDamping = -1.0f; // -1: sin aplicar
+    bool pendingPluck = false;      // Fase 13: puntear en la primera muestra de la nota
+    std::uint32_t pluckSeed = 0;
     double appliedStringNote = 0.0;
     float smoothingCoef = 1.0f; // 5 ms, para niveles y afinación
 

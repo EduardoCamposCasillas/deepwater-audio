@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include "dsp/PluckedString.h"
 #include "dsp/Warp.h"
 #include "dsp/Wavetable.h"
 
@@ -102,6 +103,9 @@ struct NoiseSettings
     bool operator== (const NoiseSettings&) const = default;
 };
 
+// Fase 13: el orden coincide con dsp::StringExcitation y se guarda (índice): solo añadir al final.
+inline constexpr std::array<const char*, 3> stringExcitationNames { "White Noise", "Filtered Noise", "Impulse" };
+
 // Fase 12: cuerda pulsada (Karplus-Strong). Una fuente más de la voz, como el sub y el ruido: mono, a la frecuencia del
 // host (no pasa por el camino sobremuestreado del warp/FM) y apagada por defecto.
 struct StringSettings
@@ -113,6 +117,8 @@ struct StringSettings
     float level = 0.8f;
     float decaySeconds = 2.0f; // T60 del fundamental, igual en todas las notas
     float damping = 0.5f;      // 0 = los agudos duran como el fundamental; 1 = mueren 300 veces antes
+    // Fase 13: el punteo (por defecto, ruido blanco sin peine = el sonido de la Fase 12).
+    dsp::PluckShape pluck;
 
     [[nodiscard]] float tuningSemitones() const noexcept
     {

@@ -382,17 +382,41 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     for (size_t k = 0; k < stringKnobs.size(); ++k)
         setUpKnob (stringKnobs[k], stringPage, stringInfos[k].parameterId, stringInfos[k].name, knobWidth);
     stringHelp.setText (juce::String::fromUTF8 (
-                            "Cada nota puntea la cuerda: un golpe de ruido entra en una lÃ­nea de retardo que se "
-                            "realimenta y pierde agudos en cada vuelta. Decay = cuÃ¡nto tarda el fundamental en caer "
-                            "60 dB (igual en todas las notas). Damping = cuÃ¡nto antes mueren los agudos: poco = "
-                            "metÃ¡lica y brillante (arpa, clavecÃ­n); mucho = apagada y redonda (nylon, koto "
-                            "con la palma). Al soltar la tecla la cuerda se apaga como con la palma; el Release de Env 1 "
-                            "sigue mandando sobre el final. Suena junto con los osciladores, el sub y el ruido, y pasa por "
-                            "el mismo filtro y los efectos."),
+                            "Cada nota puntea la cuerda: un golpe (ruido o impulso) entra en una l\xc3\xadnea de "
+                            "retardo que se realimenta y pierde agudos en cada vuelta. Decay = cu\xc3\xa1nto tarda el "
+                            "fundamental en caer 60 dB (igual en todas las notas). Damping = cu\xc3\xa1nto antes "
+                            "mueren los agudos: poco = met\xc3\xa1lica y brillante (arpa, clavec\xc3\xadn); mucho = "
+                            "apagada y redonda (nylon, koto con la palma). Al soltar la tecla la cuerda se apaga como "
+                            "con la palma; el Release de Env 1 sigue mandando sobre el final. Suena junto con los "
+                            "osciladores, el sub y el ruido, y pasa por el mismo filtro y los efectos."),
                         juce::dontSendNotification);
     stringHelp.setJustificationType (juce::Justification::topLeft);
     stringHelp.setColour (juce::Label::textColourId, undertow::gui::theme::dimText);
     stringPage.addAndMakeVisible (stringHelp);
+
+    pluckGroup.setText ("Punteo");
+    stringPage.addAndMakeVisible (pluckGroup);
+    excitationLabel.setText ("Excitation", juce::dontSendNotification);
+    styleCaption (excitationLabel);
+    stringPage.addAndMakeVisible (excitationLabel);
+    setUpComboBox (excitationBox, stringPage, id::stringExcitation, excitationAttachment);
+    excitationParam = apvts.getRawParameterValue (id::stringExcitation);
+    const std::array<KnobInfo, 2> pluckInfos { { { id::stringPickPosition, "Pick Pos" }, { id::stringPickTone, "Pick Tone" } } };
+    for (size_t k = 0; k < pluckKnobs.size(); ++k)
+        setUpKnob (pluckKnobs[k], stringPage, pluckInfos[k].parameterId, pluckInfos[k].name, knobWidth);
+    pluckHelp.setText (juce::String::fromUTF8 (
+                            "Excitation = con qu\xc3\xa9 se puntea. White Noise: ruido blanco, todos los "
+                            "arm\xc3\xb3nicos (el sonido de siempre). Filtered Noise: el ruido pasa por un paso bajo "
+                            "(Pick Tone): p\xc3\xba" "a blanda o dedo, ataque m\xc3\xa1s redondo. Impulse: un golpe "
+                            "seco por el mismo paso bajo, id\xc3\xa9ntico en cada nota. Pick Position = d\xc3\xb3nde "
+                            "se puntea: 0 % sin efecto; cerca del puente (5-15 %) brillante y nasal; 50 % en el "
+                            "centro: sin arm\xc3\xb3nicos pares, hueco. Pick Position y Pick Tone se leen al puntear: "
+                            "se oyen en la nota siguiente (y la matriz puede moverlos por nota: Velocity \xe2\x86\x92 "
+                            "Pick Tone)."),
+                       juce::dontSendNotification);
+    pluckHelp.setJustificationType (juce::Justification::topLeft);
+    pluckHelp.setColour (juce::Label::textColourId, undertow::gui::theme::dimText);
+    stringPage.addAndMakeVisible (pluckHelp);
 
     activeVoicesLabel.setJustificationType (juce::Justification::centredRight);
     activeVoicesLabel.setColour (juce::Label::textColourId, undertow::gui::theme::dimText);
@@ -724,6 +748,11 @@ void UndertowAudioProcessorEditor::timerCallback()
     delayTimeKnob.label.setVisible (! delaySynced);
     delayDivisionBox.setVisible (delaySynced);
     delayDivisionLabel.setVisible (delaySynced);
+
+    // Pick Tone no hace nada con White Noise: se atenúa (sigue aceptando modulación, por si se cambia de excitación).
+    const bool toneUsed = static_cast<int> (excitationParam->load()) != static_cast<int> (undertow::dsp::StringExcitation::whiteNoise);
+    pluckKnobs[1].slider.setAlpha (toneUsed ? 1.0f : 0.4f);
+    pluckKnobs[1].label.setAlpha (toneUsed ? 1.0f : 0.4f);
 }
 
 void UndertowAudioProcessorEditor::paint (juce::Graphics& g)
@@ -1048,6 +1077,20 @@ void UndertowAudioProcessorEditor::layoutContent()
         stringOnButton.setBounds (inner.removeFromLeft (effectColumnWidth).removeFromTop (24));
         for (auto& knob : stringKnobs)
             layoutKnob (knob, inner.removeFromLeft (knobWidth));
+
+        // Fila 2 (Fase 13): el punteo (selector y 2 perillas) y su explicación al lado.
+        auto row = page.removeFromTop (rowHeight);
+        page.removeFromTop (groupPadding);
+        auto pluckArea = row.removeFromLeft (groupPadding * 2 + effectColumnWidth + 2 * knobWidth);
+        pluckGroup.setBounds (pluckArea);
+        auto pluckInner = innerOf (pluckArea);
+        auto column = pluckInner.removeFromLeft (effectColumnWidth).withTrimmedRight (8);
+        excitationLabel.setBounds (column.removeFromTop (20));
+        excitationBox.setBounds (column.removeFromTop (26));
+        for (auto& knob : pluckKnobs)
+            layoutKnob (knob, pluckInner.removeFromLeft (knobWidth));
+        pluckHelp.setBounds (row.withTrimmedLeft (groupPadding).withTrimmedTop (8));
+
         stringHelp.setBounds (page.removeFromTop (rowHeight).reduced (groupPadding, 0));
     }
 }

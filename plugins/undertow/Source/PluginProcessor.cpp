@@ -149,7 +149,8 @@ UndertowAudioProcessor::UndertowAudioProcessor()
     stringParams = { parameters.getRawParameterValue (id::stringOn),    parameters.getRawParameterValue (id::stringOctave),
                      parameters.getRawParameterValue (id::stringSemi),  parameters.getRawParameterValue (id::stringFine),
                      parameters.getRawParameterValue (id::stringLevel), parameters.getRawParameterValue (id::stringDecay),
-                     parameters.getRawParameterValue (id::stringDamping) };
+                     parameters.getRawParameterValue (id::stringDamping), parameters.getRawParameterValue (id::stringExcitation),
+                     parameters.getRawParameterValue (id::stringPickPosition), parameters.getRawParameterValue (id::stringPickTone) };
     filterOnParam = parameters.getRawParameterValue (id::filter1On);
     filterTypeParam = parameters.getRawParameterValue (id::filter1Type);
     filterSlopeParam = parameters.getRawParameterValue (id::filter1Slope);
@@ -530,6 +531,25 @@ juce::AudioProcessorValueTreeState::ParameterLayout UndertowAudioProcessor::crea
                                                              juce::NormalisableRange<float> (0.0f, 1.0f), string.damping,
                                                              percentAttributes()));
 
+    // --- Fase 13: el punteo. Por defecto ruido blanco sin peine: un proyecto de la Fase 12 suena igual. ---
+    constexpr int v13 = id::versionHintPluck;
+    using undertow::dsp::PluckedString;
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::stringExcitation, v13 },
+                                                              "String Excitation", toStringArray (synth::stringExcitationNames),
+                                                              static_cast<int> (string.pluck.excitation)));
+    // Pick Position: fracción del largo de la cuerda donde se puntea (0 = sin efecto; 50 % = en el centro).
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id::stringPickPosition, v13 },
+                                                             "String Pick Position",
+                                                             juce::NormalisableRange<float> (0.0f, PluckedString::maxPickPosition),
+                                                             string.pluck.pickPosition, percentAttributes()));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::stringPickTone, v13 }, "String Pick Tone",
+        logRange (PluckedString::minPickToneHz, PluckedString::maxPickToneHz), string.pluck.pickToneHz,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("Hz")
+            .withStringFromValueFunction (frequencyToText)
+            .withValueFromStringFunction (textToFrequency)));
+
     return layout;
 }
 
@@ -611,7 +631,8 @@ undertow::synth::SourceSettings UndertowAudioProcessor::readSourceSettings() con
     const auto& s = stringParams;
     settings.string = { s.on->load() >= 0.5f,  static_cast<int> (s.octave->load()), static_cast<int> (s.semitones->load()),
                         s.fine->load(),        s.level->load(),                     s.decay->load(),
-                        s.damping->load() };
+                        s.damping->load(),
+                        { choiceToEnum<undertow::dsp::StringExcitation> (s.excitation), s.pickPosition->load(), s.pickTone->load() } };
     settings.subTable = &wavetableBank->get (0); // Basic Shapes: seno, triángulo, sierra, cuadrada
     return settings;
 }

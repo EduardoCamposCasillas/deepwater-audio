@@ -169,6 +169,9 @@ private:
         std::atomic<float>* level = nullptr;
         std::atomic<float>* decay = nullptr;
         std::atomic<float>* damping = nullptr;
+        std::atomic<float>* excitation = nullptr; // Fase 13
+        std::atomic<float>* pickPosition = nullptr;
+        std::atomic<float>* pickTone = nullptr;
     };
     StringParams stringParams;
 
