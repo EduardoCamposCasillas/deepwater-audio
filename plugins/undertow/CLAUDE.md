@@ -83,6 +83,20 @@ warp/FM), un solo juego de parámetros, y apagada no se calcula.
       note-off con "palma", afinación < 1 cent (MIDI 12–96, 4 sample rates), pestaña "Cuerda".
 - [ ] Fase 13 — Excitación: Pick Position (peine en la excitación), ruido filtrado (tono de la púa) e impulso;
       destinos de la matriz (al final): String Level, Decay, Damping, Pick Position, Pitch.
+      Diseño acordado (ya explicado al usuario; falta implementar):
+      - Parámetros nuevos al final, versionHint 9: stringExcitation (lista, orden guardado: White Noise, Filtered
+        Noise, Impulse; por defecto White Noise = sonido de la Fase 12), stringPickPosition (0–50 % del largo, def. 0)
+        y stringPickTone (corte del paso bajo de la excitación, 200 Hz–20 kHz log; solo en Filtered Noise e Impulse).
+      - Pick Position = peine x[n] − w·x[n − βP] en la excitación (Jaffe & Smith), con D = round(β·período). 0 % = sin
+        peine (Fase 12); el peso w sube de 0 a 1 en el primer 5 % para que sea continuo; energía normalizada con
+        1/√(1 + w²). 50 % = punteo en el centro: sin armónicos pares (hueco).
+      - Impulso: un golpe de 1 muestra (con la media quitada, como el ruido) pasado por el paso bajo de Pick Tone.
+      - El punteo se aplaza a la primera muestra de la nota (después de computeModulation), para que la matriz
+        (p. ej. Velocity → Pick Tone) actúe al puntear y la longitud ya incluya Global Pitch.
+      - Destinos al final de modDestinationNames: String Level, String Pitch (±24 st, anillo sobre Semi), String Decay
+        (100 % = toda la perilla en su escala log), String Damping, String Pick Pos, String Pick Tone (estos dos solo
+        se leen al puntear). Añadirlos a gui/ModulationTargets.h (el test de Fase 9 exige perilla para cada destino).
+        Llamar a setDecay/setDamping solo cuando cambie el valor modulado (setDecay hace un log).
 - [ ] Fase 14 — Presets de cuerda (guitarra, koto, arpa, plucks) con notas, y APRENDIZAJE.md.
 - [ ] Fase 15 (opcional) — Stiffness / inharmonicidad (all-pass de dispersión en el lazo).
 - [ ] Fase 16 (opcional) — La cuerda como resonador: excitación = las fuentes de la voz (opción al final de la lista).
