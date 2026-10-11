@@ -85,7 +85,7 @@ warp/FM), un solo juego de parámetros, y apagada no se calcula.
       destinos de la matriz (al final): String Level, Pitch, Decay, Damping, Pick Position, Pick Tone.
 - [x] Fase 14 — Presets de cuerda (guitarra, koto, arpa, plucks) con notas, y APRENDIZAJE.md.
 - [x] Fase 15 (opcional) — Stiffness / inharmonicidad (all-pass de dispersión en el lazo).
-- [ ] Fase 16 (opcional) — La cuerda como resonador: excitación = las fuentes de la voz (opción al final de la lista).
+- [x] Fase 16 (opcional) — La cuerda como resonador: excitación = las fuentes de la voz (opción al final de la lista).
 
 ## Estado actual
 Fase 1 COMPLETADA (2026-09-24): CMake + JUCE 9.0.2, VST3 + Standalone, seno monofónico (prioridad a la última
@@ -598,7 +598,7 @@ no tiene all-pass (huella FNV de `PluckedString` idéntica bit a bit, scratch) y
   se "rellena"; los parciales agudos mueren antes que el fundamental aunque Damping sea 0 (dan más vueltas por segundo:
   físico); Stiffness no se puede barrer con la nota sonando (para eso, Damping/Decay o el filtro).
 
-Fase 16 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Lo existente suena igual: con White Noise, Filtered
+Fase 16 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. Lo existente suena igual: con White Noise, Filtered
 Noise e Impulse la cuerda hace el mismo cálculo (huella FNV de `PluckedString` y de la voz, scratch: idénticas bit a
 bit) y null test de los 6 presets de referencia (`out/render-fase15` vs `out/render-fase16`): idéntico bit a bit.
 Huellas de los 49 presets: iguales.
