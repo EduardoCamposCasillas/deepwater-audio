@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Arpa: punteo con la yema cerca del centro (redondo y algo hueco), graves larguísimos, agudos cortos y una sala grande. -->
+<UndertowPreset formatVersion="1" name="Arpa de Concierto" category="Pluck" author="Undertow">
+  <Notes>
+    Instrumento: arpa de concierto (pedales, 47 cuerdas). Se puntea con la yema de los dedos cerca del CENTRO de la
+    cuerda, y las cuerdas graves vibran muchísimo tiempo. Cuerda pulsada (Fases 12–13).
+
+    Cómo se construyó:
+    - Cuerda sola, Decay 5 s y Damping 45 %.
+    - Punteo: Filtered Noise, Pick Tone 1.2 kHz (yema: ataque blando, sin chasquido) y Pick Pos 42 %: cerca del centro
+      el peine deja huecos cada ~2.4 armónicos (se van casi del todo el 5.º, el 7.º y el 12.º, y el 2.º se debilita).
+      Ese leve hueco es el sonido redondo, "de campana suave", del arpa; a 50 % exacto se irían todos los pares y
+      sonaría a clarinete.
+    - Key → String Decay −20 %: las graves duran mucho más que las agudas (C3 de FL ~8 s, C5 5 s, C7 ~3 s). En el arpa la
+      diferencia es enorme, y sin esta ruta las notas agudas se quedan colgando como campanas.
+    - Velocity → String Pick Tone +25 %: fuerte = más brillante.
+    - Voices 16: un glissando son muchas notas sonando a la vez.
+    - Env 1: Sustain 100 %, Release 1.5 s. La cuerda se apaga con la "palma" al soltar la tecla: dibuja notas largas
+      (de 2 a 4 tiempos) o usa el pedal (CC 64); el arpista también deja vibrar las cuerdas hasta que las apaga.
+    - Reverb grande (Size 75 %, 3.5 s, Mix 30 %, pre-delay 20 ms): el arpa casi siempre se oye en una sala de
+      concierto; el pre-delay separa el ataque de la cola y lo mantiene definido.
+
+    Tócalo: un glissando en C mayor de C5 a C7 de FL (solo teclas blancas, una nota cada 30–40 ms) y acordes
+    arpegiados lentos en la mano izquierda (C4–G4–E5).
+    Prueba a mover: Pick Pos (25 % = más brillante y "de guitarra"; 50 % = hueco) y el Mix de la reverb.
+    Técnicas: Fase 12 + Fase 13 + Fase 5 (Key → Decay) + Fase 8 (reverb con pre-delay).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAOn" value="Off"/>
+
+    <PARAM id="stringOn" value="On"/>
+    <PARAM id="stringLevel" value="0.8"/>
+    <PARAM id="stringDecay" value="5"/>
+    <PARAM id="stringDamping" value="0.45"/>
+    <PARAM id="stringExcitation" value="Filtered Noise"/>
+    <PARAM id="stringPickPosition" value="0.42"/>
+    <PARAM id="stringPickTone" value="1200"/>
+
+    <PARAM id="voices" value="16"/>
+    <PARAM id="velocity" value="0.5"/>
+    <PARAM id="attack" value="0.001"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="1.5"/>
+
+    <PARAM id="mod1Source" value="Key"/>
+    <PARAM id="mod1Destination" value="String Decay"/>
+    <PARAM id="mod1Amount" value="-0.2"/>
+    <PARAM id="mod2Source" value="Velocity"/>
+    <PARAM id="mod2Destination" value="String Pick Tone"/>
+    <PARAM id="mod2Amount" value="0.25"/>
+
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.75"/>
+    <PARAM id="fxReverbDecay" value="3.5"/>
+    <PARAM id="fxReverbPreDelay" value="0.02"/>
+    <PARAM id="fxReverbMix" value="0.3"/>
+    <PARAM id="master" value="3"/>
+  </Parameters>
+</UndertowPreset>

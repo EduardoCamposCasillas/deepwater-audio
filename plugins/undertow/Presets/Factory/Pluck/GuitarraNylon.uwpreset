@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Guitarra clásica: cuerda pulsada sola, punteo blando con la yema, mucho Damping y cada nota punteada en un sitio distinto. -->
+<UndertowPreset formatVersion="1" name="Guitarra Nylon" category="Pluck" author="Undertow">
+  <Notes>
+    Instrumento: guitarra clásica (cuerdas de nylon, tocada con los dedos). Cuerda pulsada (Fases 12–13), sin
+    osciladores: todo el sonido sale de la cuerda.
+
+    Cómo se construyó:
+    - Osc A apagado; Cuerda On, Level 80 %.
+    - Decay 2.5 s: lo que dura una nota de guitarra clásica en el registro medio.
+    - Damping 65 %: el nylon pierde los agudos muy pronto; la cola es redonda y "de madera".
+    - Punteo: Filtered Noise con Pick Tone 1.6 kHz (la yema del dedo es blanda: casi no hay chasquido) y Pick Pos 22 %
+      (el guitarrista clásico toca cerca de la boca, lejos del puente: sonido cálido, ni nasal ni hueco).
+    - Velocity → String Pick Tone +35 %: tocar fuerte abre el ataque, como apretar más el dedo contra la cuerda.
+    - LFO 1 en Sample &amp; Hold, Retrigger y muy lento (0.02 Hz) → String Pick Pos +6 %: cada nota elige un punto de
+      punteo al azar entre ~19 % y ~25 %. Nadie toca dos veces en el mismo milímetro; esa pequeña diferencia es la que
+      hace que un arpegio no suene a máquina ("humanizar").
+    - Env 1: Sustain 100 %, Release 250 ms. Al soltar la tecla la cuerda se apaga con la "palma" (en ~0.1 s): dibuja
+      las notas largas en el Piano Roll, o usa el pedal (CC 64), para que se solapen como en una guitarra real.
+    - Reverb pequeña (Size 35 %, 1.2 s, Mix 18 %): una sala, no una catedral.
+
+    Tócalo: arpegios en C mayor con las notas solapadas, C5–E5–G5–C6 de FL, a 80–90 BPM. Prueba también un bajo
+    alternado con el pulgar (C4–G4) bajo la melodía.
+    Prueba a mover: Damping (40 % = acústica de acero; 80 % = una guitarra muy vieja con cuerdas muertas) y el amount
+    del LFO 1 (0 % = todas las notas iguales; escucha el arpegio con y sin).
+    Técnicas: Fase 12 (Decay, Damping) + Fase 13 (Filtered Noise, Pick Pos, Pick Tone) + Fase 5 (S&amp;H en Retrigger).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAOn" value="Off"/>
+
+    <PARAM id="stringOn" value="On"/>
+    <PARAM id="stringLevel" value="0.8"/>
+    <PARAM id="stringDecay" value="2.5"/>
+    <PARAM id="stringDamping" value="0.65"/>
+    <PARAM id="stringExcitation" value="Filtered Noise"/>
+    <PARAM id="stringPickPosition" value="0.22"/>
+    <PARAM id="stringPickTone" value="1600"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.5"/>
+    <PARAM id="attack" value="0.001"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.25"/>
+
+    <PARAM id="lfo1Shape" value="Sample &amp; Hold"/>
+    <PARAM id="lfo1Mode" value="Retrigger"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.02"/>
+    <PARAM id="mod1Source" value="Velocity"/>
+    <PARAM id="mod1Destination" value="String Pick Tone"/>
+    <PARAM id="mod1Amount" value="0.35"/>
+    <PARAM id="mod2Source" value="LFO 1"/>
+    <PARAM id="mod2Destination" value="String Pick Pos"/>
+    <PARAM id="mod2Amount" value="0.06"/>
+
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.35"/>
+    <PARAM id="fxReverbDecay" value="1.2"/>
+    <PARAM id="fxReverbMix" value="0.18"/>
+    <PARAM id="master" value="2"/>
+  </Parameters>
+</UndertowPreset>

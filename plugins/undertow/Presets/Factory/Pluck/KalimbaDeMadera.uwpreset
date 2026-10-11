@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Kalimba / mallet: golpe Impulse siempre igual, punteo en el centro (sin armónicos pares) y Pick Tone bajo. -->
+<UndertowPreset formatVersion="1" name="Kalimba de Madera" category="Pluck" author="Undertow">
+  <Notes>
+    Instrumento: kalimba / marimba pequeña. Género: lo-fi, chill, afrobeats suave. Cuerda pulsada (Fases 12–13): es
+    la receta 2 de la Fase 13. Una kalimba no tiene cuerdas sino lengüetas de metal, pero el truco del punteo en el
+    centro da un timbre muy parecido.
+
+    Cómo se construyó:
+    - Cuerda sola, Octave +1, Decay 1.2 s, Damping 55 %: una nota corta y redonda.
+    - Punteo: Impulse (un golpe de una muestra, sin azar: todas las notas atacan exactamente igual, como un mazo), Pick
+      Pos 50 % (en el centro: desaparecen los armónicos pares → timbre "hueco" de lengüeta o barra de madera) y Pick
+      Tone 1.2 kHz (quita el chasquido del golpe).
+    - Velocity → String Level +30 % con Velocity Sens bajo (20 %): el golpe fuerte suena más fuerte pero el timbre
+      no cambia, como en una kalimba (casi no cambia de color con la fuerza).
+    - Env 1: Sustain 100 %, Release 600 ms (al soltar, la nota se apaga en vez de cortarse).
+    - Delay 1/8 D (Mix 12 %) y reverb corta: la kalimba de lo-fi casi siempre lleva un eco suave.
+
+    Tócalo: corcheas en la pentatónica de C, C5–D5–E5–G5–A5–C6 de FL (suena una octava arriba), a 85 BPM.
+    Prueba a mover: Pick Pos (50 % → 40 %: vuelven algunos pares y suena más a "cuerda") y Excitation en Filtered
+    Noise (cada nota cambia un poco: más orgánico, menos "secuencia").
+    Técnicas: Fase 12 + Fase 13 (Impulse, Pick Pos en el centro) + Fase 8 (delay).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAOn" value="Off"/>
+
+    <PARAM id="stringOn" value="On"/>
+    <PARAM id="stringOctave" value="1"/>
+    <PARAM id="stringLevel" value="0.6"/>
+    <PARAM id="stringDecay" value="1.2"/>
+    <PARAM id="stringDamping" value="0.55"/>
+    <PARAM id="stringExcitation" value="Impulse"/>
+    <PARAM id="stringPickPosition" value="0.5"/>
+    <PARAM id="stringPickTone" value="1200"/>
+
+    <PARAM id="voices" value="8"/>
+    <PARAM id="velocity" value="0.2"/>
+    <PARAM id="attack" value="0.001"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.6"/>
+
+    <PARAM id="mod1Source" value="Velocity"/>
+    <PARAM id="mod1Destination" value="String Level"/>
+    <PARAM id="mod1Amount" value="0.3"/>
+
+    <PARAM id="fxDelayOn" value="On"/>
+    <PARAM id="fxDelaySync" value="On"/>
+    <PARAM id="fxDelayDivision" value="1/8 D"/>
+    <PARAM id="fxDelayFeedback" value="0.3"/>
+    <PARAM id="fxDelayTone" value="0.4"/>
+    <PARAM id="fxDelayMix" value="0.12"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.3"/>
+    <PARAM id="fxReverbDecay" value="1"/>
+    <PARAM id="fxReverbMix" value="0.15"/>
+    <PARAM id="master" value="0"/>
+  </Parameters>
+</UndertowPreset>

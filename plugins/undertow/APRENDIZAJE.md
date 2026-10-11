@@ -2209,3 +2209,142 @@ después.
 
 ### Retos completados
 - [ ] Reto Fase 13 — clavecín barroco
+
+## Fase 14 — Instrumentos de cuerda: de un modelo a un instrumento
+
+Las Fases 12 y 13 construyeron la cuerda; esta fase la **toca**. No se añadió nada al motor: son 6 presets de fábrica
+(categoría *Pluck*; en el navegador, busca "cuerda" o "instrumento") hechos solo con la cuerda, la matriz y los
+efectos. Cada uno explica en sus notas cómo se construyó, qué tocar y qué perilla mover. Ninguno resuelve los retos
+pendientes (contrabajo pizzicato y clavecín).
+
+### Conceptos aprendidos
+**Un modelo físico no es todavía un instrumento.** La cuerda de las Fases 12–13 suena "a cuerda", pero todas las
+notas se comportan igual: misma caída en graves y agudos, mismo punto de punteo, misma afinación desde el primer
+instante. Un instrumento real tiene pequeñas *imperfecciones sistemáticas*, y son esas las que el oído usa para
+reconocerlo. Para diseñar uno hay que responder cinco preguntas:
+
+1. **¿De qué es la cuerda?** → **Decay** y **Damping**. Nylon: Damping alto (65 %), cola redonda. Acero: Damping
+   medio (40 %), la cola brilla. Koto: Damping bajo (30 %), zumbido metálico.
+2. **¿Con qué se toca?** → **Excitation** y **Pick Tone**. Yema del dedo: Filtered Noise con Pick Tone bajo
+   (1.2–1.6 kHz). Púa: 4 kHz. Púa dura: 9 kHz. Mazo: Impulse (siempre igual).
+3. **¿Dónde se toca?** → **Pick Pos**. Junto al puente (8 %): nasal (koto). Entre la boca y el puente (18–22 %):
+   guitarra. Cerca del centro (42 %): redondo y algo hueco (arpa). En el centro (50 %): hueco (kalimba).
+4. **¿Cómo cambia de nota a nota?** Aquí entra la **matriz**:
+   - *Key → String Decay negativo*: las notas agudas duran menos que las graves. En una cuerda real, una nota aguda
+     tiene una cuerda más corta que guarda menos energía y la pierde antes por el aire y el puente. En el arpa la
+     diferencia es enorme (C3 de FL ~8 s, C7 ~3 s); sin esta ruta, los agudos se quedan colgando como campanas.
+   - *Velocity → String Pick Tone*: tocar fuerte = ataque más brillante. Es la diferencia entre "más volumen" y
+     "tocar más fuerte" (en la Fase 1 la velocity solo cambiaba el volumen).
+   - *Sample & Hold en Retrigger → String Pick Pos*: cada nota se puntea en un punto un poco distinto (±2–3 % del largo
+     de la cuerda). Un S&H en *Retrigger* toma un valor al azar **una vez por nota** (con su propia semilla), y como Pick
+     Pos solo se lee al puntear, ese valor queda fijo para toda la nota. Con un ritmo muy lento (0.02 Hz = un ciclo cada
+     50 s) el valor no cambia mientras la nota suena. Esto es **humanizar**: ningún músico toca dos veces igual.
+   - *Env 2 → String Pitch, muy poco* (+12 cents, decay 80 ms): el **twang** del koto. Una cuerda punteada con fuerza
+     se estira de más al principio, su tensión sube y suena un poco alta; al calmarse, baja a su nota. Es un efecto
+     físico real (la "modulación por tensión") que la cuerda de Karplus-Strong no tiene sola: aquí se imita.
+5. **¿Dónde suena?** → los efectos. Un arpa casi siempre se oye en una sala grande, una guitarra clásica en una sala
+   pequeña. La reverb no es un adorno: es parte de cómo reconocemos al instrumento. El **pre-delay** (20 ms en el arpa)
+   separa el ataque de la cola y mantiene la nota definida dentro de una reverb larga.
+
+**Capas: cuerda + oscilador.** La cuerda es **mono** y su caída es "física"; un oscilador con unison es **ancho** y no
+sabe apagarse solo. En *Pluck Cuerda Pop* la cuerda pone el ataque y la cola naturales, la sierra el ancho estéreo, y
+Env 1 (Sustain 0 %) hace que la sierra caiga como la cuerda. Es la técnica de muchos plucks modernos de pop y house:
+medio instrumento, medio sintetizador.
+
+**Al soltar la tecla, la cuerda se apaga ("palma").** En Undertow el note-off apoya la palma (Fase 12): la cuerda cae
+en ~0.1 s, aunque Env 1 tenga un Release largo. Para un arpa o un koto que deben **seguir vibrando**, dibuja notas
+largas en el Piano Roll o usa el **pedal de sustain** (CC 64): con el pedal pisado, la cuerda suena hasta apagarse
+sola. Al revés, en una guitarra de funk o un pluck corto, esa palma es justo lo que quieres.
+
+**El volumen de un pluck se compara por el pico.** Los 6 presets están igualados con el Master al pico de los plucks
+que ya existían (−10…−11 dBFS con el arpegio de prueba). Su RMS es más bajo (un sonido que cae enseguida tiene mucho
+"factor de cresta"), pero en el ataque suenan igual de fuertes.
+
+### Qué hace cada control (los trucos nuevos)
+| Truco | Qué se oye | En el analizador / osciloscopio |
+|---|---|---|
+| Key → String Decay −15…−20 % | Los graves "se quedan", los agudos se apagan antes: suena a instrumento, no a órgano. | En un acorde largo, los picos de las notas agudas bajan primero en el EQ. |
+| Velocity → String Pick Tone +20…+40 % | Las notas fuertes atacan más brillantes; las suaves, más redondas. | El arranque de los picos agudos sube con la velocity; la cola es la misma. |
+| LFO S&H Retrigger (0.02 Hz) → String Pick Pos +5…+6 % | Un arpegio deja de sonar a secuenciador: cada nota tiene un color un poco distinto. | Los huecos del peine se mueven un poco de nota a nota. |
+| Env 2 (decay 80 ms) → String Pitch +0.5 % | El "twang": la nota entra un pelo alta y se asienta. | El pico de la fundamental se desliza unos cents hacia abajo al principio. |
+| Mod Wheel → String Pitch +8.3 % | Doblar la cuerda 2 semitonos mientras suena (oshide del koto, bend de guitarra). | El pico sube sin un ataque nuevo. |
+| Velocity → String Level con Velocity Sens bajo | Más fuerte sin cambiar el timbre (kalimba). | Solo sube la altura de los picos, no su forma. |
+| Cuerda + sierra con unison, Env 1 Sustain 0 % | Pluck con ataque "real" y ancho de sintetizador. | Estéreo: la cuerda en el centro, la sierra a los lados. |
+
+### Mapa de los presets de cuerda
+| Preset | Qué enseña |
+|---|---|
+| Guitarra Nylon | Damping alto + yema (Pick Tone 1.6 kHz) + humanizar con S&H → Pick Pos. |
+| Guitarra Acústica Acero | Púa media, Key → Decay (agudas más cortas) y rasgueo con la herramienta *Strum* de FL. |
+| Koto | Junto al puente (8 %) con púa dura, twang con Env 2 → Pitch y oshide con la rueda. |
+| Arpa de Concierto | Cerca del centro (42 %), Key → Decay −20 %, reverb grande con pre-delay, glissandos. |
+| Pluck Cuerda Pop | Capas: cuerda (ataque, cola) + sierra con unison (ancho) + envolvente de filtro. |
+| Kalimba de Madera | Impulse (siempre igual) en el centro (50 %) con Pick Tone bajo; velocity sin cambio de timbre. |
+
+### Ejercicio de escucha guiado
+Mismo canal de siempre (Fruity Parametric EQ 2 para mirar, Wave Candy como osciloscopio).
+1. **Humanizar.** Carga *Guitarra Nylon*. Dibuja en el Piano Roll 8 corcheas de la misma nota, E5 de FL, a 90 BPM,
+   todas con la misma velocity. Cada nota tiene un color un poquito distinto. Ve a *Modulación* y baja el amount de
+   LFO 1 → String Pick Pos de 6 % a 0 %: las 8 notas suenan clónicas ("ametralladora"). Súbelo a 30 %: demasiado,
+   parece que el guitarrista no sabe dónde tiene la mano. El punto bueno es el que no notas hasta que lo quitas.
+2. **Graves que duran, agudos que no.** Carga *Arpa de Concierto*, pisa el pedal (o dibuja notas de 4 compases) y
+   toca C3 y C7 de FL juntas. El C7 se apaga mucho antes. Pon el amount de Key → String Decay a 0 %: las dos duran lo
+   mismo y el C7 se queda "pitando" como una campana. Devuélvelo a −20 %.
+3. **El twang.** Carga *Koto* y toca A5 de FL fuerte, varias veces. Pon el amount de Env 2 → String Pitch en 0 %: la
+   nota entra "plana", como un sintetizador. En 2 %: el twang se vuelve un "boing" caricaturesco. El 0.5 % del preset
+   se nota más como *carácter* que como un cambio de tono.
+4. **Oshide.** En *Koto*, toca una A5 larga y en el segundo tiempo sube la rueda de modulación hasta la mitad: la nota
+   llega a A#5 sin volver a puntear. Grábalo como automatización del CC 1 en FL para repetirlo igual.
+5. **Las capas.** Carga *Pluck Cuerda Pop* y toca el acorde Am (A5–C6–E6 de FL). Pon Osc A Level a 0 %: queda la
+   cuerda sola, orgánica pero estrecha y en el centro (mira la imagen estéreo en Wave Candy). Devuélvelo y pon String
+   Level a 0 %: queda un pluck de synth genérico, sin el chasquido del ataque. Juntas son más que la suma.
+6. **La palma.** En *Arpa de Concierto*, toca la misma nota corta (una semicorchea) y larga (una blanca). La corta se
+   apaga casi enseguida aunque el Release es de 1.5 s: es la palma. Para un arpa, notas largas o pedal.
+
+### Receta
+**Guitarra eléctrica limpia de funk (el "chank").** *Init*, Osc A off. Cuerda On, Level 80 %, Decay 4 s, Damping 30 %.
+Punteo: Filtered Noise, Pick Pos 10 %, Pick Tone 6 kHz. Matriz: Velocity → String Pick Tone 30 %. Env 1: Attack 1 ms,
+Sustain 100 %, Release 60 ms. Voices 8. Chorus On (Mix 25 %), Delay 1/8 D con Mix 10 %, reverb pequeña (Mix 10 %).
+Master +3 dB. *Por qué:* Pick Pos 10 % es como la pastilla del puente de una eléctrica: brillante y con "mordida"; el
+Damping bajo y el Decay largo son las cuerdas de acero sin la caja de una acústica. Y aquí la **palma** al soltar es la
+protagonista: toca acordes de E9 (E5–G#5–D6–F#6 de FL) en semicorcheas **muy cortas**, con algunas notas aún más
+cortas y suaves (las "fantasma"): cada acorde se apaga en seco, como cuando el guitarrista de funk afloja la mano
+izquierda. El chorus es el pedal clásico de la guitarra limpia de los 80.
+
+Las otras 6 recetas están en las notas de los presets. Como con la librería por géneros, haz **ingeniería inversa**:
+apaga sus rutas de la matriz una por una y escucha qué aporta cada una.
+
+### Reto sin receta
+**Banjo de bluegrass.** Un banjo es una cuerda de acero sobre un parche de tambor: suena muy **brillante y nasal**, con
+un ataque que "pica", y sus notas se apagan **rápido aunque no las apagues** (el parche absorbe la energía). Se toca
+en *rolls*: arpegios rapidísimos de semicorcheas con púas de metal en los dedos. Tu reto: un banjo para un roll a
+**130 BPM** sobre G mayor (G5–B5–D6 de FL repetido), donde:
+- las notas se separen solas aunque las dibujes ligadas (sin depender de la palma),
+- y dos notas iguales seguidas **no** suenen idénticas.
+
+Guárdalo con notas: qué respuesta diste a cada una de las cinco preguntas de esta fase.
+Pista para empezar: compara las notas de *Koto* y *Guitarra Nylon*: ¿qué tomarías de cada uno? Inténtalo primero; las
+pistas vendrán después.
+
+### Vocabulario
+- **Humanizar.** Añadir variaciones pequeñas y al azar (tiempo, velocity, timbre) para que algo programado suene
+  tocado. *Ejemplo:* la función *Humanize* del Piano Roll de FL hace lo mismo con el tiempo y la velocity de las notas.
+- **Rasgueo (strum).** Tocar las cuerdas de un acorde una tras otra muy rápido, no a la vez. *Ejemplo:* cualquier
+  guitarra acústica de pop o de folk; en FL, la herramienta *Strum* del Piano Roll.
+- **Glissando.** Deslizar el dedo por muchas cuerdas o teclas seguidas. *Ejemplo:* el arpa de las escenas de "sueño"
+  en el cine y los dibujos animados.
+- **Oshide.** Técnica del koto: apretar la cuerda al otro lado del puente para subir su nota mientras suena. *Ejemplo:*
+  la música tradicional japonesa (*Rokudan no Shirabe*) y las bandas sonoras de ambiente japonés.
+- **Tsume.** Las púas que el intérprete de koto lleva en los dedos. *Ejemplo:* el ataque duro y "picado" del koto.
+- **Twang / modulación por tensión.** La nota de una cuerda punteada fuerte empieza un poco alta y se asienta.
+  *Ejemplo:* el koto y el bajo eléctrico tocado en slap lo tienen muy marcado.
+- **Hirajoshi.** Escala pentatónica japonesa (en D: D–E–F–A–Bb). *Ejemplo:* la usan muchos temas de metal y de
+  videojuegos para sonar "japonés".
+- **Capas (layering).** Sumar dos sonidos que se complementan para que funcionen como uno. *Ejemplo:* los plucks de
+  future bass suelen ser un sample de instrumento real más un synth con unison.
+- **Chank.** El acorde corto y apagado de la guitarra rítmica de funk. *Ejemplo:* Nile Rodgers en "Le Freak" o "Get
+  Lucky".
+- **Roll (de banjo).** Patrón de arpegio rápido de tres dedos. *Ejemplo:* "Foggy Mountain Breakdown" (Flatt & Scruggs).
+
+### Retos completados
+- [ ] Reto Fase 14 — banjo de bluegrass

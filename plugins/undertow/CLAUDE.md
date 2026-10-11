@@ -537,3 +537,19 @@ la cuerda con White Noise y Pick Position 0 % suena igual que en la Fase 12 (hue
 - Límites conocidos: Impulse brillante en graves más suave (límite de pico, arriba); el punteo cuesta ~3× el de la
   Fase 12 (bucles dependientes: paso bajo, sumas); con D < 2 muestras (Pick Position muy bajo en notas muy agudas) la
   compensación de nivel es aproximada.
+
+Fase 14 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Sin cambios en el motor: solo presets y cuaderno.
+- 6 presets de fábrica nuevos en `Presets/Factory/Pluck/` (49 en total): Guitarra Nylon, Guitarra Acústica Acero, Koto,
+  Arpa de Concierto, Pluck Cuerda Pop (cuerda + sierra con unison) y Kalimba de Madera. Categoría Pluck (las
+  categorías no cambian); las notas empiezan por "Instrumento: …" o "Género: …" y dicen "cuerda pulsada".
+- Trucos de la matriz que enseñan: Key → String Decay negativo (agudas más cortas), Velocity → String Pick Tone, LFO
+  S&H en Retrigger a 0.02 Hz → String Pick Pos (un punto de punteo al azar por nota = humanizar), Env 2 → String Pitch
+  +0.5 % (twang del koto) y Mod Wheel → String Pitch +8.33 % (= +2 st, oshide).
+- No resuelven retos pendientes (contrabajo pizzicato de la Fase 12, clavecín de la Fase 13). APRENDIZAJE.md: sección
+  Fase 14 (las cinco preguntas para diseñar un instrumento, receta de guitarra de funk, reto: banjo de bluegrass).
+- Niveles igualados con Master al pico de los plucks existentes: −10.2…−10.9 dBFS con la frase Pluck. Acorde
+  sostenido de 4 notas (medido aparte con `--user`): acero −11.2, arpa −5.5 dBFS. CPU 2.1–3.5 %.
+- Huellas: el diff de `tests/reference/factory-presets.txt` solo añade las 6 líneas; las 43 viejas, iguales.
+- Release con 0 warnings; ctest 4/4; pluginval strictness 10: SUCCESS.
+- Límite que se nota en estos presets: el note-off siempre apaga la cuerda con la palma (~0.1 s), así que arpa y koto
+  necesitan notas largas o el pedal (CC 64). Un control para elegir cuánto apaga la palma sería una mejora posible.

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Guitarra acústica de acero para rasgueos: púa media, agudos que duran y notas agudas más cortas que las graves. -->
+<UndertowPreset formatVersion="1" name="Guitarra Acústica Acero" category="Pluck" author="Undertow">
+  <Notes>
+    Instrumento: guitarra acústica de cuerdas de acero, tocada con púa. Cuerda pulsada (Fases 12–13). Es la receta 1
+    de la Fase 13 del cuaderno, con dos ajustes más para que suene a instrumento y no a "una nota".
+
+    Cómo se construyó:
+    - Cuerda sola (Osc A apagado), Decay 3 s y Damping 40 %: el acero conserva los agudos bastante más que el nylon;
+      por eso la cola "brilla".
+    - Punteo: Filtered Noise, Pick Tone 4 kHz (una púa media) y Pick Pos 18 % (entre la boca y el puente, donde se
+      rasguea una acústica).
+    - Velocity → String Pick Tone +40 %: los golpes fuertes del rasgueo suenan más brillantes que los suaves.
+    - Key → String Decay −15 %: las notas agudas se apagan antes que las graves (de C4 a C6 de FL la cola se acorta a
+      ~70 %). En una guitarra real pasa lo mismo: una cuerda aguda y corta guarda menos energía. Sin esta ruta, todas
+      las notas duran lo mismo y los acordes suenan "de órgano".
+    - LFO 1 (S&amp;H, Retrigger, 0.02 Hz) → String Pick Pos +5 %: cada cuerda del acorde se puntea en un sitio un poco
+      distinto, como pasa de verdad al rasguear.
+    - Env 1: Sustain 100 %, Release 350 ms; Voices 12 (un acorde de 6 cuerdas más el que todavía suena).
+    - Chorus muy leve (Mix 12 %) y reverb de sala (Size 40 %, Mix 15 %): algo de ancho; la cuerda es mono.
+
+    Tócalo: acordes de G, C, D y Em de FL en la octava 4–5 a 100 BPM. Para que suene a rasgueo, selecciona el acorde en
+    el Piano Roll y usa la herramienta Strum (Alt+S): escalona las notas 10–20 ms. Hacia abajo (graves primero) y
+    hacia arriba (agudos primero) alternados, y los golpes "arriba" con menos velocity.
+    Prueba a mover: el amount de Key → String Decay (0 % y −30 %) y el Pick Pos (8 % = metálico; 35 % = más suave).
+    Técnicas: Fase 12 + Fase 13 + Fase 5 (Key y Velocity como fuentes).
+  </Notes>
+  <Parameters>
+    <PARAM id="oscAOn" value="Off"/>
+
+    <PARAM id="stringOn" value="On"/>
+    <PARAM id="stringLevel" value="0.8"/>
+    <PARAM id="stringDecay" value="3"/>
+    <PARAM id="stringDamping" value="0.4"/>
+    <PARAM id="stringExcitation" value="Filtered Noise"/>
+    <PARAM id="stringPickPosition" value="0.18"/>
+    <PARAM id="stringPickTone" value="4000"/>
+
+    <PARAM id="voices" value="12"/>
+    <PARAM id="velocity" value="0.5"/>
+    <PARAM id="attack" value="0.001"/>
+    <PARAM id="sustain" value="1"/>
+    <PARAM id="release" value="0.35"/>
+
+    <PARAM id="lfo1Shape" value="Sample &amp; Hold"/>
+    <PARAM id="lfo1Mode" value="Retrigger"/>
+    <PARAM id="lfo1Sync" value="Off"/>
+    <PARAM id="lfo1Rate" value="0.02"/>
+    <PARAM id="mod1Source" value="Velocity"/>
+    <PARAM id="mod1Destination" value="String Pick Tone"/>
+    <PARAM id="mod1Amount" value="0.4"/>
+    <PARAM id="mod2Source" value="Key"/>
+    <PARAM id="mod2Destination" value="String Decay"/>
+    <PARAM id="mod2Amount" value="-0.15"/>
+    <PARAM id="mod3Source" value="LFO 1"/>
+    <PARAM id="mod3Destination" value="String Pick Pos"/>
+    <PARAM id="mod3Amount" value="0.05"/>
+
+    <PARAM id="fxChorusOn" value="On"/>
+    <PARAM id="fxChorusMix" value="0.12"/>
+    <PARAM id="fxReverbOn" value="On"/>
+    <PARAM id="fxReverbSize" value="0.4"/>
+    <PARAM id="fxReverbDecay" value="1.4"/>
+    <PARAM id="fxReverbMix" value="0.15"/>
+    <PARAM id="master" value="3"/>
+  </Parameters>
+</UndertowPreset>
