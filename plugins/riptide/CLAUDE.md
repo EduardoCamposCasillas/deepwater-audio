@@ -88,7 +88,7 @@ plugins/riptide/
       Cada modo con su propia curva y comportamiento según el nivel de entrada.
 - [x] Fase 4 — Tono: filtros pre y post saturación (HP/LP), tilt EQ y control de "emphasis"
       para decidir qué frecuencias se saturan más.
-- [ ] Fase 5 — Mix dry/wet con compensación de fase/latencia, compensación automática de volumen
+- [x] Fase 5 — Mix dry/wet con compensación de fase/latencia, compensación automática de volumen
       (auto gain) y modo delta (escuchar solo lo que agrega la saturación).
 - [ ] Fase 6 — Multibanda: crossovers Linkwitz-Riley (hasta 4 bandas), modo y drive por banda,
       solo/mute por banda, suma plana cuando no hay saturación.
@@ -99,7 +99,7 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 5 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+Fase 5 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena: entrada → × input (drive) → tono pre → [IN] → modo → tono post → filtro DC → × auto gain = wet; dry = entrada
   retrasada la latencia → filtro DC gemelo; mix `dry + (wet − dry)·mix` → `− delta·dry` → × output → fundido de bypass
   (con la original intacta, sin filtro DC: bit a bit) → × fundido de factor → [OUT].
@@ -251,4 +251,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: que el usuario pruebe la Fase 5 en FL; después, Fase 6 (multibanda).
+Siguiente: Fase 6 (multibanda).
