@@ -110,11 +110,11 @@ plugins/riptide/
 - [x] Fase 8 — GUI profesional: curva de transferencia en vivo, analizador de espectro antes/después,
       visualización de bandas, escalable.
 - [x] Fase 9 — Presets con notas educativas (batería, bajo, voz, bus, master, efectos creativos).
-- [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
+- [x] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 10 IMPLEMENTADA (2026-10-11), pendiente de que el usuario la pruebe en FL Studio. El audio no cambia: idéntico bit
-a bit a la Fase 9.
+Fase 10 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. Riptide TERMINADO. El audio no cambia:
+idéntico bit a bit a la Fase 9.
 - CPU (`RiptideTests --cpu`, 48 kHz estéreo, ruido −12 dBFS + 12 dB de Input, bloques de 256, mejor de 5, con FTZ/DAZ
   como el plugin; este equipo, ±10 %): Init (Tape 4x) 1.55 → 0.98 %; Tape Off 0.79 → 0.59; 2x 1.15 → 0.78; 8x 2.39 → 1.39;
   16x 4.19 → 2.17; los 6 modos a 16x 4.2–4.8 → 2.1–2.7 %; tono completo + mix + auto gain + modulación 1.78 → 1.38;
@@ -464,5 +464,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: probar la Fase 10 en FL Studio (y la comparación contra referencias con `scripts/level_match.py`). Es la
-última fase de Riptide; después, el plugin 3 (EQ paramétrico).
+Siguiente: Riptide está terminado. Plugin 3 de la suite: EQ paramétrico (ver el `CLAUDE.md` raíz).
