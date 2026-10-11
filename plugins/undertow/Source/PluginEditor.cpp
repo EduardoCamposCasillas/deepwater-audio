@@ -373,12 +373,13 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     stringPage.addAndMakeVisible (stringGroup);
     stringPage.addAndMakeVisible (stringOnButton);
     stringOnAttachment = std::make_unique<ButtonAttachment> (apvts, id::stringOn, stringOnButton);
-    const std::array<KnobInfo, 6> stringInfos { { { id::stringOctave, "Octave" },
+    const std::array<KnobInfo, 7> stringInfos { { { id::stringOctave, "Octave" },
                                                   { id::stringSemi, "Semi" },
                                                   { id::stringFine, "Fine" },
                                                   { id::stringLevel, "Level" },
                                                   { id::stringDecay, "Decay" },
-                                                  { id::stringDamping, "Damping" } } };
+                                                  { id::stringDamping, "Damping" },
+                                                  { id::stringStiffness, "Stiffness" } } };
     for (size_t k = 0; k < stringKnobs.size(); ++k)
         setUpKnob (stringKnobs[k], stringPage, stringInfos[k].parameterId, stringInfos[k].name, knobWidth);
     stringHelp.setText (juce::String::fromUTF8 (
@@ -388,7 +389,11 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
                             "mueren los agudos: poco = met\xc3\xa1lica y brillante (arpa, clavec\xc3\xadn); mucho = "
                             "apagada y redonda (nylon, koto con la palma). Al soltar la tecla la cuerda se apaga como "
                             "con la palma; el Release de Env 1 sigue mandando sobre el final. Suena junto con los "
-                            "osciladores, el sub y el ruido, y pasa por el mismo filtro y los efectos."),
+                            "osciladores, el sub y el ruido, y pasa por el mismo filtro y los efectos. "
+                            "Stiffness = rigidez: los arm\xc3\xb3nicos agudos suben (se estiran) como en una cuerda "
+                            "gruesa de acero. 0 % = cuerda ideal; 25-50 % = piano (mejor en graves); 75-100 % = campana, "
+                            "barra de metal. El fundamental sigue afinado. Se elige al puntear la cuerda en silencio: un "
+                            "redisparo con la cuerda sonando conserva su rigidez."),
                         juce::dontSendNotification);
     stringHelp.setJustificationType (juce::Justification::topLeft);
     stringHelp.setColour (juce::Label::textColourId, undertow::gui::theme::dimText);
@@ -1067,7 +1072,7 @@ void UndertowAudioProcessorEditor::layoutContent()
     }
 
     // ================= Página "Cuerda" =================
-    // Una fila: On y después las perillas (afinación, nivel y las dos de la cuerda). Debajo, la explicación.
+    // Una fila: On y después las perillas (afinación, nivel y las tres de la cuerda). Debajo, la explicación.
     {
         auto page = stringPage.getLocalBounds();
         auto groupArea = page.removeFromTop (rowHeight);

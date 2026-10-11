@@ -272,7 +272,7 @@ private:
     juce::GroupComponent stringGroup;
     juce::ToggleButton stringOnButton { "On" };
     std::unique_ptr<ButtonAttachment> stringOnAttachment;
-    std::array<Knob, 6> stringKnobs; // Octave, Semi, Fine, Level, Decay, Damping
+    std::array<Knob, 7> stringKnobs; // Octave, Semi, Fine, Level, Decay, Damping, Stiffness (Fase 15)
     juce::Label stringHelp;
 
     // --- Fase 13: el punteo ---

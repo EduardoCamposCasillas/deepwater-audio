@@ -124,7 +124,7 @@ public:
         applyPathConfig ({}); // fija también la frecuencia de muestreo de los osciladores y el sub
         noise.setSampleRate (sampleRate);
         string.prepare (sampleRate);
-        appliedStringDecay = appliedStringDamping = -1.0f;
+        appliedStringDecay = appliedStringDamping = appliedStringStiffness = -1.0f;
         pendingPluck = false;
         duckStage = DuckStage::none;
         duckGain = 1.0f;
@@ -612,7 +612,8 @@ private:
                                                  modulationOf (ModDestination::stringLevel), smoothingCoef);
             setStringFrequency (stringTuning + globalPitch
                                 + modulationOf (ModDestination::stringPitch) * pitchModulationSemitones);
-            updateStringLoss (modulationOf (ModDestination::stringDecay), modulationOf (ModDestination::stringDamping));
+            updateStringBody (modulationOf (ModDestination::stringDecay), modulationOf (ModDestination::stringDamping),
+                              modulationOf (ModDestination::stringStiffness));
             if (pendingPluck && stringSettings.enabled)
                 string.pluck (pluckSeed, modulatedPluckShape());
         }
@@ -816,8 +817,9 @@ private:
         }
     }
 
-    // Decay y Damping de la cuerda: perilla + matriz. Solo se pasan a la cuerda si cambiaron (setDecay hace un log).
-    void updateStringLoss (float decayModulation, float dampingModulation) noexcept
+    // Decay, Damping y (Fase 15) Stiffness de la cuerda: perilla + matriz. Solo se pasan a la cuerda si cambiaron
+    // (setDecay hace un log).
+    void updateStringBody (float decayModulation, float dampingModulation, float stiffnessModulation) noexcept
     {
         const auto& settings = sourceSettings.string;
         if (settings.decaySeconds != appliedStringDecay || decayModulation != appliedStringDecayModulation)
@@ -831,6 +833,12 @@ private:
         {
             appliedStringDamping = damping;
             string.setDamping (damping);
+        }
+        const float stiffness = std::clamp (settings.stiffness + stiffnessModulation, 0.0f, 1.0f);
+        if (stiffness != appliedStringStiffness)
+        {
+            appliedStringStiffness = stiffness;
+            string.setStiffness (stiffness);
         }
     }
 
@@ -893,6 +901,7 @@ private:
     float stringTuning = 0.0f;      // semitonos, suavizados
     float appliedStringPitch = 0.0f;
     float appliedStringDecay = -1.0f, appliedStringDecayModulation = 0.0f, appliedStringDamping = -1.0f; // -1: sin aplicar
+    float appliedStringStiffness = -1.0f;
     bool pendingPluck = false;      // Fase 13: puntear en la primera muestra de la nota
     std::uint32_t pluckSeed = 0;
     double appliedStringNote = 0.0;

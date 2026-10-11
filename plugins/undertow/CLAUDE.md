@@ -35,7 +35,7 @@ para que funcionen también como material de estudio.
 Desde la raíz del repositorio (ver también los comandos generales en el `CLAUDE.md` raíz):
 ```
 cmake --build build --config Release --target UndertowSynth_VST3        # solo el plugin
-build/plugins/undertow/Release/UndertowTests.exe                         # tests de DSP y voces (--fase7/8/9/12/13, --verbose)
+build/plugins/undertow/Release/UndertowTests.exe                         # tests de DSP y voces (--fase7/8/9/12/13/15, --verbose)
 build/plugins/undertow/Release/UndertowTests.exe --cpu                   # tabla de CPU (Fase 11)
 build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe   # presets, huellas, memoria
 UndertowPresetTests --render plugins/undertow/tests/reference/migration-test.mid <carpeta>   # WAV para null tests
@@ -553,3 +553,47 @@ Fase 14 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. 
 - Release con 0 warnings; ctest 4/4; pluginval strictness 10: SUCCESS.
 - Límite que se nota en estos presets: el note-off siempre apaga la cuerda con la palma (~0.1 s), así que arpa y koto
   necesitan notas largas o el pedal (CC 64). Un control para elegir cuánto apaga la palma sería una mejora posible.
+
+Fase 15 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Lo existente suena igual: con Stiffness 0 la cuerda
+no tiene all-pass (huella FNV de `PluckedString` idéntica bit a bit, scratch) y null test de los 6 presets de referencia
+(`out/render-fase14` vs `out/render-fase15`): idéntico bit a bit. Huellas de los 49 presets: iguales.
+- `dsp/PluckedString.h`: rigidez = cascada de M all-pass de 1.er orden iguales, (a + z⁻¹) / (1 + a·z⁻¹) con a ≤ 0,
+  entre la línea y el filtro de lazo (Van Duyne & Smith). M = 8, o (período − 4) / 2 si es menos (al menos 1). B = 0.05·s⁴
+  (`inharmonicityFor`); objetivo fₙ = n·f0·√(1 + B·n²) / √(1 + B) (`stiffPartialRatio`, el 1.er parcial en la nota).
+  'a' por Newton con salvaguarda de bisección: fase de la vuelta = 2π·n en el 8.º parcial (o en fs/4 si cae más
+  arriba; n fraccionario de la cuadrática sin restas), con la línea despejada de la condición en f0; el filtro de lazo no
+  entra (su dispersión ya estaba). La línea se acorta el retardo de fase del all-pass en f0 y su retardo de grupo entra
+  en el cálculo del T60 y del "resbalón". Límites: la línea no baja de 1/4 de la vuelta ni de 3 muestras (con 3, una nota
+  grave muy rígida subida con la matriz acumulaba la excitación ×20: los agudos casi no se retrasan en el all-pass y para
+  ellos la vuelta era de 4 muestras); el polo del filtro deja sitio al all-pass; a ≥ −0.999; vuelta ≥ M + 5.
+- 'a' se elige al puntear una cuerda EN SILENCIO y queda fijo hasta que vuelve al silencio (se quita el all-pass); un
+  redisparo con la cuerda sonando conserva su rigidez. Probado y descartado (ver el comentario de la clase): moverla con
+  la cuerda sonando, primero con deslizamiento de 10 ms (clics de hasta 35×: la línea saltaba cientos de muestras cada
+  32), luego con rampa por muestra y límite de velocidad (sin clics, pero cada cambio sube o baja el nivel 2–7 dB por la
+  energía que guarda el all-pass, y con S&H a Stiffness y a Pitch o redisparos esos saltos se sumaban: ×10 000; la forma
+  de escalera normalizada, ortogonal, no lo arreglaba). Con 'a' fijo el all-pass es LTI. Única excepción: si la nota sube
+  tanto que no cabe, 'a' va hacia 0 lo justo, en rampa de 32 muestras, y no vuelve (monótono: el nivel cambia una vez).
+  Con el tono moviéndose, el retardo del all-pass en f0 se sigue con su pendiente d(φ/ω)/dω = (grupo − fase) / ω entre
+  cálculos completos (`updateLength`).
+- Voz: `StringSettings::stiffness` (al final del struct); Stiffness (perilla + matriz) se pasa en `updateStringBody`
+  (antes `updateStringLoss`) solo si cambia. Destino nuevo al final: String Stiffness (100 % = toda la perilla), en
+  `gui/ModulationTargets.h` (24 perillas destino).
+- Parámetro nuevo (versionHint 10, al final): stringStiffness (0–100 %, def. 0). GUI: 7.ª perilla de la fila de la
+  cuerda y una frase en su ayuda.
+- Render de referencia (`UndertowPresetTests --render`): ahora 6 presets, + Koto y Guitarra Nylon (para que el null
+  test cubra la cuerda).
+- Tests (`UndertowTests --fase15`): parciales 1–8 medidos (A0–A5 de FL, 4 sample rates) contra la fórmula: fundamental
+  0.005 cents; parciales 2–8, peor 0.2 / 9 / 36 / 40 cents con Stiffness 25 / 50 / 75 / 100 % (la cascada de all-pass
+  iguales no sigue la curva lejos del 8.º; el simulador en Python lo predijo igual); afinación MIDI 12–96 × 4 sample
+  rates × 3 Damping con Stiffness 50/100 %: 0.03 cents; saltos de tono de −12 a +12 st con la cuerda sonando: 0.04
+  cents; T60 del fundamental con 100 %: 0.3 %; Stiffness 0 sin all-pass y la nota siguiente a una rígida, bit a bit;
+  perilla y redisparo con la cuerda sonando no la cambian (bit a bit); Mod Wheel → String Stiffness = la perilla (bit a
+  bit); Velocity → String Stiffness; extremos al azar sin NaN; tortura (tono ±48 st a 40 Hz, redisparos con otra rigidez,
+  Decay hasta 30 s): pico 9.6 contra 8.6 sin rigidez. CPU (48 kHz, 16 notas): cuerda sola 2.9 %, con Stiffness 100 %
+  4.0 %, con vibrato 11.3 %.
+- Release con 0 warnings; ctest 4/4; pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096,
+  `--repeat 3 --randomise`): SUCCESS.
+- Límites conocidos: por encima del 8.º parcial la curva se estira menos que la fórmula (y en notas muy agudas, con
+  pocas secciones, también los primeros); el hueco de Pick Position está calculado para armónicos y con mucha rigidez
+  se "rellena"; los parciales agudos mueren antes que el fundamental aunque Damping sea 0 (dan más vueltas por segundo:
+  físico); Stiffness no se puede barrer con la nota sonando (para eso, Damping/Decay o el filtro).

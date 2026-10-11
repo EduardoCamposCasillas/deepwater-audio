@@ -45,10 +45,12 @@ enum class ModDestination
     // Fase 7
     oscAWarp, oscBWarp, oscAFm, oscBFm,
     // Fase 13: la cuerda
-    stringLevel, stringPitch, stringDecay, stringDamping, stringPickPosition, stringPickTone
+    stringLevel, stringPitch, stringDecay, stringDamping, stringPickPosition, stringPickTone,
+    // Fase 15
+    stringStiffness
 };
 
-inline constexpr std::array<const char*, 26> modDestinationNames {
+inline constexpr std::array<const char*, 27> modDestinationNames {
     "None",
     "Osc A Position",
     "Osc A Pitch",
@@ -75,6 +77,7 @@ inline constexpr std::array<const char*, 26> modDestinationNames {
     "String Damping",
     "String Pick Pos",  // Pick Position y Pick Tone solo se leen al puntear (el valor de la nota cuando empieza)
     "String Pick Tone", // 100 % = toda la perilla (200 Hz - 20 kHz, logarítmica)
+    "String Stiffness", // 100 % = toda la perilla; se lee al puntear la cuerda en silencio (no al redisparar)
 };
 
 inline constexpr int numModSources = static_cast<int> (modSourceNames.size());

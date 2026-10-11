@@ -2348,3 +2348,159 @@ pistas vendrán después.
 
 ### Retos completados
 - [ ] Reto Fase 14 — banjo de bluegrass
+
+## Fase 15 — Rigidez: cuando los armónicos dejan de ser armónicos
+
+Hasta aquí la cuerda era **ideal**: perfectamente flexible, así que sus modos de vibrar caían justo en f0, 2·f0, 3·f0…
+(una serie armónica). Una cuerda real es también una **barra**: resiste doblarse. Esta fase añade esa rigidez con una
+sola perilla, **Stiffness**, y con ella se pasa de la guitarra al piano, y del piano a la campana.
+
+### Conceptos aprendidos
+**Inharmonicidad.** La rigidez empuja la cuerda de vuelta con más fuerza cuanto más curvada está, y las ondas cortas
+(los armónicos agudos) se curvan mucho más que las largas. Resultado: los agudos viajan más rápido por la cuerda y sus
+modos quedan **por encima** de los armónicos. La fórmula de una cuerda rígida es
+
+  fₙ = n · f0 · √(1 + B·n²)
+
+donde **B** es el coeficiente de inharmonicidad. B pequeño apenas mueve los primeros parciales pero los altos (n²
+crece deprisa) se van alejando cada vez más. Valores reales: cuerdas graves de piano ~10⁻⁴, centro ~10⁻³, agudos
+hasta ~10⁻²; una barra de metal o una campana, mucho más. (Undertow divide además por √(1 + B) para que el 1.er
+parcial quede exactamente en la nota que tocas.)
+
+**Parcial vs armónico.** Un *armónico* es un múltiplo exacto de f0; un *parcial* es cualquier componente del sonido.
+En una cuerda ideal son lo mismo; con rigidez, los parciales ya no son armónicos. Por eso el oído deja de oír "una
+nota con timbre" y empieza a oír algo metálico o de campana: la serie ya no encaja en un solo tono.
+
+**Por qué el piano se afina "estirado".** El 2.º parcial de un La grave queda un poco por encima de 2·f0. Si el afinador
+pusiera el La de una octava más arriba exactamente al doble, chocaría con ese 2.º parcial y se oirían **batidos**
+(un "wah-wah" lento). Así que lo afina un pelín alto, y lo mismo en cada octava: los agudos de un piano están más altos
+que en la teoría y los graves más bajos (la **curva de Railsback**). La rigidez es la razón del sonido de piano.
+
+**Cómo se hace en el lazo: un filtro all-pass.** Para que los agudos den la vuelta antes que los graves, el lazo
+necesita un retardo que **baje con la frecuencia** sin cambiar el volumen de nada. Eso es un **all-pass** (pasa-todo):
+ganancia exactamente 1 en todas las frecuencias, pero cada frecuencia sale con un retardo distinto. El de 1.er orden,
+A(z) = (a + z⁻¹) / (1 + a·z⁻¹), con **a negativo** retrasa más los graves que los agudos. Undertow pone **8 iguales en
+cascada** justo después de la línea (la idea de Van Duyne y Smith), y como el all-pass ya retrasa en f0, la línea se
+**acorta** lo mismo: el fundamental sigue afinado (medido: menos de 0.04 cents de MIDI 12 a 96, C1 a C9 de FL, en 4
+sample rates, y también después de saltos de tono de ±12 semitonos con la cuerda sonando).
+
+**Elegir a.** El coeficiente se calcula para que el **8.º parcial** caiga exactamente donde dice la fórmula (Newton: se
+corrige a hasta que la fase de la vuelta en ese parcial da 8 vueltas completas). Con 8 secciones iguales la curva no
+es perfecta lejos de ese punto; medido en los parciales 2 a 8:
+| Stiffness | B | el 8.º parcial queda en | error peor (parciales 2–8) |
+|---|---|---|---|
+| 25 % | 2·10⁻⁴ | 8.05 × f0 | 0.2 cents |
+| 50 % | 3·10⁻³ | 8.75 × f0 | 9 cents |
+| 75 % | 0.016 | 11.3 × f0 | 36 cents |
+| 100 % | 0.05 | 16 × f0 | 40 cents |
+Por encima del 8.º la curva real se estira menos que la fórmula. En la zona de piano el error es inaudible; en la
+zona de campana no importa (no hay un "correcto" que oír). La perilla va como B = 0.05·s⁴: la 4.ª potencia reparte el
+recorrido por lo que se oye (casi todo el cambio útil de piano está entre 20 y 50 %).
+
+**La rigidez se elige al empezar a vibrar.** Como Pick Position, se lee al puntear, pero un poco más estricto: el
+coeficiente se queda fijo mientras la cuerda vibra, también si la redisparas. La razón salió en los tests: el
+all-pass guarda energía según su retardo de grupo, y cambiar a con la cuerda sonando sube o baja el nivel entre 2 y
+7 dB. Con muchos cambios (un S&H a Stiffness y a Pitch, o redisparos con otra rigidez) esos saltos se suman como un
+paseo al azar, y una cuerda de Decay largo llegó a crecer **×10 000**. Con a fijo, el all-pass es un filtro lineal que
+no cambia y la cuerda es tan estable como sin él. Única excepción: si la matriz sube tanto la nota que el all-pass ya
+no cabe en la vuelta, a se acerca a 0 lo justo (como una cuerda que se tensa, que se vuelve relativamente menos
+rígida), y no vuelve aunque la nota baje.
+
+**Efectos secundarios (son físicos).** Los parciales agudos dan la vuelta antes, así que dan **más vueltas por
+segundo** y pierden más por segundo: con rigidez los agudos mueren antes aunque Damping esté en 0. Y el hueco de **Pick
+Position** está calculado para armónicos: con mucha rigidez los parciales se apartan de donde el peine hace su hueco
+y ya no desaparecen del todo (el 50 % suena menos hueco).
+
+### Qué hace cada control al sonido
+| Control | Qué oyes | En el analizador y el osciloscopio |
+|---|---|---|
+| **Stiffness** (pestaña Cuerda, al lado de Damping) | 0 %: la cuerda de siempre. 15–30 %: "cuerpo" de cuerda gruesa de acero, se nota sobre todo en graves. 30–50 %: piano, clavecín grave, el brillo "de metal" del bajo de un piano vertical. 60–80 %: vibráfono, piano de juguete, campanita. 90–100 %: campana, barra de metal, gong pequeño: la nota casi se pierde. | En el EQ los picos dejan de estar equiespaciados: cada uno se separa más del anterior (en un A3 de FL, 110 Hz, el 8.º pico pasa de 880 Hz a ~960 Hz con 50 % y a ~1760 Hz con 100 %). En el osciloscopio la onda deja de repetirse igual en cada período: "se deforma" mientras suena. |
+| **String Stiffness** (destino de la matriz) | 100 % = toda la perilla. Se lee al empezar la vibración: tiene sentido con fuentes "por nota": **Key** (más o menos rigidez según la tecla), **Velocity** (golpe fuerte = más metálico), un S&H en Retrigger (cada nota un poco distinta). Un LFO libre no hace nada a la nota que ya suena. | — |
+
+### Ejercicio de escucha guiado
+Mismo canal que en las fases 12–13 (Fruity Parametric EQ 2 para mirar, Wave Candy como osciloscopio). *Init*, Osc A
+off, Cuerda On, Decay 4 s, Damping 15 %, Excitation **Impulse**, Pick Tone 20 kHz, Pick Pos 0 % (todos los parciales
+parejos). Env 1: Attack 1 ms, Sustain 100 %, Release 1 s. Toca un **A3 de FL (110 Hz)**.
+1. **Los picos se separan.** Stiffness 0 %: en el EQ, picos cada 110 Hz. Sube a 25 % y vuelve a tocar: casi igual,
+   solo los picos de arriba (más allá de 2 kHz) se corren a la derecha. 50 %: el 8.º pico ya está en ~960 Hz en vez de
+   880. 100 %: los picos se abren como un abanico; el 8.º, por 1760 Hz. Escucha cómo pasa de "cuerda" a "campana".
+2. **Grave contra agudo.** Stiffness 40 %. Toca A1 de FL (27.5 Hz) y luego A5 de FL (440 Hz). La proporción entre
+   parciales es la misma en las dos notas (B es igual), pero la grave tiene muchísimos parciales dentro de lo audible y
+   suena muy metálica; la aguda tiene pocos y casi no cambia. Ahora arrastra *Key* a la perilla Stiffness con −30 %:
+   las graves se suavizan. (Un piano real hace lo contrario de lo "fácil": sus cuerdas graves son entorchadas
+   precisamente para tener menos rigidez.)
+3. **Se elige al empezar a vibrar.** Toca una nota larga y gira Stiffness de 0 a 100 % mientras suena: no cambia.
+   Vuelve a tocarla: la nueva sí. Pisa el pedal (CC 64) y repite la misma nota varias veces mientras mueves la perilla:
+   la cuerda sigue con la rigidez de la primera vez hasta que se apaga del todo.
+4. **Los batidos de la octava.** Stiffness 40 %, Decay 6 s, Damping 10 %. Toca a la vez A2 y A3 de FL (55 y 110 Hz).
+   En una octava "perfecta" los parciales de la aguda caen encima de los pares de la grave; con rigidez, los de la
+   grave están más estirados (su 4.º parcial sube más que el 2.º de la aguda) y no coinciden: se oye un temblor, un
+   "wah-wah" de 1 o 2 por segundo en la zona de 220–440 Hz, más rápido cuanto más arriba. Con Stiffness 0 % la octava
+   queda quieta. Ese temblor es lo que el afinador de pianos evita afinando la octava un poco grande (**afinar
+   estirado**).
+5. **Rigidez y Pick Position.** Pick Pos 50 % con Stiffness 0 %: hueco, sin pares. Sube Stiffness a 80 %: los pares
+   vuelven a asomar en el EQ, el hueco se "rellena".
+
+### Recetas
+**1. Piano de cuerda (vertical, íntimo).** Init, Osc A off. Cuerda On, Level 80 %, Decay 6 s, Damping 45 %, Stiffness
+**35 %**. Punteo: **Impulse**, Pick Pos **12 %**, Pick Tone 2.5 kHz. Matriz: Velocity → String Pick Tone 50 %,
+Velocity → String Stiffness 10 %, Key → String Damping 20 %. Env 1: Attack 1 ms, Sustain 100 %, Release 400 ms. Voices
+16. Reverb Size 45 %, Mix 18 %. Toca con el pedal. *Por qué:* el piano no se puntea, se **golpea** con un martillo de
+fieltro: un Impulse por un paso bajo (Pick Tone) que se abre con la velocity, porque un martillo fuerte se aplasta menos
+y suena más brillante. Pick Pos 12 % es dónde golpea el martillo de verdad (entre 1/7 y 1/9 del largo: así se
+debilitan el 7.º, el 8.º y el 9.º armónico, que chocan con la armonía occidental). Stiffness 35 % da el brillo de cuerda de acero y los
+batidos lentos entre octavas; Velocity → Stiffness añade un poco de "metal" en los golpes fuertes. El Damping que sube
+con la tecla hace que los agudos se apaguen antes, como en un piano. No va a sonar a un piano de concierto (le falta
+la caja, las dos o tres cuerdas por nota que se desafinan un poco entre sí y el martillo que rebota), pero el carácter se
+reconoce enseguida.
+
+**2. Campanas tubulares.** Cuerda On, Octave +1, Decay 8 s, Damping 10 %, Stiffness **95 %**. Punteo: Impulse, Pick Pos
+22 %, Pick Tone 6 kHz. Env 1: Attack 1 ms, Sustain 100 %, Release 4 s. Reverb Size 80 %, Mix 30 %. Toca notas sueltas
+y lentas (una cada compás). *Por qué:* con tanta rigidez los parciales forman casi un acorde propio: es exactamente lo
+que define a una campana (el oído le pone una nota "aproximada"). Damping bajo y Decay largo porque el metal casi no
+pierde energía; la reverb grande es la iglesia. Si una nota suena "rara", baja a 85 %: con la rigidez al máximo la
+nota se pierde y queda solo el timbre.
+
+### Reto sin receta
+**Piano de juguete.** El de la banda sonora de *Amélie* (Yann Tiersen): no tiene cuerdas, tiene **varillas de metal**
+golpeadas por martillitos duros. Suena agudo, **muy metálico pero todavía con nota**, con un ataque duro y una cola
+corta que tintinea. Tu reto: una melodía de vals en C mayor, entre C6 y C7 de FL, que suene a piano de juguete y que
+siga sonando afinada al tocar acordes de tres notas. Pista para empezar: piensa qué parte de "metálico" viene de
+Stiffness y qué parte de cómo se golpea, y busca el valor de rigidez donde la nota todavía se canta. Inténtalo primero;
+las pistas vendrán después.
+
+### Cuándo no usarla
+- **En bajos que tienen que empastar con un sub o un 808.** Los parciales estirados ya no caen en los armónicos del
+  sub y el grave suena "desafinado" o borroso. Si quieres el color, usa poca (10–20 %) o Key → Stiffness negativo.
+- **En acordes densos con mucha rigidez.** Cada nota trae su propio "acorde" de parciales: tres campanas a la vez
+  chocan entre sí. Las campanas suenan mejor en notas sueltas o en intervalos amplios.
+- **Esperando un barrido.** La rigidez no se mueve con la nota sonando: para un timbre que cambie mientras suena usa
+  Damping, Decay o el filtro.
+
+### Vocabulario
+- **Inharmonicidad (B).** Cuánto se apartan los parciales de una serie armónica por la rigidez. *Ejemplo:* el bajo
+  "metálico" y algo desafinado de un piano vertical pequeño, comparado con un piano de cola de 2.7 m (cuerdas más
+  largas = menos B).
+- **Parcial.** Cualquier componente senoidal de un sonido (armónico o no). *Ejemplo:* las campanas tienen parciales
+  que no son armónicos; por eso cuesta decir qué nota dan.
+- **Dispersión.** Cuando la velocidad de una onda depende de su frecuencia. *Ejemplo:* los disparos láser de *Star
+  Wars* se grabaron golpeando el cable tensor de una antena: en un cable rígido los agudos llegan antes que los graves y
+  el golpe se convierte en un "piu" que baja.
+- **Filtro all-pass (pasa-todo).** Deja pasar todas las frecuencias con el mismo volumen pero con retardos distintos.
+  *Ejemplo:* los phasers (Small Stone, el phaser de FL) son cadenas de all-pass que se mueven, mezcladas con la señal
+  seca.
+- **Retardo de fase / retardo de grupo.** Cuánto se retrasa una frecuencia (fase) y cuánto se retrasa la "envolvente"
+  de un grupo de frecuencias cercanas (grupo). En un all-pass son distintos; en una línea de retardo, iguales.
+  *Ejemplo:* los crossovers Linkwitz-Riley del multibanda de Riptide: sumados dan volumen plano, pero cada banda sale
+  con otro retardo de grupo (la suma es un all-pass).
+- **Batidos.** Dos frecuencias casi iguales suman y restan su volumen a un ritmo igual a su diferencia. *Ejemplo:* el
+  "wah-wah" de una guitarra con una cuerda un poco desafinada al tocar un unísono; el coro de un piano de bar (honky-tonk).
+- **Afinación estirada (curva de Railsback).** Afinar las octavas algo más grandes que el doble para que encajen con
+  los parciales estirados. *Ejemplo:* cualquier piano afinado por un profesional; un piano afinado "matemáticamente" con
+  un afinador electrónico simple suena apagado en los extremos.
+- **Lineal e invariante en el tiempo (LTI).** Un sistema cuyos coeficientes no cambian: lo que entra y sale se describe
+  solo con su respuesta en frecuencia. Si un coeficiente se mueve, el sistema puede ganar o perder energía por sí solo.
+  *Ejemplo:* un columpio que sube porque doblas las piernas en el momento justo (bombeo paramétrico).
+
+### Retos completados
+- [ ] Reto Fase 15 — piano de juguete

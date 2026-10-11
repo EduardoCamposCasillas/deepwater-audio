@@ -59,6 +59,27 @@ struct PluckShape
 // Límite: un paso bajo deja pasar la continua más que el fundamental, así que la ganancia que compensa el filtro en f0
 // también la sube. Para que la continua caiga como mucho 4 veces más lento que el fundamental, en notas agudas con
 // Decay largo el Damping alto se ablanda solo (de todas formas allí los armónicos son pocos y mueren deprisa).
+//
+// Fase 15: rigidez (Stiffness). Una cuerda rígida resiste doblarse; esa fuerza pesa más en las ondas cortas, que viajan
+// más rápido: los parciales quedan por encima de los armónicos, fₙ = n·f0·√(1 + B·n²) / √(1 + B) (B = inharmonicidad;
+// dividir por √(1 + B) deja el 1.er parcial en la nota). En el lazo: una cascada de M all-pass de 1.er orden iguales,
+// A(z) = (a + z⁻¹) / (1 + a·z⁻¹) con a < 0, justo después de la línea. Ganancia 1 en todas las frecuencias (no toca
+// el Decay del fundamental) y retardo que BAJA con la frecuencia: los agudos dan la vuelta antes y suben. La línea se
+// acorta lo que el all-pass retrasa en f0 (el fundamental sigue afinado) y 'a' se elige para que el 8.º parcial caiga
+// donde dice la fórmula (Newton sobre la fase del lazo; la cascada de all-pass iguales es la idea de Van Duyne & Smith).
+//
+//   línea ──► all-pass × M ──► filtro de 1 polo ──► × g ──► (+ excitación) ──► línea
+//
+// Con Stiffness 0 el all-pass no existe: el mismo cálculo que en la Fase 14, bit a bit.
+//
+// 'a' se elige cuando la cuerda empieza a vibrar desde el silencio y no cambia hasta que vuelve a quedar en silencio
+// (la rigidez es del material: un redisparo sobre una cuerda que suena la conserva). Probado y descartado: moverla con la
+// cuerda sonando. El all-pass guarda energía según su retardo de grupo: al cambiar 'a' el nivel sube o baja 2-7 dB, y con
+// muchos cambios (S&H a Stiffness y a Pitch, o redisparos con otra rigidez) esos saltos se suman como un paseo al azar: una
+// cuerda de Decay largo llegó a crecer ×10 000. Con 'a' fijo el all-pass es lineal e invariante y la cuerda es tan
+// estable como sin él. Una excepción: si la matriz sube tanto la nota que el retardo del all-pass ya no cabe en la vuelta,
+// 'a' se acerca a 0 lo justo (como una cuerda que se tensa: B baja con la tensión), solo en esa dirección. Aunque la nota
+// vuelva a bajar, 'a' no vuelve: el nivel cambia una vez como mucho y no hay paseo al azar.
 class PluckedString
 {
 public:
@@ -69,6 +90,8 @@ public:
     static constexpr float maxPickPosition = 0.5f;
     static constexpr float minPickToneHz = 200.0f;
     static constexpr float maxPickToneHz = 20000.0f;
+    static constexpr double maxInharmonicity = 0.05; // B con Stiffness 100 %: campana o barra de metal
+    static constexpr int maxDispersionSections = 8;
 
     // Se llama fuera del hilo de audio: reserva la línea y el buffer de la excitación para la nota más grave posible.
     void prepare (double newSampleRate)
@@ -91,6 +114,7 @@ public:
         excitationLength = excitationIndex = 0;
         mute = targetMute = 0.0f;
         silent = true;
+        clearDispersion();
         snapParameters();
     }
 
@@ -115,6 +139,24 @@ public:
 
     void setDamping (float amount) noexcept { targetDamping = std::clamp (amount, 0.0f, 1.0f); }
 
+    // Fase 15: 0..1. Se lee al puntear una cuerda en silencio (ver arriba): con la cuerda sonando, la nueva rigidez
+    // espera a que vuelva a empezar desde el silencio.
+    void setStiffness (float amount) noexcept { targetStiffness = std::clamp (amount, 0.0f, 1.0f); }
+
+    // B (inharmonicidad) de una posición de la perilla: B = 0.05·s⁴. La 4.ª potencia reparte la perilla por lo que se
+    // oye: 25 % ≈ 2·10⁻⁴ (cuerda grave de piano), 50 % ≈ 3·10⁻³ (piano agudo), 75 % ≈ 0.016, 100 % = 0.05 (campana).
+    [[nodiscard]] static double inharmonicityFor (float stiffness) noexcept
+    {
+        const double s = std::clamp (static_cast<double> (stiffness), 0.0, 1.0);
+        return maxInharmonicity * s * s * s * s;
+    }
+
+    // Parcial n de una cuerda rígida, en múltiplos de la nota (el 1.º es la nota).
+    [[nodiscard]] static double stiffPartialRatio (double n, double inharmonicity) noexcept
+    {
+        return n * std::sqrt ((1.0 + inharmonicity * n * n) / (1.0 + inharmonicity));
+    }
+
     // Decay y Damping saltan a su valor (sin el deslizamiento de 10 ms): al empezar una nota desde silencio.
     void snapParameters() noexcept
     {
@@ -136,6 +178,14 @@ public:
             logDecay = targetLogDecay;
             damping = targetDamping;
             mute = targetMute;
+            // La rigidez de esta vibración: el all-pass existe solo si hace falta (sin él, el cálculo de la Fase 14).
+            clearDispersion();
+            if (targetStiffness > 0.0f)
+            {
+                stiffness = targetStiffness;
+                sections = sectionsForPeriod (sampleRate / clampedFrequency());
+                designPending = true; // updateCoefficients elige 'a' (necesita el filtro de lazo)
+            }
         }
         updateCoefficients();
         if (silent)
@@ -179,8 +229,16 @@ public:
             if (--rampSamples == 0)
                 jumpToTargets();
         }
+        // Fase 15: 'a' solo se mueve cuando la nota sube y el all-pass no cabe; entonces va en rampa con la línea.
+        if (dispersionRamp > 0)
+        {
+            dispersion = --dispersionRamp == 0 ? targetDispersion : dispersion + dispersionStep;
+            lengthDirty = true;
+        }
 
-        const float delayed = line.readLagrange (taps);
+        float delayed = line.readLagrange (taps);
+        if (sections > 0)
+            delayed = disperse (delayed);
         filterState += feedforward * (delayed - filterState); // y = (1 − p)·x + p·y₋₁
         float y = loopGain * filterState;
         if (excitationIndex < excitationLength)
@@ -192,6 +250,8 @@ public:
         if (++silentCount >= static_cast<int> (period) + 4)
         {
             silent = quietPeak < silenceThreshold && excitationIndex >= excitationLength;
+            if (silent)
+                clearDispersion(); // la próxima vibración elige su rigidez (con 0, sin all-pass)
             silentCount = 0;
             quietPeak = 0.0f;
         }
@@ -203,6 +263,7 @@ public:
     [[nodiscard]] double getLoopGain() const noexcept { return targetLoopGain; }
     [[nodiscard]] double getPole() const noexcept { return 1.0 - targetFeedforward; }
     [[nodiscard]] bool isSilent() const noexcept { return silent; }
+    [[nodiscard]] int getDispersionSections() const noexcept { return sections; }
     [[nodiscard]] std::vector<float> getExcitation() const // el último punteo (reserva memoria: solo tests)
     {
         return { excitation.begin(), excitation.begin() + excitationLength };
@@ -391,7 +452,9 @@ private:
 
     [[nodiscard]] double clampedFrequency() const noexcept
     {
-        return std::clamp (frequency, minFrequency, sampleRate / minPeriodSamples);
+        // Fase 15: con el all-pass, la vuelta deja sitio al menos a sus M muestras (su retardo con a = 0).
+        const double shortest = sections > 0 ? static_cast<double> (sections) + minPeriodBeyondSections : 0.0;
+        return std::clamp (frequency, minFrequency, sampleRate / std::max (minPeriodSamples, shortest));
     }
 
     // Solo la longitud de la línea, con el filtro y la corrección de afinación del último cálculo completo.
@@ -399,7 +462,19 @@ private:
     {
         lengthDirty = false;
         period = sampleRate / clampedFrequency();
-        taps = deepwater::dsp::LagrangeTaps::forDelay (period * periodScale - delayOffset);
+        if (sections == 0)
+        {
+            taps = deepwater::dsp::LagrangeTaps::forDelay (period * periodScale - delayOffset);
+            return;
+        }
+        // Con el all-pass, su retardo en f0 cambia con el tono: entre dos cálculos completos se sigue con su pendiente
+        // (para un vibrato, exacto de sobra; el cálculo siguiente, a 32 muestras como mucho, lo pone en su sitio).
+        // Mientras 'a' va en rampa, exacto con la 'a' de esta muestra.
+        const double designPeriod = period * periodScale;
+        const double omega = 2.0 * std::numbers::pi / designPeriod;
+        const double allpass = dispersionRamp > 0 ? allpassDelayAt (omega, dispersion)
+                                                  : allpassDelayNow + allpassDelaySlope * (omega - allpassDelayOmega);
+        taps = deepwater::dsp::LagrangeTaps::forDelay (designPeriod - baseOffset - allpass);
     }
 
     void updateCoefficients() noexcept
@@ -439,6 +514,34 @@ private:
         pole = std::min (pole, poleForSquaredGain ((passGain / dcLimit) * (passGain / dcLimit), oneMinusCosOf (omega0)));
         // 2) Su retardo (como mucho p / (1 − p) muestras, en continua) debe caber en la vuelta con margen para Lagrange.
         pole = std::min (pole, (period - 4.0) / (period - 3.0));
+        // ... junto con el all-pass de la rigidez (Fase 15), si está: lo que retrasa en f0 (o M, su mínimo con a = 0, si
+        // todavía hay que elegir 'a'). Lo que deja el filtro es lo más que el all-pass puede retrasar, sin que la línea
+        // baje de un cuarto de la vuelta: los agudos casi no se retrasan en el all-pass, así que para ellos la vuelta es
+        // la línea. Con 3 muestras de línea (una nota grave muy rígida subida con la matriz) la excitación, que dura un
+        // período de la nota original, daba cientos de vueltas mientras entraba y se acumulaba ×20.
+        if (sections > 0)
+        {
+            const double longest = std::min (period - 4.0, (1.0 - minLineFraction) * period - 1.0);
+            const double reserve = designPending ? static_cast<double> (sections)
+                                                 : std::min (allpassDelayAt (omega0, targetDispersion), longest);
+            pole = std::min (pole, (period - 4.0 - reserve) / (period - 3.0 - reserve));
+            const Complex atFundamental ((1.0 - pole) + pole * oneMinusCosOf (omega0), pole * std::sin (omega0));
+            const double room = longest - std::arg (atFundamental) / omega0;
+            const double lowest = dispersionLimit (omega0, room);
+            if (designPending)
+            {
+                designPending = false;
+                dispersion = targetDispersion
+                    = static_cast<float> (designDispersion (omega0, inharmonicityFor (stiffness), lowest));
+            }
+            else if (targetDispersion < lowest)
+            {
+                // La nota subió y no cabe: 'a' hacia 0 lo justo, en rampa (ver arriba: no vuelve).
+                targetDispersion = static_cast<float> (lowest);
+                dispersionStep = (targetDispersion - dispersion) / static_cast<float> (controlInterval);
+                dispersionRamp = controlInterval;
+            }
+        }
 
         // Dos pasadas: la 1.ª en f0 calcula cuánto resbalará el modo; la 2.ª afina el lazo para f0 − Δω.
         // Si la ganancia que hace falta pasa del límite (Lagrange también quita un poco en f0 y el límite 1 no lo
@@ -466,7 +569,9 @@ private:
             // La vuelta: 1 (realimentación) + línea + filtro = el período. Lagrange se aparta un poco del retardo pedido
             // (en graves nada; en C7 a 44.1 kHz, milésimas de muestra): se mide y se corrige.
             designPeriod = 2.0 * pi / omega;
-            const double lineDelay = designPeriod - 1.0 - filterDelay;
+            double lineDelay = designPeriod - 1.0 - filterDelay;
+            if (sections > 0)
+                lineDelay -= allpassDelayAt (omega, targetDispersion);
             taps = deepwater::dsp::LagrangeTaps::forDelay (lineDelay);
             request = lineDelay - (taps.phaseDelay (omega) - lineDelay);
             taps = deepwater::dsp::LagrangeTaps::forDelay (request);
@@ -479,8 +584,10 @@ private:
                 lagrangeSlope += Complex (0.0, -static_cast<double> (k)) * static_cast<double> (taps.weights[k])
                                  * std::polar (1.0, -omega * static_cast<double> (k));
             const Complex pullBack = pole * std::polar (1.0, -omega);
-            const Complex slope = Complex (0.0, -1.0 - taps.first) + lagrangeSlope / lagrange
-                                  - Complex (0.0, 1.0) * pullBack / (1.0 - pullBack);
+            Complex slope = Complex (0.0, -1.0 - taps.first) + lagrangeSlope / lagrange
+                            - Complex (0.0, 1.0) * pullBack / (1.0 - pullBack);
+            if (sections > 0) // el all-pass solo retrasa (|A| = 1): suma su retardo de grupo
+                slope -= Complex (0.0, static_cast<double> (sections) * allpassGroupDelay (omega, targetDispersion));
             const double m = slope.real();
             const double groupDelay = -slope.imag();
             const double norm = groupDelay * groupDelay + m * m;
@@ -494,6 +601,18 @@ private:
 
         periodScale = designPeriod / period;
         delayOffset = designPeriod - request;
+        if (sections > 0)
+        {
+            // Para updateLength: el resto de la vuelta (realimentación, filtro, corrección de Lagrange), el retardo del
+            // all-pass aquí y su pendiente con ω, d(φ/ω)/dω = (retardo de grupo − de fase) / ω.
+            allpassDelayOmega = omega;
+            allpassDelayNow = allpassDelayAt (omega, targetDispersion);
+            baseOffset = delayOffset - allpassDelayNow;
+            allpassDelaySlope = (static_cast<double> (sections) * allpassGroupDelay (omega, targetDispersion) - allpassDelayNow)
+                                / omega;
+            if (dispersionRamp > 0) // la línea empieza donde está 'a' ahora
+                taps = deepwater::dsp::LagrangeTaps::forDelay (designPeriod - baseOffset - allpassDelayAt (omega, dispersion));
+        }
         targetLoopGain = static_cast<float> (std::min (std::exp (logLoss) / filterGain, dcLimit));
         targetFeedforward = static_cast<float> (1.0 - pole);
         rampSamples = controlInterval;
@@ -508,6 +627,115 @@ private:
         rampSamples = 0;
     }
 
+    // --- Fase 15: el all-pass de la rigidez ---
+
+    // Cuántas secciones: 8 (con más, la curva sigue mejor a la fórmula), pero no más de la mitad de lo que deja la
+    // vuelta (período − 4): en notas muy agudas hay pocos parciales y bastan menos.
+    [[nodiscard]] static int sectionsForPeriod (double samples) noexcept
+    {
+        return std::clamp (static_cast<int> ((samples - 4.0) / 2.0), 1, maxDispersionSections);
+    }
+
+    void clearDispersion() noexcept
+    {
+        sections = 0;
+        dispersion = targetDispersion = dispersionStep = 0.0f;
+        dispersionRamp = 0;
+        dispersionState.fill (0.0f);
+        baseOffset = allpassDelayNow = allpassDelaySlope = allpassDelayOmega = 0.0;
+        designPending = false;
+    }
+
+    // Cada sección: y = a·x + s;  s = x − a·y  (forma transpuesta: 2 multiplicaciones y 1 estado por sección).
+    [[nodiscard]] float disperse (float x) noexcept
+    {
+        const float a = dispersion;
+        for (int k = 0; k < sections; ++k)
+        {
+            float& state = dispersionState[static_cast<size_t> (k)];
+            const float y = a * x + state;
+            state = x - a * y;
+            x = y;
+        }
+        return x;
+    }
+
+    // Fase (retraso, en radianes) de una sección a ω: ω − 2·atan(a·sin ω / (1 + a·cos ω)). Con a = 0, ω (1 muestra).
+    [[nodiscard]] static double allpassPhase (double omega, double a) noexcept
+    {
+        return omega - 2.0 * std::atan2 (a * std::sin (omega), 1.0 + a * std::cos (omega));
+    }
+
+    // Retardo de grupo de una sección: (1 − a²) / (1 + 2a·cos ω + a²). Con a < 0, mayor en graves que en agudos.
+    [[nodiscard]] static double allpassGroupDelay (double omega, double a) noexcept
+    {
+        return (1.0 - a * a) / (1.0 + 2.0 * a * std::cos (omega) + a * a);
+    }
+
+    // Retardo de las M secciones a ω (en muestras) con el coeficiente a.
+    [[nodiscard]] double allpassDelayAt (double omega, double a) const noexcept
+    {
+        return static_cast<double> (sections) * allpassPhase (omega, a) / omega;
+    }
+
+    // El 'a' más negativo con el que el all-pass retrasa en f0 como mucho 'room' muestras. Retardo por sección
+    // d = room / M: φ(ω1) = d·ω1 despejada da a = sin θ / sin (ω1 − θ), con θ = ω1·(1 − d) / 2.
+    [[nodiscard]] double dispersionLimit (double omega1, double room) const noexcept
+    {
+        const double perSection = std::max (room / static_cast<double> (sections), 1.0);
+        const double theta = 0.5 * omega1 * (1.0 - perSection);
+        return std::max (std::sin (theta) / std::sin (omega1 - theta), minDispersion);
+    }
+
+    // El coeficiente a para la inharmonicidad B. La vuelta (realimentación + línea + all-pass; el filtro de lazo no
+    // cuenta: su pequeña dispersión ya estaba en la Fase 14) debe tener fase 2π en el 1.er parcial (la línea se ajusta
+    // a eso) y 2π·n en el parcial n de referencia. Despejando la línea de la 1.ª condición, la 2.ª es una ecuación en a:
+    //   f(a) = (ωr/ω1)·(2π − M·φ(ω1)) + M·φ(ωr) − 2π·n = 0.
+    // Newton desde la mitad del intervalo donde f cambia de signo, sin salir de él (si un paso se sale, bisección). El
+    // de referencia es el 8.º parcial, o el punto de fs/4 si el 8.º cae más arriba (cerca de Nyquist el all-pass digital
+    // se aparta del analógico). 'lowest' = el 'a' más negativo que cabe: si para la B pedida haría falta más, se queda ahí (la rigidez
+    // se satura en las notas más agudas).
+    [[nodiscard]] double designDispersion (double omega1, double inharmonicity, double lowest) const noexcept
+    {
+        constexpr double twoPi = 2.0 * std::numbers::pi;
+        const double m = static_cast<double> (sections);
+        const double ratio = std::min (stiffPartialRatio (referencePartial, inharmonicity),
+                                       referenceLimit * std::numbers::pi / omega1);
+        const double omegaR = ratio * omega1;
+        // El parcial (fraccionario) que cae en ωr: n²·(1 + B·n²) = r²·(1 + B), resuelta en la forma sin restas.
+        const double r2 = ratio * ratio * (1.0 + inharmonicity);
+        const double n = std::sqrt (2.0 * r2 / (1.0 + std::sqrt (1.0 + 4.0 * inharmonicity * r2)));
+        const auto f = [&] (double a) {
+            return ratio * (twoPi - m * allpassPhase (omega1, a)) + m * allpassPhase (omegaR, a) - twoPi * n;
+        };
+        const auto phaseSlope = [] (double a, double w) { // dφ/da
+            return -2.0 * std::sin (w) / (1.0 + 2.0 * a * std::cos (w) + a * a);
+        };
+
+        double low = lowest, high = 0.0;
+        if (f (low) >= 0.0)
+            return low; // ni con todo el retardo disponible llega: saturada
+        if (f (high) <= 0.0)
+            return 0.0;
+        double a = 0.5 * low;
+        for (int iteration = 0; iteration < 60; ++iteration)
+        {
+            const double value = f (a);
+            if (value > 0.0)
+                high = a;
+            else
+                low = a;
+            const double derivative = m * (phaseSlope (a, omegaR) - ratio * phaseSlope (a, omega1));
+            double next = derivative != 0.0 ? a - value / derivative : 0.5 * (low + high);
+            if (! (next > low && next < high))
+                next = 0.5 * (low + high);
+            if (std::abs (next - a) < 1.0e-12)
+                return next;
+            a = next;
+        }
+        return a;
+    }
+
     static constexpr double smoothingSeconds = 0.01;
     static constexpr double muteSeconds = 0.015;
     static constexpr double mutedDecaySeconds = 0.1;
@@ -518,6 +746,11 @@ private:
     static constexpr double maxDcDecayRatio = 4.0;     // ... y cae como mucho 4 veces más lento que el fundamental
     static constexpr float silenceThreshold = 1.0e-5f; // −100 dB
     static constexpr float fullCombPosition = 0.05f;   // desde aquí el peine de Pick Position es completo (w = 1)
+    static constexpr double referencePartial = 8.0;    // Fase 15: el parcial que el all-pass pone en su sitio
+    static constexpr double referenceLimit = 0.5;      // ... salvo que pase de fs/4 (fracción de Nyquist)
+    static constexpr double minDispersion = -0.999;    // a: más cerca de −1 el all-pass sería casi un integrador
+    static constexpr double minLineFraction = 0.25;    // con el all-pass, la línea es al menos 1/4 de la vuelta
+    static constexpr double minPeriodBeyondSections = 5.0; // y la vuelta, al menos M + 5 (con a = 0 retrasa M)
     static constexpr float maxExcitationPeak = 4.0f;
     static inline const float logMinDecay = std::log (minDecaySeconds);
     static inline const float logMaxDecay = std::log (maxDecaySeconds);
@@ -541,6 +774,15 @@ private:
     float logDecay = 0.0f, targetLogDecay = 0.0f;
     float damping = 0.5f, targetDamping = 0.5f;
     float mute = 0.0f, targetMute = 0.0f;
+    // Fase 15: el all-pass de la rigidez (0 secciones = no existe). 'dispersion' = a, fijo durante la vibración.
+    float stiffness = 0.0f, targetStiffness = 0.0f; // la de esta vibración / la de la perilla + la matriz
+    std::array<float, maxDispersionSections> dispersionState {};
+    int sections = 0;
+    float dispersion = 0.0f, targetDispersion = 0.0f, dispersionStep = 0.0f;
+    int dispersionRamp = 0;
+    bool designPending = false;
+    double baseOffset = 0.0;       // delayOffset sin el all-pass
+    double allpassDelayNow = 0.0, allpassDelayOmega = 0.0, allpassDelaySlope = 0.0; // su retardo en f0 y cómo sigue al tono
     float smoothingCoef = 1.0f, muteCoef = 1.0f;
     int excitationLength = 0, excitationIndex = 0;
     int samplesUntilUpdate = 0;

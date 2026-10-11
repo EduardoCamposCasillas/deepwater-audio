@@ -162,6 +162,9 @@ inline constexpr const char* stringExcitation = "stringExcitation";
 inline constexpr const char* stringPickPosition = "stringPickPosition";
 inline constexpr const char* stringPickTone = "stringPickTone";
 
+// Fase 15: rigidez de la cuerda (inharmonicidad).
+inline constexpr const char* stringStiffness = "stringStiffness";
+
 // Versión con la que se introdujeron los parámetros (la usa VST3 para compatibilidad hacia atrás).
 inline constexpr int versionHint = 1;
 // Los parámetros añadidos en una versión posterior llevan un número mayor.
@@ -173,4 +176,5 @@ inline constexpr int versionHintWarp = 6;
 inline constexpr int versionHintEffects = 7;
 inline constexpr int versionHintString = 8;
 inline constexpr int versionHintPluck = 9;
+inline constexpr int versionHintStiffness = 10;
 } // namespace undertow::params

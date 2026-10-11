@@ -5,7 +5,7 @@
 //   UndertowPresetTests --verbose  además, la tabla de niveles de cada preset de fábrica
 //   UndertowPresetTests --verbose --user "C:\ruta"   mide también los presets de esa carpeta (p. ej. los tuyos)
 //   UndertowPresetTests --update-references   reescribe tests/reference/factory-presets.txt (ver "Huellas")
-//   UndertowPresetTests --render <archivo.mid> <carpeta>   toca el MIDI con 4 presets y guarda un WAV por preset
+//   UndertowPresetTests --render <archivo.mid> <carpeta>   toca el MIDI con 6 presets y guarda un WAV por preset
 //                                                        (no corre los tests; ver "Render de referencia")
 //
 // Fase 11: además comprueba que processBlock no reserva memoria (operator new contado, abajo), mide la CPU de cada
@@ -371,7 +371,9 @@ float fingerprintDifference (const Fingerprint& a, const Fingerprint& b)
 // refactors que NO deben cambiar el sonido (p. ej. la migración al monorepo): se renderiza antes y después y se restan
 // los archivos (null test). Un procesador nuevo por preset: el contador de notas (semilla del unison y del ruido) y el
 // reloj de los LFO libres empiezan siempre igual, así que el mismo código produce exactamente las mismas muestras.
-const std::array<const char*, 4> referencePresets { "Supersaw Trance", "Sync Lead 80s", "Bajo Fuzz Indie", "Pad Shoegaze" };
+// Los dos últimos (Fase 15): la cuerda pulsada, para que el null test también la cubra.
+const std::array<const char*, 6> referencePresets { "Supersaw Trance", "Sync Lead 80s", "Bajo Fuzz Indie", "Pad Shoegaze",
+                                                    "Koto", "Guitarra Nylon" };
 
 int renderReferences (const juce::File& midiFile, const juce::File& outputFolder)
 {

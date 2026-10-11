@@ -4311,15 +4311,444 @@ void testPluckCpuCost()
     CHECK (cpu < 0.20);
 }
 
+// --- Fase 15: rigidez (inharmonicidad) -----------------------------------------------------------------------------
+
+// Cuerda con Impulse (todos los parciales con la misma fuerza), sin Damping y con Decay largo: los parciales agudos
+// duran lo bastante para medirlos.
+std::vector<float> renderStiffString (PluckedString& string, double hz, float stiffness, size_t numSamples,
+                                      float damping = 0.0f, float decay = 8.0f)
+{
+    string.setDecay (decay);
+    string.setDamping (damping);
+    string.setStiffness (stiffness);
+    string.setFrequency (hz);
+    string.reset();
+    string.pluck (1, { StringExcitation::impulse, 0.0f, 20000.0f });
+    std::vector<float> signal (numSamples);
+    for (auto& s : signal)
+        s = string.processSample();
+    return signal;
+}
+
+// Frecuencia de un parcial cerca de 'approxHz' en una nota de fundamental 'hz'. Como measurePartialFrequency, pero con
+// ventanas de 8 períodos del FUNDAMENTAL (no del parcial): separan bien parciales que están a f0 uno del otro. Primero
+// separadas 1 período (cubre ±f0 / 2 de error), después 16.
+double measureStiffPartial (const std::vector<float>& signal, double sampleRate, double hz, double approxHz, size_t start)
+{
+    const double period = sampleRate / hz;
+    const auto length = static_cast<size_t> (8.0 * period);
+    double estimate = approxHz;
+    for (const double gapPeriods : { 1.0, 16.0 })
+    {
+        const auto gap = static_cast<size_t> (gapPeriods * period);
+        const double phase = std::arg (partialAt (signal, estimate, sampleRate, start + gap, length)
+                                       / partialAt (signal, estimate, sampleRate, start, length));
+        estimate += phase * sampleRate / (2.0 * pi * static_cast<double> (gap));
+    }
+    return estimate;
+}
+
+void testStiffPartialsFollowTheFormula()
+{
+    std::printf ("Rigidez: parciales 1-8 medidos contra fn = n f0 sqrt(1 + B n^2) / sqrt(1 + B), 4 sample rates\n");
+
+    // Stiffness 25 / 50 / 75 / 100 % = B 2e-4 / 3.1e-3 / 1.6e-2 / 5e-2. Notas: A0 a A5 de FL (MIDI 21-81); el parcial 8
+    // de la más aguda (A5 = 880 Hz) a 100 % cae en 10 kHz. Lo que se mide por encima de 0.4·fs no cuenta (no hay).
+    const std::array<float, 4> stiffnesses { 0.25f, 0.5f, 0.75f, 1.0f };
+    const std::array<double, 4> limits { 1.0, 12.0, 45.0, 50.0 }; // cents, peor parcial 2-8 (ver el diseño)
+    std::array<double, 4> worst {};
+    double worstFundamental = 0.0;
+    for (const double sr : sampleRates)
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (const int note : { 21, 33, 45, 57, 69, 81 })
+            for (size_t s = 0; s < stiffnesses.size(); ++s)
+            {
+                const double hz = deepwater::dsp::midiNoteToHz (note);
+                const double period = sr / hz;
+                const double b = PluckedString::inharmonicityFor (stiffnesses[s]);
+                const auto signal = renderStiffString (*string, hz, stiffnesses[s], static_cast<size_t> (30.0 * period));
+                const auto start = static_cast<size_t> (4.0 * period);
+                for (int n = 1; n <= 8; ++n)
+                {
+                    const double expected = hz * PluckedString::stiffPartialRatio (n, b);
+                    if (expected > 0.4 * sr)
+                        break;
+                    const double cents = centsBetween (measureStiffPartial (signal, sr, hz, expected, start), expected);
+                    if (n == 1)
+                        worstFundamental = std::max (worstFundamental, std::abs (cents));
+                    else
+                        worst[s] = std::max (worst[s], std::abs (cents));
+                    if (verbose && sr == 48000.0)
+                        std::printf ("    nota %d  Stiffness %.0f %%  parcial %d: esperado %.1f Hz, error %+.2f cents\n", note,
+                                     100.0f * stiffnesses[s], n, expected, cents);
+                }
+            }
+    }
+    std::printf ("  fundamental: peor %.3f cents\n", worstFundamental);
+    for (size_t s = 0; s < stiffnesses.size(); ++s)
+    {
+        const double b = PluckedString::inharmonicityFor (stiffnesses[s]);
+        std::printf ("  Stiffness %3.0f %% (B = %.1e): parcial 8 = %.3f x f0 (armónico: 8), peor error parciales 2-8: %.2f cents\n",
+                     100.0f * stiffnesses[s], b, PluckedString::stiffPartialRatio (8, b), worst[s]);
+        CHECK (worst[s] < limits[s]);
+    }
+    CHECK (worstFundamental < 1.0);
+}
+
+void testStiffStringKeepsTuningAndDecay()
+{
+    std::printf ("Rigidez: el fundamental sigue afinado (MIDI 12-96, 4 sample rates) y su T60 sigue siendo el Decay\n");
+
+    double worstCents = 0.0;
+    int worstNote = 0;
+    double worstRate = 0.0;
+    for (const double sr : sampleRates)
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (int note = 12; note <= 96; note += 3)
+            for (const float stiffness : { 0.5f, 1.0f })
+                for (const float damping : { 0.0f, 0.5f, 1.0f })
+                {
+                    const double hz = deepwater::dsp::midiNoteToHz (note);
+                    const double period = sr / hz;
+                    const auto signal = renderStiffString (*string, hz, stiffness, static_cast<size_t> (30.0 * period),
+                                                           damping, 4.0f);
+                    const auto start = static_cast<size_t> (4.0 * period);
+                    const double cents = centsBetween (measurePartialFrequency (signal, sr, hz, start), hz);
+                    if (std::abs (cents) > worstCents)
+                    {
+                        worstCents = std::abs (cents);
+                        worstNote = note;
+                        worstRate = sr;
+                    }
+                }
+    }
+    std::printf ("  afinación: peor %.4f cents (nota %d a %.0f Hz)\n", worstCents, worstNote, worstRate);
+    CHECK (worstCents < 1.0);
+
+    // Con la cuerda sonando, la matriz mueve el tono (el all-pass no cambia: su retardo en f0 sí, y la línea lo sigue).
+    // Saltos de -12 a +12 semitonos sobre A1 / A3 de FL con Stiffness 100 %, medidos después del salto.
+    double worstJump = 0.0;
+    for (const double sr : { 44100.0, 96000.0 })
+        for (const double hz : { 55.0, 220.0 })
+            for (const double semitones : { -12.0, -5.0, 2.0, 7.0, 12.0 })
+            {
+                auto string = std::make_unique<PluckedString>();
+                string->prepare (sr);
+                const double target = hz * std::exp2 (semitones / 12.0);
+                const double period = sr / target;
+                std::vector<float> signal (static_cast<size_t> (0.2 * sr + 30.0 * period));
+                string->setDecay (8.0f);
+                string->setDamping (0.2f);
+                string->setStiffness (1.0f);
+                string->setFrequency (hz);
+                string->reset();
+                string->pluck (1, { StringExcitation::impulse, 0.0f, 20000.0f });
+                const auto jumpAt = static_cast<size_t> (0.2 * sr);
+                for (size_t n = 0; n < signal.size(); ++n)
+                {
+                    if (n == jumpAt)
+                        string->setFrequency (target);
+                    signal[n] = string->processSample();
+                }
+                const auto start = jumpAt + static_cast<size_t> (4.0 * period);
+                const double cents = centsBetween (measurePartialFrequency (signal, sr, target, start), target);
+                worstJump = std::max (worstJump, std::abs (cents));
+            }
+    std::printf ("  saltos de tono con la cuerda sonando (-12 a +12 st, Stiffness 100 %%): peor %.4f cents\n", worstJump);
+    CHECK (worstJump < 1.0);
+
+    double worstError = 0.0;
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (const int note : { 36, 57, 81, 96 })
+            for (const float decay : { 0.5f, 2.0f, 8.0f })
+                for (const float damping : { 0.0f, 0.5f })
+                {
+                    const double hz = deepwater::dsp::midiNoteToHz (note);
+                    const double period = sr / hz;
+                    const auto length = static_cast<size_t> (8.0 * period);
+                    const auto first = static_cast<size_t> (4.0 * period);
+                    const auto second = first + static_cast<size_t> (0.5 * decay * sr);
+                    const auto signal = renderStiffString (*string, hz, 1.0f, second + length + 16, damping, decay);
+                    const double measured = -60.0 / partialSlopeDbPerSecond (signal, sr, hz, first, second, length);
+                    worstError = std::max (worstError, std::abs (measured / decay - 1.0));
+                }
+    }
+    std::printf ("  T60 del fundamental con Stiffness 100 %%: peor error %.2f %%\n", 100.0 * worstError);
+    CHECK (worstError < 0.10);
+}
+
+void testStiffnessZeroRemovesTheAllpass()
+{
+    std::printf ("Rigidez 0: sin all-pass (la cuerda de la Fase 14, bit a bit), también después de haberla usado\n");
+
+    constexpr double sr = 48000.0;
+    const auto render = [] (PluckedString& string, size_t numSamples) {
+        std::vector<float> signal (numSamples);
+        for (auto& s : signal)
+            s = string.processSample();
+        return signal;
+    };
+    const auto start = [] (PluckedString& string, float stiffness, float decay) {
+        string.setFrequency (196.0);
+        string.setDecay (decay);
+        string.setStiffness (stiffness);
+        string.reset();
+        string.pluck (5);
+    };
+
+    auto fresh = std::make_unique<PluckedString>();
+    fresh->prepare (sr);
+    start (*fresh, 0.0f, 2.0f);
+    const auto reference = render (*fresh, 24000);
+    CHECK (fresh->getDispersionSections() == 0);
+
+    // Una cuerda con Stiffness 80 % (Decay corto): al quedar en silencio se quita el all-pass sola, y la nota siguiente
+    // con Stiffness 0 es la de siempre.
+    auto used = std::make_unique<PluckedString>();
+    used->prepare (sr);
+    start (*used, 0.8f, 0.1f);
+    (void) render (*used, 100);
+    const int sectionsUsed = used->getDispersionSections();
+    for (int i = 0; i < 48000 && ! used->isSilent(); ++i)
+        (void) used->processSample();
+    const int sectionsSilent = used->getDispersionSections();
+    start (*used, 0.0f, 2.0f);
+    const auto again = render (*used, 24000);
+    std::printf ("  con 80 %%: %d secciones; en silencio: %d; la nota siguiente a 0 %%: %s\n", sectionsUsed, sectionsSilent,
+                 again == reference ? "idéntica bit a bit" : "DISTINTA");
+    CHECK (sectionsUsed == PluckedString::maxDispersionSections);
+    CHECK (used->isSilent() || sectionsSilent == 0);
+    CHECK (sectionsSilent == 0);
+    CHECK (again == reference);
+}
+
+void testStiffnessAppliesOnNextPluck()
+{
+    std::printf ("Rigidez: se elige al empezar a vibrar (perilla, redisparo y matriz)\n");
+
+    constexpr double sr = 48000.0;
+    const auto settle = static_cast<size_t> (0.3 * sr);
+
+    // Mover la perilla con la nota sonando no la cambia (bit a bit).
+    {
+        auto sources = stringOnlySources();
+        sources.string.stiffness = 0.6f;
+        auto still = stringVoice (sr, sources, {});
+        auto moved = stringVoice (sr, sources, {});
+        const auto a = playString (*still, 45, 1.0f, 2 * settle);
+        moved->noteOn (45, 1.0f);
+        std::vector<float> b (2 * settle, 0.0f);
+        moved->render (b.data(), static_cast<int> (settle));
+        sources.string.stiffness = 0.0f;
+        moved->setSourceSettings (sources);
+        moved->render (b.data() + settle, static_cast<int> (settle));
+        std::printf ("  perilla 60 -> 0 %% con la nota sonando: %s\n", a == b ? "la nota no cambia (bit a bit)" : "CAMBIA");
+        CHECK (a == b);
+    }
+
+    // Redisparar la misma nota con la cuerda sonando: la rigidez de la vibración se queda (bit a bit igual que redisparar
+    // sin cambiarla). Cuando la cuerda queda en silencio, la nota siguiente ya usa la nueva.
+    {
+        const auto replay = [&] (float second) {
+            auto sources = stringOnlySources();
+            sources.string.decaySeconds = 0.3f;
+            sources.string.stiffness = 0.8f;
+            auto manager = stringVoice (sr, sources, {});
+            manager->noteOn (45, 1.0f);
+            std::vector<float> signal (3 * settle + static_cast<size_t> (6.0 * sr), 0.0f);
+            manager->render (signal.data(), static_cast<int> (settle));
+            sources.string.stiffness = second;
+            manager->setSourceSettings (sources);
+            manager->noteOn (45, 0.7f); // redisparo con la cuerda sonando
+            manager->render (signal.data() + settle, static_cast<int> (settle));
+            manager->noteOff (45);
+            manager->render (signal.data() + 2 * settle, static_cast<int> (signal.size() - 3 * settle)); // hasta el silencio
+            manager->noteOn (45, 1.0f);
+            manager->render (signal.data() + signal.size() - settle, static_cast<int> (settle));
+            return signal;
+        };
+        const auto changed = replay (0.0f), unchanged = replay (0.8f);
+        const auto sameUntil = static_cast<size_t> (std::mismatch (changed.begin(), changed.end(), unchanged.begin()).first
+                                                    - changed.begin());
+        std::printf ("  redisparo con la cuerda sonando, 80 -> 0 %%: igual al redisparo sin cambio durante %.2f s (la nota "
+                     "siguiente, desde el silencio, empieza a los %.2f s)\n", static_cast<double> (sameUntil) / sr,
+                     static_cast<double> (changed.size() - settle) / sr);
+        CHECK (sameUntil >= changed.size() - settle && sameUntil < changed.size());
+    }
+
+    // El destino con la Mod Wheel al máximo = mover la perilla (bit a bit).
+    auto knob = stringOnlySources();
+    knob.string.stiffness = 0.7f;
+    ModulationSettings route;
+    route.slots[0] = { ModSource::modWheel, ModDestination::stringStiffness, 0.4f };
+    auto routed = stringOnlySources();
+    routed.string.stiffness = 0.3f;
+    const auto modulated = playString (*stringVoice (sr, routed, route), 57, 1.0f, 24000);
+    const auto reference = playString (*stringVoice (sr, knob, {}), 57, 1.0f, 24000);
+    std::printf ("  Mod Wheel -> String Stiffness 30 %% + 40 %% = perilla en 70 %%: %s\n",
+                 modulated == reference ? "idéntico bit a bit" : "DISTINTO");
+    CHECK (modulated == reference);
+
+    // Velocity -> String Stiffness: la nota fuerte es más inarmónica (parcial 8 medido).
+    auto sources = stringOnlySources();
+    sources.string.damping = 0.0f;
+    sources.string.decaySeconds = 8.0f;
+    sources.string.pluck = { StringExcitation::impulse, 0.0f, 20000.0f };
+    ModulationSettings velocityRoute;
+    velocityRoute.slots[0] = { ModSource::velocity, ModDestination::stringStiffness, 0.8f };
+    const auto eighth = [&] (float velocity) {
+        constexpr double hz = 110.0;
+        const auto signal = playString (*stringVoice (sr, sources, velocityRoute), 45, velocity, 24000);
+        const double b = PluckedString::inharmonicityFor (0.8f * velocity);
+        return measureStiffPartial (signal, sr, hz, hz * PluckedString::stiffPartialRatio (8, b), 2000) / hz;
+    };
+    const double soft = eighth (0.2f), hard = eighth (1.0f);
+    std::printf ("  Velocity -> String Stiffness 80 %%: parcial 8 = %.3f x f0 (velocity 0.2) y %.3f x f0 (1.0)\n", soft, hard);
+    CHECK (soft < 8.05 && hard > 9.0);
+}
+
+void testStiffStringExtremesAreSafe()
+{
+    std::printf ("Rigidez al azar con frecuencias, Decay y Damping al azar (y S&H a Stiffness y String Pitch): sin NaN\n");
+
+    std::mt19937 rng (57);
+    std::uniform_real_distribution<float> unit (0.0f, 1.0f);
+    bool finite = true;
+    for (const double sr : sampleRates)
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (int i = 0; i < 300; ++i)
+        {
+            string->setFrequency (0.5 * std::pow (1.0e5, unit (rng)));
+            string->setDecay (0.01f + 40.0f * unit (rng), 4.0f * unit (rng) - 2.0f);
+            string->setDamping (unit (rng));
+            string->setStiffness (1.4f * unit (rng) - 0.2f);
+            if (i % 3 == 0)
+                string->pluck (static_cast<std::uint32_t> (i), { static_cast<StringExcitation> (i % 3), 0.5f * unit (rng), 3000.0f });
+            for (int k = 0; k < 97; ++k)
+                finite = finite && std::isfinite (string->processSample());
+        }
+    }
+
+    // El caso que hizo elegir 'a' fijo (ver PluckedString): Decay largo, el tono saltando ±48 st 40 veces por segundo,
+    // redisparos con otra rigidez cada 0.1-0.5 s. Con 'a' moviéndose con la cuerda sonando llegaba a ×10 000; ahora el
+    // pico debe ser del orden del de la misma cuerda sin rigidez (que también acumula: los redisparos se suman).
+    const auto torture = [&] (bool stiff) {
+        float worst = 0.0f;
+        for (int trial = 0; trial < 120; ++trial)
+        {
+            std::mt19937 local (static_cast<std::uint32_t> (trial));
+            const double sr = trial % 2 == 0 ? 44100.0 : 96000.0;
+            auto string = std::make_unique<PluckedString>();
+            string->prepare (sr);
+            const double base = deepwater::dsp::midiNoteToHz (static_cast<int> (unit (local) * 127.0f));
+            string->setDecay (0.05f + 29.95f * unit (local));
+            string->setDamping (unit (local));
+            string->setStiffness (stiff ? unit (local) : 0.0f);
+            string->setFrequency (base);
+            string->reset();
+            string->pluck (1);
+            const auto hold = static_cast<int> (sr / 40.0);
+            auto nextPluck = static_cast<int> (sr * (0.1 + 0.4 * unit (local)));
+            for (int n = 0; n < static_cast<int> (2.0 * sr); ++n)
+            {
+                if (n % hold == 0)
+                {
+                    string->setFrequency (base * std::exp2 ((96.0 * unit (local) - 48.0) / 12.0));
+                    string->setDamping (unit (local));
+                    string->setStiffness (stiff ? unit (local) : 0.0f);
+                }
+                if (n == nextPluck)
+                {
+                    string->pluck (static_cast<std::uint32_t> (n));
+                    nextPluck += static_cast<int> (sr * (0.1 + 0.4 * unit (local)));
+                }
+                const float y = string->processSample();
+                finite = finite && std::isfinite (y);
+                worst = std::max (worst, std::abs (y));
+            }
+        }
+        return worst;
+    };
+    const float stiffPeak = torture (true), plainPeak = torture (false);
+    std::printf ("  tono a saltos y redisparos (120 cuerdas de 2 s): pico %.1f con rigidez al azar, %.1f sin rigidez\n",
+                 stiffPeak, plainPeak);
+    CHECK (stiffPeak < 2.0f * plainPeak);
+
+    auto sources = stringOnlySources();
+    ModulationSettings modulation;
+    modulation.lfos[0] = { LfoShape::sampleAndHold, LfoMode::free, false, 40.0f, 5 };
+    modulation.slots[0] = { ModSource::lfo1, ModDestination::stringStiffness, 1.0f };
+    modulation.slots[1] = { ModSource::lfo1, ModDestination::stringPitch, 1.0f }; // ±24 st: notas agudas hasta fs/8
+    modulation.slots[2] = { ModSource::lfo1, ModDestination::globalPitch, 1.0f };
+    modulation.slots[3] = { ModSource::lfo1, ModDestination::stringDamping, -1.0f };
+    float peak = 0.0f;
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        auto manager = stringVoice (sr, sources, modulation);
+        manager->setPolyphony (16);
+        std::vector<float> left (4096), right (4096);
+        for (int block = 0; block < 300; ++block)
+        {
+            sources.string.stiffness = unit (rng);
+            sources.string.decaySeconds = 0.05f + 29.95f * unit (rng);
+            manager->setSourceSettings (sources);
+            if (unit (rng) < 0.4f)
+                manager->noteOn (static_cast<int> (unit (rng) * 128.0f) % 128, unit (rng));
+            if (unit (rng) < 0.2f)
+                manager->noteOff (static_cast<int> (unit (rng) * 128.0f) % 128);
+            const int n = 1 + static_cast<int> (unit (rng) * 4095.0f);
+            std::fill (left.begin(), left.end(), 0.0f);
+            std::fill (right.begin(), right.end(), 0.0f);
+            manager->render (left.data(), right.data(), n);
+            for (size_t i = 0; i < static_cast<size_t> (n); ++i)
+            {
+                finite = finite && std::isfinite (left[i]) && std::isfinite (right[i]);
+                peak = std::max (peak, std::abs (left[i]));
+            }
+        }
+    }
+    std::printf ("  voz con S&H a Stiffness, String Pitch, Global Pitch y Damping: pico %.2f\n", peak);
+    CHECK (finite);
+    CHECK (peak < 30.0f);
+}
+
+void testStiffnessCpuCost()
+{
+    std::printf ("CPU de la rigidez (48 kHz, 16 notas, bloques de 256)\n");
+
+    auto strings = stringOnlySources();
+    strings.string.decaySeconds = 30.0f;
+    const double plain = voiceScenarioCpu (strings, {}, {}, 16);
+    strings.string.stiffness = 1.0f;
+    const double stiff = voiceScenarioCpu (strings, {}, {}, 16);
+    ModulationSettings moving; // vibrato: el retardo del all-pass sigue al tono en cada muestra
+    moving.lfos[0] = { LfoShape::sine, LfoMode::retrigger, false, 5.0f, 5 };
+    moving.slots[0] = { ModSource::lfo1, ModDestination::stringPitch, 0.01f };
+    const double modulated = voiceScenarioCpu (strings, {}, moving, 16);
+    std::printf ("  cuerda sola %.1f %%, con Stiffness 100 %% (8 all-pass) %.1f %%, con Stiffness 100 %% y vibrato %.1f %% de un "
+                 "núcleo\n", 100.0 * plain, 100.0 * stiff, 100.0 * modulated);
+    CHECK (modulated < 0.20);
+}
+
 } // namespace
 
 
 int main (int argc, char** argv)
 {
     std::setvbuf (stdout, nullptr, _IONBF, 0); // sin buffer: si el programa se cae, se ve en qué test fue
-    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 / --fase12 (solo los tests de esa
-    // fase); --cpu (solo la tabla de CPU de la Fase 11, sin tests).
-    bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false, onlyPhase12 = false, onlyPhase13 = false;
+    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 / --fase12 / --fase13 / --fase15
+    // (solo los tests de esa fase); --cpu (solo la tabla de CPU de la Fase 11, sin tests).
+    bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false, onlyPhase12 = false, onlyPhase13 = false,
+         onlyPhase15 = false;
     for (int i = 1; i < argc; ++i)
     {
         if (std::string_view (argv[i]) == "--cpu")
@@ -4333,8 +4762,9 @@ int main (int argc, char** argv)
         onlyPhase9 = onlyPhase9 || std::string_view (argv[i]) == "--fase9";
         onlyPhase12 = onlyPhase12 || std::string_view (argv[i]) == "--fase12";
         onlyPhase13 = onlyPhase13 || std::string_view (argv[i]) == "--fase13";
+        onlyPhase15 = onlyPhase15 || std::string_view (argv[i]) == "--fase15";
     }
-    const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9 && ! onlyPhase12 && ! onlyPhase13;
+    const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9 && ! onlyPhase12 && ! onlyPhase13 && ! onlyPhase15;
     if (all)
     {
         testSegmentTimesAreExactAtEverySampleRate();
@@ -4458,6 +4888,16 @@ int main (int argc, char** argv)
         testModulatedStringIsClickFree();
         testPluckExtremesAreSafe();
         testPluckCpuCost();
+    }
+
+    if (all || onlyPhase15)
+    {
+        testStiffPartialsFollowTheFormula();
+        testStiffStringKeepsTuningAndDecay();
+        testStiffnessZeroRemovesTheAllpass();
+        testStiffnessAppliesOnNextPluck();
+        testStiffStringExtremesAreSafe();
+        testStiffnessCpuCost();
     }
 
     if (failures == 0)

@@ -119,6 +119,8 @@ struct StringSettings
     float damping = 0.5f;      // 0 = los agudos duran como el fundamental; 1 = mueren 300 veces antes
     // Fase 13: el punteo (por defecto, ruido blanco sin peine = el sonido de la Fase 12).
     dsp::PluckShape pluck;
+    // Fase 15: rigidez (0 = cuerda ideal, armónica: el sonido de la Fase 14; 1 = campana). B = 0.05·stiffness⁴.
+    float stiffness = 0.0f;
 
     [[nodiscard]] float tuningSemitones() const noexcept
     {

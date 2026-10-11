@@ -150,7 +150,8 @@ UndertowAudioProcessor::UndertowAudioProcessor()
                      parameters.getRawParameterValue (id::stringSemi),  parameters.getRawParameterValue (id::stringFine),
                      parameters.getRawParameterValue (id::stringLevel), parameters.getRawParameterValue (id::stringDecay),
                      parameters.getRawParameterValue (id::stringDamping), parameters.getRawParameterValue (id::stringExcitation),
-                     parameters.getRawParameterValue (id::stringPickPosition), parameters.getRawParameterValue (id::stringPickTone) };
+                     parameters.getRawParameterValue (id::stringPickPosition), parameters.getRawParameterValue (id::stringPickTone),
+                     parameters.getRawParameterValue (id::stringStiffness) };
     filterOnParam = parameters.getRawParameterValue (id::filter1On);
     filterTypeParam = parameters.getRawParameterValue (id::filter1Type);
     filterSlopeParam = parameters.getRawParameterValue (id::filter1Slope);
@@ -550,6 +551,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout UndertowAudioProcessor::crea
             .withStringFromValueFunction (frequencyToText)
             .withValueFromStringFunction (textToFrequency)));
 
+    // --- Fase 15: rigidez. Por defecto 0 (cuerda ideal): un proyecto de la Fase 14 suena igual. ---
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id::stringStiffness, id::versionHintStiffness },
+                                                             "String Stiffness", juce::NormalisableRange<float> (0.0f, 1.0f),
+                                                             string.stiffness, percentAttributes()));
+
     return layout;
 }
 
@@ -632,7 +638,8 @@ undertow::synth::SourceSettings UndertowAudioProcessor::readSourceSettings() con
     settings.string = { s.on->load() >= 0.5f,  static_cast<int> (s.octave->load()), static_cast<int> (s.semitones->load()),
                         s.fine->load(),        s.level->load(),                     s.decay->load(),
                         s.damping->load(),
-                        { choiceToEnum<undertow::dsp::StringExcitation> (s.excitation), s.pickPosition->load(), s.pickTone->load() } };
+                        { choiceToEnum<undertow::dsp::StringExcitation> (s.excitation), s.pickPosition->load(), s.pickTone->load() },
+                        s.stiffness->load() };
     settings.subTable = &wavetableBank->get (0); // Basic Shapes: seno, triángulo, sierra, cuadrada
     return settings;
 }
