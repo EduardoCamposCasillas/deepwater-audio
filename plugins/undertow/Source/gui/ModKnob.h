@@ -158,8 +158,12 @@ public:
             g.setColour (theme::text);
             g.fillEllipse (juce::Rectangle<float> (thickness + 1.0f, thickness + 1.0f).withCentre (point));
         }
+    }
 
-        // Mientras se ajusta un amount, su valor tapa el cuadro de texto de la perilla.
+    // Mientras se ajusta un amount, su valor tapa el cuadro de texto de la perilla. Va aquí y no en paint():
+    // el cuadro de texto es un Label hijo que se pinta después de paint() y quedaría encima.
+    void paintOverChildren (juce::Graphics& g) override
+    {
         if (amountDrag)
             if (const auto* route = focusedRoute())
             {
