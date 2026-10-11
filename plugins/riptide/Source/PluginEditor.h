@@ -4,6 +4,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "dsp/Bands.h"
 #include "dsp/Saturator.h"
 
 #include "gui/LevelMeterView.h"
@@ -12,8 +13,8 @@
 class RiptideAudioProcessor;
 
 // GUI funcional (la profesional llega en la Fase 8). Medidor IN | modos, tono (cortes con PRE/POST, emphasis, tilt),
-// nivel y mezcla (Input, Mix, Output, AUTO GAIN con la compensación en dB, DELTA) | medidor OUT; en la cabecera, el
-// selector de oversampling y el bypass.
+// bandas (número de bandas, cruces entre ellas y, por banda, modo, drive, solo, mute y su auto gain), nivel y mezcla
+// (Input, Mix, Output, AUTO GAIN, DELTA) | medidor OUT; en la cabecera, el selector de oversampling y el bypass.
 // Un temporizador a 30 cuadros por segundo recoge los niveles que publicó el audio y redibuja los medidores.
 class RiptideAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -44,6 +45,9 @@ private:
                       const juce::String& tooltip);
     void updateAutoGainReadout();
     void showMode (int index);
+    void showBandCount (int count);
+    void updateBandReadouts();
+    void paintBands (juce::Graphics& g);
 
     RiptideAudioProcessor& processor;
     riptide::gui::RiptideLookAndFeel lookAndFeel;
@@ -79,6 +83,27 @@ private:
     std::array<juce::TextButton, riptide::dsp::numModes> modeButtons;
     juce::Label modeDescription;
     std::unique_ptr<juce::ParameterAttachment> modeAttachment;
+
+    // Bandas (Fase 6). Una columna por banda y, entre dos columnas, la perilla del cruce que las separa. Las bandas que
+    // no existen (más allá del número elegido) se ven apagadas.
+    struct BandStrip
+    {
+        juce::Label title, range; // "BANDA 2" y "120 Hz - 1.0 kHz" (los cruces que suenan de verdad)
+        juce::ComboBox mode;
+        std::unique_ptr<ComboBoxAttachment> modeAttachment;
+        juce::Slider drive { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
+        std::unique_ptr<SliderAttachment> driveAttachment;
+        juce::TextButton solo { "S" }, mute { "M" };
+        std::unique_ptr<ButtonAttachment> soloAttachment, muteAttachment;
+        juce::Label autoGain; // la compensación de esta banda
+        juce::Rectangle<int> area; // fondo de la columna (paint)
+    };
+    juce::Label bandsSection;
+    std::array<juce::TextButton, riptide::dsp::maxBands> bandCountButtons;
+    std::unique_ptr<juce::ParameterAttachment> bandCountAttachment;
+    std::array<BandStrip, riptide::dsp::maxBands> bandStrips;
+    std::array<Knob, riptide::dsp::maxCrossovers> crossoverKnobs;
+    int shownBands = 1;
 
     double lastFrameMs = 0.0;
 

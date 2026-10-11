@@ -4,8 +4,8 @@
 
 namespace
 {
-constexpr int editorWidth = 760;
-constexpr int editorHeight = 560;
+constexpr int editorWidth = 900;
+constexpr int editorHeight = 760;
 constexpr int headerHeight = 44;
 constexpr int padding = 12;
 constexpr int meterWidth = 96;
@@ -19,6 +19,24 @@ constexpr int modeDescriptionHeight = 34;
 constexpr int signalFlowHeight = 28;
 constexpr int toggleWidth = 96;
 constexpr int toggleHeight = 26;
+constexpr int crossoverColumnWidth = 76;
+constexpr int bandKnobSize = 54;
+constexpr int bandStripHeight = 186;
+constexpr int levelKnobsHeight = 132;
+
+// "80 Hz", "2.5 kHz" o "20 kHz".
+juce::String formatHz (float hz)
+{
+    if (hz < 999.5f)
+        return juce::String (juce::roundToInt (hz)) + " Hz";
+    return hz < 9950.0f ? juce::String (hz / 1000.0f, 1) + " kHz" : juce::String (juce::roundToInt (hz / 1000.0f)) + " kHz";
+}
+
+juce::String formatDb (float db)
+{
+    const float rounded = std::round (db * 10.0f) / 10.0f;
+    return (rounded > 0.0f ? "+" : "") + juce::String (rounded == 0.0f ? 0.0f : rounded, 1) + " dB";
+}
 
 // Qué hace cada modo, en lenguaje musical (se muestra debajo de los botones y como tooltip). En UTF-8 escapado: MSVC
 // no garantiza la codificación de los literales del código fuente.
@@ -112,6 +130,69 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
     addAndMakeVisible (modeDescription);
     modeAttachment->sendInitialUpdate();
 
+    // Bandas.
+    setUpSectionLabel (bandsSection, "BANDAS");
+    auto* bandsParameter = processor.getParameters().getParameter (id::bands);
+    bandCountAttachment = std::make_unique<juce::ParameterAttachment> (
+        *bandsParameter, [this] (float index) { showBandCount (static_cast<int> (std::lround (index)) + 1); });
+    for (size_t i = 0; i < bandCountButtons.size(); ++i)
+    {
+        auto& button = bandCountButtons[i];
+        button.setButtonText (juce::String (i + 1));
+        button.setRadioGroupId (2);
+        button.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::accent.withAlpha (0.55f));
+        button.setTooltip (juce::String::fromUTF8 ("N\xc3\xba" "mero de bandas. 1 = toda la se\xc3\xb1" "al junta (como hasta la Fase 5). Con m\xc3\xa1s, cada banda se satura por separado: lo fuerte de una (el bombo, el bajo) ya no empuja ni ensucia a las otras. Cambiarlo hace un fundido corto a silencio."));
+        button.onClick = [this, i] { bandCountAttachment->setValueAsCompleteGesture (static_cast<float> (i)); };
+        addAndMakeVisible (button);
+    }
+
+    const auto modeChoices = processor.getParameters().getParameter (id::bandMode[0])->getAllValueStrings();
+    for (size_t b = 0; b < bandStrips.size(); ++b)
+    {
+        auto& strip = bandStrips[b];
+        strip.title.setText ("BANDA " + juce::String (b + 1), juce::dontSendNotification);
+        strip.title.setJustificationType (juce::Justification::centred);
+        strip.title.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        strip.title.setColour (juce::Label::textColourId, riptide::gui::theme::text);
+        addAndMakeVisible (strip.title);
+        strip.range.setJustificationType (juce::Justification::centred);
+        strip.range.setFont (juce::FontOptions (11.0f));
+        strip.range.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
+        addAndMakeVisible (strip.range);
+
+        strip.mode.addItemList (modeChoices, 1);
+        strip.mode.setTooltip (juce::String::fromUTF8 ("Modo de esta banda. Global = el de los botones de arriba. Ejemplo: graves en Tube (cuerpo, pares) y agudos en Tape (suaves) o en Transistor (mordida)."));
+        addAndMakeVisible (strip.mode);
+        strip.modeAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), id::bandMode[b], strip.mode);
+
+        strip.drive.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 18);
+        strip.drive.setTooltip (juce::String::fromUTF8 ("Drive de esta banda, sumado al Input. Subirlo satura m\xc3\xa1s solo esta zona; bajarlo la deja m\xc3\xa1s limpia que el resto. Con AUTO GAIN el volumen de la banda se mantiene."));
+        addAndMakeVisible (strip.drive);
+        strip.driveAttachment = std::make_unique<SliderAttachment> (processor.getParameters(), id::bandDrive[b], strip.drive);
+        strip.drive.setDoubleClickReturnValue (true, 0.0);
+
+        strip.solo.setClickingTogglesState (true);
+        strip.solo.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::meterHot.withAlpha (0.6f));
+        strip.solo.setTooltip (juce::String::fromUTF8 ("Solo: escuchar solo esta banda (tambi\xc3\xa9n en la original del mix y en el delta). Sirve para ajustar el drive y los cruces de cada banda. Varias en solo = suenan todas ellas."));
+        addAndMakeVisible (strip.solo);
+        strip.soloAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), id::bandSolo[b], strip.solo);
+        strip.mute.setClickingTogglesState (true);
+        strip.mute.setColour (juce::TextButton::buttonOnColourId, riptide::gui::theme::meterClip.withAlpha (0.6f));
+        strip.mute.setTooltip (juce::String::fromUTF8 ("Mute: quitar esta banda de la salida. Con una banda en solo, el solo manda."));
+        addAndMakeVisible (strip.mute);
+        strip.muteAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), id::bandMute[b], strip.mute);
+
+        strip.autoGain.setJustificationType (juce::Justification::centred);
+        strip.autoGain.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        strip.autoGain.setTooltip (juce::String::fromUTF8 ("Compensaci\xc3\xb3n de AUTO GAIN de esta banda (tenue si AUTO GAIN est\xc3\xa1 apagado)."));
+        addAndMakeVisible (strip.autoGain);
+    }
+    for (size_t i = 0; i < crossoverKnobs.size(); ++i)
+        setUpKnob (crossoverKnobs[i], id::crossover[i], "Cruce " + juce::String (i + 1),
+                   juce::String::fromUTF8 ("Frecuencia que separa las dos bandas vecinas (Linkwitz-Riley, 24 dB/oct: sin saturaci\xc3\xb3n la suma es plana). Si dos cruces quedan a menos de media octava, Riptide los separa: lo que suena se ve debajo del nombre de cada banda."));
+    bandCountAttachment->sendInitialUpdate();
+    updateBandReadouts();
+
     setSize (editorWidth, editorHeight);
     lastFrameMs = juce::Time::getMillisecondCounterHiRes();
     startTimerHz (framesPerSecond);
@@ -167,10 +248,59 @@ void RiptideAudioProcessorEditor::updateAutoGainReadout()
 {
     // Encendido: la compensación que se aplica. Apagado: la que se aplicaría, tenue (útil para ver cuánto cambia el
     // volumen el drive).
-    const float db = std::round (processor.getAutoGainDb() * 10.0f) / 10.0f;
-    autoGainReadout.setText ((db > 0.0f ? "+" : "") + juce::String (db == 0.0f ? 0.0f : db, 1) + " dB", juce::dontSendNotification);
+    // Con varias bandas cada una tiene la suya (en su columna).
+    autoGainReadout.setText (shownBands > 1 ? "por banda" : formatDb (processor.getAutoGainDb()), juce::dontSendNotification);
     autoGainReadout.setColour (juce::Label::textColourId, autoGainButton.getToggleState() ? riptide::gui::theme::accent
                                                                                            : riptide::gui::theme::dimText.withAlpha (0.6f));
+}
+
+void RiptideAudioProcessorEditor::showBandCount (int count)
+{
+    shownBands = juce::jlimit (1, riptide::dsp::maxBands, count);
+    bandCountButtons[static_cast<size_t> (shownBands - 1)].setToggleState (true, juce::dontSendNotification);
+    // Las bandas y los cruces que no existen se ven apagados (y no se pueden tocar).
+    for (size_t b = 0; b < bandStrips.size(); ++b)
+    {
+        const bool active = static_cast<int> (b) < shownBands;
+        auto& strip = bandStrips[b];
+        for (juce::Component* component : { static_cast<juce::Component*> (&strip.title), static_cast<juce::Component*> (&strip.range),
+                                            static_cast<juce::Component*> (&strip.mode), static_cast<juce::Component*> (&strip.drive),
+                                            static_cast<juce::Component*> (&strip.solo), static_cast<juce::Component*> (&strip.mute),
+                                            static_cast<juce::Component*> (&strip.autoGain) })
+        {
+            component->setEnabled (active);
+            component->setAlpha (active ? 1.0f : 0.3f);
+        }
+    }
+    for (size_t i = 0; i < crossoverKnobs.size(); ++i)
+    {
+        const bool active = static_cast<int> (i) < shownBands - 1;
+        for (juce::Component* component : { static_cast<juce::Component*> (&crossoverKnobs[i].slider),
+                                            static_cast<juce::Component*> (&crossoverKnobs[i].label) })
+        {
+            component->setEnabled (active);
+            component->setAlpha (active ? 1.0f : 0.3f);
+        }
+    }
+    updateBandReadouts();
+    repaint();
+}
+
+void RiptideAudioProcessorEditor::updateBandReadouts()
+{
+    // El rango de cada banda con los cruces que suenan (ya separados), y la compensación de su auto gain.
+    const auto colour = autoGainButton.getToggleState() ? riptide::gui::theme::accent : riptide::gui::theme::dimText.withAlpha (0.6f);
+    for (size_t b = 0; b < bandStrips.size(); ++b)
+    {
+        auto& strip = bandStrips[b];
+        const int band = static_cast<int> (b);
+        const float low = band == 0 ? 20.0f : processor.getCrossoverHz (band - 1);
+        const float high = band >= shownBands - 1 ? 20000.0f : processor.getCrossoverHz (band);
+        strip.range.setText (static_cast<int> (b) < shownBands ? formatHz (low) + " - " + formatHz (high) : juce::String ("-"),
+                             juce::dontSendNotification);
+        strip.autoGain.setText ("auto " + formatDb (processor.getAutoGainDb (band)), juce::dontSendNotification);
+        strip.autoGain.setColour (juce::Label::textColourId, colour);
+    }
 }
 
 void RiptideAudioProcessorEditor::setUpSectionLabel (juce::Label& label, const juce::String& text)
@@ -199,6 +329,7 @@ void RiptideAudioProcessorEditor::timerCallback()
     inputMeter.update (channels, elapsed);
     outputMeter.update (channels, elapsed);
     updateAutoGainReadout();
+    updateBandReadouts();
 }
 
 void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
@@ -212,7 +343,7 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("RIPTIDE", header.removeFromLeft (110), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("saturador  -  Fase 5", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
+    g.drawText ("saturador  -  Fase 6", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
                 juce::Justification::centredLeft);
 
     // Panel de las perillas, entre los dos medidores.
@@ -222,12 +353,28 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     g.fillRoundedRectangle (knobsPanel, 8.0f);
     g.setColour (theme::panelOutline);
     g.drawRoundedRectangle (knobsPanel.reduced (0.5f), 8.0f, 1.0f);
+    paintBands (g);
 
     // Flecha del recorrido de la señal: IN → perillas → OUT.
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (juce::String::fromUTF8 ("input \xe2\x86\x92 PRE \xe2\x86\x92 emphasis \xe2\x86\x92 MODO \xe2\x86\x92 de-emph. \xe2\x86\x92 POST \xe2\x86\x92 tilt \xe2\x86\x92 auto gain \xe2\x86\x92 mix \xe2\x86\x92 delta \xe2\x86\x92 output"),
+    g.drawText (juce::String::fromUTF8 ("input \xe2\x86\x92 PRE \xe2\x86\x92 emphasis \xe2\x86\x92 BANDAS (drive \xc2\xb7 modo \xc2\xb7 auto gain) \xe2\x86\x92 de-emph. \xe2\x86\x92 POST \xe2\x86\x92 tilt \xe2\x86\x92 mix \xe2\x86\x92 delta \xe2\x86\x92 output"),
                 knobsPanel.removeFromBottom (static_cast<float> (signalFlowHeight)), juce::Justification::centred);
+}
+
+void RiptideAudioProcessorEditor::paintBands (juce::Graphics& g)
+{
+    using namespace riptide::gui;
+    // Fondo de cada columna: las que suenan, más claras; las apagadas, apenas marcadas.
+    for (size_t b = 0; b < bandStrips.size(); ++b)
+    {
+        const auto area = bandStrips[b].area.toFloat();
+        const bool active = static_cast<int> (b) < shownBands;
+        g.setColour (active ? theme::control.withAlpha (0.7f) : theme::control.withAlpha (0.2f));
+        g.fillRoundedRectangle (area, 6.0f);
+        g.setColour (active ? theme::panelOutline : theme::panelOutline.withAlpha (0.4f));
+        g.drawRoundedRectangle (area.reduced (0.5f), 6.0f, 1.0f);
+    }
 }
 
 void RiptideAudioProcessorEditor::resized()
@@ -271,10 +418,45 @@ void RiptideAudioProcessorEditor::resized()
             highCutPositionButton.setBounds (column.withSizeKeepingCentre (56, positionButtonHeight));
     }
 
+    // Bandas: el título con el selector 1-4 a la derecha; debajo, banda | cruce | banda | cruce | ...
+    panel.removeFromTop (6);
+    auto bandsHeader = panel.removeFromTop (22);
+    for (auto it = bandCountButtons.rbegin(); it != bandCountButtons.rend(); ++it)
+        it->setBounds (bandsHeader.removeFromRight (30).reduced (2, 0));
+    bandsSection.setBounds (bandsHeader);
+    panel.removeFromTop (4);
+    auto bandRow = panel.removeFromTop (bandStripHeight);
+    const int stripWidth = (bandRow.getWidth() - riptide::dsp::maxCrossovers * crossoverColumnWidth) / riptide::dsp::maxBands;
+    for (size_t b = 0; b < bandStrips.size(); ++b)
+    {
+        auto& strip = bandStrips[b];
+        strip.area = bandRow.removeFromLeft (stripWidth);
+        auto column = strip.area.reduced (6, 6);
+        strip.title.setBounds (column.removeFromTop (16));
+        strip.range.setBounds (column.removeFromTop (16));
+        column.removeFromTop (4);
+        strip.mode.setBounds (column.removeFromTop (22));
+        column.removeFromTop (4);
+        strip.drive.setBounds (column.removeFromTop (bandKnobSize + 18));
+        column.removeFromTop (4);
+        auto buttons = column.removeFromTop (22);
+        strip.solo.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2).reduced (2, 0));
+        strip.mute.setBounds (buttons.reduced (2, 0));
+        strip.autoGain.setBounds (column.removeFromTop (18));
+
+        if (b < crossoverKnobs.size())
+        {
+            auto crossoverColumn = bandRow.removeFromLeft (crossoverColumnWidth);
+            auto content = crossoverColumn.withSizeKeepingCentre (crossoverColumnWidth, 18 + bandKnobSize + 20);
+            crossoverKnobs[b].label.setBounds (content.removeFromTop (18));
+            crossoverKnobs[b].slider.setBounds (content);
+        }
+    }
+
     // Nivel y mezcla: Input (drive), Mix, Output y la columna de AUTO GAIN (con su lectura) y DELTA.
     panel.removeFromTop (6);
     levelSection.setBounds (panel.removeFromTop (sectionLabelHeight));
-    auto knobs = panel.withTrimmedBottom (signalFlowHeight - padding);
+    auto knobs = panel.removeFromTop (levelKnobsHeight);
     const int knobWidth = knobs.getWidth() / 4;
     for (auto* knob : { &inputKnob, &mixKnob, &outputKnob })
     {

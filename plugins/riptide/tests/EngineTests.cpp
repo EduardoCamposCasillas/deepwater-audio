@@ -6,7 +6,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <numbers>
+#include <utility>
 #include <vector>
 
 #include "dsp/Engine.h"
@@ -110,7 +112,8 @@ EngineSettings withMode (Mode mode, EngineSettings settings = {})
 // Procesa una señal entera con un motor nuevo (mono, bloques de 256).
 std::vector<float> render (double sampleRate, const EngineSettings& settings, std::vector<float> signal)
 {
-    Engine engine;
+    auto engineOwner = std::make_unique<Engine>(); // en el heap: con 4 bandas el motor no cabe en la pila
+    auto& engine = *engineOwner;
     engine.prepare (sampleRate, settings);
     std::vector<float> none;
     processInBlocks (engine, signal, none, 256);
@@ -199,7 +202,8 @@ void testBypassIsDelayedInput()
             for (const int blockSize : { 1, 7, 512, 4096 })
                 for (const bool stereo : { false, true })
                 {
-                    Engine engine;
+                    auto engineOwner = std::make_unique<Engine>();
+                    auto& engine = *engineOwner;
                     engine.prepare (sr, withOversampling (os, { 12.0f, 6.0f, true }));
                     const auto latency = static_cast<size_t> (engine.getLatency());
                     const auto inputL = noise (10000, 0.9f, 1u);
@@ -227,7 +231,8 @@ void testLatencyAlignsWetAndDry()
         for (int os = 0; os < riptide::dsp::numOversamplingChoices; ++os)
             for (const Mode mode : { Mode::transistor, Mode::hardClip, Mode::fold })
             {
-                Engine engine;
+                auto engineOwner = std::make_unique<Engine>();
+                auto& engine = *engineOwner;
                 engine.prepare (sr, withOversampling (os, withMode (mode)));
                 const auto latency = static_cast<size_t> (engine.getLatency());
                 // −40 dBFS: las curvas se desvían de la recta en menos de 10⁻⁴ relativo. Lo que queda es el filtro DC
@@ -359,7 +364,8 @@ void testDcIsRemoved()
 {
     std::printf ("Engine: el filtro DC quita un desplazamiento constante de la entrada\n");
 
-    Engine engine;
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
     engine.prepare (48000.0, withOversampling (1));
     std::vector<float> left (96000, 0.2f), right;
     processInBlocks (engine, left, right, 480);
@@ -377,12 +383,14 @@ void testBypassToggleIsSmooth()
         const int fadeSamples = static_cast<int> (std::lround (Engine::bypassFadeSeconds * sr));
         const auto input = sine (100.0, sr, static_cast<size_t> (fadeSamples) * 20, 0.5f);
 
-        Engine still;
+        auto stillOwner = std::make_unique<Engine>();
+        auto& still = *stillOwner;
         still.prepare (sr, settings);
         std::vector<float> reference = input, none;
         processInBlocks (still, reference, none, 64); // procesado sin conmutar: su paso máximo es el de la onda
 
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         engine.prepare (sr, settings);
         std::vector<float> signal;
         size_t position = 0;
@@ -416,12 +424,14 @@ void testOversamplingSwitchIsClickless()
         const auto input = sine (200.0, sr, static_cast<size_t> (sr), 0.5f);
 
         // Referencia: el paso máximo de la onda saturada sin cambios de factor.
-        Engine still;
+        auto stillOwner = std::make_unique<Engine>();
+        auto& still = *stillOwner;
         still.prepare (sr, settingsFor (4));
         std::vector<float> reference = input, none;
         processInBlocks (still, reference, none, 64);
 
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         engine.prepare (sr, settingsFor (0));
         std::vector<float> output;
         size_t position = 0;
@@ -449,7 +459,8 @@ void testOversamplingSwitchIsClickless()
     }
 
     // La latencia publicada sigue al factor activo, y cambia solo cuando el cambio se aplica (en silencio).
-    Engine engine;
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
     engine.prepare (44100.0, withOversampling (0));
     std::vector<float> block (2000, 0.0f), none;
     engine.setSettings (withOversampling (4));
@@ -474,7 +485,8 @@ void testModeSwitchIsClickless()
         for (const Mode mode : allModes)
             reference = std::max (reference, maxStep (render (sr, withMode (mode, base), input)));
 
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         engine.prepare (sr, base);
         const int latency = engine.getLatency();
         std::vector<float> output, none;
@@ -514,7 +526,8 @@ void testModeSwitchIsClickless()
         const auto direct = render (sr, settings, input);
 
         // Primera mitad en otro modo, segunda mitad en este.
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         engine.prepare (sr, withMode (mode == Mode::tube ? Mode::fold : Mode::tube, settings));
         const auto middle = static_cast<std::ptrdiff_t> (input.size() / 2);
         std::vector<float> first (input.begin(), input.begin() + middle), second (input.begin() + middle, input.end()), none;
@@ -528,7 +541,8 @@ void testModeSwitchIsClickless()
     }
 
     // Cambiar el factor a mitad de un cruce lo termina en silencio: queda el modo nuevo.
-    Engine engine;
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
     engine.prepare (sr, withOversampling (1, withMode (Mode::tape)));
     std::vector<float> block (2000, 0.1f), none;
     engine.setSettings (withOversampling (3, withMode (Mode::fold)));
@@ -696,7 +710,8 @@ void testToneChangesAreClickless()
         for (const auto& tone : steps)
             reference = std::max (reference, maxStep (render (sr, withTone (tone, base), input)));
 
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         engine.prepare (sr, base);
         std::vector<float> output, none;
         size_t position = 0;
@@ -721,7 +736,8 @@ void testInputMeterSeesEmphasis()
 {
     std::printf ("Tono: IN mide lo que llega a la curva (con el emphasis); OUT, la salida ya de-enfatizada\n");
 
-    Engine engine;
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
     ToneSettings tone;
     tone.emphasisDb = 12.0f;
     tone.emphasisHz = 1000.0f;
@@ -749,7 +765,8 @@ void testBlockSizeIndependence()
     std::vector<float> referenceL, referenceR;
     for (const int blockSize : { 1, 7, 64, 4096 })
     {
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         engine.prepare (44100.0, {});
         std::vector<float> outL, outR;
         for (size_t c = 0; c < changes.size(); ++c)
@@ -779,7 +796,8 @@ void testMeters()
 
     for (const double sr : sampleRates)
     {
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         engine.prepare (sr, { 6.0f, -10.0f, false, 2, Mode::hardClip });
 
         // L: seno de 1 kHz a −40 dBFS (el clip duro es recto); R: silencio.
@@ -796,7 +814,8 @@ void testMeters()
     }
 
     // Mono: solo se mide el canal 0.
-    Engine mono;
+    auto monoOwner = std::make_unique<Engine>();
+    auto& mono = *monoOwner;
     mono.prepare (48000.0, {});
     std::vector<float> left = sine (1000.0, 48000.0, 4800, 0.1f), none;
     processInBlocks (mono, left, none, 480);
@@ -878,7 +897,8 @@ void testMixEndpoints()
             {
                 EngineSettings settings = withOversampling (os, withMode (mode, { 12.0f, 0.0f, false }));
                 const auto input = noise (20000, 0.5f, 5u);
-                Engine probe;
+                auto probeOwner = std::make_unique<Engine>();
+                auto& probe = *probeOwner;
                 probe.prepare (sr, settings);
                 const auto dry = alignedDry (input, sr, static_cast<size_t> (probe.getLatency()));
 
@@ -917,7 +937,8 @@ void testDeltaIsWhatTheSaturationAdds()
     const double sr = 48000.0;
     const auto input = sine (1000.0, sr, 24000, 0.25f);
     const auto settings = withMode (Mode::hardClip, { 18.0f, 0.0f, false });
-    Engine probe;
+    auto probeOwner = std::make_unique<Engine>();
+    auto& probe = *probeOwner;
     probe.prepare (sr, settings);
     const auto dry = alignedDry (input, sr, static_cast<size_t> (probe.getLatency()));
     const auto wet = render (sr, settings, input);
@@ -940,7 +961,8 @@ void testAutoGainMatchesLevel()
     const double sr = 48000.0;
     const size_t count = static_cast<size_t> (sr * 6.0); // 6 constantes de tiempo del nivel
     const size_t start = count - static_cast<size_t> (sr);
-    Engine probe;
+    auto probeOwner = std::make_unique<Engine>();
+    auto& probe = *probeOwner;
     probe.prepare (sr, {});
     const auto latency = static_cast<size_t> (probe.getLatency());
     // Se compara con la dry alineada: el filtro DC le quita al ruido rosa algo de sus graves más profundos (unos 0.6 dB),
@@ -976,7 +998,8 @@ void testAutoGainFollowsDriveInstantly()
     const double sr = 48000.0;
     // Nivel bajo, curva recta: la compensación es −drive y la salida es la dry alineada, incluso durante la rampa.
     {
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         auto settings = withMix (1.0f, true, false, withMode (Mode::transistor));
         engine.prepare (sr, settings);
         const auto input = sine (1000.0, sr, 48000, 0.003f);
@@ -1001,7 +1024,8 @@ void testAutoGainFollowsDriveInstantly()
     }
     // Saturando mucho (clip duro, +24 dB): al bajar el drive a 0 de golpe la salida no sube más de 1 dB sobre su nivel.
     {
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         auto settings = withMix (1.0f, true, false, withMode (Mode::hardClip, { 24.0f, 0.0f, false }));
         engine.prepare (sr, settings);
         const auto input = sine (220.0, sr, static_cast<size_t> (sr * 8.0), 0.5f);
@@ -1030,7 +1054,8 @@ void testAutoGainHoldsThroughSilence()
     std::printf ("Auto gain: en silencio la compensación se queda donde estaba (puerta de −60 dBFS)\n");
 
     const double sr = 44100.0;
-    Engine engine;
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
     engine.prepare (sr, withMix (1.0f, true, false, withMode (Mode::tube, { 18.0f, 0.0f, false })));
     auto music = noise (static_cast<size_t> (sr * 5.0), 0.5f, 7u);
     std::vector<float> none;
@@ -1060,7 +1085,8 @@ void testMixControlsAreClickless()
                 for (const bool delta : { false, true })
                     steady = std::max (steady, maxStep (render (sr, withMix (mix, automatic, delta, base), input)));
 
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         engine.prepare (sr, base);
         std::vector<float> signal = input, none;
         const size_t length = static_cast<size_t> (sr / 20);
@@ -1085,7 +1111,8 @@ void testBypassIgnoresMix()
 
     for (const double sr : sampleRates)
     {
-        Engine engine;
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
         engine.prepare (sr, withMix (0.4f, true, true, withMode (Mode::fold, { 12.0f, 3.0f, true })));
         const auto latency = static_cast<size_t> (engine.getLatency());
         const auto input = noise (10000, 0.9f, 8u);
@@ -1100,6 +1127,310 @@ void testBypassIgnoresMix()
 }
 
 } // namespace
+
+// --- Fase 6: multibanda ----------------------------------------------------------------------------------------------
+
+EngineSettings withBands (int numBands, EngineSettings settings = {})
+{
+    settings.numBands = numBands;
+    return settings;
+}
+
+void testCrossoversAreSpread()
+{
+    std::printf ("Bandas: los cruces en uso quedan ordenados y a media octava como mínimo (se empujan, no se cruzan)\n");
+
+    using riptide::dsp::spreadCrossovers;
+    const auto octavesApart = [] (float low, float high) { return std::log2 (high / low); };
+
+    // Bien separados: no se tocan.
+    auto hz = spreadCrossovers ({ 120.0f, 1000.0f, 5000.0f }, 4);
+    CHECK (std::abs (hz[0] - 120.0f) < 0.01f && std::abs (hz[1] - 1000.0f) < 0.1f && std::abs (hz[2] - 5000.0f) < 0.5f);
+
+    // El segundo por debajo del primero: lo empuja hacia arriba (y al tercero, si hace falta).
+    hz = spreadCrossovers ({ 1000.0f, 900.0f, 1100.0f }, 4);
+    CHECK (std::abs (hz[0] - 1000.0f) < 0.1f);
+    CHECK (octavesApart (hz[0], hz[1]) > 0.499f && octavesApart (hz[1], hz[2]) > 0.499f);
+
+    // Arriba del todo: el último se queda en el máximo y empuja a los de abajo.
+    hz = spreadCrossovers ({ 16000.0f, 16000.0f, 16000.0f }, 4);
+    CHECK (std::abs (hz[2] - riptide::dsp::crossoverMaxHz) < 1.0f);
+    CHECK (octavesApart (hz[0], hz[1]) > 0.499f && octavesApart (hz[1], hz[2]) > 0.499f);
+
+    // Con 2 bandas solo cuenta el primer cruce: puede ir a cualquier sitio del rango.
+    hz = spreadCrossovers ({ 16000.0f, 200.0f, 300.0f }, 2);
+    CHECK (std::abs (hz[0] - 16000.0f) < 1.0f);
+}
+
+void testMultibandIsFlatWithoutSaturation()
+{
+    std::printf ("Bandas: sin saturación (-40 dBFS) la suma de 2-4 bandas es plana y el delta, silencio\n");
+
+    for (const double sr : { 44100.0, 96000.0 })
+        for (int numBands = 2; numBands <= riptide::dsp::maxBands; ++numBands)
+            for (const int os : { 0, 2 })
+                for (const double hz : { 40.0, 120.0, 400.0, 1000.0, 3000.0, 5000.0, 12000.0 })
+                {
+                    const auto settings = withBands (numBands, withOversampling (os, withMode (Mode::hardClip)));
+                    // Contra 1 banda: el filtro DC (5 Hz) ya baja 0.06 dB en 40 Hz, y eso no es cosa del divisor.
+                    const double single = lowLevelGainDb (sr, withBands (1, settings), hz);
+                    CHECK (std::abs (lowLevelGainDb (sr, settings, hz) - single) < 0.01);
+
+                    const auto input = sine (hz, sr, static_cast<size_t> (sr / 2), 0.01f);
+                    const auto delta = render (sr, withMix (1.0f, false, true, settings), input);
+                    CHECK (rmsDb (delta, delta.size() / 2) - rmsDb (input, input.size() / 2) < -80.0);
+                    const auto halfDelta = render (sr, withMix (0.5f, false, true, settings), input);
+                    CHECK (rmsDb (halfDelta, halfDelta.size() / 2) - rmsDb (input, input.size() / 2) < -80.0);
+                }
+}
+
+void testBandDriveAndModeStayInTheirBand()
+{
+    std::printf ("Bandas: el drive y el modo de una banda solo saturan su zona de frecuencias\n");
+
+    const double sr = 48000.0;
+    auto settings = withBands (2, withMode (Mode::transistor));
+    settings.crossoverHz[0] = 500.0f;
+    const auto bass = sine (60.0, sr, static_cast<size_t> (sr), 0.1f);
+
+    // +24 dB en la banda aguda: el bajo de 60 Hz (en la grave) sale limpio. En la grave: se satura.
+    auto highDriven = settings;
+    highDriven.bands[1].driveDb = 24.0f;
+    auto lowDriven = settings;
+    lowDriven.bands[0].driveDb = 24.0f;
+    const auto clean = render (sr, highDriven, bass);
+    const auto dirty = render (sr, lowDriven, bass);
+    const size_t start = clean.size() / 2;
+    const double cleanThird = dw::gainToDb (static_cast<float> (toneAmplitude (clean, 180.0, sr, start)));
+    const double dirtyThird = dw::gainToDb (static_cast<float> (toneAmplitude (dirty, 180.0, sr, start)));
+    CHECK (cleanThird < -90.0);
+    CHECK (dirtyThird > -30.0);
+    CHECK (std::abs (dw::gainToDb (static_cast<float> (toneAmplitude (clean, 60.0, sr, start) / 0.1))) < 0.05);
+
+    // Modo propio: la banda aguda en Rectify (la fundamental desaparece, sale la octava); la grave sigue con el global.
+    auto ownMode = settings;
+    ownMode.bands[1].ownMode = true;
+    ownMode.bands[1].mode = Mode::rectify;
+    ownMode.bands[1].driveDb = 12.0f;
+    const auto high = render (sr, ownMode, sine (3000.0, sr, static_cast<size_t> (sr), 0.3f));
+    CHECK (toneAmplitude (high, 3000.0, sr, start) < 0.01);
+    CHECK (toneAmplitude (high, 6000.0, sr, start) > 0.1);
+    const auto low = render (sr, ownMode, bass);
+    CHECK (std::abs (dw::gainToDb (static_cast<float> (toneAmplitude (low, 60.0, sr, start) / 0.1))) < 0.05);
+}
+
+void testSoloAndMute()
+{
+    std::printf ("Bandas: mute quita la banda, solo deja solo esa; también en la original del mix\n");
+
+    const double sr = 44100.0;
+    const auto base = withBands (3, withMode (Mode::hardClip)); // cruces en 120 Hz y 1 kHz
+    const auto gainAt = [&] (const EngineSettings& settings, double hz) { return lowLevelGainDb (sr, settings, hz); };
+
+    auto muted = base;
+    muted.bands[1].mute = true;
+    CHECK (gainAt (muted, 350.0) < -25.0);
+    CHECK (std::abs (gainAt (muted, 30.0)) < 0.2 && std::abs (gainAt (muted, 6000.0)) < 0.2);
+
+    auto soloed = base;
+    soloed.bands[2].solo = true;
+    soloed.bands[2].mute = true; // el solo gana al mute
+    CHECK (std::abs (gainAt (soloed, 6000.0)) < 0.2);
+    CHECK (gainAt (soloed, 30.0) < -40.0 && gainAt (soloed, 350.0) < -25.0);
+    CHECK (gainAt (withMix (0.0f, false, false, soloed), 30.0) < -40.0); // solo la banda, también en la dry
+
+    // Dos bandas en solo: suenan las dos.
+    auto twoSolos = soloed;
+    twoSolos.bands[0].solo = true;
+    CHECK (std::abs (gainAt (twoSolos, 30.0)) < 0.2 && gainAt (twoSolos, 350.0) < -25.0);
+
+    // Solo en una banda que no existe (la 4 con 3 bandas): no cuenta.
+    auto ghost = base;
+    ghost.bands[3].solo = true;
+    CHECK (std::abs (gainAt (ghost, 350.0)) < 0.05);
+
+    // 1 banda en mute: silencio.
+    auto single = withBands (1, withMode (Mode::hardClip));
+    single.bands[0].mute = true;
+    CHECK (gainAt (single, 1000.0) <= dw::silenceDb);
+}
+
+void testBandChangesAreClickless()
+{
+    std::printf ("Bandas: solo, mute, drive, modo, cruces y número de bandas cambian sin saltos\n");
+
+    // Cada etapa con su duración. 150 Hz cae en la banda 2 hasta que los cruces se mueven a 300 Hz.
+    std::vector<std::pair<EngineSettings, double>> stages;
+    auto settings = withBands (4, withOversampling (2, withMode (Mode::tape, { 6.0f, 0.0f, false })));
+    stages.emplace_back (settings, 0.2);
+    settings.bands[1].mute = true;
+    stages.emplace_back (settings, 0.1);
+    settings.bands[1].solo = true;
+    stages.emplace_back (settings, 0.1);
+    settings.bands[1] = {};
+    settings.bands[0].driveDb = 24.0f;
+    settings.bands[1].driveDb = -24.0f;
+    stages.emplace_back (settings, 0.1);
+    settings.bands[1].ownMode = true;
+    settings.bands[1].mode = Mode::fold;
+    settings.mode = Mode::hardClip;
+    stages.emplace_back (settings, 0.15);
+    settings.crossoverHz = { 300.0f, 600.0f, 8000.0f };
+    stages.emplace_back (settings, 0.1);
+    settings.numBands = 2;
+    stages.emplace_back (settings, 0.1);
+    settings.numBands = 3;
+    settings.oversampling = 3; // a la vez que el factor: un solo fundido
+    stages.emplace_back (settings, 0.2);
+
+    for (const double sr : sampleRates)
+    {
+        const auto input = sine (150.0, sr, static_cast<size_t> (sr) * 2, 0.4f);
+
+        // El paso más grande de la onda en cada etapa sin cambios (con +24 dB de drive la onda es casi cuadrada: sus
+        // flancos ya son pasos grandes).
+        float reference = 0.0f;
+        for (const auto& stage : stages)
+            reference = std::max (reference, maxStep (render (sr, stage.first, input)));
+
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
+        engine.prepare (sr, stages.front().first);
+        const int latency = engine.getLatency();
+        std::vector<float> output, none;
+        size_t position = 0;
+        for (const auto& stage : stages)
+        {
+            engine.setSettings (stage.first);
+            const auto length = static_cast<size_t> (stage.second * sr);
+            std::vector<float> block (input.begin() + static_cast<std::ptrdiff_t> (position),
+                                      input.begin() + static_cast<std::ptrdiff_t> (position + length));
+            processInBlocks (engine, block, none, 64);
+            output.insert (output.end(), block.begin(), block.end());
+            position += length;
+            if (stage.first.oversampling == 2)
+                CHECK (engine.getLatency() == latency); // las bandas no cambian la latencia
+        }
+        CHECK (engine.getActiveBands() == 3 && engine.getActiveOversampling() == 3);
+        CHECK (std::abs (engine.getCrossoverHz (0) - 300.0f) < 0.1f);
+
+        // Los cambios se reparten en fundidos de 10-20 ms entre señales de como mucho ±1.5. Mientras un cruce se mueve, el
+        // tono pasa de una banda a otra y la onda es una mezcla de dos formas saturadas: sus flancos pueden sumar un poco
+        // (medido: +0.3 %), de ahí el 2 % de margen sobre la referencia.
+        const float fadeSamples = static_cast<float> (Engine::factorFadeSeconds * sr);
+        CHECK (maxStep (output) <= 1.02f * reference + 3.0f / fadeSamples);
+    }
+}
+
+void testBandAutoGain()
+{
+    std::printf ("Bandas: el auto gain de cada banda iguala su volumen (drive y modo distintos por banda)\n");
+
+    const double sr = 48000.0;
+    const size_t count = static_cast<size_t> (sr * 6.0);
+    const size_t start = count - static_cast<size_t> (sr);
+    auto settings = withBands (3, withMode (Mode::tape, { 6.0f, 0.0f, false }));
+    settings.bands[0].driveDb = 18.0f;
+    settings.bands[1].ownMode = true;
+    settings.bands[1].mode = Mode::hardClip;
+    settings.bands[2].ownMode = true;
+    settings.bands[2].mode = Mode::tube;
+    settings.bands[2].driveDb = 12.0f;
+    auto probeOwner = std::make_unique<Engine>();
+    probeOwner->prepare (sr, settings);
+    const auto latency = static_cast<size_t> (probeOwner->getLatency());
+
+    const auto hiss = pinkNoise (count, 0.18f, 11u); // −15 dBFS RMS
+    const double inputDb = rmsDb (alignedDry (hiss, sr, latency), start);
+    const double plainError = rmsDb (render (sr, settings, hiss), start) - inputDb;
+    const double matchedError = rmsDb (render (sr, withMix (1.0f, true, false, settings), hiss), start) - inputDb;
+    std::printf ("   ruido rosa: sin auto gain %+5.2f dB, con auto gain %+5.2f dB\n", plainError, matchedError);
+    CHECK (plainError > 3.0); // sin compensar, el drive lo sube
+    CHECK (matchedError < 0.5 && matchedError > -3.0);
+
+    // Cambiar el número de bandas empieza a medir de cero: en medio segundo ya está igualado.
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
+    auto matched = withMix (1.0f, true, false, settings);
+    engine.prepare (sr, withBands (1, matched));
+    std::vector<float> first (hiss.begin(), hiss.begin() + static_cast<std::ptrdiff_t> (2 * sr)), none;
+    processInBlocks (engine, first, none, 512);
+    engine.setSettings (matched);
+    std::vector<float> second (hiss.begin() + static_cast<std::ptrdiff_t> (2 * sr), hiss.begin() + static_cast<std::ptrdiff_t> (3 * sr));
+    processInBlocks (engine, second, none, 512);
+    std::vector<float> secondInput (hiss.begin() + static_cast<std::ptrdiff_t> (2 * sr - static_cast<double> (latency)),
+                                    hiss.begin() + static_cast<std::ptrdiff_t> (3 * sr - static_cast<double> (latency)));
+    const double settledError = rmsDb (second, second.size() / 2) - rmsDb (secondInput, secondInput.size() / 2);
+    std::printf ("   tras pasar de 1 a 3 bandas (0.5-1 s después): %+5.2f dB\n", settledError);
+    CHECK (settledError < 0.5 && settledError > -3.0);
+    CHECK (engine.getAutoGainDb (0) < engine.getAutoGainDb (1)); // la banda 1 tiene más drive: más compensación
+}
+
+void testMultibandBlockSizeAndBypass()
+{
+    std::printf ("Bandas: el resultado no depende del tamaño de bloque; con bypass, la entrada retrasada bit a bit\n");
+
+    constexpr size_t changeEvery = 28672;
+    auto a = withBands (4, withMode (Mode::tube, { 9.0f, 0.0f, false }));
+    a.bands[0].driveDb = 6.0f;
+    a.bands[2].ownMode = true;
+    a.bands[2].mode = Mode::fold;
+    a.bands[3].mute = true;
+    a.mix = 0.6f;
+    a.autoGain = true;
+    auto b = a;
+    b.numBands = 2;
+    b.crossoverHz = { 900.0f, 100.0f, 200.0f };
+    b.bands[1].solo = true;
+    b.delta = true;
+    auto c = a;
+    c.numBands = 3;
+    c.mode = Mode::transistor;
+    c.bands[1].driveDb = -12.0f;
+    const std::array<EngineSettings, 3> changes { a, b, c };
+    const auto inputL = noise (changeEvery * changes.size(), 0.7f, 21u);
+    const auto inputR = noise (changeEvery * changes.size(), 0.7f, 22u);
+
+    std::vector<float> referenceL, referenceR;
+    for (const int blockSize : { 1, 64, 4096 })
+    {
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
+        engine.prepare (44100.0, {});
+        std::vector<float> outL, outR;
+        for (size_t k = 0; k < changes.size(); ++k)
+        {
+            engine.setSettings (changes[k]);
+            std::vector<float> left (inputL.begin() + static_cast<std::ptrdiff_t> (k * changeEvery),
+                                     inputL.begin() + static_cast<std::ptrdiff_t> ((k + 1) * changeEvery));
+            std::vector<float> right (inputR.begin() + static_cast<std::ptrdiff_t> (k * changeEvery),
+                                      inputR.begin() + static_cast<std::ptrdiff_t> ((k + 1) * changeEvery));
+            processInBlocks (engine, left, right, blockSize);
+            outL.insert (outL.end(), left.begin(), left.end());
+            outR.insert (outR.end(), right.begin(), right.end());
+        }
+        if (referenceL.empty())
+        {
+            referenceL = outL;
+            referenceR = outR;
+        }
+        CHECK (outL == referenceL);
+        CHECK (outR == referenceR);
+    }
+
+    auto bypassed = a;
+    bypassed.bypassed = true;
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
+    engine.prepare (44100.0, bypassed);
+    const auto latency = static_cast<size_t> (engine.getLatency());
+    auto left = inputL, right = inputR;
+    processInBlocks (engine, left, right, 512);
+    bool exact = true;
+    for (size_t i = latency; i < left.size(); ++i)
+        exact = exact && left[i] == inputL[i - latency] && right[i] == inputR[i - latency];
+    CHECK (exact);
+}
 
 int main()
 {
@@ -1133,6 +1464,13 @@ int main()
     testAutoGainHoldsThroughSilence();
     testMixControlsAreClickless();
     testBypassIgnoresMix();
+    testCrossoversAreSpread();
+    testMultibandIsFlatWithoutSaturation();
+    testBandDriveAndModeStayInTheirBand();
+    testSoloAndMute();
+    testBandChangesAreClickless();
+    testBandAutoGain();
+    testMultibandBlockSizeAndBypass();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de Riptide pasaron.\n");

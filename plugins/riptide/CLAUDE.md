@@ -25,6 +25,7 @@ un plugin de nivel profesional y que él entienda cada parte y sepa cuándo y c�
 - `Halfband.h`: decimador e interpolador halfband ×2 (100 dB). El oversampling 2x–16x de la Fase 2 se construye
   encadenando etapas ×2 (la latencia total es la suma de las etapas: hay que informarla al host).
 - `Svf.h`: SVF TPT/ZDF para los filtros pre/post y el tono (Fase 4); base de los crossovers (Fase 6).
+- `Crossover.h` (Fase 6): crossover Linkwitz-Riley de 24 dB/oct, su allpass y el divisor multibanda con suma plana.
 - `OnePole.h`: filtro de 1 polo TPT (pre/de-énfasis de Tape, high-pass de Rectify) y `TiltFilter` (Fase 4).
 - `Smoothing.h`: suavizado de gain, drive y mix; fundidos de bypass.
 - `FastMath.h` (`fastTanh`), `Fft.h` (analizador fuera del hilo de audio), `Simd.h`.
@@ -71,6 +72,7 @@ plugins/riptide/
     dsp/Saturator.h          # modos: curvas, filtros propios de cada modo, oversampling (un canal)
     dsp/Tone.h               # cortes PRE/POST, emphasis y tilt (coeficientes compartidos + estado por canal)
     dsp/AutoGain.h           # auto gain: tabla de pérdida de volumen de cada curva + nivel lento con puerta
+    dsp/Bands.h              # multibanda: ajustes por banda, separación de los cruces y sus coeficientes suavizados
     gui/                     # tema, LookAndFeel, medidores
   tests/EngineTests.cpp    # tests del motor (sin JUCE)
 ```
@@ -99,6 +101,54 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
+Fase 6 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+- Cadena: entrada → × input (drive) → tono pre → [IN] → divisor (1–4 bandas) → por banda: × drive → modo → × auto gain →
+  × solo/mute → Σ → tono post → filtro DC = wet; dry = entrada retrasada la latencia → filtro DC gemelo → divisor gemelo
+  → × solo/mute por banda → Σ; mix → − delta·dry → × output → fundido de bypass (original intacta, bit a bit) → ×
+  fundido de estructura → [OUT].
+- Librería (nuevo): `Crossover.h`. `LinkwitzRileySplit` (LR4 = Butterworth² con 3 etapas SVF: la común da LP y HP, otra
+  LP y otra HP; −6 dB en el corte, 24 dB/oct), `LinkwitzRileyAllPass` (x − 2k·BP con los mismos coeficientes: es
+  exactamente LP4 + HP4) y `MultibandSplitter<N>` (árbol en cascada: el cruce i saca la banda i y el resto sigue; las
+  bandas que ya salieron pasan por el allpass de cada cruce posterior, así Σ bandas = AP₁·AP₂·AP₃·x, plana). Undertow
+  no lo usa: no cambia.
+- `dsp/Bands.h`: `maxBands` = 4, `BandSettings` (modo propio o global, drive ±24 dB, solo, mute), `spreadCrossovers`
+  (los cruces en uso, ordenados y a ≥ 0.5 octava; empuja hacia arriba y, si el último pasa de 16 kHz, hacia abajo) y
+  `CrossoverControls` (frecuencias suavizadas en octavas, `LinearRamp` de 20 ms; coeficientes una vez por muestra,
+  compartidos por canales y por los dos divisores).
+- `Engine`: por banda (compartido entre canales) drive (`LinearRamp`), audible (`EffectSwitch` de 20 ms; con algún solo
+  suenan solo las bandas en solo, el solo gana al mute; solo cuentan las bandas que existen), cruce de modos propio
+  (mismo mecanismo de la Fase 3, ahora por banda) y `AutoGain` propio (nivel de la banda sin drive, drive total =
+  input × banda retrasado la latencia). Por canal: 4 × 2 `Saturator`, divisor de la wet y de la dry. Con 1 banda no
+  hay divisor y la suma es la banda tal cual.
+- Cambiar el número de bandas = cambio de estructura, igual que el factor: fundido a silencio de 10 ms, se reconfiguran
+  todas las bandas (modo pedido, historia borrada), se reinician los divisores, los cruces saltan a su sitio y el auto
+  gain de cada banda vuelve a medir. Un solo fundido si cambian bandas y factor a la vez. La latencia no depende de las
+  bandas.
+- `AutoGain`: arranque nuevo. Al abrirse la puerta por primera vez el nivel empieza en el del detector de 10 ms y hasta
+  juntar 1 s es la media de todo lo medido (coeficiente 1/n): llega al nivel real sin esperar segundos. Medido al pasar
+  de 1 a 3 bandas: −0.9 dB en el segundo siguiente.
+- El auto gain ahora multiplica cada banda antes de sumar (antes, después del tono post y del filtro DC): con 1 banda y
+  AUTO GAIN puesto cambia solo el redondeo. Con AUTO GAIN apagado, 1 banda = idéntico bit a bit a la Fase 5:
+  comprobado renderizando el motor de la Fase 5 (HEAD) y el nuevo (6 modos × 3 factores × 2 sample rates × sin tono /
+  con tono / con mix 60 % y delta, estéreo, con cambios de modo, drive, tilt, mix y output a mitad).
+- Parámetros nuevos (versionHint 6): `bands` (choice 1/2/3/4, índice = bandas − 1, def. 1), `crossover1..3` (20–16 000 Hz
+  log, def. 120 / 1000 / 5000), y por banda `band{1..4}Mode` (choice Global + los 6 modos, def. Global; índice − 1 =
+  `Mode`, un modo nuevo va al final aquí también), `band{1..4}Drive` (±24 dB, def. 0), `band{1..4}Solo` y
+  `band{1..4}Mute` (bool, def. off). El procesador publica en atómicos el auto gain de cada banda y los cruces que
+  suenan (ya separados).
+- GUI 900 × 760: sección BANDAS entre TONO y NIVEL Y MEZCLA, con el selector 1-4 a la derecha del título; columnas de
+  banda (título, rango real "120 Hz - 1.0 kHz", modo, drive, S/M, "auto ±x dB") y entre ellas la perilla del cruce. Las
+  bandas y cruces que no existen se ven apagados y no se pueden tocar. Con varias bandas, la lectura global de AUTO GAIN
+  dice "por banda". Cabecera "Fase 6".
+- Tests: `DeepwaterDspTests` (+2: LR4 −6 dB en el corte, −24.6 dB a una octava, suma plana < 0.001 dB y = allpass
+  muestra a muestra, a 4 sample rates; divisor de 1–4 bandas: Σ = cadena de allpasses < 2e-5, suma plana y cada banda
+  aislando su zona) y `RiptideTests` (+7: separación de cruces, multibanda plano y delta < −80 dB sin saturación (2–4
+  bandas, mix 100 y 50 %), drive y modo propio solo en su banda, solo/mute (también en la dry; solo gana; solo en banda
+  inexistente no cuenta), cambios de solo/mute/drive/modo/cruces/bandas/factor sin saltos, auto gain por banda (ruido
+  rosa: +15.1 dB sin compensar, −0.1 dB con auto gain) y tras pasar de 1 a 3 bandas, independencia de bloque y bypass
+  bit a bit con multibanda). Los tests crean el `Engine` en el heap: con 16 saturadores no cabe en la pila.
+- Release con 0 warnings; ctest 4/4; pluginval strictness 10 ampliado: SUCCESS. GUI revisada con captura del Standalone.
+
 Fase 5 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena: entrada → × input (drive) → tono pre → [IN] → modo → tono post → filtro DC → × auto gain = wet; dry = entrada
   retrasada la latencia → filtro DC gemelo; mix `dry + (wet − dry)·mix` → `− delta·dry` → × output → fundido de bypass
@@ -251,4 +301,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 6 (multibanda).
+Siguiente: que el usuario pruebe la Fase 6 en FL; después, Fase 7 (dinámica y modulación).

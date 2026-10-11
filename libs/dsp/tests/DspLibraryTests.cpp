@@ -12,6 +12,7 @@
 #include <numbers>
 #include <vector>
 
+#include "deepwater/dsp/Crossover.h"
 #include "deepwater/dsp/DcBlocker.h"
 #include "deepwater/dsp/Decibels.h"
 #include "deepwater/dsp/DelayLine.h"
@@ -421,6 +422,132 @@ void testSvfMatchesTheory()
     CHECK (std::abs (atCutoff + 3.0103) < 0.001);
 }
 
+// --- Crossover Linkwitz-Riley ----------------------------------------------------------------------------------------
+
+void testLinkwitzRileySplit()
+{
+    std::printf ("Crossover LR4: -6 dB en el corte, 24 dB/oct, low + high = allpass (suma plana)\n");
+
+    for (const double sr : sampleRates)
+    {
+        const double crossoverHz = 1000.0;
+        const auto c = dw::LinkwitzRiley::forFrequency (crossoverHz, sr);
+
+        // Respuesta de cada salida a un seno.
+        const auto measure = [&] (double hz, double& low, double& high, double& sum)
+        {
+            const auto input = sineSignal (hz, sr, 32768);
+            std::vector<float> lows (input.size()), highs (input.size()), sums (input.size());
+            dw::LinkwitzRileySplit split;
+            for (size_t i = 0; i < input.size(); ++i)
+            {
+                const auto bands = split.process (input[i], c);
+                lows[i] = bands.low;
+                highs[i] = bands.high;
+                sums[i] = bands.low + bands.high;
+            }
+            low = toDb (toneAmplitude (lows, hz, sr, 8192));
+            high = toDb (toneAmplitude (highs, hz, sr, 8192));
+            sum = toDb (toneAmplitude (sums, hz, sr, 8192));
+        };
+
+        double low = 0.0, high = 0.0, sum = 0.0;
+        measure (crossoverHz, low, high, sum);
+        CHECK (std::abs (low + 6.02) < 0.02 && std::abs (high + 6.02) < 0.02); // cada una a −6 dB en el corte
+        for (const double hz : { 30.0, 250.0, 700.0, 1000.0, 1400.0, 4000.0, 15000.0 })
+        {
+            measure (hz, low, high, sum);
+            CHECK (std::abs (sum) < 0.001); // la suma es plana en cualquier frecuencia
+        }
+        // Una octava lejos del corte: Butterworth² = −24.6 dB; dos octavas: −48.2 dB (24 dB/oct).
+        measure (500.0, low, high, sum);
+        CHECK (std::abs (high + 24.6) < 0.2);
+        measure (250.0, low, high, sum);
+        CHECK (std::abs (high + 48.2) < 0.3);
+        measure (2000.0, low, high, sum);
+        CHECK (std::abs (low + 24.6) < 0.6); // la bilineal hace caer el LP algo más rápido hacia Nyquist
+
+        // La suma es, muestra a muestra, el allpass con los mismos coeficientes.
+        dw::LinkwitzRileySplit split;
+        dw::LinkwitzRileyAllPass allPass;
+        float worst = 0.0f;
+        for (size_t i = 0; i < 20000; ++i)
+        {
+            const float x = static_cast<float> (std::sin (0.37 * static_cast<double> (i)) * std::sin (0.0021 * static_cast<double> (i)));
+            const auto bands = split.process (x, c);
+            worst = std::max (worst, std::abs (bands.low + bands.high - allPass.process (x, c)));
+        }
+        CHECK (worst < 1.0e-5f);
+    }
+}
+
+void testMultibandSplitterSumsFlat()
+{
+    std::printf ("Divisor multibanda (1-4 bandas): la suma es plana y sigue a la cadena de allpasses; cada banda aisla su zona\n");
+
+    using Splitter = dw::MultibandSplitter<4>;
+    const std::array<double, 3> crossoverHz { 120.0, 1000.0, 5000.0 };
+    for (const double sr : sampleRates)
+    {
+        Splitter::CrossoverCoefficients c {};
+        for (size_t i = 0; i < c.size(); ++i)
+            c[i] = dw::LinkwitzRiley::forFrequency (crossoverHz[i], sr);
+
+        for (int numBands = 1; numBands <= 4; ++numBands)
+        {
+            // Muestra a muestra: Σ bandas = AP₁·AP₂·... (y con 1 banda, la entrada exacta).
+            Splitter splitter;
+            std::array<dw::LinkwitzRileyAllPass, 3> chain;
+            float worst = 0.0f;
+            for (size_t i = 0; i < 30000; ++i)
+            {
+                const float x = static_cast<float> (std::sin (0.91 * static_cast<double> (i)) * std::sin (0.0013 * static_cast<double> (i)));
+                std::array<float, 4> bands {};
+                splitter.process (x, c, numBands, bands.data());
+                float sum = 0.0f;
+                for (int b = 0; b < numBands; ++b)
+                    sum += bands[static_cast<size_t> (b)];
+                float reference = x;
+                for (int k = 0; k < numBands - 1; ++k)
+                    reference = chain[static_cast<size_t> (k)].process (reference, c[static_cast<size_t> (k)]);
+                worst = std::max (worst, std::abs (sum - reference));
+                if (numBands == 1)
+                    CHECK (bands[0] == x);
+            }
+            CHECK (worst < 2.0e-5f);
+
+            // Magnitud de la suma y aislamiento: un seno en el centro (geométrico) de cada banda sale casi todo por ella.
+            for (int target = 0; target < numBands; ++target)
+            {
+                const double low = target == 0 ? 30.0 : crossoverHz[static_cast<size_t> (target - 1)];
+                const double high = target == numBands - 1 ? 16000.0 : crossoverHz[static_cast<size_t> (target)];
+                const double hz = std::sqrt (low * high);
+                const auto input = sineSignal (hz, sr, 32768);
+                std::array<std::vector<float>, 4> bandSignals;
+                std::vector<float> sums (input.size());
+                for (auto& band : bandSignals)
+                    band.resize (input.size());
+                Splitter s;
+                for (size_t i = 0; i < input.size(); ++i)
+                {
+                    std::array<float, 4> bands {};
+                    s.process (input[i], c, numBands, bands.data());
+                    for (int b = 0; b < numBands; ++b)
+                    {
+                        bandSignals[static_cast<size_t> (b)][i] = bands[static_cast<size_t> (b)];
+                        sums[i] += bands[static_cast<size_t> (b)];
+                    }
+                }
+                CHECK (std::abs (toDb (toneAmplitude (sums, hz, sr, 8192))) < 0.001);
+                CHECK (toDb (toneAmplitude (bandSignals[static_cast<size_t> (target)], hz, sr, 8192)) > -1.0);
+                for (int b = 0; b < numBands; ++b)
+                    if (b != target)
+                        CHECK (toDb (toneAmplitude (bandSignals[static_cast<size_t> (b)], hz, sr, 8192)) < -12.0);
+            }
+        }
+    }
+}
+
 void testSvfIsStableWhenModulated()
 {
     std::printf ("SVF: estable con el cutoff saltando en cada muestra y Q alto\n");
@@ -726,6 +853,8 @@ int main()
     testTiltFilter();
     testSvfMatchesTheory();
     testSvfIsStableWhenModulated();
+    testLinkwitzRileySplit();
+    testMultibandSplitterSumsFlat();
     testSmoothedParameter();
     testLinearRamp();
     testEffectSwitch();

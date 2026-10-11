@@ -43,14 +43,15 @@ float textToFrequency (const juce::String& text, float offHz)
 // Perilla de frecuencia logarítmica: cada octava ocupa lo mismo en el recorrido (el oído escucha en octavas).
 // offHz < 0 = el parámetro no tiene posición de apagado.
 std::unique_ptr<juce::AudioParameterFloat> makeFrequencyParameter (const char* id, const juce::String& name, float minHz,
-                                                                   float maxHz, float defaultHz, float offHz)
+                                                                   float maxHz, float defaultHz, float offHz,
+                                                                   int version = riptide::params::versionHintPhase4)
 {
     juce::NormalisableRange<float> range (
         minHz, maxHz,
         [] (float start, float end, float proportion) { return start * std::pow (end / start, proportion); },
         [] (float start, float end, float hz) { return std::log (hz / start) / std::log (end / start); });
     return std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { id, riptide::params::versionHintPhase4 }, name, range, defaultHz,
+        juce::ParameterID { id, version }, name, range, defaultHz,
         juce::AudioParameterFloatAttributes()
             .withLabel ("Hz")
             .withStringFromValueFunction ([offHz] (float hz, int) { return frequencyToText (hz, offHz); })
@@ -97,6 +98,16 @@ RiptideAudioProcessor::RiptideAudioProcessor()
     mixParam = parameters.getRawParameterValue (id::mix);
     autoGainParam = parameters.getRawParameterValue (id::autoGain);
     deltaParam = parameters.getRawParameterValue (id::delta);
+    bandsParam = parameters.getRawParameterValue (id::bands);
+    for (size_t i = 0; i < crossoverParams.size(); ++i)
+        crossoverParams[i] = parameters.getRawParameterValue (id::crossover[i]);
+    for (size_t b = 0; b < bandModeParams.size(); ++b)
+    {
+        bandModeParams[b] = parameters.getRawParameterValue (id::bandMode[b]);
+        bandDriveParams[b] = parameters.getRawParameterValue (id::bandDrive[b]);
+        bandSoloParams[b] = parameters.getRawParameterValue (id::bandSolo[b]);
+        bandMuteParams[b] = parameters.getRawParameterValue (id::bandMute[b]);
+    }
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
     startTimerHz (20);
@@ -147,6 +158,29 @@ juce::AudioProcessorValueTreeState::ParameterLayout RiptideAudioProcessor::creat
             .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::autoGain, id::versionHintPhase5 }, "Auto Gain", false));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::delta, id::versionHintPhase5 }, "Delta", false));
+
+    // Multibanda. Por defecto 1 banda con el modo global y sin drive propio: un proyecto de la Fase 5 suena igual.
+    // Índice de "bands" = número de bandas − 1 (no cambiar el orden).
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::bands, id::versionHintPhase6 }, "Bands",
+                                                              juce::StringArray { "1", "2", "3", "4" }, 0));
+    for (size_t i = 0; i < id::crossover.size(); ++i)
+        layout.add (makeFrequencyParameter (id::crossover[i], "Crossover " + juce::String (i + 1), dsp::crossoverMinHz,
+                                            dsp::crossoverMaxHz, dsp::defaultCrossoverHz[i], -1.0f, id::versionHintPhase6));
+    // Modo de cada banda: 0 = el global; desde 1, los modos en el orden de modeNames (un modo nuevo va al final, aquí
+    // también).
+    juce::StringArray bandModes { "Global" };
+    bandModes.addArray (modes);
+    for (size_t b = 0; b < id::bandMode.size(); ++b)
+    {
+        const juce::String band = "Band " + juce::String (b + 1);
+        layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::bandMode[b], id::versionHintPhase6 },
+                                                                  band + " Mode", bandModes, 0));
+        layout.add (makeDbParameter (id::bandDrive[b], band + " Drive", dsp::maxBandDriveDb, id::versionHintPhase6));
+        layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bandSolo[b], id::versionHintPhase6 },
+                                                                band + " Solo", false));
+        layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bandMute[b], id::versionHintPhase6 },
+                                                                band + " Mute", false));
+    }
     return layout;
 }
 
@@ -161,15 +195,29 @@ riptide::dsp::EngineSettings RiptideAudioProcessor::readSettings() const noexcep
     tone.emphasisDb = emphasisParam->load();
     tone.emphasisHz = emphasisFreqParam->load();
     tone.tiltDb = tiltParam->load();
-    return { inputGainParam->load(),
-             outputGainParam->load(),
-             bypassParam->load() >= 0.5f,
-             static_cast<int> (std::lround (oversamplingParam->load())),
-             static_cast<riptide::dsp::Mode> (mode),
-             tone,
-             mixParam->load() / 100.0f,
-             autoGainParam->load() >= 0.5f,
-             deltaParam->load() >= 0.5f };
+    riptide::dsp::EngineSettings settings { inputGainParam->load(),
+                                            outputGainParam->load(),
+                                            bypassParam->load() >= 0.5f,
+                                            static_cast<int> (std::lround (oversamplingParam->load())),
+                                            static_cast<riptide::dsp::Mode> (mode),
+                                            tone,
+                                            mixParam->load() / 100.0f,
+                                            autoGainParam->load() >= 0.5f,
+                                            deltaParam->load() >= 0.5f };
+    settings.numBands = static_cast<int> (std::lround (bandsParam->load())) + 1;
+    for (size_t i = 0; i < crossoverParams.size(); ++i)
+        settings.crossoverHz[i] = crossoverParams[i]->load();
+    for (size_t b = 0; b < bandModeParams.size(); ++b)
+    {
+        auto& band = settings.bands[b];
+        const int bandMode = juce::jlimit (0, riptide::dsp::numModes, static_cast<int> (std::lround (bandModeParams[b]->load())));
+        band.ownMode = bandMode > 0;
+        band.mode = static_cast<riptide::dsp::Mode> (juce::jmax (0, bandMode - 1));
+        band.driveDb = bandDriveParams[b]->load();
+        band.solo = bandSoloParams[b]->load() >= 0.5f;
+        band.mute = bandMuteParams[b]->load() >= 0.5f;
+    }
+    return settings;
 }
 
 void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
@@ -185,6 +233,7 @@ void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBl
         }
     engineLatency.store (engine.getLatency());
     setLatencySamples (engine.getLatency());
+    publishBands();
 }
 
 void RiptideAudioProcessor::releaseResources() {}
@@ -210,8 +259,16 @@ void RiptideAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     engine.setSettings (readSettings());
     engine.process (buffer.getArrayOfWritePointers(), numChannels, buffer.getNumSamples());
     engineLatency.store (engine.getLatency(), std::memory_order_relaxed);
-    autoGainDb.store (engine.getAutoGainDb(), std::memory_order_relaxed);
+    publishBands();
     publishMeters (numChannels);
+}
+
+void RiptideAudioProcessor::publishBands() noexcept
+{
+    for (size_t b = 0; b < autoGainDb.size(); ++b)
+        autoGainDb[b].store (engine.getAutoGainDb (static_cast<int> (b)), std::memory_order_relaxed);
+    for (size_t i = 0; i < crossoverHz.size(); ++i)
+        crossoverHz[i].store (engine.getCrossoverHz (static_cast<int> (i)), std::memory_order_relaxed);
 }
 
 void RiptideAudioProcessor::timerCallback()

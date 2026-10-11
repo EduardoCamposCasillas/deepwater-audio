@@ -7,9 +7,9 @@
 
 #include "dsp/Engine.h"
 
-// Fase 5: efecto mono/estéreo: input (drive) → tono pre (cortes, emphasis) → modo de saturación con oversampling → tono
-// post (de-emphasis, cortes, tilt) → filtro DC → auto gain → mix con la original alineada → delta → output, con
-// medidores de entrada y salida y bypass con fundido. Todo el audio está en riptide::dsp::Engine (sin JUCE); aquí solo
+// Fase 6: efecto mono/estéreo: input (drive) → tono pre (cortes, emphasis) → 1-4 bandas Linkwitz-Riley, cada una con su
+// modo, drive, auto gain y solo/mute (saturación con oversampling) → tono post (de-emphasis, cortes, tilt) → filtro DC →
+// mix con la original alineada → delta → output, con medidores de entrada y salida y bypass con fundido. Todo el audio está en riptide::dsp::Engine (sin JUCE); aquí solo
 // se conectan los parámetros, el estado, la latencia y los medidores con la GUI.
 //
 // El temporizador corre en el hilo de mensajes: informa al host la latencia nueva cuando el audio cambia de factor de
@@ -63,12 +63,21 @@ public:
     StereoMeter& getInputMeter() noexcept { return inputMeter; }
     StereoMeter& getOutputMeter() noexcept { return outputMeter; }
     int getMeteredChannels() const noexcept { return meteredChannels.load (std::memory_order_relaxed); }
-    float getAutoGainDb() const noexcept { return autoGainDb.load (std::memory_order_relaxed); }
+    float getAutoGainDb (int band = 0) const noexcept
+    {
+        return autoGainDb[static_cast<size_t> (band)].load (std::memory_order_relaxed);
+    }
+    // La frecuencia a la que suena cada cruce (las perillas pueden pedir otra: el motor los separa media octava).
+    float getCrossoverHz (int index) const noexcept
+    {
+        return crossoverHz[static_cast<size_t> (index)].load (std::memory_order_relaxed);
+    }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     riptide::dsp::EngineSettings readSettings() const noexcept;
     void publishMeters (int numChannels) noexcept;
+    void publishBands() noexcept;
     void timerCallback() override;
 
     juce::AudioProcessorValueTreeState parameters;
@@ -87,6 +96,10 @@ private:
     std::atomic<float>* mixParam = nullptr;
     std::atomic<float>* autoGainParam = nullptr;
     std::atomic<float>* deltaParam = nullptr;
+    std::atomic<float>* bandsParam = nullptr;
+    std::array<std::atomic<float>*, riptide::dsp::maxCrossovers> crossoverParams {};
+    std::array<std::atomic<float>*, riptide::dsp::maxBands> bandModeParams {}, bandDriveParams {}, bandSoloParams {},
+        bandMuteParams {};
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     riptide::dsp::Engine engine;
@@ -95,7 +108,8 @@ private:
     StereoMeter outputMeter;
     std::atomic<int> meteredChannels { 2 };
     std::atomic<int> engineLatency { 0 }; // la escribe el audio; el temporizador se la informa al host
-    std::atomic<float> autoGainDb { 0.0f }; // la compensación actual, para mostrarla en la GUI
+    std::array<std::atomic<float>, riptide::dsp::maxBands> autoGainDb {};      // la compensación de cada banda, para la GUI
+    std::array<std::atomic<float>, riptide::dsp::maxCrossovers> crossoverHz {}; // los cruces que suenan, para la GUI
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RiptideAudioProcessor)
 };

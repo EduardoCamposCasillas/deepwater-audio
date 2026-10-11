@@ -162,19 +162,37 @@ public:
         table = &curveLoudness();
         slowCoef = 1.0 - std::exp (-1.0 / (levelSeconds * sampleRate));
         fastCoef = 1.0 - std::exp (-1.0 / (gateSeconds * sampleRate));
+        fastSamples = gateSeconds * sampleRate;
         gatePower = std::pow (10.0, gateDb / 10.0);
         limitGain = deepwater::dsp::dbToGain (limitDb);
         reset();
     }
 
-    void reset() noexcept { slowPower = fastPower = 0.0; }
+    void reset() noexcept
+    {
+        slowPower = fastPower = 0.0;
+        measuredSamples = 0.0;
+    }
 
     // power = media por canal de x² de la señal que entra a la curva, sin el drive (una vez por muestra).
     void push (double power) noexcept
     {
         fastPower += (power - fastPower) * fastCoef;
-        if (fastPower >= gatePower)
-            slowPower += (power - slowPower) * slowCoef; // en double: el coeficiente es diminuto (~2·10⁻⁵)
+        if (fastPower < gatePower)
+            return;
+        // Arranque (Fase 6): un promedio de 1 s que empieza en 0 tarda segundos en llegar al nivel real, y mientras tanto
+        // la compensación sería la de "señal baja" (la salida, más baja). Al abrirse la puerta por primera vez el nivel
+        // arranca en el del detector rápido, y hasta juntar 1 s de señal es la media de TODO lo medido (coeficiente
+        // 1/n): llega al nivel real en lo que dura la medida, sin esperar. Importa al cambiar el número de bandas, que
+        // empieza a medir cada banda de cero.
+        if (measuredSamples == 0.0)
+        {
+            slowPower = fastPower;
+            measuredSamples = fastSamples;
+        }
+        measuredSamples += 1.0;
+        const double coef = std::max (slowCoef, 1.0 / measuredSamples);
+        slowPower += (power - slowPower) * coef; // en double: el coeficiente es diminuto (~2·10⁻⁵)
     }
 
     // Ganancia lineal que iguala el volumen. drive = ganancia de Input con la que se saturó lo que está saliendo ahora;
@@ -196,6 +214,7 @@ private:
     const CurveLoudness* table = nullptr;
     double slowCoef = 0.0, fastCoef = 0.0, gatePower = 0.0;
     double slowPower = 0.0, fastPower = 0.0;
+    double fastSamples = 1.0, measuredSamples = 0.0; // el arranque cuenta lo que ya promedió el detector rápido
     float limitGain = 1.0f;
     float current = 1.0f;
 };

@@ -587,3 +587,137 @@ se entienda**, pero sin que suene distorsionada ni más fuerte (compruébalo con
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 6 — Multibanda: saturar cada zona del espectro por separado
+
+Hasta ahora toda la señal pasaba junta por la curva. El problema: **la parte más fuerte manda**. En casi cualquier
+mezcla esa parte son los graves (bombo, bajo, 808): ellos empujan la curva, y todo lo que suena encima se satura al
+ritmo de ellos y se ensucia con su intermodulación. Un saturador multibanda parte la señal en bandas (graves, medios,
+agudos...) y satura cada una con su propio modo y drive, como si tuvieras cuatro Riptides en paralelo, cada uno
+dedicado a una zona.
+
+### Conceptos aprendidos
+
+- **Crossover (divisor de bandas).** Un par de filtros que reparten la señal: un low-pass se queda con lo de abajo del
+  corte y un high-pass con lo de arriba. Con 4 bandas hay 3 cortes (Riptide los llama **cruces**). La condición de un
+  buen crossover: si no se procesa nada, **la suma de las bandas tiene que sonar igual que la entrada**.
+- **Por qué no sirve cualquier par de filtros.** Alrededor del corte, el low-pass y el high-pass dejan pasar las dos
+  algo de señal, pero cada uno la retrasa distinto (su **fase**). Al sumarlas no se suman "derechas": con dos filtros
+  Butterworth simples aparece un pozo (o una joroba de +3 dB) justo en el corte.
+- **Linkwitz-Riley (LR4, 24 dB/oct).** Es la solución clásica (de los crossovers de cajas acústicas): dos Butterworth en
+  cascada en cada lado. Cada banda vale **−6 dB en el corte** y las dos llegan **en fase** en todas las frecuencias, así
+  que su suma es **plana**: 0 dB en todo el espectro. Lo único que queda es un giro de fase alrededor de cada corte (un
+  **allpass**: deja pasar todo con el mismo volumen, solo cambia la fase), y un giro de fase lento como ese no se oye
+  como color. Medido en Riptide: la suma de 2, 3 o 4 bandas sin saturar se aparta menos de 0.001 dB de la entrada.
+- **La original del mix también se divide.** Por ese giro de fase, la señal multibanda ya no es idéntica a la original:
+  si la sumaras directo con la dry (Mix < 100 %) volvería el filtro de peine de la Fase 5 alrededor de los cruces. Por
+  eso la dry pasa por un **divisor gemelo**: las dos llegan con la misma fase y el delta sigue dando silencio sin drive.
+- **Pendiente y solapamiento.** 24 dB/oct significa que una banda no termina de golpe en el cruce: una octava más allá
+  todavía queda algo (−24 dB). Por eso Riptide no deja dos cruces a menos de **media octava**: si están más juntos, la
+  banda del medio casi no tiene nada propio. Si mueves una perilla de cruce más allá de su vecina, la **empuja** (no se
+  intercambian); lo que de verdad suena se lee debajo del nombre de cada banda.
+- **Intermodulación, otra vez.** En la Fase 4 viste que un bajo fuerte que satura junto con una voz la ensucia (tonos de
+  suma y diferencia). Separando bandas, el bajo y la voz ya no saturan **juntos**: cada banda solo intermodula consigo
+  misma. Es la razón principal para usar multibanda en buses y en el master.
+- **Auto gain por banda.** Cada banda mide su propio nivel y compensa su propio drive y su modo. Subir el drive de los
+  medios cambia el carácter de los medios sin que suban de volumen respecto de los graves y los agudos.
+- **CPU.** Cada banda es un saturador completo con su oversampling: 4 bandas a 16x cuestan unas 4 veces lo de 1 banda.
+  Si el proyecto va justo, baja el oversampling o usa menos bandas.
+
+### Qué hace cada control
+
+- **BANDAS 1 2 3 4** (por defecto 1). Con 1, Riptide es exactamente el de la Fase 5 (comprobado bit a bit). Cambiar el
+  número de bandas hace un fundido corto a silencio (10 ms de bajada y 10 de subida), como cambiar el oversampling: es
+  un ajuste para elegir, no para automatizar.
+- **Cruce 1, 2, 3** (20 Hz–16 kHz; por defecto 120 Hz, 1 kHz y 5 kHz). Entre cada par de bandas. Con 2 bandas solo
+  cuenta el Cruce 1 (120 Hz: sub/graves contra todo lo demás); con 4: graves | medios graves | medios agudos | agudos.
+  Se pueden mover con música sin clics (se suavizan en 20 ms).
+- Por banda (de izquierda a derecha, de grave a agudo):
+  - **Modo**: *Global* (el de los botones de arriba, por defecto) o uno propio. Graves en Tube y agudos en Tape suena
+    muy distinto a todo en Tube.
+  - **Drive** (−24 a +24 dB, por defecto 0): se suma al **Input**. Input sigue siendo el drive general; el de cada banda
+    lo ajusta. Negativo = esa banda queda más limpia que el resto.
+  - **S (solo)**: escuchar solo esa banda (varias en solo = suenan todas ellas). El solo gana al mute.
+  - **M (mute)**: quitar esa banda de la salida.
+  - **auto ±x dB**: la compensación del auto gain de esa banda (en color si AUTO GAIN está puesto).
+- Solo y mute actúan también sobre la dry del mix y sobre el **DELTA**: con una banda en solo y DELTA puesto oyes
+  exactamente lo que la saturación le agrega a esa banda.
+- En el analizador: con una banda en solo ves su "montaña" con faldas de 24 dB/oct a cada lado del cruce. Con drive en
+  una sola banda, los armónicos nuevos aparecen **encima** de esa banda (la saturación crea armónicos hacia arriba: los
+  de los graves caen en los medios), no debajo.
+
+### Ejercicio de escucha guiado: una sola saturación contra tres (con volumen igualado)
+
+1. Un loop de batería completo (bombo, caja, platillos) en un insert con Riptide y un **Fruity Parametric EQ 2** después
+   para ver el espectro. **AUTO GAIN puesto**, **Transistor**, Oversampling 4x, **1 banda**.
+2. **Input +15 dB.** Qué notar: cada golpe de bombo "aplasta" todo: la caja y los platillos se ensucian y respiran al
+   ritmo del bombo (la curva está ocupada con él).
+3. Pasa a **3 bandas**, Cruce 1 en **150 Hz** y Cruce 2 en **2.5 kHz**. Mismo Input. Qué notar: el bombo sigue saturado
+   pero los platillos ya no "bombean" con él, y la caja suena más clara. Es la intermodulación que desapareció.
+4. Pon la **banda 1 en solo** y mueve el Cruce 1 entre 80 y 250 Hz: escucha dónde está el "golpe" del bombo y dónde
+   empieza el cuerpo de la caja. Quita el solo.
+5. **Drive de la banda 3 en −12 dB**: los platillos quedan limpios y el resto, saturado. Después **+6 dB**: el fizz
+   vuelve, solo en los agudos. Pon DELTA un momento para escuchar qué agrega cada banda (prueba con solo + DELTA).
+6. Banda 1 en **Tube**, banda 2 en **Global** (Transistor), banda 3 en **Tape**. Qué notar: el bombo gana cuerpo (pares),
+   la caja tiene mordida y los platillos se redondean. Tres saturadores distintos en uno.
+7. Vuelve a **1 banda** y compara: así de diferente es "toda junta" contra "por zonas".
+
+### Receta de uso: un bus de batería grande sin platillos ásperos
+
+1. Riptide en el bus de la batería. **3 bandas**, **AUTO GAIN puesto**, Oversampling 4x.
+2. **Cruce 1 en 120–150 Hz** (debajo queda el bombo y el sub), **Cruce 2 en 3–5 kHz** (encima, platillos y aire).
+3. **Banda 1: Tube, drive +6 dB.** Pares en el bombo: más redondo y más "nota", sin perder el golpe.
+4. **Banda 2: Transistor (o Hard Clip), drive +9 a +12 dB.** Aquí vive la pegada de la caja y los toms: la mordida en
+   los medios hace que la batería se oiga más grande y más cerca.
+5. **Banda 3: Tape, drive −6 dB.** Los platillos casi limpios y redondeados: nada de fizz.
+6. **Input** para el drive general y **Mix** al 60–100 % según cuánta pegada original quieras conservar. Iguala con
+   Output y compara con el bypass.
+7. ¿Por qué funciona? Cada zona recibe la saturación que la favorece: los graves, armónicos que refuerzan la nota; los
+   medios, densidad y presencia; los agudos, nada (ya tienen todos los armónicos que necesitan, y saturarlos solo agrega
+   aspereza). Y ninguna zona ensucia a las otras.
+8. Variante para un **bajo**: 2 bandas, Cruce 1 en 100–150 Hz, banda 1 con drive −12 dB (sub limpio y firme) y banda 2
+   con Tube +12 dB (el gruñido de las cuerdas). Es la solución "de manual" al reto de la Fase 4 (allá no había bandas;
+   aquí sí, y sin el hueco del Low Cut en paralelo).
+
+### Reto sin receta
+
+Tienes la **mezcla completa** de un beat (el 2-pista, en el master) y quieres que suene **más caliente y pegada**, como
+si hubiera pasado por una consola o una cinta, **sin que el bombo haga respirar al resto** y **sin que las voces y los
+hi-hats se vuelvan ásperos**. Tiene que ser sutil: con AUTO GAIN y el bypass, la diferencia se tiene que notar en la
+densidad, no en el volumen. Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Crossover / cruce**: el punto (y los filtros) donde se separan dos bandas. *En música:* las cajas acústicas de dos
+  vías tienen uno entre el woofer y el tweeter (suele estar entre 2 y 3 kHz).
+- **Saturación (o compresión) multibanda**: procesar cada zona del espectro por separado. *En música:* el sonido "grande
+  pero claro" de los masters de EDM y pop moderno; los compresores multibanda de la radio FM.
+- **Linkwitz-Riley**: el tipo de crossover cuya suma es plana (24 dB/oct, −6 dB en el corte). *En música:* es el estándar
+  de los crossovers de sistemas de sonido en vivo.
+- **Allpass / giro de fase**: un filtro que no cambia el volumen de ninguna frecuencia, solo su fase. *En música:* es el
+  corazón del phaser (varios allpass que se mueven, sumados con la señal original).
+- **Banda**: la zona del espectro entre dos cruces. *En música:* "la banda de los 200 a 500 Hz" es donde suele vivir el
+  barro de una mezcla.
+- **Solo / mute por banda**: escuchar o quitar una zona. *En música:* así se busca en mastering en qué zona está un
+  problema antes de corregirlo.
+
+### Errores comunes
+
+- **Cuatro bandas "por si acaso".** Más bandas = más cruces (más giro de fase), más CPU y más decisiones. Empieza con 2
+  o 3 y agrega una solo si una zona necesita algo distinto.
+- **Un cruce justo en el centro de un instrumento importante.** Si la voz tiene su cuerpo en 1 kHz y pones ahí un cruce
+  con bandas muy distintas, cada mitad de la voz satura distinto y suena partida. Pon los cruces entre instrumentos, no
+  en medio de uno (usa el solo para encontrarlos).
+- **Drives muy distintos en bandas vecinas.** Con mucha diferencia (+12 en una, −12 en la otra) la zona del cruce, que
+  comparten las dos, queda con un hueco o una joroba de volumen. Si lo oyes, acerca los drives o mueve el cruce.
+- **Olvidar un solo o un mute puesto.** Si "falta" algo en la mezcla, revisa los botones S y M. Con un solo puesto el
+  resto de las bandas no suena, tampoco en la dry.
+- **Usar las bandas como EQ.** El drive de una banda cambia la saturación (y, sin AUTO GAIN, también el volumen), pero
+  no es un ecualizador: para subir o bajar una zona sin saturar, usa un EQ.
+- **Cuándo NO usar multibanda:** en una pista sola de un instrumento simple (un bajo limpio, una voz) suele bastar con 1
+  banda y el tono de la Fase 4; y en sonidos donde quieres justamente que todo sature junto (un bajo de rock, un
+  sintetizador agresivo), la intermodulación es parte del carácter.
+
+### Retos completados
+
+(Ninguno todavía.)
