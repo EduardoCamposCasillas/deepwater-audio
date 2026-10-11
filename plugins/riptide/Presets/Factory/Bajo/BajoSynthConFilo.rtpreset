@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Clip duro con emphasis en los medios: un bajo de synth agresivo que corta la mezcla. -->
+<RiptidePreset formatVersion="1" name="Bajo Synth con Filo" category="Bajo" author="Riptide">
+  <Notes>
+    Para bajos de synth en EDM, dubstep o drum and bass: filo y agresividad en los medios, el sub controlado.
+
+    Cómo se construyó:
+    - Hard Clip: recto hasta 0 dBFS y plano después. Armónicos impares fuertes (suena "cuadrado").
+    - Emphasis +6 dB en 1.2 kHz: lo que más se recorta son los medios, donde está el filo.
+    - Input +8 dB y Mix 70 %: un 30 % de la señal original conserva la redondez del sub.
+    - Oversampling 8x: el clip duro crea armónicos hasta el infinito; con 8x los que pasan de Nyquist casi no se
+      reflejan (sin aliasing que desafine las notas agudas).
+    - High Cut POST en 8 kHz y AUTO GAIN.
+
+    Pruébalo: baja el Oversampling a Off y toca notas agudas: oirás tonos metálicos que no siguen la melodía.
+    Eso es aliasing.
+    Cuándo NO usarlo: en bajos que tienen que acompañar sin llamar la atención; el clip duro siempre se nota.
+    Viene de: Fase 2 (aliasing) + Fase 3 (Hard Clip) + Fase 4 (emphasis).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Hard Clip"/>
+    <PARAM id="oversampling" value="8x"/>
+    <PARAM id="inputGain" value="8"/>
+    <PARAM id="mix" value="70"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="emphasis" value="6"/>
+    <PARAM id="emphasisFreq" value="1200"/>
+    <PARAM id="highCut" value="8000"/>
+  </Parameters>
+</RiptidePreset>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Caja con crack en los medios, en paralelo para conservar el golpe. -->
+<RiptidePreset formatVersion="1" name="Caja con Mordida" category="Batería" author="Riptide">
+  <Notes>
+    Una caja que corta la mezcla: más "crack" y más cuerpo sin perder el ataque. Rock, pop, trap, boom bap.
+
+    Cómo se construyó:
+    - Transistor: limpio hasta cerca del límite y después áspero; armónicos IMPARES = mordida y presencia.
+    - Low Cut PRE en 150 Hz: el bombo que se cuela por el micrófono de la caja (y el retumbe de la propia caja)
+      no empuja la curva. Satura solo el cuerpo y el crack.
+    - Emphasis +4 dB en 2 kHz: el crack es lo que más se satura.
+    - Input +12 dB: la señal saturada sola (Mix 100 %) suena destrozada a propósito.
+    - Mix 45 %: la caja original conserva su ataque intacto y la saturada rellena entre golpe y golpe. Es
+      saturación en paralelo (la "compresión New York", pero con armónicos).
+    - High Cut POST en 10 kHz: sin fizz en los platillos que se cuelan.
+    - Output +5.5 dB: el Mix mezcla (no suma): con 45 % la caja original baja; y a la saturada le falta lo que
+      quitó el Low Cut, cosa que el AUTO GAIN no repone (compensa la curva, no los filtros). Con Output la caja
+      queda al mismo volumen que con el bypass.
+
+    Pruébalo: pon Mix en 100 % un momento para oír la señal saturada sola, y vuelve a 45 %. Después DELTA: oyes
+    solo lo que se agrega (el "ruido" de la caja).
+    Cuándo NO usarlo: en una caja de jazz o acústica tocada con escobillas; ahí la saturación se oye como
+    suciedad.
+    Viene de: Fase 5 (mezcla en paralelo).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Transistor"/>
+    <PARAM id="inputGain" value="12"/>
+    <PARAM id="mix" value="45"/>
+    <PARAM id="autoGain" value="On"/>
+    <PARAM id="outputGain" value="5.5"/>
+
+    <PARAM id="lowCut" value="150"/>
+    <PARAM id="emphasis" value="4"/>
+    <PARAM id="emphasisFreq" value="2000"/>
+    <PARAM id="highCut" value="10000"/>
+  </Parameters>
+</RiptidePreset>

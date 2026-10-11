@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Aliasing a propósito: clip duro sin oversampling, mezclado por debajo. -->
+<RiptidePreset formatVersion="1" name="Lo-Fi Aliasing" category="Creativo" author="Riptide">
+  <Notes>
+    El "error" digital como efecto: tonos metálicos que no siguen la nota, como los samplers y los videojuegos
+    viejos. Lo-fi, hyperpop, chiptune.
+
+    Cómo se construyó:
+    - Hard Clip con Input +18 dB y Oversampling Off: los armónicos del recorte que pasan de Nyquist se reflejan
+      y caen en frecuencias que no tienen relación con la nota (aliasing).
+    - High Cut POST en 5 kHz: suaviza la aspereza, quedan los tonos raros de los medios.
+    - Mix 60 % y AUTO GAIN.
+
+    Pruébalo: toca una nota aguda y súbela despacio: el aliasing BAJA mientras la nota sube (se refleja). Ahora
+    pon Oversampling 16x: el efecto desaparece. Esa es la diferencia que viste en la Fase 2.
+    Cuándo NO usarlo: en el master o en cualquier pista que no tenga que sonar rota.
+    Viene de: Fase 2 (aliasing) + Fase 3 (Hard Clip).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Hard Clip"/>
+    <PARAM id="oversampling" value="Off"/>
+    <PARAM id="inputGain" value="18"/>
+    <PARAM id="mix" value="60"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="highCut" value="5000"/>
+  </Parameters>
+</RiptidePreset>

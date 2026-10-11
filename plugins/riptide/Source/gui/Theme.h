@@ -4,6 +4,8 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include "deepwater/presets/Palette.h"
+
 // Colores de toda la interfaz en un solo sitio. La base es la misma que la de Undertow (la suite se reconoce como
 // familia); el acento es cálido porque saturar es "calentar" el sonido.
 namespace riptide::gui::theme
@@ -30,4 +32,11 @@ inline const juce::Colour spectrumBefore { 0xff9aa7b4 };
 inline const juce::Colour grid { 0xff1c232b };
 inline const std::array<juce::Colour, 4> bands { juce::Colour { 0xffff8a5c }, juce::Colour { 0xffe8c35a },
                                                  juce::Colour { 0xff7fc98f }, juce::Colour { 0xff6fa8ff } };
+
+// Fase 9: los colores de la barra, el navegador y el panel de guardar presets (libs/presets). Los presets del usuario se
+// marcan en ámbar.
+[[nodiscard]] inline deepwater::presets::Palette presetPalette()
+{
+    return { background, panel, panelOutline, display, text, dimText, accent, meterHot };
+}
 } // namespace riptide::gui::theme

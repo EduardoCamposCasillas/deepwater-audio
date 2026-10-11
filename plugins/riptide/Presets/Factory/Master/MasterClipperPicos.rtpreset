@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Clipper de master: recorta los picos más altos para ganar volumen sin limitador. -->
+<RiptidePreset formatVersion="1" name="Master Clipper de Picos" category="Master" author="Riptide">
+  <Notes>
+    Un clipper antes del limitador: recorta los picos cortos (el clic del bombo, el golpe de la caja) que casi
+    no se oyen pero que no dejan subir el volumen de la mezcla. Técnica habitual en trap, EDM y reggaetón.
+
+    Cómo se construyó:
+    - Hard Clip: recto hasta 0 dBFS y plano después; lo que no llega al techo pasa SIN tocar.
+    - Input +3 dB: solo los picos que pasan de −3 dBFS se recortan (unos pocos milisegundos por golpe).
+    - Output −3 dB: el techo queda en −3 dBFS. Ahora el limitador del final trabaja 3 dB menos.
+    - Oversampling 16x: recortar crea armónicos muy agudos; con 16x no se reflejan y el recorte no "raspa".
+    - Sin AUTO GAIN a propósito: el objetivo es bajar los picos, no igualar el volumen. El RMS casi no cambia.
+
+    Pruébalo: mira el medidor OUT: el pico baja 3 dB y el RMS se queda. Activa DELTA: oyes solo lo recortado
+    (unos clics cortos en los golpes). Si en DELTA ya se oye la música, estás recortando demasiado.
+    Cuándo NO usarlo: en música acústica, clásica o jazz: el recorte de picos les quita la vida. Y nunca
+    recortes tanto que en DELTA se oiga la mezcla.
+    Viene de: Fase 3 (Hard Clip) + Fase 5 (delta).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Hard Clip"/>
+    <PARAM id="oversampling" value="16x"/>
+    <PARAM id="inputGain" value="3"/>
+    <PARAM id="outputGain" value="-3"/>
+  </Parameters>
+</RiptidePreset>

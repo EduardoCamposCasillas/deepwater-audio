@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bombo con más nota: Tube con emphasis en la fundamental, para que se oiga también en bocinas pequeñas. -->
+<RiptidePreset formatVersion="1" name="Bombo Redondo" category="Batería" author="Riptide">
+  <Notes>
+    Un bombo que "suena a nota" y no solo a golpe: hip hop, pop, reggaetón, cualquier bombo que se pierde en la
+    mezcla.
+
+    Cómo se construyó:
+    - Tube: su curva asimétrica agrega armónicos PARES. El 2.º armónico es la octava de la fundamental (un bombo
+      en 55 Hz gana 110 Hz y 165 Hz): la misma nota, más arriba, donde las bocinas pequeñas sí llegan.
+    - Emphasis +6 dB en 70 Hz: sube el cuerpo del bombo ANTES de la curva y lo devuelve a su sitio DESPUÉS. Así
+      lo que más se satura es la fundamental, no el clic del golpe (que ya es brillante y saturado se vuelve
+      áspero).
+    - Input +6 dB: saturación moderada; el pico del golpe se redondea un poco.
+    - High Cut POST en 9 kHz: quita el "fizz" que la curva agrega a la parte del clic.
+    - AUTO GAIN: el volumen no cambia al mover el Input; juzgas el carácter, no el volumen.
+
+    Pruébalo: en el espectro, mira cómo aparecen picos en 2× y 3× la fundamental del bombo con DESPUÉS
+    encendido. Con el bypass, baja el volumen general de FL casi al mínimo: con el preset el bombo se sigue
+    oyendo.
+    Cuándo NO usarlo: si el bombo ya choca con el bajo en 100–200 Hz, los armónicos nuevos caen justo ahí y
+    ensucian; primero decide quién manda en los graves (el bombo o el bajo).
+    Viene de: Fase 3 (Tube = pares) + Fase 4 (emphasis).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Tube"/>
+    <PARAM id="inputGain" value="6"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="emphasis" value="6"/>
+    <PARAM id="emphasisFreq" value="70"/>
+    <PARAM id="highCut" value="9000"/>
+  </Parameters>
+</RiptidePreset>

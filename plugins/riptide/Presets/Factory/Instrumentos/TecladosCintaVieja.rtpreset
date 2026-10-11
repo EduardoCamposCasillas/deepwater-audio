@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pianos, Rhodes y teclados con el color de una cinta gastada: oscuros, densos y redondos. -->
+<RiptidePreset formatVersion="1" name="Teclados Cinta Vieja" category="Instrumentos" author="Riptide">
+  <Notes>
+    Un piano o un Rhodes que suena a disco viejo: lo-fi hip hop, soul, neo soul.
+
+    Cómo se construyó:
+    - Tape con Input +9 dB: rodilla suave y bien adentro; los ataques de las teclas se redondean.
+    - Tilt −2 dB: los agudos abajo y los graves arriba, como una cinta usada. Va después del AUTO GAIN: el
+      cuerpo del piano sube un poco y Output −1 dB lo compensa.
+    - High Cut POST en 9 kHz: el brillo de arriba desaparece (las cintas viejas pierden agudos).
+    - AUTO GAIN.
+
+    Pruébalo: para más "vejez", baja el High Cut a 5 kHz y súmale un vinilo o ruido de cinta en otra pista.
+    Cuándo NO usarlo: si el piano tiene que brillar y llevar la canción (balada pop): se va a hundir en la
+    mezcla.
+    Viene de: Fase 3 (Tape) + Fase 4 (tilt y cortes).
+  </Notes>
+  <Parameters>
+    <PARAM id="inputGain" value="9"/>
+    <PARAM id="autoGain" value="On"/>
+    <PARAM id="outputGain" value="-1"/>
+
+    <PARAM id="highCut" value="9000"/>
+    <PARAM id="tilt" value="-2"/>
+  </Parameters>
+</RiptidePreset>

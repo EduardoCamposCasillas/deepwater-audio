@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Una guitarra limpia (o DI) convertida en crunch: Transistor con los medios adelante. -->
+<RiptidePreset formatVersion="1" name="Guitarra Crunch" category="Instrumentos" author="Riptide">
+  <Notes>
+    Para guitarras limpias o grabadas por línea (DI): un crunch tipo amplificador empujado. Rock, indie, blues.
+
+    Cómo se construyó:
+    - Transistor con Input +15 dB: mordida de impares, como un pedal de overdrive a transistores.
+    - Low Cut PRE en 120 Hz: los graves no llegan a la curva (si llegan, el sonido se vuelve "pastoso").
+    - Emphasis +6 dB en 800 Hz: los medios de la guitarra saturan más; es el "honk" de los amplificadores.
+    - High Cut POST en 6 kHz: hace de bocina de amplificador (no reproducen por encima de ~5 kHz). Sin esto la
+      distorsión suena a abeja.
+    - AUTO GAIN.
+
+    Pruébalo: mueve el High Cut entre 4 y 10 kHz: es el control de "qué tan cerca está el micrófono".
+    Cuándo NO usarlo: en una guitarra ya distorsionada; sumar más saturación solo la comprime y le quita
+    definición.
+    Viene de: Fase 3 (Transistor) + Fase 4 (cortes y emphasis).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Transistor"/>
+    <PARAM id="inputGain" value="15"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="lowCut" value="120"/>
+    <PARAM id="emphasis" value="6"/>
+    <PARAM id="emphasisFreq" value="800"/>
+    <PARAM id="highCut" value="6000"/>
+  </Parameters>
+</RiptidePreset>

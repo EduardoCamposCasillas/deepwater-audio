@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Presencia en una voz: sin graves en la curva, la zona de 3 kHz saturando un poco más. -->
+<RiptidePreset formatVersion="1" name="Voz Presente Cinta" category="Voz" author="Riptide">
+  <Notes>
+    Una voz que se entiende mejor en la mezcla, con la suavidad de la cinta. Pop, rock, podcast.
+
+    Cómo se construyó:
+    - Low Cut PRE en 130 Hz: los golpes de micrófono y la respiración grave no llegan a la curva.
+    - Tape con Input +4.5 dB: rodilla suave; la cinta comprime más los agudos, así que las eses no se disparan.
+    - Emphasis +4 dB en 3 kHz: la presencia (donde el oído es más sensible) es lo que más satura.
+    - High Cut POST en 12 kHz: quita el poco fizz que se agrega arriba.
+    - AUTO GAIN y Output +1.5 dB: la cinta y el emphasis empujan los agudos de la voz contra la rodilla, y el
+      AUTO GAIN calcula la pérdida con el nivel total (no por frecuencia) y se queda del lado seguro, un poco
+      más bajo.
+
+    Pruébalo: activa DELTA y escucha lo que se agrega: tiene que ser un "brillo" de la voz, no ruido. Mueve Emph
+    Freq entre 2 y 5 kHz para encontrar la zona de cada cantante.
+    Cuándo NO usarlo: en voces muy brillantes o sibilantes: ahí el emphasis va mejor en negativo (o nada).
+    Viene de: Fase 4 (variante de la receta para voz).
+  </Notes>
+  <Parameters>
+    <PARAM id="inputGain" value="4.5"/>
+    <PARAM id="autoGain" value="On"/>
+    <PARAM id="outputGain" value="1.5"/>
+
+    <PARAM id="lowCut" value="130"/>
+    <PARAM id="emphasis" value="4"/>
+    <PARAM id="emphasisFreq" value="3000"/>
+    <PARAM id="highCut" value="12000"/>
+  </Parameters>
+</RiptidePreset>

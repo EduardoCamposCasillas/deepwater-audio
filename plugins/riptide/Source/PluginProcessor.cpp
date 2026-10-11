@@ -454,7 +454,9 @@ void RiptideAudioProcessor::publishMeters (int numChannels) noexcept
 void RiptideAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // Se ejecuta en el hilo de mensajes (al guardar el proyecto de FL), no en el de audio.
-    if (auto xml = parameters.copyState().createXml())
+    auto state = parameters.copyState();
+    presetManager.writeStateProperties (state); // nombre del preset y si estaba modificado
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
@@ -472,6 +474,8 @@ void RiptideAudioProcessor::setStateInformation (const void* data, int sizeInByt
                 if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter); ranged != nullptr && ranged->isDiscrete())
                     if (const float exact = ranged->convertTo0to1 (ranged->convertFrom0to1 (ranged->getValue())); exact != ranged->getValue())
                         ranged->setValueNotifyingHost (exact);
+
+            presetManager.stateRestored();
         }
 }
 

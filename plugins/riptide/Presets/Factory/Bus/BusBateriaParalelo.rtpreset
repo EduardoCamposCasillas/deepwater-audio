@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Saturación en paralelo: la batería destrozada mezclada por debajo de la original. -->
+<RiptidePreset formatVersion="1" name="Bus Batería Paralelo" category="Bus" author="Riptide">
+  <Notes>
+    La batería suena más grande y llena, pero los golpes siguen pegando. El truco clásico de los buses de
+    batería en rock, hip hop y electrónica.
+
+    Cómo se construyó:
+    - Transistor con Input +18 dB: la señal saturada sola (Mix 100 %) tiene que sonar claramente destrozada.
+    - Low Cut PRE en 90 Hz: el bombo no empuja la curva (ensuciaría todo). Su sub llega limpio por la señal
+      original.
+    - High Cut POST en 7 kHz: la saturada aporta medios (crunch de la caja, cuerpo de los toms) sin fizz.
+    - Mix 30 %: la original conserva los transitorios; la saturada rellena entre golpe y golpe.
+    - AUTO GAIN: la saturada llega al mix con el nivel de la original, así el Mix es de verdad una proporción.
+    - Output +3 dB: el Mix reparte (70 % original + 30 % saturada) y a la saturada le faltan los graves que
+      quitó el Low Cut: el total queda más bajo. Output lo devuelve al volumen del bypass.
+
+    Pruébalo: sube el Mix de 0 a 100 % despacio. Por debajo de 20 % casi no se nota; por encima de 50 % los
+    golpes se ablandan. El punto dulce depende del tema: escúchalo con toda la mezcla.
+    Cuándo NO usarlo: en una batería que tiene que sonar natural y con mucha dinámica (jazz, acústico).
+    Viene de: Fase 5 (receta de saturación en paralelo).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Transistor"/>
+    <PARAM id="inputGain" value="18"/>
+    <PARAM id="mix" value="30"/>
+    <PARAM id="autoGain" value="On"/>
+    <PARAM id="outputGain" value="3"/>
+
+    <PARAM id="lowCut" value="90"/>
+    <PARAM id="highCut" value="7000"/>
+  </Parameters>
+</RiptidePreset>

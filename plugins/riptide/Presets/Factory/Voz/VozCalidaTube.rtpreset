@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Calidez en una voz: Tube con poco drive, armónicos pares que engordan sin ensuciar. -->
+<RiptidePreset formatVersion="1" name="Voz Cálida Tube" category="Voz" author="Riptide">
+  <Notes>
+    Una voz más cercana y gruesa, sin que las consonantes se vuelvan ásperas. Voces de pop, R&amp;B, baladas.
+
+    Cómo se construyó:
+    - Tube: el 2.º armónico es una octava exacta de cada nota; engorda sin añadir notas "extrañas". Los impares
+      de Transistor agregarían filo, que en una voz se oye rápido como aspereza.
+    - Input +4.5 dB: poco. La voz es lo más expuesto de la mezcla; la saturación se tiene que sentir, no oír.
+    - AUTO GAIN.
+
+    Pruébalo: alterna el bypass en la parte más fuerte de la voz. Si suena sucia en las notas fuertes, baja
+    Input.
+    Cuándo NO usarlo: en una voz que ya viene saturada de la grabación (preamp empujado) o con mucha sibilancia.
+    Viene de: Fase 3 (receta de calidez en una voz con Tube).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Tube"/>
+    <PARAM id="inputGain" value="4.5"/>
+    <PARAM id="autoGain" value="On"/>
+  </Parameters>
+</RiptidePreset>

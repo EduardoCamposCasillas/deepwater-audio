@@ -7,7 +7,10 @@
 
 #include "deepwater/dsp/AnalyzerTap.h"
 #include "dsp/Engine.h"
+#include "presets/RiptidePresets.h"
 
+// Fase 9: presets (libs/presets). El nombre del preset y si se modificó viajan con el proyecto de FL.
+//
 // Fase 8: además, el audio deja una copia de lo que entra y de lo que sale en dos tomas lock-free (AnalyzerTap) para el
 // analizador de espectro de la GUI, y publica el pico de la entrada para la curva de transferencia.
 //
@@ -69,6 +72,9 @@ public:
 
     juce::AudioProcessorValueTreeState& getParameters() noexcept { return parameters; }
 
+    // Fase 9: biblioteca de presets, preset actual y guardar/cargar (solo desde el hilo de mensajes).
+    deepwater::presets::PresetManager& getPresetManager() noexcept { return presetManager; }
+
     StereoMeter& getInputMeter() noexcept { return inputMeter; }
     StereoMeter& getOutputMeter() noexcept { return outputMeter; }
     int getMeteredChannels() const noexcept { return meteredChannels.load (std::memory_order_relaxed); }
@@ -106,6 +112,7 @@ private:
     void timerCallback() override;
 
     juce::AudioProcessorValueTreeState parameters;
+    deepwater::presets::PresetManager presetManager { parameters, riptide::presets::format() }; // después de 'parameters'
     std::atomic<float>* inputGainParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
     std::atomic<float>* bypassParam = nullptr;

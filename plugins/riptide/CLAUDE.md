@@ -31,6 +31,7 @@ un plugin de nivel profesional y que él entienda cada parte y sepa cuándo y c�
 - `Lfo.h` (Fase 7, movido desde Undertow) y `EnvelopeFollower.h` (Fase 7): las fuentes de modulación.
 - `FastMath.h` (`fastTanh`), `Fft.h`, `Simd.h`.
 - `AnalyzerTap.h` y `SpectrumAnalyzer.h` (Fase 8): la toma lock-free audio → GUI y el analizador FFT (fuera del audio).
+- `libs/presets` (`deepwater::presets`, Fase 9, venía de Undertow): presets, navegador y panel de guardar.
 
 Todo DSP nuevo que sirva para futuros plugins (EQ, compresor, delay, reverb) va en la librería, con tests. Candidato
 que hoy está en Undertow y podría moverse cuando haga falta: el ADAA de `Distortion.h`. Moverlo exige el null test de
@@ -57,6 +58,9 @@ Desde la raíz del repositorio (ver también los comandos generales en el `CLAUD
 ```
 cmake --build build --config Release --target Riptide_VST3          # solo el plugin
 build/plugins/riptide/Release/RiptideTests.exe                       # tests del motor (sin JUCE)
+build/plugins/riptide/RiptidePresetTests_artefacts/Release/RiptidePresetTests.exe   # presets (--verbose: niveles)
+RiptidePresetTests --render <carpeta>   # WAV de las señales de prueba y de cada preset (escuchar, null tests)
+RiptidePresetTests --notes              # las notas como las muestra el navegador
 ```
 - VST3: `build/plugins/riptide/Riptide_artefacts/Release/VST3/Riptide.vst3`.
 - Standalone: `build/plugins/riptide/Riptide_artefacts/Release/Standalone/Riptide.exe` (la entrada de audio arranca
@@ -65,7 +69,7 @@ build/plugins/riptide/Release/RiptideTests.exe                       # tests del
 ## Estructura
 ```
 plugins/riptide/
-  CMakeLists.txt           # plugin y tests; enlaza deepwater::dsp
+  CMakeLists.txt           # plugin, presets de fábrica (BinaryData) y tests; enlaza deepwater::dsp y deepwater::presets
   Source/
     PluginProcessor.h/.cpp   # parámetros, estado, processBlock, publicación de medidores
     PluginEditor.h/.cpp      # GUI
@@ -77,7 +81,10 @@ plugins/riptide/
     dsp/Bands.h              # multibanda: ajustes por banda, separación de los cruces y sus coeficientes suavizados
     dsp/Modulation.h         # envolvente y LFO: destinos, rutas (destino + amount) y el modulador por muestra
     gui/                     # tema, LookAndFeel, medidores, visores (curva y espectro), DisplayState, formatos
+    presets/RiptidePresets.h/.cpp  # formato propio (categorías, .rtpreset, bypass excluido, BinaryData)
+  Presets/Factory/         # .rtpreset de fábrica por categoría (compilados dentro del plugin)
   tests/EngineTests.cpp    # tests del motor (sin JUCE)
+  tests/PresetTests.cpp    # tests de presets (con JUCE: compila el procesador)
 ```
 
 ## Hoja de ruta
@@ -104,6 +111,32 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
+Fase 9 IMPLEMENTADA (2026-10-11), pendiente de que el usuario la pruebe en FL Studio. El audio no cambia (el motor no
+se tocó).
+- Presets en la librería compartida: el sistema de Undertow pasó a `libs/presets` (ver el `CLAUDE.md` raíz y el de
+  Undertow) y Riptide lo usa con su `PresetFormat` (`presets/RiptidePresets.cpp`): `<RiptidePreset>`, `.rtpreset`,
+  `Documentos\Riptide\Presets`, categorías Init, Batería, Bajo, Voz, Instrumentos, Bus, Master, Creativo, Otros. El
+  bypass está EXCLUIDO: un preset no lo guarda ni lo cambia, y no cuenta para el "*".
+- Procesador: `PresetManager` (después de `parameters`); el nombre del preset y si estaba modificado viajan con el
+  proyecto (propiedades del estado); proyecto de la Fase 8 → "Sin nombre".
+- GUI: barra de presets en la cabecera (440 px, a la izquierda del oversampling); navegador y panel de guardar encima de
+  la zona central (entre los medidores); mensajes de 6 s junto al título, en ámbar. `theme::presetPalette()` (usuario en
+  ámbar). Arreglado: el tooltip del zoom (Fase 8) estaba con doble codificación UTF-8 ("TamaÃ±o"). Cabecera "Fase 9".
+- 26 presets de fábrica (Init + 3 Batería, 4 Bajo, 3 Voz, 4 Instrumentos, 4 Bus, 2 Master, 5 Creativo): las recetas de
+  las fases 2–8 y presets nuevos, con notas (qué hace cada ajuste y por qué, cómo probarlo, cuándo NO usarlo, de qué
+  fase viene). No resuelven los retos pendientes (las soluciones de los retos 2 y 4 ya estaban en recetas posteriores).
+  `bands` se escribe como índice (un número en una lista es el índice) con un comentario en el XML.
+- Niveles: con las señales de prueba de `RiptidePresetTests` (batería, bajo, voz, acorde y mezcla a ~−18 dBFS RMS) cada
+  preset queda a −1.3…+0.5 dB del bypass. El AUTO GAIN compensa la curva, no los filtros ni el reparto del Mix: los
+  presets en paralelo con corte PRE, Radio AM y los que suman graves (cinta, tilt) llevan Output, explicado en sus notas.
+- Tests: `RiptidePresetTests` (en ctest): presets de fábrica (nombres, categorías, notas, valores, sin bypass), cargar
+  (unidades, nombres de opciones, defectos, bypass intacto), "*", guardar/reemplazar/borrar en carpeta temporal,
+  archivos raros, estado del proyecto, cada preset con su señal (sin NaN, pico < 0 dBFS, 0 reservas de memoria,
+  ±1.5 dB), bloques 1–4096 × mono/estéreo × 4 sample rates, y cambiar de preset cada 150 ms con un seno sonando (mayor
+  salto entre muestras 0.023; sin reservas).
+- Release con 0 warnings; ctest 5/5; pluginval strictness 10 ampliado (Riptide y Undertow): SUCCESS. Revisado con
+  capturas del Standalone (cabecera, navegador, panel de guardar; Undertow sin cambios visibles).
+
 Fase 8 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. El audio no cambia.
 - Librería (nuevo, sin tocar las piezas existentes: Undertow no cambia): `AnalyzerTap.h` = buffer circular que se pisa,
   muestras `std::atomic<float>` relajadas (sin carrera de datos), el audio mezcla a mono (L + R) / 2; detección de
@@ -383,4 +416,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 9 (presets con notas educativas).
+Siguiente: probar la Fase 9 en FL Studio; después Fase 10 (pulido).

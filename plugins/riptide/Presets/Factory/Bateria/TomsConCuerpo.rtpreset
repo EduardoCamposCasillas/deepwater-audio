@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Toms gordos que no pierden el golpe: Tube + la envolvente bajando el drive en cada ataque. -->
+<RiptidePreset formatVersion="1" name="Toms con Cuerpo" category="Batería" author="Riptide">
+  <Notes>
+    Toms (o cualquier golpe con cola larga) más gordos y con más sustain, sin ablandar el ataque.
+
+    Cómo se construyó:
+    - Tube con Input +9 dB y Emphasis +5 dB en 120 Hz: el cuerpo del tom satura y gana octavas (pares).
+    - Envolvente → Drive, Amount −20 %, Attack 1 ms, Release 120 ms, Sens +3 dB: en cada golpe el drive BAJA
+      casi 10 dB al instante (el ataque pasa casi limpio) y vuelve mientras suena la cola, que se satura y se
+      alarga. Mira la curva: el tramo brillante se encoge en cada golpe.
+    - AUTO GAIN: el nivel medio no sube aunque la cola sea más densa.
+
+    Pruébalo: pon el Amount en 0 y compara. Sin la envolvente el golpe se redondea; con ella, el golpe se queda
+    y la cola engorda. Si oyes un "swoosh" del drive volviendo, alarga el Release.
+    Cuándo NO usarlo: en baterías muy rápidas (blast beats, redobles): la cola no llega a sonar y la envolvente
+    no tiene tiempo de volver.
+    Viene de: Fase 7 (receta "una batería que pega y además suena gorda", aquí en una sola pista).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Tube"/>
+    <PARAM id="inputGain" value="9"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="emphasis" value="5"/>
+    <PARAM id="emphasisFreq" value="120"/>
+
+    <PARAM id="envAttack" value="1"/>
+    <PARAM id="envRelease" value="120"/>
+    <PARAM id="envSensitivity" value="3"/>
+    <PARAM id="envTarget" value="Drive"/>
+    <PARAM id="envAmount" value="-20"/>
+  </Parameters>
+</RiptidePreset>

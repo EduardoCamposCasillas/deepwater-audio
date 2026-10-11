@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Locución de radio: cuerpo en los graves de la voz y densidad pareja. -->
+<RiptidePreset formatVersion="1" name="Voz Locución" category="Voz" author="Riptide">
+  <Notes>
+    Una voz hablada con el cuerpo y la densidad de la radio FM: podcast, locución, voces habladas en un tema.
+
+    Cómo se construyó:
+    - Low Cut PRE en 70 Hz: fuera los ruidos de mesa y de tráfico.
+    - Tube con Input +6 dB y Emphasis +3 dB en 180 Hz: el pecho de la voz satura un poco más y gana octavas; la
+      voz suena más grande y más cerca.
+    - Tilt −1 dB: un poco más oscura y cálida, como los equipos de radio.
+    - AUTO GAIN.
+
+    Pruébalo: compara con Voz Cálida Tube. Esta tiene el peso abajo (pecho); aquella, en toda la voz.
+    Cuándo NO usarlo: en voces cantadas agudas: el énfasis en 180 Hz no les toca nada útil.
+    Viene de: Fase 3 (Tube) + Fase 4 (emphasis y tilt).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Tube"/>
+    <PARAM id="inputGain" value="6"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="lowCut" value="70"/>
+    <PARAM id="emphasis" value="3"/>
+    <PARAM id="emphasisFreq" value="180"/>
+    <PARAM id="tilt" value="-1"/>
+  </Parameters>
+</RiptidePreset>

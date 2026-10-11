@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Saturación en paralelo para un bajo: la señal limpia lleva el sub y la saturada solo los medios. -->
+<RiptidePreset formatVersion="1" name="Bajo Paralelo Tube" category="Bajo" author="Riptide">
+  <Notes>
+    La otra forma de hacer gruñir un bajo sin ensuciar el sub: en paralelo, sin bandas. Más simple y con otro
+    color que Bajo Gruñido, Sub Limpio.
+
+    Cómo se construyó:
+    - Tube con Input +12 dB.
+    - Low Cut PRE en 200 Hz: a la curva solo le llegan los medios; el sub no se satura.
+    - Mix 50 %: el sub llega limpio por la señal original y la saturada suma el gruñido.
+    - AUTO GAIN: la saturada llega con el nivel de la original.
+    - Output +6.5 dB: con Mix 50 % el sub (que solo viene por la original) baja 6 dB. Output lo devuelve a su
+      nivel; el gruñido queda encima.
+
+    Pruébalo: si suena un poco hueco alrededor de 200 Hz es normal: el Low Cut desfasa esa zona de la saturada
+    respecto de la original. Mueve el corte o baja un poco el Mix. Compáralo con Bajo Gruñido, Sub Limpio (sin
+    ese hueco, porque los cruces Linkwitz-Riley suman plano).
+    Cuándo NO usarlo: si el bajo y el bombo ya pelean en 100–200 Hz: el hueco puede empeorar la pelea.
+    Viene de: Fase 5 (variante de la receta para un bajo).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Tube"/>
+    <PARAM id="inputGain" value="12"/>
+    <PARAM id="mix" value="50"/>
+    <PARAM id="autoGain" value="On"/>
+    <PARAM id="outputGain" value="6.5"/>
+
+    <PARAM id="lowCut" value="200"/>
+  </Parameters>
+</RiptidePreset>

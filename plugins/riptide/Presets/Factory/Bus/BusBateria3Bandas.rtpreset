@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Multibanda: bombo con Tube, medios con Transistor y platillos casi limpios. -->
+<RiptidePreset formatVersion="1" name="Bus Batería 3 Bandas" category="Bus" author="Riptide">
+  <Notes>
+    Una batería grande en los medios, con el bombo redondo y sin platillos ásperos. Cada zona recibe la
+    saturación que la favorece.
+
+    Cómo se construyó:
+    - 3 bandas. Cruce 1 en 130 Hz (debajo: bombo y sub) y Cruce 2 en 4 kHz (encima: platillos y aire).
+    - Banda 1, Tube +6 dB: pares en el bombo, más redondo y más "nota".
+    - Banda 2, Transistor +10 dB: la pegada de la caja y los toms; la mordida en los medios hace que la batería
+      se oiga más cerca.
+    - Banda 3, Tape −6 dB: los platillos casi limpios y redondeados. Ya tienen todos los armónicos que
+      necesitan.
+    - AUTO GAIN por banda: cada banda conserva su volumen; el balance de la batería no cambia.
+
+    Pruébalo: usa la S de cada banda para oír qué estás separando. Si en el solo de la banda 1 se oye la caja,
+    baja el Cruce 1. En el espectro, las zonas teñidas muestran qué banda toca cada frecuencia.
+    Cuándo NO usarlo: si solo quieres "un poco de color" en toda la batería, el preset Bus Batería Cinta es más
+    simple y suena más natural.
+    Viene de: Fase 6 (receta del bus de batería sin platillos ásperos).
+  </Notes>
+  <Parameters>
+    <PARAM id="autoGain" value="On"/>
+    <!-- bands: índice de la opción (0 = 1 banda): 2 = 3 bandas -->
+    <PARAM id="bands" value="2"/>
+    <PARAM id="crossover1" value="130"/>
+    <PARAM id="crossover2" value="4000"/>
+
+    <PARAM id="band1Mode" value="Tube"/>
+    <PARAM id="band1Drive" value="6"/>
+    <PARAM id="band2Mode" value="Transistor"/>
+    <PARAM id="band2Drive" value="10"/>
+    <PARAM id="band3Mode" value="Tape"/>
+    <PARAM id="band3Drive" value="-6"/>
+  </Parameters>
+</RiptidePreset>

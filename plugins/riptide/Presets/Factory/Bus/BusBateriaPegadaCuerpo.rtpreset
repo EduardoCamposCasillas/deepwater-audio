@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Saturación dinámica: la envolvente baja el drive en cada golpe para que el transitorio pase limpio. -->
+<RiptidePreset formatVersion="1" name="Bus Batería Pegada y Cuerpo" category="Bus" author="Riptide">
+  <Notes>
+    La pegada de la batería seca y la densidad de la saturada en la MISMA señal, sin mezcla en paralelo.
+
+    Cómo se construyó:
+    - Tape con Input +12 dB: toda la batería bien saturada (así sola suena gorda pero el golpe se ablanda).
+    - Envolvente → Drive, Amount −28 %, Attack 1 ms, Release 100 ms, Sens +3 dB: en cada golpe el drive baja al
+      instante y el transitorio pasa casi limpio; detrás vuelve y satura el cuerpo y las colas.
+    - AUTO GAIN: el volumen no salta con los cambios de drive. Output −1 dB: la cinta suma cuerpo en 70 Hz (head
+      bump) que el AUTO GAIN no descuenta.
+
+    Pruébalo: mira la barra de la ENVOLVENTE (tiene que llegar casi al final en los golpes; si no, sube Sens) y
+    el arco celeste de la perilla Input. Con tempos rápidos acorta el Release a 60 ms.
+    Cuándo NO usarlo: si se oye el drive "volviendo" (un swoosh después de cada golpe) y no lo arreglas
+    alargando el Release, usa mejor el paralelo (Bus Batería Paralelo).
+    Viene de: Fase 7 (receta "una batería que pega y además suena gorda").
+  </Notes>
+  <Parameters>
+    <PARAM id="inputGain" value="12"/>
+    <PARAM id="autoGain" value="On"/>
+    <PARAM id="outputGain" value="-1"/>
+
+    <PARAM id="envAttack" value="1"/>
+    <PARAM id="envRelease" value="100"/>
+    <PARAM id="envSensitivity" value="3"/>
+    <PARAM id="envTarget" value="Drive"/>
+    <PARAM id="envAmount" value="-28"/>
+  </Parameters>
+</RiptidePreset>

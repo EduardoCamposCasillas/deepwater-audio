@@ -27,6 +27,8 @@ constexpr int toneLevelHeight = 18 + toneKnobSize + 20 + 4 + positionButtonHeigh
 constexpr int modKnobSize = 50;
 constexpr int modRowHeight = 16 + modKnobSize + 18;
 constexpr int zoomButtonWidth = 64;
+constexpr int presetBarWidth = 440;
+constexpr juce::uint32 messageSeconds = 6;
 
 // Tamaño del diseño (zoom 100 %). La ventana real es este tamaño × zoom.
 constexpr int mainPanelHeight = padding + modeButtonHeight + 4 + modeDescriptionHeight + 6 + sectionLabelHeight
@@ -71,8 +73,9 @@ const std::array<const char*, riptide::dsp::numModes> modeDescriptions {
 } // namespace
 
 RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p), settings (openSettings()), spectrumView (p), inputMeter ("IN", p.getInputMeter()),
-      outputMeter ("OUT", p.getOutputMeter())
+    : AudioProcessorEditor (p), processor (p), settings (openSettings()),
+      presets (p.getPresetManager(), riptide::gui::theme::presetPalette(), settings.get()), spectrumView (p),
+      inputMeter ("IN", p.getInputMeter()), outputMeter ("OUT", p.getOutputMeter())
 {
     namespace id = riptide::params;
     setLookAndFeel (&lookAndFeel);
@@ -253,6 +256,10 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
     modulationHelp.setJustificationType (juce::Justification::topLeft);
     content.addAndMakeVisible (modulationHelp);
 
+    // Presets (Fase 9). Al final: el navegador y el panel de guardar quedan por encima de todo lo demás.
+    presets.onMessage = [this] (const juce::String& text) { showMessage (text); };
+    presets.addTo (content);
+
     layOutContent();
 
     // El zoom se decide ANTES de poner los límites: setResizeLimits ya redimensiona la ventana (aún de 0 × 0) y eso no
@@ -302,6 +309,13 @@ void RiptideAudioProcessorEditor::setZoom (float newZoom)
 {
     newZoom = juce::jlimit (minZoom, maxZoom, newZoom);
     setSize (juce::roundToInt (baseWidth * newZoom), juce::roundToInt (baseHeight * newZoom));
+}
+
+void RiptideAudioProcessorEditor::showMessage (const juce::String& text)
+{
+    message = text;
+    messageExpiry = juce::Time::getApproximateMillisecondCounter() + messageSeconds * 1000;
+    content.repaint (0, 0, content.getWidth(), headerHeight);
 }
 
 void RiptideAudioProcessorEditor::showZoomMenu()
@@ -541,6 +555,14 @@ void RiptideAudioProcessorEditor::timerCallback()
     const double elapsed = juce::jlimit (0.0, 0.5, (now - lastFrameMs) / 1000.0);
     lastFrameMs = now;
 
+    presets.update(); // nombre del preset y "*" si se tocó algo
+    if (messageExpiry != 0 && juce::Time::getApproximateMillisecondCounter() > messageExpiry)
+    {
+        messageExpiry = 0;
+        message.clear();
+        content.repaint (0, 0, content.getWidth(), headerHeight);
+    }
+
     const int channels = processor.getMeteredChannels();
     inputMeter.update (channels, elapsed);
     outputMeter.update (channels, elapsed);
@@ -599,9 +621,12 @@ void RiptideAudioProcessorEditor::paintContent (juce::Graphics& g)
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
     g.drawText ("RIPTIDE", header.removeFromLeft (110), juce::Justification::centredLeft);
-    g.setColour (theme::dimText);
+    // Junto al título: qué es, o el último mensaje de los presets durante unos segundos.
+    const auto info = header.withRight (presetsHeaderX - padding);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("saturador  -  Fase 8", header.withRight (oversamplingLabel.getX() - padding), juce::Justification::centredLeft);
+    g.setColour (message.isNotEmpty() ? theme::meterHot : theme::dimText);
+    g.drawFittedText (message.isNotEmpty() ? message : juce::String ("saturador  -  Fase 9"), info, juce::Justification::centredLeft,
+                      1, 0.8f);
 
     // Paneles de las perillas y de la modulación, entre los dos medidores (los visores dibujan el suyo).
     auto knobsPanel = mainArea.toFloat();
@@ -708,11 +733,15 @@ void RiptideAudioProcessorEditor::layOutContent()
     header.removeFromRight (padding);
     oversamplingBox.setBounds (header.removeFromRight (70));
     oversamplingLabel.setBounds (header.removeFromRight (100));
+    header.removeFromRight (padding);
+    const auto presetsHeader = header.removeFromRight (presetBarWidth);
+    presetsHeaderX = presetsHeader.getX();
 
     auto body = content.getLocalBounds().withTrimmedTop (headerHeight).reduced (padding);
     inputMeter.setBounds (body.removeFromLeft (meterWidth));
     outputMeter.setBounds (body.removeFromRight (meterWidth));
     body.reduce (padding, 0);
+    presets.setBounds (presetsHeader, body);
     modulationArea = body.removeFromRight (modulationWidth);
     body.removeFromRight (padding);
 

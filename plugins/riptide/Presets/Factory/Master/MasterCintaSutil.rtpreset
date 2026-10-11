@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Un toque de cinta en toda la mezcla: densidad sutil con el volumen igualado. -->
+<RiptidePreset formatVersion="1" name="Master Cinta Sutil" category="Master" author="Riptide">
+  <Notes>
+    Para el master (la mezcla entera): un poco más de densidad y suavidad arriba, como si la mezcla hubiera
+    pasado por una máquina de cinta. Tiene que ser SUTIL: la diferencia se nota en la densidad, no en el
+    volumen.
+
+    Cómo se construyó:
+    - Tape con Input +3 dB: apenas dentro de la rodilla.
+    - Oversampling 8x: en el master todo se oye; la saturación no puede dejar ni un rastro de aliasing.
+    - AUTO GAIN: compara con el bypass al mismo volumen. Si te gusta "más fuerte", es el volumen, no la cinta.
+    - Output −1 dB: la cinta suma cuerpo en 70 Hz (head bump) que el AUTO GAIN no descuenta; en una mezcla con
+      graves eso es ~1 dB más de volumen.
+
+    Pruébalo: escucha el bombo con atención. En una sola banda, cada golpe empuja la curva y el resto de la
+    mezcla se satura un poco más en ese instante. Con Input bajo no se nota; si lo subes, sí. Este preset es
+    deliberadamente simple: el reto de la Fase 6 te pide resolver justo eso.
+    Cuándo NO usarlo: si la mezcla todavía tiene problemas (graves desbalanceados, voces enterradas): la
+    saturación en el master no arregla una mezcla, la pega tal como está.
+    Viene de: Fase 3 (Tape) + Fase 5 (auto gain).
+  </Notes>
+  <Parameters>
+    <PARAM id="oversampling" value="8x"/>
+    <PARAM id="inputGain" value="3"/>
+    <PARAM id="autoGain" value="On"/>
+    <PARAM id="outputGain" value="-1"/>
+  </Parameters>
+</RiptidePreset>

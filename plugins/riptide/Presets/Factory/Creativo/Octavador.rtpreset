@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Rectificador mezclado en paralelo: la nota más una octava arriba. -->
+<RiptidePreset formatVersion="1" name="Octavador Rectify" category="Creativo" author="Riptide">
+  <Notes>
+    El efecto de un pedal octavador (octave fuzz): una octava arriba de la nota, mezclada con la original.
+    Guitarras, bajos de synth, leads.
+
+    Cómo se construyó:
+    - Rectify: da vuelta al semiciclo negativo. La fundamental desaparece y aparece el doble de la frecuencia
+      (una octava arriba).
+    - Input +6 dB y Mix 50 %: la octava se suma a la original.
+    - AUTO GAIN y Output +3 dB: la octava y la nota original no suman en fase (son frecuencias distintas), así
+      que la mezcla al 50 % queda más baja que cualquiera de las dos.
+
+    Pruébalo: Mix al 100 % para oír solo la octava; con acordes suena muy sucio (cada nota y cada diferencia
+    entre notas se duplica). Funciona mejor con notas sueltas.
+    Cuándo NO usarlo: en acordes de muchas notas o en bajos que llevan el sub de la mezcla (la octava le quita
+    la fundamental a la parte saturada).
+    Viene de: Fase 3 (Rectify) + Fase 5 (mix).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Rectify"/>
+    <PARAM id="inputGain" value="6"/>
+    <PARAM id="mix" value="50"/>
+    <PARAM id="autoGain" value="On"/>
+    <PARAM id="outputGain" value="3"/>
+  </Parameters>
+</RiptidePreset>

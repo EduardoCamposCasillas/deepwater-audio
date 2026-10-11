@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- La batería entera más pegada y suave arriba: el carácter de la cinta. -->
+<RiptidePreset formatVersion="1" name="Bus Batería Cinta" category="Bus" author="Riptide">
+  <Notes>
+    Para el bus de la batería (todas las pistas sumadas): que suene como un solo instrumento, más densa y con
+    los platillos un poco más suaves. Rock, indie, hip hop con loops.
+
+    Cómo se construyó:
+    - Tape: rodilla muy suave y, como la cinta real, comprime más los agudos que los graves (pre-énfasis) y suma
+      un poco de cuerpo en 70 Hz (head bump).
+    - Input +7.5 dB: dentro de la rodilla. Los picos de los golpes se redondean y el factor de cresta baja: la
+      batería se oye más "junta".
+    - AUTO GAIN: mismo volumen que con el bypass, para que la comparación sea justa.
+
+    Pruébalo: alterna el bypass y escucha la cola de la caja y los platillos. Mira el medidor OUT: el pico baja
+    y el RMS se queda; esa es la densidad.
+    Cuándo NO usarlo: si la batería ya viene muy comprimida (un loop masterizado): más densidad la aplana.
+    Viene de: Fase 3 (variante de la receta: Tape en un bus de batería).
+  </Notes>
+  <Parameters>
+    <PARAM id="inputGain" value="7.5"/>
+    <PARAM id="autoGain" value="On"/>
+  </Parameters>
+</RiptidePreset>

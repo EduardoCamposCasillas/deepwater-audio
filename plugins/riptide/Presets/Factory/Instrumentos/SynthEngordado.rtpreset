@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Un synth delgado con más cuerpo: Tube en los medios graves y un poco de mezcla en paralelo. -->
+<RiptidePreset formatVersion="1" name="Synth Engordado" category="Instrumentos" author="Riptide">
+  <Notes>
+    Para leads, plucks o acordes de synth que suenan delgados o "digitales": más cuerpo y más analógico.
+
+    Cómo se construyó:
+    - Tube con Input +10 dB: pares, octavas que engordan sin desafinar.
+    - Emphasis +4 dB en 400 Hz: el cuerpo (medios graves) es lo que más satura.
+    - Mix 80 %: un poco de la señal original mantiene la definición del ataque.
+    - AUTO GAIN.
+
+    Pruébalo: en el espectro, con un acorde sostenido, mira cómo se llenan los huecos entre armónicos: la
+    saturación de varias notas a la vez crea intermodulación (sumas y restas de frecuencias). En acordes con
+    muchas notas puede sonar turbio: baja Input.
+    Cuándo NO usarlo: en pads que ya son anchos y densos; más densidad los vuelve una pared sin detalle.
+    Viene de: Fase 3 (Tube) + Fase 5 (mix).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Tube"/>
+    <PARAM id="inputGain" value="10"/>
+    <PARAM id="mix" value="80"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="emphasis" value="4"/>
+    <PARAM id="emphasisFreq" value="400"/>
+  </Parameters>
+</RiptidePreset>

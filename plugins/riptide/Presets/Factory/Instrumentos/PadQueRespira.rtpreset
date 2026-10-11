@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- La zona que más se satura sube y baja una vez por compás: movimiento hecho de armónicos. -->
+<RiptidePreset formatVersion="1" name="Pad que Respira" category="Instrumentos" author="Riptide">
+  <Notes>
+    Un pad, una guitarra o un acorde sostenido que se mueve solo, como un filtro lento pero hecho de saturación.
+
+    Cómo se construyó:
+    - Tube con Input +8 dB y Emphasis +9 dB en 1 kHz: una zona se satura mucho más que el resto.
+    - LFO → Emph Freq, Triangle, SYNC 1 bar, Amount +25 %: el centro de esa zona sube y baja casi 2 octavas por
+      compás, al tempo del tema.
+    - AUTO GAIN.
+
+    Pruébalo: mira la barra del LFO y el arco celeste de la perilla Emph Freq. Cambia la división a 1/4 para un
+    movimiento rítmico, o la forma a Sample and Hold para saltos (ver Color al Azar).
+    Cuándo NO usarlo: en sonidos que ya se mueven mucho (arpegios rápidos con filtro): los dos movimientos
+    chocan.
+    Viene de: Fase 7 (variante creativa con el LFO).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Tube"/>
+    <PARAM id="inputGain" value="8"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="emphasis" value="9"/>
+    <PARAM id="emphasisFreq" value="1000"/>
+
+    <PARAM id="lfoShape" value="Triangle"/>
+    <PARAM id="lfoSync" value="On"/>
+    <PARAM id="lfoDivision" value="1 bar"/>
+    <PARAM id="lfoTarget" value="Emph Freq"/>
+    <PARAM id="lfoAmount" value="25"/>
+  </Parameters>
+</RiptidePreset>

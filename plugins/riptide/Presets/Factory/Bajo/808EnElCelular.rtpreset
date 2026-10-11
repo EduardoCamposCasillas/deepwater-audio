@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Que el 808 se oiga en bocinas pequeñas: armónicos pares del cuerpo, sin fizz. -->
+<RiptidePreset formatVersion="1" name="808 en el Celular" category="Bajo" author="Riptide">
+  <Notes>
+    Para 808, subs y bajos de synth que suenan bien en audífonos y desaparecen en el celular o la laptop (esas
+    bocinas no reproducen por debajo de ~100 Hz).
+
+    Cómo se construyó:
+    - Tube: armónicos pares, octavas que refuerzan la nota en vez de ensuciarla.
+    - Emphasis +7.5 dB en 100 Hz: el cuerpo del 808 es lo que más satura; sus armónicos (de 90 a 180 Hz para un
+      808 en F2 de FL, 44 Hz, y más arriba) son justo lo que una bocina pequeña sí puede reproducir.
+    - Input +9 dB: lo justo para que la nota se entienda a volumen bajo.
+    - High Cut POST en 6 kHz: el fizz no le aporta nada a un bajo.
+    - AUTO GAIN: el 808 no sube de volumen; solo se vuelve más audible.
+
+    Pruébalo: pon un Fruity Parametric EQ 2 DESPUÉS de Riptide cortando todo por debajo de 150 Hz (simula el
+    celular) y alterna el bypass: sin Riptide el 808 desaparece; con él, se sigue oyendo la nota. Es la
+    "fundamental ausente": el oído reconstruye la nota a partir de sus armónicos.
+    Cuándo NO usarlo: en un sub que tiene que ser solo sub (dub, algunos estilos de techno): los armónicos le
+    quitan pureza.
+    Viene de: Fase 4 (receta "un 808 que se oye en bocinas pequeñas"; es la respuesta al reto de la Fase 2).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Tube"/>
+    <PARAM id="inputGain" value="9"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="emphasis" value="7.5"/>
+    <PARAM id="emphasisFreq" value="100"/>
+    <PARAM id="highCut" value="6000"/>
+  </Parameters>
+</RiptidePreset>

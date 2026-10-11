@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sonido de radio vieja o teléfono: banda estrecha y saturada. -->
+<RiptidePreset formatVersion="1" name="Radio AM" category="Creativo" author="Riptide">
+  <Notes>
+    Una voz, una guitarra o un loop que suena a radio vieja o a teléfono. Intros, puentes, efectos de contraste.
+
+    Cómo se construyó:
+    - Low Cut POST en 500 Hz y High Cut POST en 3 kHz: solo queda la banda que transmitía una radio AM.
+    - Transistor con Input +15 dB: la radio estaba al máximo y su amplificador recortaba.
+    - Los cortes van en POST: la saturación se hace con toda la señal (los graves también la empujan) y después
+      se recorta la banda. En PRE sonaría más limpio y más delgado.
+    - AUTO GAIN y Output +6 dB: el AUTO GAIN compensa la curva, no los filtros; los cortes se llevan mucha
+      energía (los graves sobre todo) y Output la devuelve.
+
+    Pruébalo: automatiza el Mix de 0 a 100 % al final de una intro: la radio "se convierte" en la canción.
+    Cuándo NO usarlo: durante todo un tema; el efecto cansa rápido. Úsalo en momentos.
+    Viene de: Fase 3 (Transistor) + Fase 4 (cortes PRE/POST).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Transistor"/>
+    <PARAM id="inputGain" value="15"/>
+    <PARAM id="autoGain" value="On"/>
+    <PARAM id="outputGain" value="6"/>
+
+    <PARAM id="lowCut" value="500"/>
+    <PARAM id="lowCutPosition" value="Post"/>
+    <PARAM id="highCut" value="3000"/>
+    <PARAM id="highCutPosition" value="Post"/>
+  </Parameters>
+</RiptidePreset>

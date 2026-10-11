@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Wavefolding con el drive movido por el LFO: un timbre metálico que cambia al tempo. -->
+<RiptidePreset formatVersion="1" name="Fold Metálico" category="Creativo" author="Riptide">
+  <Notes>
+    Timbres metálicos y sintéticos que cambian todo el tiempo: diseño sonoro, leads de electrónica, bajos
+    experimentales.
+
+    Cómo se construyó:
+    - Fold: en vez de aplanar los picos, los dobla hacia abajo. Más drive = más pliegues = armónicos altos que
+      aparecen y desaparecen.
+    - Input +9 dB y Oversampling 8x (los pliegues crean muchos armónicos agudos).
+    - LFO → Drive, Sine, SYNC 1/2, Amount +12 %: el drive sube y baja casi 6 dB cada media nota, y el timbre se
+      abre y se cierra.
+    - AUTO GAIN: el volumen se mantiene aunque el timbre cambie.
+
+    Pruébalo: mira la curva: el tramo brillante cruza los pliegues al ritmo del LFO. Prueba la forma Saw Up para
+    un efecto de "barrido" rítmico.
+    Cuándo NO usarlo: en cualquier cosa que tenga que sonar natural.
+    Viene de: Fase 3 (Fold) + Fase 7 (LFO).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Fold"/>
+    <PARAM id="oversampling" value="8x"/>
+    <PARAM id="inputGain" value="9"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="lfoShape" value="Sine"/>
+    <PARAM id="lfoSync" value="On"/>
+    <PARAM id="lfoDivision" value="1/2"/>
+    <PARAM id="lfoTarget" value="Drive"/>
+    <PARAM id="lfoAmount" value="12"/>
+  </Parameters>
+</RiptidePreset>

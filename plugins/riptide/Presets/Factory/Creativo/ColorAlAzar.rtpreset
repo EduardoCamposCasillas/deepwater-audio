@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample and Hold en la zona que se satura: el color cambia a saltos, al ritmo. -->
+<RiptidePreset formatVersion="1" name="Color al Azar" category="Creativo" author="Riptide">
+  <Notes>
+    Un acorde o un loop que cambia de color en cada corchea, como un filtro "random" pero hecho de armónicos.
+
+    Cómo se construyó:
+    - Tape con Input +10 dB y Emphasis +9 dB en 1 kHz: una zona se satura mucho más.
+    - LFO → Emph Freq, Sample and Hold, SYNC 1/8, Amount +30 %: en cada corchea esa zona salta a otro lugar al
+      azar (siempre la misma serie: el efecto se repite igual en cada exportación).
+    - AUTO GAIN.
+
+    Pruébalo: cambia la división a 1/16 para algo más nervioso, o a 1 bar para un cambio por compás.
+    Cuándo NO usarlo: en la voz principal o en algo que tenga que sonar estable.
+    Viene de: Fase 7 (variante creativa con Sample and Hold).
+  </Notes>
+  <Parameters>
+    <PARAM id="inputGain" value="10"/>
+    <PARAM id="autoGain" value="On"/>
+
+    <PARAM id="emphasis" value="9"/>
+    <PARAM id="emphasisFreq" value="1000"/>
+
+    <PARAM id="lfoShape" value="Sample &amp; Hold"/>
+    <PARAM id="lfoSync" value="On"/>
+    <PARAM id="lfoDivision" value="1/8"/>
+    <PARAM id="lfoTarget" value="Emph Freq"/>
+    <PARAM id="lfoAmount" value="30"/>
+  </Parameters>
+</RiptidePreset>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Punto de partida: todos los controles en su valor por defecto. Un preset de fábrica solo escribe lo que cambia
+     respecto a este. -->
+<RiptidePreset formatVersion="1" name="Init" category="Init" author="Riptide">
+  <Notes>
+    Todos los controles en su valor por defecto: Tape, Input y Output a 0 dB, Oversampling 4x, sin cortes ni emphasis,
+    Mix 100 %, 1 banda y la modulación sin amount.
+
+    Ojo: Init NO es transparente. Con Input a 0 dB la cinta ya redondea un poco los picos que pasan de −12 dBFS (mira
+    la curva: el tramo brillante muestra hasta dónde llega la señal). Para comparar, usa el BYPASS.
+
+    Cómo empezar desde aquí:
+    1. Elige el modo según lo que quieras agregar (pares = cuerpo, impares = mordida, clip = control de picos).
+    2. Sube Input hasta oír el carácter y enciende AUTO GAIN para juzgar sin el engaño del volumen.
+    3. Decide QUÉ se satura (cortes PRE, emphasis, bandas) y cómo suena lo que sale (POST, tilt).
+    4. Mix por debajo de 100 % si el golpe original se tiene que conservar.
+  </Notes>
+  <Parameters>
+  </Parameters>
+</RiptidePreset>

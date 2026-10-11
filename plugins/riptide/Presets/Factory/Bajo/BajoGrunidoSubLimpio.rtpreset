@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Dos bandas: el sub intacto y firme, los medios del bajo gruñendo con Tube. -->
+<RiptidePreset formatVersion="1" name="Bajo Gruñido, Sub Limpio" category="Bajo" author="Riptide">
+  <Notes>
+    El bajo gruñe en los medios (se oye la "mugre" de las cuerdas o del synth) pero el sub sigue limpio y firme.
+    Rock, funk, bajo eléctrico, bajos de synth.
+
+    Cómo se construyó:
+    - 2 bandas con el Cruce 1 en 120 Hz.
+    - Banda 1 (el sub), drive −12 dB: casi nada llega a la curva; el sub sale limpio y con la misma pegada.
+    - Banda 2 (los medios), Tube +12 dB: el gruñido. Pares: engorda sin desafinar.
+    - Modo global Tube (las bandas en "Global" lo usan).
+    - AUTO GAIN por banda: el balance entre sub y medios no cambia.
+
+    Pruébalo: S en la banda 1 (solo el sub) y en la banda 2 (solo el gruñido). Mueve el Cruce 1 entre 80 y 200
+    Hz: más arriba, el gruñido es más fino; más abajo, más gordo pero menos limpio.
+    Cuándo NO usarlo: si el bajo tiene que sonar redondo y tranquilo (balada, jazz).
+    Viene de: Fase 6 (variante para un bajo; resuelve el reto de la Fase 4).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Tube"/>
+    <PARAM id="autoGain" value="On"/>
+    <!-- bands: índice de la opción (0 = 1 banda): 1 = 2 bandas -->
+    <PARAM id="bands" value="1"/>
+    <PARAM id="crossover1" value="120"/>
+
+    <PARAM id="band1Drive" value="-12"/>
+    <PARAM id="band2Mode" value="Tube"/>
+    <PARAM id="band2Drive" value="12"/>
+  </Parameters>
+</RiptidePreset>

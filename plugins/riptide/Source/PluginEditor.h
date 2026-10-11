@@ -4,6 +4,8 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "deepwater/presets/PresetPanel.h"
+
 #include "dsp/Bands.h"
 #include "dsp/Modulation.h"
 #include "dsp/Saturator.h"
@@ -16,6 +18,10 @@
 
 class RiptideAudioProcessor;
 
+// Fase 9: en la cabecera, la barra de presets (anterior/siguiente, nombre con "*" si se modificó, Guardar y menú); el
+// navegador y el panel de guardar se abren encima de la zona central (entre los medidores). Los mensajes ("Preset: …",
+// guardado, avisos) aparecen unos segundos junto al título.
+//
 // Fase 8: GUI profesional y escalable. Medidor IN | arriba los visores (curva de transferencia y espectro antes/después
 // con las bandas encima); debajo los modos, el tono (cortes con PRE/POST, emphasis, tilt) junto al nivel y la mezcla
 // (Input, Mix, Output, AUTO GAIN, DELTA) y las bandas (número, cruces y, por banda, modo, drive, solo, mute y su auto
@@ -61,6 +67,7 @@ private:
     void layOutContent();
     void paintContent (juce::Graphics& g);
     void setZoom (float newZoom);
+    void showMessage (const juce::String& message);
     void showZoomMenu();
     [[nodiscard]] float initialZoom() const;
     [[nodiscard]] riptide::gui::DisplayState makeDisplayState() const;
@@ -83,6 +90,12 @@ private:
     float zoom = 1.0f;
     bool rememberZoom = false; // hasta terminar el constructor los cambios de tamaño no son una elección del usuario
     juce::TextButton zoomButton;
+
+    // Presets (Fase 9): barra, navegador y panel de guardar (libs/presets). Después de 'settings' (recuerda el autor).
+    deepwater::presets::PresetPanel presets;
+    juce::String message;            // se dibuja junto al título hasta messageExpiry
+    juce::uint32 messageExpiry = 0;
+    int presetsHeaderX = 0;          // dónde empieza la barra (el mensaje se dibuja a su izquierda)
 
     // Visores (Fase 8).
     riptide::gui::TransferCurveView curveView;

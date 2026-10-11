@@ -1027,3 +1027,132 @@ un seno sostenido. Mirando **solo el espectro** (no la curva ni los botones), di
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 9 — Presets con notas: recetas que se cargan con un clic
+
+Riptide trae 25 presets de fábrica (más Init) organizados por **para qué pista** sirven: Batería (una pista), Bajo, Voz,
+Instrumentos, Bus (un grupo, sobre todo la batería), Master y Creativo. Casi todos son las recetas de este cuaderno,
+listas para cargar; cada uno lleva notas que dicen **qué hace cada ajuste y por qué**, cómo probarlo y cuándo no usarlo.
+Puedes guardar los tuyos con sus propias notas. El sonido de Riptide no cambia: es la misma Fase 8.
+
+### Conceptos aprendidos
+
+- **Un preset es un punto de partida, no un resultado.** Un preset se hizo con OTRA señal: otro nivel, otra grabación,
+  otro tema. Por eso casi todos usan AUTO GAIN y por eso al cargarlo hay que revisar al menos dos cosas: **cuánto llega
+  a la curva** (Input, o el nivel de tu pista) y **cuánto se mezcla** (Mix). El resto (el modo, qué zona se satura, los
+  cortes) es la idea del preset y suele funcionar tal cual.
+- **El preset depende del nivel de entrada.** Una saturación no es lineal: el mismo preset sobre una pista a −30 dBFS
+  casi no hace nada y sobre una a −6 dBFS puede destrozarla. Los presets de fábrica están pensados para pistas con gain
+  staging (Fase 1): RMS cerca de −18 dBFS. Mira la CURVA al cargarlo: si el tramo brillante no llega a la rodilla, sube
+  Input; si se pasa de largo, bájalo.
+- **Lo que el AUTO GAIN no compensa.** El auto gain calcula cuánto volumen pierde la CURVA; los filtros (cortes, tilt, la
+  cabeza de la cinta) y la mezcla en paralelo son ecualización y se oyen como tal. Por eso algunos presets traen Output:
+  Radio AM (+6 dB: los cortes se llevan mucha energía), los paralelos con corte PRE (Caja con Mordida +5.5 dB, Bajo
+  Paralelo Tube +6.5 dB, Bus Batería Paralelo +3 dB), o −1 dB donde la cinta o el tilt suman graves. Todos quedan a
+  ±1.5 dB del bypass, medido con señales de prueba (`RiptidePresetTests --verbose`: de −1.3 a +0.5 dB).
+- **Mix = reparto, no suma.** Con Mix 50 % la original baja a la mitad (−6 dB) y la saturada entra a la mitad. Si la
+  saturada no tiene graves (Low Cut PRE), el sub del total baja 6 dB: Output lo devuelve.
+- **El bypass no es parte del sonido.** Cargar un preset nunca apaga ni enciende Riptide, y los presets no guardan el
+  bypass. Init tampoco es transparente: la cinta ya redondea un poco con Input a 0 dB. Para comparar, siempre BYPASS.
+- **Un preset es un archivo de texto con unidades reales.** XML legible: `inputGain` 6 (dB), `highCut` 9000 (Hz),
+  `mode` Tube. Lo que no aparece toma su valor por defecto (el de Init): un preset de fábrica se lee como una receta,
+  solo con lo que cambia. Ojo: en las listas un número es la **posición** de la opción, no su nombre; `bands` 2 = la
+  tercera opción = 3 bandas (por eso el archivo lo aclara con un comentario).
+- **El nombre del preset viaja con el proyecto de FL**, con un `*` si lo modificaste. Un proyecto anterior a esta fase
+  dice "Sin nombre" (su sonido no viene de ningún preset).
+- **Una sola biblioteca de presets para toda la suite.** El sistema de presets de Undertow (formato, navegador, guardar)
+  pasó a `libs/presets`: Riptide lo usa tal cual y los próximos plugins también. Por eso el navegador se ve y se usa
+  igual en los dos.
+
+### Qué hace cada control
+
+- **◀ ▶** (cabecera): preset anterior / siguiente, en el orden del navegador. Rápido para comparar varios sobre la misma
+  pista con el tema sonando.
+- **Nombre** (con la categoría en naranja y `*` si tocaste algo): abre el **navegador**. A la izquierda las categorías (y
+  "Mis presets"); en el centro la lista y la búsqueda (busca en nombre, categoría y **notas**: prueba "paralelo",
+  "envolvente", "808"); a la derecha las notas. Un clic o las flechas del teclado = cargar (para escuchar rápido); doble
+  clic o Enter = cargar y cerrar; Esc = cerrar. Los presets tuyos tienen un punto ámbar y se pueden borrar (van a la
+  papelera de reciclaje).
+- **Guardar**: tu sonido como preset propio, con nombre, categoría, autor y **notas**. Si partiste de uno de fábrica, las
+  notas empiezan con "Basado en «...»" para que escribas qué cambiaste y por qué. Se guardan en
+  `Documentos\Riptide\Presets` (puedes hacer subcarpetas; el navegador las lee todas).
+- **···**: Init (todo por defecto), Guardar como, abrir la carpeta de tus presets y volver a leerla (si copiaste
+  archivos a mano).
+- Junto al título aparece unos segundos el último mensaje ("Preset: ...", "Preset guardado: ...", avisos).
+
+### Ejercicio de escucha guiado: el mismo bus de batería, cuatro filosofías (con volumen igualado)
+
+1. Pon Riptide en el bus de la batería (o en un loop). Que llegue con unos −18 dBFS RMS (medidor IN).
+2. Carga **Bus Batería Cinta**. Alterna BYPASS: más densa, platillos más suaves, mismo volumen.
+3. Carga **Bus Batería Paralelo**. Mira el Mix (30 %) y escucha los golpes: pegan igual que en el bypass, pero entre
+   golpe y golpe hay más "relleno". Sube el Mix a 100 % un momento para oír la parte saturada sola.
+4. Carga **Bus Batería 3 Bandas**. Mira el espectro: tres zonas teñidas. Usa la **S** de cada banda: el bombo con Tube,
+   la caja con Transistor, los platillos casi limpios.
+5. Carga **Bus Batería Pegada y Cuerpo**. Mira la barra de la ENVOLVENTE y el arco celeste de Input: el drive baja en
+   cada golpe y vuelve en la cola.
+6. Con ◀ ▶ recórrelos con el tema sonando. Para cada uno, escribe en una línea qué conserva (pegada, sub, platillos) y
+   qué agrega. Las cuatro son formas de "pegar" una batería; la que eliges depende de qué tiene que conservar el tema.
+7. Al final compara siempre con BYPASS: si alguno te gusta "porque suena más fuerte", revisa el medidor OUT; deberían
+   quedar a ±1.5 dB.
+
+### Receta de uso: adaptar un preset a tu pista (y guardarlo como tuyo)
+
+1. Carga el preset más cercano a lo que buscas (p. ej. **808 en el Celular** en tu 808).
+2. **Nivel**: mira la CURVA. Si tu 808 llega mucho más bajo o más alto que −18 dBFS RMS, corrige con **Input** hasta que
+   el tramo brillante llegue a la rodilla sin pasarla de largo.
+3. **La zona**: el preset satura alrededor de 100 Hz (Emphasis). Pasa el mouse por el espectro sobre el monte de tu 808 y
+   lleva **Emph Freq** ahí (para un 808 en F2 de FL, 44 Hz, mejor entre 80 y 100 Hz: el cuerpo, no el sub puro).
+4. **El resultado**: alterna BYPASS con el EQ que simula el celular (corte de 150 Hz, receta de la Fase 4). Ajusta Input
+   hasta que la nota se entienda.
+5. **Guárdalo**: Guardar → nombre ("808 Mi Tema"), categoría Bajo, y en las notas qué cambiaste y por qué ("Input +3: mi
+   808 llega más bajo"; "Emph Freq 85 Hz: ahí está su cuerpo"). Dentro de un mes esas notas son lo que te va a servir;
+   el preset sin notas, no.
+6. ¿Por qué así? El preset trae la IDEA (Tube + emphasis en el cuerpo + sin fizz); tu pista decide los NÚMEROS.
+
+### Reto sin receta
+
+Elige una voz de un tema tuyo y crea **tu propio preset de voz** desde **Init**, sin cargar ninguno de los de Voz, con un
+objetivo que escribas antes de empezar (p. ej. "que suene a radio de los 70 pero se entienda" o "más cálida que la
+original sin que se note"). Guárdalo con notas que expliquen cada ajuste. Después compara a ciegas (con BYPASS y el
+volumen igualado) contra Voz Cálida Tube y Voz Presente Cinta: ¿qué hiciste distinto y por qué? Inténtalo y después
+pide pistas.
+
+(Los presets de fábrica no resuelven los retos pendientes de las fases 1, 3, 5, 6, 7 y 8. Los de las fases 2 y 4 ya
+tenían su solución en una receta posterior: **808 en el Celular** es la receta de la Fase 4 y **Bajo Gruñido, Sub
+Limpio** la variante de la Fase 6. **Master Cinta Sutil** es a propósito la versión simple: sus notas dicen qué le falta
+para el reto de la Fase 6, sin resolverlo.)
+
+### Vocabulario
+
+- **Preset**: una foto guardada de los controles de un plugin, con nombre. *En música:* el "patch" de un sintetizador o
+  los presets de un amplificador de guitarra digital.
+- **Punto de partida (starting point)**: un preset que se carga para ajustarlo, no para dejarlo tal cual. *En música:*
+  los ingenieros de mezcla tienen plantillas con los plugins ya puestos y las retocan en cada tema.
+- **Gain staging (otra vez)**: el nivel con el que cada pista llega a cada plugin. *En música:* la razón por la que el
+  mismo preset de un video de YouTube suena distinto en tu proyecto.
+- **Saturación en paralelo**: mezclar la señal saturada con la original. *En música:* la "compresión New York" de las
+  baterías de rock y hip hop, pero con armónicos en vez de compresión.
+- **Clipper**: un recortador de picos antes del limitador del master. *En música:* parte del volumen de los masters de
+  trap y EDM viene de clippers que recortan los golpes del bombo y la caja.
+- **Octavador (octave fuzz)**: un efecto que suma una octava arriba rectificando la onda. *En música:* el Octavia de
+  Jimi Hendrix en el solo de "Purple Haze".
+- **Fundamental ausente**: el oído "escucha" una nota grave aunque no suene, si escucha sus armónicos. *En música:* por
+  qué un 808 saturado se entiende en el celular.
+
+### Errores comunes
+
+- **Cargar un preset y no tocar nada.** Se hizo con otra señal. Mínimo: revisa la CURVA (nivel) y el Mix.
+- **Elegir el preset que suena "más fuerte".** Están igualados a ±1.5 dB con señales de prueba, pero con tu pista pueden
+  quedar más arriba o más abajo. Compara con BYPASS y el medidor OUT.
+- **Usar el preset de otra categoría sin pensar.** Uno de Master (sutil, oversampling alto) en un bajo casi no se nota;
+  uno de Bus en el master puede ser demasiado. La categoría dice para qué pista y cuánta "intervención" se pensó.
+- **Guardar sin notas.** En tres semanas no vas a recordar por qué el Cruce 1 estaba en 135 Hz. Las notas son la mitad
+  del preset.
+- **Apilar presets.** Tres instancias de Riptide con tres presets "de color" en la misma pista suman densidad hasta
+  aplanarla. Una saturación por pista y otra en el bus suele bastar.
+- **Cuándo NO usar un preset:** cuando no sabes qué le falta a la pista. Primero escucha y nombra el problema (no se oye
+  en el celular, la caja no corta, la voz está lejos); después busca el preset que lo resuelve.
+
+### Retos completados
+
+(Ninguno todavía.)
