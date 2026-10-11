@@ -22,7 +22,7 @@ set(UNDERTOW_PLUGIN_SOURCES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/dsp/Wavetable.cpp
-    Source/presets/PresetManager.cpp
+    Source/presets/PresetFormat.cpp
     Source/synth/VoiceManager.cpp
     Source/synth/WavetableBank.cpp
 )
@@ -54,6 +54,7 @@ target_link_libraries(UndertowSynth
         juce::juce_dsp
         UndertowPresetData
         deepwater::dsp                 # librería DSP compartida de la suite (libs/dsp)
+        deepwater::presets             # presets de la suite (libs/presets)
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -105,6 +106,7 @@ if(UNDERTOW_BUILD_TESTS)
             juce::juce_dsp
             UndertowPresetData
             deepwater::dsp
+            deepwater::presets
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
     )

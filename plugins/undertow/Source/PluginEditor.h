@@ -14,9 +14,7 @@
 #include "gui/ModKnob.h"
 #include "gui/ModSourceBar.h"
 #include "gui/ModulationRouter.h"
-#include "gui/PresetBar.h"
-#include "gui/PresetBrowser.h"
-#include "gui/PresetSaveDialog.h"
+#include "deepwater/presets/PresetPanel.h"
 #include "gui/UndertowLookAndFeel.h"
 #include "gui/WavetableView.h"
 #include "synth/Modulation.h"
@@ -50,13 +48,6 @@ private:
     void showZoomMenu();
     void showMessage (const juce::String& message);
     [[nodiscard]] float initialZoom() const;
-
-    // --- Fase 10: presets ---
-    void loadPreset (const undertow::presets::Preset& preset);
-    void showPresetBrowser (bool show);
-    void showSaveDialog (bool show);
-    void showPresetMenu (juce::Component& anchor);
-    void updatePresetBar();
 
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
@@ -138,9 +129,7 @@ private:
     TabButton effectsTab { "Efectos" };
     TabButton stringTab { "Cuerda" };
     juce::TextButton zoomButton;
-    undertow::gui::PresetBar presetBar;
-    undertow::gui::PresetBrowser presetBrowser;
-    undertow::gui::PresetSaveDialog saveDialog;
+    deepwater::presets::PresetPanel presets; // barra, navegador y panel de guardar (libs/presets)
     undertow::gui::ModSourceBar modBar;
     std::vector<undertow::gui::ModKnob*> modulationKnobs; // las que son destino de la matriz
     juce::uint32 messageExpiry = 0;

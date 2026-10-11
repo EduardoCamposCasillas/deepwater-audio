@@ -4,13 +4,12 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-#include "gui/Theme.h"
-#include "gui/UndertowLookAndFeel.h"
+#include "deepwater/presets/Palette.h"
 
-namespace undertow::gui
+namespace deepwater::presets
 {
 
-// Fase 10: barra de presets de la cabecera.  [◀][▶] [ BASS  Bajo Moog *  ▾ ] [Guardar] [···]
+// Barra de presets de la cabecera (Undertow Fase 10).  [◀][▶] [ BASS  Bajo Moog *  ▾ ] [Guardar] [···]
 // Solo muestra y avisa: qué hacer al pulsar cada cosa lo decide el editor (callbacks).
 class PresetBar final : public juce::Component
 {
@@ -20,7 +19,7 @@ public:
     std::function<void()> onSave;
     std::function<void (juce::Component& anchor)> onMenu;
 
-    PresetBar()
+    explicit PresetBar (const Palette& colours) : palette (colours)
     {
         previous.setTooltip ("Preset anterior");
         next.setTooltip ("Preset siguiente");
@@ -81,7 +80,7 @@ private:
     class ArrowButton final : public juce::Button
     {
     public:
-        explicit ArrowButton (bool pointsLeft) : juce::Button ({}), left (pointsLeft) {}
+        ArrowButton (const Palette& colours, bool pointsLeft) : juce::Button ({}), palette (colours), left (pointsLeft) {}
 
         void paintButton (juce::Graphics& g, bool highlighted, bool down) override
         {
@@ -92,11 +91,12 @@ private:
                 arrow.addTriangle (c.x + 3.0f, c.y - 5.0f, c.x + 3.0f, c.y + 5.0f, c.x - 4.0f, c.y);
             else
                 arrow.addTriangle (c.x - 3.0f, c.y - 5.0f, c.x - 3.0f, c.y + 5.0f, c.x + 4.0f, c.y);
-            g.setColour (highlighted ? theme::text : theme::dimText);
+            g.setColour (highlighted ? palette.text : palette.dimText);
             g.fillPath (arrow);
         }
 
     private:
+        const Palette& palette;
         const bool left;
     };
 
@@ -104,7 +104,7 @@ private:
     class NameButton final : public juce::Button
     {
     public:
-        NameButton() : juce::Button ({}) {}
+        explicit NameButton (const Palette& colours) : juce::Button ({}), palette (colours) {}
 
         juce::String category, name;
         bool modified = false;
@@ -112,9 +112,9 @@ private:
         void paintButton (juce::Graphics& g, bool highlighted, bool) override
         {
             const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
-            g.setColour (theme::display.brighter (highlighted ? 0.06f : 0.0f));
+            g.setColour (palette.display.brighter (highlighted ? 0.06f : 0.0f));
             g.fillRoundedRectangle (bounds, 6.0f);
-            g.setColour (getToggleState() ? theme::accent.withAlpha (0.8f) : theme::panelOutline);
+            g.setColour (getToggleState() ? palette.accent.withAlpha (0.8f) : palette.panelOutline);
             g.drawRoundedRectangle (bounds, 6.0f, 1.0f);
 
             auto area = getLocalBounds().reduced (10, 0);
@@ -128,26 +128,30 @@ private:
                 arrow.addTriangle (cx - 4.0f, cy + 2.0f, cx + 4.0f, cy + 2.0f, cx, cy - 3.0f);
             else
                 arrow.addTriangle (cx - 4.0f, cy - 2.0f, cx + 4.0f, cy - 2.0f, cx, cy + 3.0f);
-            g.setColour (theme::dimText);
+            g.setColour (palette.dimText);
             g.fillPath (arrow);
 
             const juce::Font categoryFont (juce::FontOptions (10.5f, juce::Font::bold));
-            const auto categoryText = UndertowLookAndFeel::upperCase (category);
+            const auto categoryText = upperCase (category);
             const int categoryWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (categoryFont, categoryText)) + 10;
             g.setFont (categoryFont);
-            g.setColour (theme::accent);
+            g.setColour (palette.accent);
             g.drawText (categoryText, area.removeFromLeft (categoryWidth), juce::Justification::centredLeft);
 
             g.setFont (juce::FontOptions (14.5f, juce::Font::bold));
-            g.setColour (theme::text);
+            g.setColour (palette.text);
             g.drawFittedText (name + (modified ? " *" : ""), area, juce::Justification::centredLeft, 1, 0.8f);
         }
+
+    private:
+        const Palette& palette;
     };
 
-    ArrowButton previous { true }, next { false };
-    NameButton nameButton;
+    const Palette palette;
+    ArrowButton previous { palette, true }, next { palette, false };
+    NameButton nameButton { palette };
     juce::TextButton saveButton { "Guardar" };
     juce::TextButton menuButton { juce::String::fromUTF8 ("\xc2\xb7\xc2\xb7\xc2\xb7") }; // ···
 };
 
-} // namespace undertow::gui
+} // namespace deepwater::presets

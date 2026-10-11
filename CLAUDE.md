@@ -18,6 +18,9 @@ libs/
   dsp/                  # librería compartida deepwater::dsp (sin JUCE ni GUI), con tests
     include/deepwater/dsp/   # headers:  #include "deepwater/dsp/Svf.h"
     src/  tests/
+  presets/              # presets de la suite deepwater::presets (con JUCE): formato XML, biblioteca, barra y navegador
+    include/deepwater/presets/   # headers:  #include "deepwater/presets/PresetPanel.h"
+    src/
 plugins/
   undertow/             # sintetizador wavetable
   riptide/              # saturador
@@ -61,6 +64,19 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 - Mover código de un plugin a la librería es un refactor que NO debe cambiar el sonido: renderizar antes y después
   (p. ej. `UndertowPresetTests --render`) y comprobar con `scripts/null_test.py` que la resta es silencio.
 - Cambiar una pieza de la librería afecta a TODOS los plugins que la usan: correr ctest completo y los null tests.
+
+## Librería de presets (`libs/presets`, namespace `deepwater::presets`)
+- Nació en Undertow (Fase 10) y pasó a la librería con Riptide (Fase 9). Usa JUCE: es una librería INTERFACE con
+  fuentes (cada plugin compila `src/` con su configuración de JUCE) y no tiene tests propios: la prueban
+  `UndertowPresetTests` y `RiptidePresetTests` (cambiarla = correr los dos).
+- `PresetManager.h`: formato XML legible en unidades reales (lo que falta = valor por defecto; en listas, un número es el
+  índice de la opción), fábrica (BinaryData del plugin) + carpeta del usuario, preset actual y "*" en el proyecto.
+  Cada plugin describe lo suyo en un `PresetFormat` (etiqueta raíz, extensión, categorías con "Init" primero y
+  "Otros" al final, carpeta, parámetros excluidos como el bypass, archivos de fábrica).
+- GUI: `PresetPanel.h` (barra + navegador + panel de guardar y todo su comportamiento; el editor solo llama a `addTo`,
+  `setBounds`, `update` y `onMessage`), con los colores del plugin en una `Palette`.
+- Un plugin nuevo: `Source/presets/<Plugin>Presets.cpp` con su `format()`, `Presets/Factory/<Categoría>/*.<ext>`
+  compilados con `juce_add_binary_data`, y un `<Plugin>PresetTests` (ver los de Riptide).
 
 ## Plan de plugins (orden acordado)
 | # | Plugin | Referencia de nivel | Estado |

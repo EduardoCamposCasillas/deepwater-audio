@@ -7,14 +7,13 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-#include "gui/Theme.h"
-#include "gui/UndertowLookAndFeel.h"
-#include "presets/PresetManager.h"
+#include "deepwater/presets/Palette.h"
+#include "deepwater/presets/PresetManager.h"
 
-namespace undertow::gui
+namespace deepwater::presets
 {
 
-// Fase 10: navegador de presets. Se abre encima de las páginas (clic en el nombre del preset).
+// Navegador de presets (Undertow Fase 10). Se abre encima de las páginas (clic en el nombre del preset).
 //
 //   ┌ Categorías ┐┌ Buscar…           ┐┌ Nombre del preset            ┐
 //   │ Todos (22) ││ Bajo Moog     BASS ││ BASS · Fábrica · Undertow    │
@@ -26,15 +25,20 @@ namespace undertow::gui
 class PresetBrowser final : public juce::Component, private juce::ListBoxModel
 {
 public:
-    std::function<void (const presets::Preset&)> onLoad;
+    std::function<void (const Preset&)> onLoad;
     std::function<void()> onClose;
     std::function<void (const juce::String& message)> onMessage;
 
-    explicit PresetBrowser (presets::PresetManager& m) : manager (m)
+    PresetBrowser (PresetManager& m, const Palette& colours)
+        : manager (m), palette (colours), numFilters (static_cast<size_t> (m.getFormat().categories.size()) + 2)
     {
-        for (size_t i = 0; i < filterButtons.size(); ++i)
+        // La columna de la categoría en cada fila mide lo que la más larga (al menos 52 px).
+        for (const auto& category : m.getFormat().categories)
+            categoryColumnWidth = juce::jmax (categoryColumnWidth, juce::roundToInt (juce::GlyphArrangement::getStringWidth (
+                                                                       rowCategoryFont(), upperCase (category))) + 4);
+        for (size_t i = 0; i < numFilters; ++i)
         {
-            auto& button = filterButtons[i];
+            auto& button = *filterButtons.add (std::make_unique<juce::TextButton>());
             button.setClickingTogglesState (true);
             button.setRadioGroupId (2);
             button.onClick = [this, i] {
@@ -43,15 +47,15 @@ public:
             };
             addAndMakeVisible (button);
         }
-        filterButtons[0].setToggleState (true, juce::dontSendNotification);
+        filterButtons[0]->setToggleState (true, juce::dontSendNotification);
 
         search.setTextToShowWhenEmpty (juce::String::fromUTF8 ("Buscar (nombre, categor\xc3\xad" "a o notas)\xe2\x80\xa6"),
-                                       theme::dimText);
+                                       palette.dimText);
         search.setFont (juce::FontOptions (14.0f));
-        search.setColour (juce::TextEditor::backgroundColourId, theme::display);
-        search.setColour (juce::TextEditor::outlineColourId, theme::panelOutline);
-        search.setColour (juce::TextEditor::focusedOutlineColourId, theme::accent);
-        search.setColour (juce::TextEditor::textColourId, theme::text);
+        search.setColour (juce::TextEditor::backgroundColourId, palette.display);
+        search.setColour (juce::TextEditor::outlineColourId, palette.panelOutline);
+        search.setColour (juce::TextEditor::focusedOutlineColourId, palette.accent);
+        search.setColour (juce::TextEditor::textColourId, palette.text);
         search.onTextChange = [this] { updateList(); };
         search.onReturnKey = [this] { closeAfterLoading(); };
         search.onEscapeKey = [this] { close(); };
@@ -59,16 +63,16 @@ public:
 
         list.setModel (this);
         list.setRowHeight (rowHeight);
-        list.setColour (juce::ListBox::backgroundColourId, theme::display);
-        list.setColour (juce::ListBox::outlineColourId, theme::panelOutline);
+        list.setColour (juce::ListBox::backgroundColourId, palette.display);
+        list.setColour (juce::ListBox::outlineColourId, palette.panelOutline);
         list.setOutlineThickness (1);
         list.setWantsKeyboardFocus (true);
         addAndMakeVisible (list);
 
         title.setFont (juce::FontOptions (20.0f, juce::Font::bold));
-        title.setColour (juce::Label::textColourId, theme::text);
+        title.setColour (juce::Label::textColourId, palette.text);
         details.setFont (juce::FontOptions (12.5f, juce::Font::bold));
-        details.setColour (juce::Label::textColourId, theme::accent);
+        details.setColour (juce::Label::textColourId, palette.accent);
         addAndMakeVisible (title);
         addAndMakeVisible (details);
 
@@ -77,10 +81,10 @@ public:
         notes.setScrollbarsShown (true);
         notes.setCaretVisible (false);
         notes.setFont (juce::FontOptions (13.5f));
-        notes.setColour (juce::TextEditor::backgroundColourId, theme::display);
-        notes.setColour (juce::TextEditor::outlineColourId, theme::panelOutline);
-        notes.setColour (juce::TextEditor::focusedOutlineColourId, theme::panelOutline);
-        notes.setColour (juce::TextEditor::textColourId, theme::text);
+        notes.setColour (juce::TextEditor::backgroundColourId, palette.display);
+        notes.setColour (juce::TextEditor::outlineColourId, palette.panelOutline);
+        notes.setColour (juce::TextEditor::focusedOutlineColourId, palette.panelOutline);
+        notes.setColour (juce::TextEditor::textColourId, palette.text);
         addAndMakeVisible (notes);
 
         deleteButton.setTooltip ("Mueve el archivo del preset a la papelera de reciclaje.");
@@ -106,12 +110,12 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
-        g.setColour (theme::panel);
+        g.setColour (palette.panel);
         g.fillRoundedRectangle (bounds, 8.0f);
-        g.setColour (theme::panelOutline);
+        g.setColour (palette.panelOutline);
         g.drawRoundedRectangle (bounds, 8.0f, 1.0f);
 
-        g.setColour (theme::dimText);
+        g.setColour (palette.dimText);
         g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
         g.drawText (juce::String::fromUTF8 ("CATEGOR\xc3\x8d" "AS"), categoryCaption, juce::Justification::centredLeft);
         g.drawText ("PRESETS", listCaption, juce::Justification::centredLeft);
@@ -124,10 +128,10 @@ public:
 
         auto categories = area.removeFromLeft (categoryWidth);
         categoryCaption = categories.removeFromTop (captionHeight);
-        for (auto& button : filterButtons)
+        for (auto* button : filterButtons)
         {
-            button.setBounds (categories.removeFromTop (30).reduced (0, 2));
-            if (&button == &filterButtons[0] || &button == &filterButtons[filterButtons.size() - 2])
+            button->setBounds (categories.removeFromTop (30).reduced (0, 2));
+            if (button == filterButtons[0] || button == filterButtons[filterButtons.size() - 2])
                 categories.removeFromTop (8); // separa "Todos" y "Mis presets" de las categorías
         }
         area.removeFromLeft (padding);
@@ -174,11 +178,11 @@ private:
     static constexpr int captionHeight = 22;
     static constexpr int rowHeight = 26;
 
-    // Filtro 0 = Todos; 1..N = cada categoría; último = Mis presets (los del usuario, de cualquier categoría).
-    static constexpr size_t numFilters = presets::categoryNames.size() + 2;
-    [[nodiscard]] static constexpr int userFilter() noexcept { return static_cast<int> (numFilters) - 1; }
+    [[nodiscard]] static juce::Font rowCategoryFont() { return juce::FontOptions (10.5f, juce::Font::bold); }
 
-    [[nodiscard]] bool passesFilter (const presets::Preset& preset) const
+    [[nodiscard]] int userFilter() const noexcept { return static_cast<int> (numFilters) - 1; }
+
+    [[nodiscard]] bool passesFilter (const Preset& preset) const
     {
         if (filter == userFilter() && preset.factory)
             return false;
@@ -193,7 +197,7 @@ private:
     void updateCounts()
     {
         const auto& all = manager.getPresets();
-        for (size_t i = 0; i < filterButtons.size(); ++i)
+        for (size_t i = 0; i < numFilters; ++i)
         {
             int count = 0;
             for (const auto& preset : all)
@@ -207,8 +211,8 @@ private:
             }
             const juce::String name = i == 0                              ? juce::String ("Todos")
                                       : static_cast<int> (i) == userFilter() ? juce::String ("Mis presets")
-                                                                             : juce::String (presets::categoryNames[i - 1]);
-            filterButtons[i].setButtonText (name + "  (" + juce::String (count) + ")");
+                                                                             : manager.getFormat().categories[static_cast<int> (i) - 1];
+            filterButtons[static_cast<int> (i)]->setButtonText (name + "  (" + juce::String (count) + ")");
         }
     }
 
@@ -231,7 +235,7 @@ private:
             selectPreset (*shown);
     }
 
-    void selectPreset (const presets::Preset& preset)
+    void selectPreset (const Preset& preset)
     {
         const auto& all = manager.getPresets();
         for (size_t row = 0; row < visible.size(); ++row)
@@ -244,7 +248,7 @@ private:
     }
 
     // Muestra el preset en el panel de la derecha y lo marca en la lista, sin cargarlo.
-    void showInfo (const presets::Preset* preset, int row)
+    void showInfo (const Preset* preset, int row)
     {
         shownName = preset != nullptr ? preset->name : juce::String();
         shownFactory = preset != nullptr && preset->factory;
@@ -269,7 +273,7 @@ private:
         }
 
         title.setText (preset->name, juce::dontSendNotification);
-        juce::String meta = UndertowLookAndFeel::upperCase (preset->category) + juce::String::fromUTF8 ("  \xc2\xb7  ")
+        juce::String meta = upperCase (preset->category) + juce::String::fromUTF8 ("  \xc2\xb7  ")
                             + (preset->factory ? juce::String::fromUTF8 ("F\xc3\xa1" "brica") : juce::String ("Tuyo"));
         if (preset->author.isNotEmpty())
             meta << juce::String::fromUTF8 ("  \xc2\xb7  ") << preset->author;
@@ -281,7 +285,7 @@ private:
         deleteButton.setVisible (! preset->factory);
     }
 
-    [[nodiscard]] const presets::Preset* shownPreset()
+    [[nodiscard]] const Preset* shownPreset()
     {
         for (const auto& preset : manager.getPresets())
             if (preset.factory == shownFactory && preset.name == shownName)
@@ -349,25 +353,25 @@ private:
 
         if (selected)
         {
-            g.setColour (theme::accent.withAlpha (0.18f));
+            g.setColour (palette.accent.withAlpha (0.18f));
             g.fillRect (0, 0, width, height);
         }
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (10, 0);
-        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
-        g.setColour (theme::dimText);
-        g.drawText (UndertowLookAndFeel::upperCase (preset.category), area.removeFromRight (52), juce::Justification::centredRight);
+        g.setFont (rowCategoryFont());
+        g.setColour (palette.dimText);
+        g.drawText (upperCase (preset.category), area.removeFromRight (categoryColumnWidth), juce::Justification::centredRight);
 
         if (! preset.factory)
         {
             // Punto de color = preset tuyo.
-            g.setColour (theme::warm);
+            g.setColour (palette.secondary);
             g.fillEllipse (area.removeFromLeft (8).toFloat().withSizeKeepingCentre (6.0f, 6.0f));
             area.removeFromLeft (6);
         }
 
         g.setFont (juce::FontOptions (14.0f, current ? juce::Font::bold : juce::Font::plain));
-        g.setColour (current ? theme::accent : theme::text);
+        g.setColour (current ? palette.accent : palette.text);
         g.drawFittedText (preset.name, area, juce::Justification::centredLeft, 1, 0.8f);
     }
 
@@ -386,8 +390,12 @@ private:
 
     void returnKeyPressed (int) override { closeAfterLoading(); }
 
-    presets::PresetManager& manager;
-    std::array<juce::TextButton, numFilters> filterButtons;
+    PresetManager& manager;
+    const Palette palette;
+    // Filtro 0 = Todos; 1..N = cada categoría; último = Mis presets (los del usuario, de cualquier categoría).
+    const size_t numFilters;
+    juce::OwnedArray<juce::TextButton> filterButtons;
+    int categoryColumnWidth = 52;
     juce::TextEditor search;
     juce::ListBox list;
     juce::Label title, details;
@@ -404,4 +412,4 @@ private:
     juce::Rectangle<int> categoryCaption, listCaption, notesCaption;
 };
 
-} // namespace undertow::gui
+} // namespace deepwater::presets

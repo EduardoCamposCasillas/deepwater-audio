@@ -4,6 +4,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "deepwater/presets/Palette.h"
 #include "synth/Modulation.h"
 
 // Colores de toda la interfaz en un solo sitio: cambiar el aspecto no obliga a tocar cada componente.
@@ -33,6 +34,12 @@ inline const std::array<juce::Colour, synth::numModSources> sourceColours {
     juce::Colour (0xff7986cb), // Mod Wheel
     juce::Colour (0xffa1887f), // Aftertouch
 };
+
+// Los colores de la barra, el navegador y el panel de guardar presets (libs/presets).
+[[nodiscard]] inline deepwater::presets::Palette presetPalette()
+{
+    return { background, panel, panelOutline, display, text, dimText, accent, warm };
+}
 
 [[nodiscard]] inline juce::Colour sourceColour (synth::ModSource source)
 {

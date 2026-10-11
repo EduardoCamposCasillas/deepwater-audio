@@ -1,15 +1,12 @@
-#include "presets/PresetManager.h"
+#include "deepwater/presets/PresetManager.h"
 
 #include <algorithm>
 #include <cmath>
 
-#include <BinaryData.h>
-
-namespace undertow::presets
+namespace deepwater::presets
 {
 namespace
 {
-constexpr const char* rootTag = "UndertowPreset";
 constexpr const char* notesTag = "Notes";
 constexpr const char* parametersTag = "Parameters";
 constexpr const char* parameterTag = "PARAM";
@@ -116,24 +113,24 @@ bool comesBefore (const Preset& a, const Preset& b)
 }
 } // namespace
 
-int Preset::categoryIndex() const noexcept
+int PresetFormat::categoryIndex (const juce::String& category) const
 {
-    for (size_t i = 0; i < categoryNames.size(); ++i)
-        if (category.equalsIgnoreCase (categoryNames[i]))
-            return static_cast<int> (i);
-    return static_cast<int> (categoryNames.size()) - 1;
+    for (int i = 0; i < categories.size(); ++i)
+        if (category.equalsIgnoreCase (categories[i]))
+            return i;
+    return juce::jmax (0, categories.size() - 1);
 }
 
-std::optional<Preset> parsePreset (const juce::XmlElement& xml, juce::String& error)
+std::optional<Preset> parsePreset (const juce::XmlElement& xml, const PresetFormat& format, juce::String& error)
 {
-    if (! xml.hasTagName (rootTag))
+    if (! xml.hasTagName (format.rootTag))
     {
-        error = "no es un preset de Undertow";
+        error = "no es un preset de " + format.productName;
         return std::nullopt;
     }
     if (xml.getIntAttribute ("formatVersion", 1) > formatVersion)
     {
-        error = "lo guardó una versión más nueva de Undertow";
+        error = juce::String::fromUTF8 ("lo guard\xc3\xb3 una versi\xc3\xb3n m\xc3\xa1s nueva de ") + format.productName;
         return std::nullopt;
     }
 
@@ -145,6 +142,7 @@ std::optional<Preset> parsePreset (const juce::XmlElement& xml, juce::String& er
         return std::nullopt;
     }
     preset.category = xml.getStringAttribute ("category", "Otros").trim();
+    preset.categoryOrder = format.categoryIndex (preset.category);
     preset.author = xml.getStringAttribute ("author").trim();
     if (const auto* notes = xml.getChildByName (notesTag))
         preset.notes = cleanNotes (notes->getAllSubText());
@@ -155,9 +153,9 @@ std::optional<Preset> parsePreset (const juce::XmlElement& xml, juce::String& er
     return preset;
 }
 
-std::unique_ptr<juce::XmlElement> presetToXml (const Preset& preset)
+std::unique_ptr<juce::XmlElement> presetToXml (const Preset& preset, const PresetFormat& format)
 {
-    auto xml = std::make_unique<juce::XmlElement> (rootTag);
+    auto xml = std::make_unique<juce::XmlElement> (format.rootTag);
     xml->setAttribute ("formatVersion", formatVersion);
     xml->setAttribute ("name", preset.name);
     xml->setAttribute ("category", preset.category);
@@ -177,11 +175,12 @@ std::unique_ptr<juce::XmlElement> presetToXml (const Preset& preset)
 
 // =====================================================================================================================
 
-PresetManager::PresetManager (juce::AudioProcessorValueTreeState& s) : state (s)
+PresetManager::PresetManager (juce::AudioProcessorValueTreeState& s, PresetFormat f) : state (s), format (std::move (f))
 {
     for (auto* parameter : state.processor.getParameters())
         if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter))
-            parameters.push_back (ranged);
+            if (! format.excludedParameters.contains (ranged->paramID))
+                parameters.push_back (ranged);
 
     snapshot = currentValues(); // una instancia nueva tiene los valores por defecto = "Init"
 }
@@ -203,34 +202,32 @@ void PresetManager::rescan()
     scanned = true;
     presets.clear();
 
-    // Fábrica: los .uwpreset de Presets/Factory, compilados dentro del plugin (juce_add_binary_data).
-    for (int i = 0; i < BinaryData::namedResourceListSize; ++i)
-    {
-        const juce::String original = BinaryData::getNamedResourceOriginalFilename (BinaryData::namedResourceList[i]);
-        if (! original.endsWithIgnoreCase (fileExtension))
-            continue;
+    // Fábrica: los presets de Presets/Factory, compilados dentro del plugin (juce_add_binary_data).
+    if (format.factoryFiles)
+        for (const auto& file : format.factoryFiles())
+        {
+            if (! file.filename.endsWithIgnoreCase (format.fileExtension))
+                continue;
 
-        int size = 0;
-        const char* data = BinaryData::getNamedResource (BinaryData::namedResourceList[i], size);
-        juce::String error;
-        if (auto xml = juce::parseXML (juce::String::fromUTF8 (data, size)))
-            if (auto preset = parsePreset (*xml, error))
-            {
-                preset->factory = true;
-                preset->notes = reflowNotes (preset->notes);
-                presets.push_back (std::move (*preset));
-            }
-        jassert (error.isEmpty()); // un preset de fábrica roto es un bug: lo detecta UndertowPresetTests
-    }
+            juce::String error;
+            if (auto xml = juce::parseXML (file.content))
+                if (auto preset = parsePreset (*xml, format, error))
+                {
+                    preset->factory = true;
+                    preset->notes = reflowNotes (preset->notes);
+                    presets.push_back (std::move (*preset));
+                }
+            jassert (error.isEmpty()); // un preset de fábrica roto es un bug: lo detectan los tests de presets del plugin
+        }
 
-    // Usuario: cualquier .uwpreset dentro de la carpeta (también en subcarpetas que cree el usuario).
-    const auto& folder = userFolder;
+    // Usuario: cualquier preset dentro de la carpeta (también en subcarpetas que cree el usuario).
+    const auto& folder = format.userFolder;
     if (folder.isDirectory())
-        for (const auto& entry : juce::RangedDirectoryIterator (folder, true, juce::String ("*") + fileExtension))
+        for (const auto& entry : juce::RangedDirectoryIterator (folder, true, juce::String ("*") + format.fileExtension))
         {
             juce::String error;
             if (auto xml = juce::parseXML (entry.getFile()))
-                if (auto preset = parsePreset (*xml, error))
+                if (auto preset = parsePreset (*xml, format, error))
                 {
                     preset->factory = false;
                     preset->file = entry.getFile();
@@ -243,13 +240,8 @@ void PresetManager::rescan()
 
 void PresetManager::setUserFolder (const juce::File& folder)
 {
-    userFolder = folder;
+    format.userFolder = folder;
     rescan();
-}
-
-juce::File PresetManager::defaultUserFolder()
-{
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Undertow").getChildFile ("Presets");
 }
 
 std::vector<float> PresetManager::resolve (const Preset& preset, juce::StringArray* problems) const
@@ -310,7 +302,7 @@ juce::StringArray PresetManager::loadInit()
 {
     ensureScanned();
     for (const auto& preset : presets)
-        if (preset.factory && preset.category == "Init")
+        if (preset.factory && preset.categoryIndex() == 0) // "Init", la primera categoría
             return load (preset);
 
     // Sin el archivo de fábrica (no debería pasar), Init = todos los valores por defecto.
@@ -368,6 +360,7 @@ juce::Result PresetManager::save (const juce::String& name, const juce::String& 
     Preset preset;
     preset.name = cleanName;
     preset.category = category;
+    preset.categoryOrder = format.categoryIndex (category);
     preset.author = author.trim();
     preset.notes = notes.trim();
 
@@ -377,7 +370,7 @@ juce::Result PresetManager::save (const juce::String& name, const juce::String& 
         preset.values.emplace_back (parameter->paramID, formatValue (parameter->convertFrom0to1 (parameter->getValue())));
 
     // Si ya existe con ese nombre (aunque esté en una subcarpeta) se reemplaza ese archivo.
-    auto file = userFolder.getChildFile (juce::File::createLegalFileName (cleanName) + fileExtension);
+    auto file = format.userFolder.getChildFile (juce::File::createLegalFileName (cleanName) + format.fileExtension);
     for (const auto& existing : presets)
         if (! existing.factory && existing.name.equalsIgnoreCase (cleanName))
             file = existing.file;
@@ -385,7 +378,7 @@ juce::Result PresetManager::save (const juce::String& name, const juce::String& 
     if (const auto created = file.getParentDirectory().createDirectory(); created.failed())
         return juce::Result::fail ("No se pudo crear la carpeta de presets: " + created.getErrorMessage());
 
-    auto xml = presetToXml (preset);
+    auto xml = presetToXml (preset, format);
     if (! xml->writeTo (file))
         return juce::Result::fail ("No se pudo escribir " + file.getFullPathName());
 
@@ -479,7 +472,7 @@ void PresetManager::stateRestored()
     const auto& tree = state.state;
     if (! tree.hasProperty (presetNameProperty))
     {
-        // Proyecto anterior a la Fase 10: su sonido no viene de ningún preset.
+        // Proyecto anterior a los presets del plugin: su sonido no viene de ningún preset.
         setCurrent ("Sin nombre", false, false);
         return;
     }
@@ -487,4 +480,4 @@ void PresetManager::stateRestored()
                 tree.getProperty (presetModifiedProperty, false));
 }
 
-} // namespace undertow::presets
+} // namespace deepwater::presets

@@ -4,13 +4,13 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-#include "gui/Theme.h"
-#include "presets/PresetManager.h"
+#include "deepwater/presets/Palette.h"
+#include "deepwater/presets/PresetManager.h"
 
-namespace undertow::gui
+namespace deepwater::presets
 {
 
-// Fase 10: panel para guardar el sonido como preset del usuario: nombre, categoría, autor y notas.
+// Panel para guardar el sonido como preset del usuario: nombre, categoría, autor y notas.
 // Las notas son lo más importante para aprender: escribir POR QUÉ hiciste cada ajuste te obliga a entenderlo, y
 // dentro de un mes te lo recordará. Se abre encima de las páginas (sin ventana modal: dan problemas en los hosts).
 class PresetSaveDialog final : public juce::Component
@@ -22,14 +22,15 @@ public:
     std::function<bool (const juce::String& name)> exists; // ¿ya hay un preset del usuario con ese nombre?
     std::function<void()> onClose;
 
-    PresetSaveDialog()
+    // Las categorías salen del formato del plugin (menos "Init", la primera: solo hay uno y es de fábrica).
+    PresetSaveDialog (const Palette& colours, const PresetFormat& format) : palette (colours)
     {
-        const auto styleEditor = [] (juce::TextEditor& editor) {
+        const auto styleEditor = [this] (juce::TextEditor& editor) {
             editor.setFont (juce::FontOptions (14.0f));
-            editor.setColour (juce::TextEditor::backgroundColourId, theme::display);
-            editor.setColour (juce::TextEditor::outlineColourId, theme::panelOutline);
-            editor.setColour (juce::TextEditor::focusedOutlineColourId, theme::accent);
-            editor.setColour (juce::TextEditor::textColourId, theme::text);
+            editor.setColour (juce::TextEditor::backgroundColourId, palette.display);
+            editor.setColour (juce::TextEditor::outlineColourId, palette.panelOutline);
+            editor.setColour (juce::TextEditor::focusedOutlineColourId, palette.accent);
+            editor.setColour (juce::TextEditor::textColourId, palette.text);
         };
         for (auto* editor : { &nameEditor, &authorEditor, &notesEditor })
         {
@@ -37,12 +38,12 @@ public:
             addAndMakeVisible (editor);
         }
         nameEditor.setInputRestrictions (64);
-        nameEditor.setTextToShowWhenEmpty (juce::String::fromUTF8 ("Mi sonido"), theme::dimText);
+        nameEditor.setTextToShowWhenEmpty (juce::String::fromUTF8 ("Mi sonido"), palette.dimText);
         nameEditor.onTextChange = [this] { updateConfirmation(); };
         nameEditor.onReturnKey = [this] { save(); };
         nameEditor.onEscapeKey = [this] { close(); };
         authorEditor.setInputRestrictions (64);
-        authorEditor.setTextToShowWhenEmpty ("(opcional)", theme::dimText);
+        authorEditor.setTextToShowWhenEmpty ("(opcional)", palette.dimText);
         authorEditor.onEscapeKey = [this] { close(); };
 
         notesEditor.setMultiLine (true, true);
@@ -50,22 +51,23 @@ public:
         notesEditor.setScrollbarsShown (true);
         notesEditor.setTextToShowWhenEmpty (juce::String::fromUTF8 ("Qu\xc3\xa9 es este sonido, c\xc3\xb3mo lo construiste "
                                                                    "y por qu\xc3\xa9 est\xc3\xa1 cada ajuste."),
-                                            theme::dimText);
+                                            palette.dimText);
 
-        for (const auto* name : presets::categoryNames)
-            if (juce::String (name) != "Init")
-                categoryBox.addItem (name, categoryBox.getNumItems() + 1);
+        for (int i = 1; i < format.categories.size(); ++i)
+            categoryBox.addItem (format.categories[i], i);
+        initCategory = format.categories[0];
+        fallbackCategory = format.categories[format.categories.size() - 1];
         addAndMakeVisible (categoryBox);
 
         for (auto* label : { &nameLabel, &categoryLabel, &authorLabel, &notesLabel })
         {
             label->setFont (juce::FontOptions (12.0f, juce::Font::bold));
-            label->setColour (juce::Label::textColourId, theme::dimText);
+            label->setColour (juce::Label::textColourId, palette.dimText);
             addAndMakeVisible (label);
         }
 
         message.setFont (juce::FontOptions (13.0f));
-        message.setColour (juce::Label::textColourId, theme::warm);
+        message.setColour (juce::Label::textColourId, palette.secondary);
         addAndMakeVisible (message);
 
         saveButton.onClick = [this] { save(); };
@@ -80,9 +82,9 @@ public:
         nameEditor.setText (name, false);
         authorEditor.setText (author, false);
         notesEditor.setText (notes, false);
-        categoryBox.setText (category == "Init" ? juce::String ("Otros") : category, juce::dontSendNotification);
+        categoryBox.setText (category == initCategory ? fallbackCategory : category, juce::dontSendNotification);
         if (categoryBox.getSelectedId() == 0)
-            categoryBox.setText ("Otros", juce::dontSendNotification);
+            categoryBox.setText (fallbackCategory, juce::dontSendNotification);
         message.setText ({}, juce::dontSendNotification);
         updateConfirmation();
         nameEditor.grabKeyboardFocus();
@@ -92,17 +94,17 @@ public:
     void paint (juce::Graphics& g) override
     {
         // El panel ocupa toda la página con un fondo oscurecido: se ve que es un paso aparte y no se toca nada detrás.
-        g.fillAll (theme::background.withAlpha (0.75f));
+        g.fillAll (palette.background.withAlpha (0.75f));
         const auto bounds = panelBounds().toFloat().reduced (0.5f);
-        g.setColour (theme::panel);
+        g.setColour (palette.panel);
         g.fillRoundedRectangle (bounds, 8.0f);
-        g.setColour (theme::panelOutline);
+        g.setColour (palette.panelOutline);
         g.drawRoundedRectangle (bounds, 8.0f, 1.0f);
 
-        g.setColour (theme::text);
+        g.setColour (palette.text);
         g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
         g.drawText ("Guardar preset", titleArea, juce::Justification::centredLeft);
-        g.setColour (theme::dimText);
+        g.setColour (palette.dimText);
         g.setFont (juce::FontOptions (12.5f));
         g.drawText ("Se guarda en " + folder.getFullPathName(), folderArea, juce::Justification::centredLeft);
     }
@@ -173,6 +175,8 @@ private:
             onClose();
     }
 
+    const Palette palette;
+    juce::String initCategory, fallbackCategory;
     juce::Label nameLabel { {}, "NOMBRE" };
     juce::Label categoryLabel { {}, juce::String::fromUTF8 ("CATEGOR\xc3\x8d" "A") };
     juce::Label authorLabel { {}, "AUTOR" };
@@ -186,4 +190,4 @@ private:
     juce::Rectangle<int> titleArea, folderArea;
 };
 
-} // namespace undertow::gui
+} // namespace deepwater::presets

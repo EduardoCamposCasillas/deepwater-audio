@@ -89,7 +89,7 @@ private:
     void updateTransport() noexcept;
 
     juce::AudioProcessorValueTreeState parameters;
-    undertow::presets::PresetManager presetManager { parameters }; // después de 'parameters': los necesita
+    undertow::presets::PresetManager presetManager { parameters, undertow::presets::format() }; // después de 'parameters': los necesita
 
     // Punteros a los valores atómicos de cada parámetro: leerlos en el hilo de audio es seguro y sin locks.
     std::atomic<float>* attackParam = nullptr;

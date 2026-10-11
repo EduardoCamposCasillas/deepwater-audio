@@ -55,7 +55,7 @@ plugins/undertow/
     dsp/                     # osciladores, filtro de voz, envolventes, LFO, warp, efectos (lo compartido: libs/dsp)
     synth/                   # voces, polifonía, matriz de modulación, banco de wavetables, cadena de efectos
     gui/                     # componentes visuales propios
-    presets/                 # PresetManager
+    presets/                 # formato propio (categorías, .uwpreset, BinaryData); el sistema está en libs/presets
   Presets/Factory/         # .uwpreset de fábrica (compilados dentro del plugin)
   tests/                   # DspTests.cpp (sin JUCE), PresetTests.cpp (con JUCE), reference/
   docs/                    # capturas para el README
@@ -640,3 +640,13 @@ Huellas de los 49 presets: iguales.
   Damping), y el ruido y lo desafinado salen mucho más bajos (subir Input); con Decay largo la resonancia tarda en
   llenarse (un ataque lento: físico); Stiffness se elige al despertar la cuerda, y con la entrada sonando sin parar no
   vuelve a elegirse hasta la nota siguiente desde silencio.
+
+Cambio desde Riptide Fase 9 (2026-10-11). El sonido no cambia (huellas de los 49 presets: iguales).
+- El sistema de presets pasó a la librería compartida `libs/presets` (`deepwater::presets`): `PresetManager.cpp`,
+  `PresetBar.h`, `PresetBrowser.h` y `PresetSaveDialog.h` (movidos con `git mv`), generalizados con un `PresetFormat`
+  (etiqueta raíz, extensión, categorías, carpeta, parámetros excluidos, archivos de fábrica) y una `Palette` de colores.
+  El pegamento del editor (cargar, siguiente/anterior, guardar con las notas empezadas, menú ···) quedó en
+  `PresetPanel.h`; el editor de Undertow solo lo coloca. Aquí quedan `presets/PresetManager.h` (categorías, extensión y
+  `format()`) y `presets/PresetFormat.cpp` (lee BinaryData). El formato `.uwpreset` y el comportamiento no cambian.
+  Arreglado de paso: el aviso de "versión más nueva" llevaba tildes sin `fromUTF8` (aserción de JUCE en Debug).
+- `UndertowPresetTests`, pluginval strictness 10 ampliado: SUCCESS. Revisado con capturas del Standalone.
