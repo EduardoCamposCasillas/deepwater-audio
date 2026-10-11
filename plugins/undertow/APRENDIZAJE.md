@@ -2504,3 +2504,135 @@ las pistas vendrán después.
 
 ### Retos completados
 - [ ] Reto Fase 15 — piano de juguete
+
+## Fase 16 — La cuerda como resonador
+
+Hasta aquí la cuerda era un instrumento: un golpe al empezar y luego la cuerda sola. En esta fase pasa a ser un
+**cuerpo que resuena**: en vez de un golpe, lo que suena en la voz (osciladores, sub, ruido) entra en ella **sin
+parar**, y la cuerda se queda con lo que encaja en sus armónicos. Se elige con una opción nueva al final del menú
+**Excitation: Sources**.
+
+### Conceptos aprendidos
+**Excitador y resonador.** Casi todos los instrumentos acústicos son dos piezas: algo que da energía (el
+**excitador**: un arco, un soplido, una púa, las cuerdas vocales) y algo que elige qué frecuencias sobreviven (el
+**resonador**: la cuerda, el tubo de una flauta, la caja de una guitarra, tu boca). Hasta la Fase 15 el excitador era
+un golpe de un período; ahora el excitador es cualquier cosa que suene en Undertow. Es la misma idea que el
+sintetizador sustractivo (oscilador → filtro), con un filtro muy especial.
+
+**El filtro peine realimentado.** Una línea de retardo que se realimenta (la cuerda) es un filtro:
+H = 1 / (1 − G·z⁻ᴺ). Donde una vuelta completa suma una fase de 2π·k (los armónicos de la cuerda: f0, 2·f0, 3·f0…)
+cada vuelta llega **en fase** con la anterior y se refuerzan: la ganancia es 1 / (1 − g), con g la ganancia de una
+vuelta. A medio camino entre dos armónicos cada vuelta llega **en contrafase** y se cancela: 1 / (1 + g). En el
+analizador se ve como un **peine** de picos cada f0. Con Decay largo g roza 1: los picos son **altos y estrechos**
+(mucha "Q"); con Decay corto, anchos y bajos (casi no filtra).
+
+**Q y tiempo de llenado: la misma cosa.** Un pico estrecho también es **lento**: la cuerda tarda en llenarse cuando
+empieza a llegarle algo y tarda en vaciarse cuando deja de llegarle. Las dos cosas las fija el Decay. Por eso con un
+resonador de Decay 4 s un tono afinado hace un **crescendo** de un par de segundos: no es un ataque que se pueda
+ajustar aparte, es física (pasa igual al cantar dentro de un piano con el pedal pisado).
+
+**Normalizar: ¿qué debe salir igual de fuerte?** Con Decay 30 s el pico de un armónico sería de hasta ×4000 (+72 dB) en notas agudas: hay que
+bajar la entrada. Undertow la multiplica por **1 − g**: así un tono **afinado con la cuerda** sale con su mismo nivel en
+el fundamental (medido: ±0.03 dB con cualquier Decay y Damping) y nunca más fuerte. La otra opción, que el **ruido** salga
+igual de fuerte, haría que un tono afinado subiera hasta +40 dB con Decay largo. Precio de lo elegido: lo que no encaja
+(el ruido, un tono desafinado) sale más bajo; el ruido baja 16 / 23 / 31 dB con Decay 0.2 / 0.5 / 2 s (A4 de FL). Para
+eso está la perilla **Input** (0 a +36 dB): sube lo que entra.
+
+**La cuerda es mono y está sola.** Las fuentes se suman en mono antes de entrar (el unison y el paneo se pierden) y
+dejan de oírse directas: lo que sale es solo la cuerda. Encender o apagar la cuerda (o cambiar Excitation) con la
+nota sonando es un fundido de 5 ms entre "directo" y "por la cuerda".
+
+**Sin palma.** Con un punteo, soltar la tecla apoya la palma (Fase 12). El resonador no: lo que le llega sigue durante
+el Release de Env 1 y la cola de la cuerda también. Si quieres que se apague antes, acorta el Release.
+
+### Qué hace cada control al sonido (con Excitation = Sources)
+| Control | Qué oyes | En el analizador y el osciloscopio |
+|---|---|---|
+| **Excitation: Sources** | La voz deja de sonar a "oscilador" y suena a oscilador **a través de una cuerda**: los armónicos que encajan, cantan; lo demás, desaparece. Ya no hay ataque de púa. | Un peine de picos cada f0 de la cuerda sobre el espectro de lo que entra. |
+| **Level** | Volumen de lo que sale (ahora es todo lo que sale de la voz). | — |
+| **Octave / Semi / Fine** de la cuerda | **La afinación del resonador** respecto a las fuentes. 0: todo pasa (cuerpo, color). Una quinta (−7 st) o una octava: solo pasan los armónicos comunes (sonido hueco, "de cuerdas simpáticas"). Valores raros (+1 st, Fine ±30 ct): la cuerda casi no deja pasar nada y lo que pasa suena a metal desafinado. | Los picos del peine se mueven; los armónicos del oscilador que caen entre picos se hunden 20–40 dB. |
+| **Decay** | Cuánto "canta" la cuerda: corto (0.1–0.3 s) = un color suave, casi un EQ; largo (2–30 s) = una resonancia que zumba, tarda en llenarse y deja una cola larga. | Picos más estrechos y altos cuanto más largo. |
+| **Damping** | Igual que siempre: los armónicos agudos de la cuerda pierden más por vuelta, así que su pico es más bajo: más oscuro. | Los picos de arriba bajan. |
+| **Stiffness** | Los picos de la cuerda se estiran (Fase 15): un oscilador afinado ya no encaja arriba y suena metálico, con "chispa". Se elige cuando la cuerda despierta desde silencio. | Picos cada vez más separados hacia arriba. |
+| **Pick Pos** | Ahora da forma a la entrada y **se puede mover con la nota sonando**: 50 % quita los armónicos pares (hueco, clarinete); 5–15 % brillante y nasal; barrerlo suena a un flanger lento y musical. | Huecos en los múltiplos de 1/Pick Pos. |
+| **Pick Tone** | Paso bajo de la entrada: oscurece lo que llega a la cuerda (útil con ruido: menos "soplo"). También se mueve en vivo. | Pendiente de 6 dB/oct desde el corte. |
+| **Input** (nueva, 0 a +36 dB) | Cuánto entra. Con 0 dB un tono afinado sale igual de fuerte; con ruido o tonos desafinados súbela (+15 a +30 dB). Atenuada en los otros modos. | Todo el peine sube. |
+| **String Pick Pos / Pick Tone** (matriz) | En modo resonador actúan siempre: un LFO lento a Pick Pos es un "phaser" de armónicos; Env 2 a Pick Tone abre el soplo al principio de la nota. | — |
+
+### Ejercicio de escucha guiado
+Canal de siempre: Fruity Parametric EQ 2 para mirar el espectro, Wave Candy como osciloscopio. *Init*. Osc A en
+**Basic Shapes, Position 66 %** (sierra), Level 50 %. Cuerda **On**, Level 100 %, Decay 1 s, Damping 30 %, Excitation
+**Sources**, Pick Pos 0 %, Pick Tone 20 kHz, Input 0 dB. Env 1: Attack 1 ms, Sustain 100 %, Release 300 ms. Toca un
+**A4 de FL (220 Hz)** largo.
+1. **Directo contra resonador.** Apaga y enciende la cuerda (botón On) con la nota sonando. Apagada: la sierra cruda.
+   Encendida: la misma nota, el mismo volumen del fundamental, pero los agudos más suaves y un "cuerpo" que zumba. En el
+   EQ, los armónicos de la sierra casi no cambian: la cuerda está **afinada con ella** y deja pasar todo.
+2. **Q y llenado.** Decay 0.1 s y luego 8 s, tocando notas cortas y largas. Con 0.1 s casi no se nota la cuerda. Con 8 s
+   cada nota **crece** durante un par de segundos y al soltar queda sonando (con Release 300 ms se corta; sube el
+   Release a 3 s y escucha la cola). El pico estrecho y la lentitud son lo mismo.
+3. **Afinar el resonador.** Decay 3 s. Cuerda Semi **−7** (una quinta abajo): el fundamental de la sierra desaparece
+   (cae entre dos picos de la cuerda) y queda la sierra **una octava arriba**: solo pasan sus armónicos pares, que caen
+   en el 3.º, 6.º, 9.º… de la cuerda. Prueba Octave −1: suena
+   todo (los armónicos de la sierra son armónicos pares de la cuerda). Ahora Semi +1: casi silencio y un timbre
+   metálico desafinado. Así se oyen las **cuerdas simpáticas**: solo vibran con lo que encaja.
+4. **Ruido por la cuerda.** Osc A off, Noise On (Level 100 %), Decay 0.5 s, Damping 20 %. Casi no se oye: el ruido es
+   casi todo "desafinado". Sube **Input a +24 dB**: aparece una nota soplada, con aire. Baja Decay a 0.15 s: más soplo
+   y menos nota; súbelo a 3 s: una nota casi pura que "silba". Pick Tone a 1.5 kHz quita el siseo de arriba.
+5. **Pick Pos en vivo.** Vuelve a la sierra (Input 0 dB, Decay 2 s). Con la nota sonando, gira Pick Pos de 0 a 50 % y
+   vuelta: los armónicos pares se hunden y vuelven, como un phaser que solo toca los armónicos. Luego ponle un LFO
+   lento (0.2 Hz) a String Pick Pos con 30 %.
+
+### Recetas
+**1. Pad con cuerdas simpáticas.** Init. Osc A Basic Shapes 66 % (sierra), Unison 5, Detune 20 %, Level 60 %. Osc B
+On, misma tabla, Octave +1, Level 30 %. Cuerda On, **Octave −1**, Level 90 %, Decay **6 s**, Damping 45 %, Excitation
+**Sources**, Pick Pos 18 %, Pick Tone 8 kHz, Input 0 dB. Env 1: Attack 400 ms, Sustain 100 %, Release 2.5 s. Chorus
+Mix 30 %, Reverb Size 70 %, Mix 30 %. Toca acordes lentos. *Por qué:* la cuerda una octava abajo deja pasar todos los
+armónicos de la sierra (son los pares de la cuerda) pero los refuerza con su resonancia larga: suena a sierra "con caja",
+como un sitar o un piano con el pedal pisado. El Decay largo da ese crescendo natural de 1–2 s que hace de ataque (por
+eso el Attack de Env 1 es corto para un pad). Pick Pos 18 % quita un poco de los armónicos que chocan (5.º–6.º). El
+unison se suma en mono al entrar: el ancho lo dan el chorus y la reverb, no el unison.
+
+**2. Flauta de ruido (cuerda soplada).** Init. Osc A off. Noise On, Level 100 %, Color 40 %. Cuerda On, Level 100 %,
+Decay **0.4 s**, Damping 25 %, Excitation **Sources**, Pick Pos 50 %, Pick Tone 2.5 kHz, **Input +24 dB**. Env 1: Attack
+80 ms, Sustain 100 %, Release 150 ms. Matriz: LFO 1 (seno, 5 Hz) → String Pitch 0.4 % (vibrato), Env 2 (Attack 1 ms,
+Decay 150 ms, Sustain 0) → String Pick Tone +30 % (soplo al principio). Reverb Mix 20 %. Melodías entre C5 y C7 de
+FL. *Por qué:* una flauta es un tubo (resonador) excitado por un chorro de aire turbulento (ruido). Decay corto =
+picos anchos: deja pasar bastante aire alrededor de la nota. Pick Pos 50 % quita los pares, como un tubo cerrado por un
+lado (clarinete, flauta de pan): suena más "hueco". Input +24 dB compensa lo que la cuerda deja fuera. El soplo de Env 2
+abre el tono en el ataque, como cuando el músico empieza a soplar.
+
+### Reto sin receta
+**Violonchelo fantasma.** Una nota larga y grave, entre C3 y C4 de FL, que suene **frotada** (con arco), con el
+"grano" del arco al principio y un sostenido que respira, y que acepte un vibrato lento. Tiene que funcionar tocando
+una línea de 4 notas ligadas. Pista para empezar: ¿qué fuente de Undertow se parece más al roce de un arco, y qué
+nivel de "nota" contra "aire" te da el Decay? Inténtalo primero; las pistas vendrán después.
+
+### Cuándo no usarlo
+- **Si necesitas el estéreo del unison.** La cuerda es mono: un supersaw ancho sale estrecho. Recupera el ancho con
+  chorus o reverb, o deja la cuerda apagada.
+- **Con fuentes que cambian de tono mucho** (FM agresiva, glides largos, notas que no son la de la cuerda). Lo que se
+  aparta de los picos desaparece y el nivel salta; para timbres que se mueven, mejor el filtro.
+- **Para un ataque rápido con Decay largo.** El resonador tarda en llenarse; si quieres golpe y cola larga, usa un
+  punteo (Impulse) en vez de Sources, o junta las dos ideas en dos capas.
+- **En bajos sub.** Un resonador de Decay largo zumba durante segundos en graves y emborrona el kick; con Decay corto
+  apenas hace nada.
+
+### Vocabulario
+- **Resonador.** Lo que elige qué frecuencias de una fuente sobreviven y cuánto duran. *Ejemplo:* la caja de una
+  guitarra acústica; tu boca al cambiar de vocal mientras cantas la misma nota.
+- **Modelo excitador–resonador.** Describir un instrumento como "qué da energía" + "qué la filtra". *Ejemplo:* un
+  violín (arco + cuerda + caja), una voz (cuerdas vocales + tracto vocal).
+- **Filtro peine (comb).** Un filtro con picos (o huecos) a distancias iguales, hecho con un retardo. *Ejemplo:* el
+  sonido "metálico" de un flanger con mucho feedback, o el de hablar dentro de un tubo.
+- **Q (factor de calidad).** Lo estrecho que es un pico respecto a su frecuencia: Q alta = pico fino, resonancia que
+  dura. *Ejemplo:* una copa de cristal que "canta" al pasarle el dedo (Q altísima) contra un golpe en una mesa (Q baja).
+- **Cuerdas simpáticas.** Cuerdas que nadie toca pero vibran con lo que encaja en sus armónicos. *Ejemplo:* el sitar
+  de *Norwegian Wood* (The Beatles) y su halo metálico; un piano con el pedal pisado cuando gritas dentro.
+- **Tiempo de llenado.** Lo que tarda un resonador en llegar a su nivel cuando empieza a recibir energía (y en vaciarse
+  al dejar de recibirla). *Ejemplo:* el "bloom" de una nota larga de órgano de tubos en una iglesia.
+- **Normalización de pico / de potencia.** Ajustar el nivel para que salga igual lo más fuerte (pico) o la energía
+  media (potencia). *Ejemplo:* la normalización de pico de FL (Edison, "Normalize") contra la de sonoridad de Spotify
+  (LUFS), que iguala la energía media.
+
+### Retos completados
+- [ ] Reto Fase 16 — violonchelo fantasma

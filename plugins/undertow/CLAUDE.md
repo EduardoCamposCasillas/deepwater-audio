@@ -35,7 +35,7 @@ para que funcionen también como material de estudio.
 Desde la raíz del repositorio (ver también los comandos generales en el `CLAUDE.md` raíz):
 ```
 cmake --build build --config Release --target UndertowSynth_VST3        # solo el plugin
-build/plugins/undertow/Release/UndertowTests.exe                         # tests de DSP y voces (--fase7/8/9/12/13/15, --verbose)
+build/plugins/undertow/Release/UndertowTests.exe                         # tests de DSP y voces (--fase7/8/9/12/13/15/16, --verbose)
 build/plugins/undertow/Release/UndertowTests.exe --cpu                   # tabla de CPU (Fase 11)
 build/plugins/undertow/UndertowPresetTests_artefacts/Release/UndertowPresetTests.exe   # presets, huellas, memoria
 UndertowPresetTests --render plugins/undertow/tests/reference/migration-test.mid <carpeta>   # WAV para null tests
@@ -597,3 +597,46 @@ no tiene all-pass (huella FNV de `PluckedString` idéntica bit a bit, scratch) y
   pocas secciones, también los primeros); el hueco de Pick Position está calculado para armónicos y con mucha rigidez
   se "rellena"; los parciales agudos mueren antes que el fundamental aunque Damping sea 0 (dan más vueltas por segundo:
   físico); Stiffness no se puede barrer con la nota sonando (para eso, Damping/Decay o el filtro).
+
+Fase 16 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Lo existente suena igual: con White Noise, Filtered
+Noise e Impulse la cuerda hace el mismo cálculo (huella FNV de `PluckedString` y de la voz, scratch: idénticas bit a
+bit) y null test de los 6 presets de referencia (`out/render-fase15` vs `out/render-fase16`): idéntico bit a bit.
+Huellas de los 49 presets: iguales.
+- `dsp/PluckedString.h`: `StringExcitation::sources` (al final de la lista). `resonate (input)`: una entrada en el lazo
+  en cada muestra (se suma donde entraba la excitación), H = 1 / (1 − G·z⁻ᴺ). Cadena de la entrada: filtro DC (5 Hz) →
+  Pick Tone (paso bajo TPT de 1 polo de libs/dsp) → Pick Position (el peine de la Fase 13 en tiempo real, sobre una
+  línea propia de medio período, Lagrange, nivel / √(1 + w²)) → × (1 − |G|), con |G| la ganancia real de la vuelta en
+  el modo (lazo × filtro × Lagrange), en rampa con la del lazo. Así un tono afinado sale con su mismo nivel en el
+  fundamental con cualquier Decay y nunca más fuerte; entre dos armónicos sale (1 − g) / (1 + g). Descartado:
+  normalizar la potencia del ruido blanco (un tono afinado subía hasta +40 dB con Decay largo). Pick Pos y Pick Tone
+  se deslizan 10 ms y se leen siempre (`setResonatorShape`). Una cuerda en silencio despierta cuando la entrada pasa
+  de −100 dB (`wakeUp`, compartido con `pluck`; la rigidez se elige ahí). `processSample()` = `tick<false>` (el cálculo
+  de siempre); `resonate` = `tick<true>`. `letRing()` quita la palma.
+- Voz: con Excitation = Sources no se puntea; la mezcla de las fuentes (en mono, después del decimador y del fundido de
+  cambio de camino) × Input entra en la cuerda y la voz saca la cuerda × Level en vez de las fuentes. `stringResonance`
+  (0 = fuentes directas, 1 = por la cuerda) se desliza 5 ms: encender/apagar la cuerda o cambiar Excitation con la nota
+  sonando es un fundido. Sin palma en modo resonador (manda el Release de Env 1). Si el resonador no está activo, el
+  camino es el de la Fase 15 (mismo orden de sumas).
+- Parámetros nuevos: la opción "Sources" al final de String Excitation (cambia el número de pasos del parámetro: una
+  automatización de Excitation guardada en FL se movería; el estado guardado es el índice y carga bien) y stringInput
+  (versionHint 11, 0…+36 dB, def. 0 dB): el ruido por el resonador baja 16 / 23 / 31 dB con Decay 0.2 / 0.5 / 2 s
+  (A4 de FL, Damping 30 %), sin ella no se podía compensar. Los destinos String Pick Pos / Pick Tone actúan siempre en
+  modo resonador.
+- GUI: grupo "Punteo" con 3 perillas (Pick Pos, Pick Tone, Input; Input atenuada fuera de Sources); la ayuda de al lado
+  cambia a la del resonador al elegir Sources.
+- Tests (`UndertowTests --fase16`): seno afinado (MIDI 33–81, 4 sample rates, Decay 0.1/0.3/1 s, Damping 0/50/100 %):
+  peor 0.03 dB; a 1.5·f0, de 0.0 a +0.4 dB de la teoría (1 − g) / (1 + g); T60 al cortar la entrada: 0.0 % y vuelve al
+  silencio; Pick Position 50 % con ruido: pares −37.6 dB respecto a impares; Pick Tone 300 Hz: −11.3 dB (teoría −11.1);
+  voz: sin fuentes, silencio exacto (no hay punteo); sierra afinada: fundamental +0.00 dB, 5.º −5.9 dB; cuerda una
+  quinta por debajo: el armónico común −5 dB, el que cae entre dos −42 dB; Input +20 dB = +20.00 dB; cuerda apagada en
+  modo Sources = voz sin cuerda bit a bit; On/Off, Sources ↔ Impulse, Pick Pos, Pick Tone, Decay e Input con la nota
+  sonando sin clic (segunda diferencia ≤ 0.93× la mayor de las dos ondas); note-off sin palma (−2.6 dB en 0.1 s, igual
+  que la sierra directa); extremos al azar sin NaN (cuadrada de amplitud 1: pico 2.06; voz con S&H: 3.47). CPU (48 kHz,
+  16 notas): sierra 4.0 %, sierra por el resonador 6.4 %, con Pick Position y vibrato 15.9 %.
+- Release con 0 warnings; ctest 4/4; pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096,
+  `--repeat 3 --randomise`): SUCCESS.
+- Límites conocidos: la cuerda es mono (el unison y el paneo de los osciladores se pierden al pasar por ella); la
+  normalización es por el fundamental: con Damping alto los armónicos agudos de un tono afinado salen más bajos (es el
+  Damping), y el ruido y lo desafinado salen mucho más bajos (subir Input); con Decay largo la resonancia tarda en
+  llenarse (un ataque lento: físico); Stiffness se elige al despertar la cuerda, y con la entrada sonando sin parar no
+  vuelve a elegirse hasta la nota siguiente desde silencio.

@@ -151,7 +151,7 @@ UndertowAudioProcessor::UndertowAudioProcessor()
                      parameters.getRawParameterValue (id::stringLevel), parameters.getRawParameterValue (id::stringDecay),
                      parameters.getRawParameterValue (id::stringDamping), parameters.getRawParameterValue (id::stringExcitation),
                      parameters.getRawParameterValue (id::stringPickPosition), parameters.getRawParameterValue (id::stringPickTone),
-                     parameters.getRawParameterValue (id::stringStiffness) };
+                     parameters.getRawParameterValue (id::stringStiffness), parameters.getRawParameterValue (id::stringInput) };
     filterOnParam = parameters.getRawParameterValue (id::filter1On);
     filterTypeParam = parameters.getRawParameterValue (id::filter1Type);
     filterSlopeParam = parameters.getRawParameterValue (id::filter1Slope);
@@ -533,6 +533,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout UndertowAudioProcessor::crea
                                                              percentAttributes()));
 
     // --- Fase 13: el punteo. Por defecto ruido blanco sin peine: un proyecto de la Fase 12 suena igual. ---
+    // Fase 16: la lista de Excitation gana "Sources" al final (la cuerda como resonador).
     constexpr int v13 = id::versionHintPluck;
     using undertow::dsp::PluckedString;
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::stringExcitation, v13 },
@@ -555,6 +556,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout UndertowAudioProcessor::crea
     layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id::stringStiffness, id::versionHintStiffness },
                                                              "String Stiffness", juce::NormalisableRange<float> (0.0f, 1.0f),
                                                              string.stiffness, percentAttributes()));
+
+    // --- Fase 16: la cuerda como resonador. Input solo actúa con Excitation = Sources; 0 dB por defecto. ---
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::stringInput, id::versionHintResonator }, "String Input",
+        juce::NormalisableRange<float> (0.0f, 36.0f), string.inputDb,
+        juce::AudioParameterFloatAttributes().withLabel ("dB").withStringFromValueFunction ([] (float v, int) {
+            return "+" + juce::String (v, 1) + " dB";
+        })));
 
     return layout;
 }
@@ -639,7 +648,7 @@ undertow::synth::SourceSettings UndertowAudioProcessor::readSourceSettings() con
                         s.fine->load(),        s.level->load(),                     s.decay->load(),
                         s.damping->load(),
                         { choiceToEnum<undertow::dsp::StringExcitation> (s.excitation), s.pickPosition->load(), s.pickTone->load() },
-                        s.stiffness->load() };
+                        s.stiffness->load(),   s.input->load() };
     settings.subTable = &wavetableBank->get (0); // Basic Shapes: seno, triángulo, sierra, cuadrada
     return settings;
 }

@@ -4739,16 +4739,461 @@ void testStiffnessCpuCost()
     CHECK (modulated < 0.20);
 }
 
+// --- Fase 16: la cuerda como resonador -----------------------------------------------------------------------------
+
+// Amplitud (de pico) de la componente 'hz' en una ventana de Hann: la suma da amplitud × longitud / 4.
+double amplitudeAt (const std::vector<float>& signal, double hz, double sampleRate, size_t start, size_t length)
+{
+    return 4.0 * std::abs (partialAt (signal, hz, sampleRate, start, length)) / static_cast<double> (length);
+}
+
+// La cuerda alimentada con 'input(n)' durante 'numSamples'. Pick Tone abierto (20 kHz) y sin peine salvo que se pida.
+std::vector<float> renderResonator (PluckedString& string, double hz, float decay, float damping, size_t numSamples,
+                                    const std::function<float (size_t)>& input,
+                                    const PluckShape& shape = { StringExcitation::sources, 0.0f, 20000.0f })
+{
+    string.setDecay (decay);
+    string.setDamping (damping);
+    string.setFrequency (hz);
+    string.setResonatorShape (shape);
+    string.reset();
+    std::vector<float> signal (numSamples);
+    for (size_t n = 0; n < numSamples; ++n)
+        signal[n] = string.resonate (input (n));
+    return signal;
+}
+
+void testResonatorPeakIsUnity()
+{
+    std::printf ("Resonador: un seno afinado con la cuerda sale con su mismo nivel (+-1 dB), con cualquier Decay y Damping; "
+                 "uno entre dos armónicos sale (1 - g) / (1 + g) (g = ganancia por vuelta), +-1 dB\n");
+
+    double worstTuned = 0.0, worstOffTune = 0.0, quietestOffTune = 0.0, loudestOffTune = -200.0;
+    for (const double sr : sampleRates)
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (const int note : { 33, 45, 57, 69, 81 })
+            for (const float decay : { 0.1f, 0.3f, 1.0f })
+                for (const float damping : { 0.0f, 0.5f, 1.0f })
+                {
+                    const double hz = deepwater::dsp::midiNoteToHz (note);
+                    const auto length = static_cast<size_t> (16.0 * sr / hz);
+                    const auto total = static_cast<size_t> (6.0 * decay * sr) + length; // 6 × T60: asentado de sobra
+                    const auto measure = [&] (double inputHz) {
+                        const double w = 2.0 * pi * inputHz / sr;
+                        const auto out = renderResonator (*string, hz, decay, damping, total, [w] (size_t n) {
+                            return static_cast<float> (std::sin (w * static_cast<double> (n)));
+                        });
+                        return toDb (amplitudeAt (out, inputHz, sr, total - length, length));
+                    };
+                    const double tuned = measure (hz);
+                    // A medio camino entre el 1.º y el 2.º armónico las vueltas llegan en contrafase: 1 / (1 + g), por la
+                    // entrada × (1 − g). (Con Damping, g allí es algo menor: sale un poco más fuerte.)
+                    const double offTune = measure (1.5 * hz);
+                    const double g = std::pow (10.0, -3.0 / (static_cast<double> (decay) * hz));
+                    const double theory = toDb ((1.0 - g) / (1.0 + g));
+                    if (verbose)
+                        std::printf ("    %5.0f Hz  nota %2d  decay %.1f  damping %3.0f %%:  afinado %+.2f dB, 1.5 x f0 %+.1f dB "
+                                     "(teoría %+.1f)\n", sr, note, decay, 100.0f * damping, tuned, offTune, theory);
+                    worstTuned = std::max (worstTuned, std::abs (tuned));
+                    worstOffTune = std::max (worstOffTune, offTune - theory);
+                    quietestOffTune = std::min (quietestOffTune, offTune - theory);
+                    loudestOffTune = std::max (loudestOffTune, offTune);
+                }
+    }
+    std::printf ("  afinado: peor %.2f dB | a 1.5 x f0: de %+.1f a %+.1f dB respecto a la teoría (lo más fuerte, %.1f dB: "
+                 "A1 de FL con Decay 0.1 s, que apenas resuena)\n", worstTuned, quietestOffTune, worstOffTune, loudestOffTune);
+    CHECK (worstTuned < 1.0);
+    CHECK (worstOffTune < 1.0);
+    CHECK (quietestOffTune > -1.0);
+}
+
+void testResonatorRingsOutAndGoesSilent()
+{
+    std::printf ("Resonador: al cortar la entrada la cuerda cae con su Decay (T60 +-10 %%) y vuelve al silencio\n");
+
+    double worstError = 0.0;
+    bool silentAtEnd = true;
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        for (const int note : { 45, 69 })
+            for (const float decay : { 0.5f, 2.0f })
+            {
+                const double hz = deepwater::dsp::midiNoteToHz (note);
+                const auto feedFor = static_cast<size_t> (0.5 * sr);
+                const double w = 2.0 * pi * hz / sr;
+                const auto out = renderResonator (*string, hz, decay, 0.3f, feedFor + static_cast<size_t> (2.0 * decay * sr),
+                                                  [&] (size_t n) {
+                                                      return n < feedFor ? static_cast<float> (std::sin (w * static_cast<double> (n)))
+                                                                         : 0.0f;
+                                                  });
+                const auto length = static_cast<size_t> (8.0 * sr / hz);
+                const auto first = feedFor + static_cast<size_t> (0.1 * decay * sr);
+                const auto second = feedFor + static_cast<size_t> (0.6 * decay * sr);
+                const double slope = partialSlopeDbPerSecond (out, sr, hz, first, second, length);
+                const double t60 = -60.0 / slope;
+                worstError = std::max (worstError, std::abs (t60 / decay - 1.0));
+                for (int i = 0; i < static_cast<int> (8.0 * decay * sr); ++i) // hasta −480 dB: callada de sobra
+                    (void) string->resonate (0.0f);
+                silentAtEnd = silentAtEnd && string->isSilent();
+            }
+    }
+    std::printf ("  T60 medido: peor error %.1f %% | en silencio al final: %s\n", 100.0 * worstError, silentAtEnd ? "sí" : "no");
+    CHECK (worstError < 0.10);
+    CHECK (silentAtEnd);
+}
+
+void testPickPositionShapesTheResonator()
+{
+    std::printf ("Resonador: Pick Position 50 %% quita los armónicos pares de un ruido que entra; Pick Tone oscurece\n");
+
+    constexpr double sr = 48000.0;
+    const double hz = deepwater::dsp::midiNoteToHz (57);
+    auto string = std::make_unique<PluckedString>();
+    string->prepare (sr);
+    const auto total = static_cast<size_t> (4.0 * sr);
+    const auto run = [&] (const PluckShape& shape) {
+        std::uint32_t state = 12345u;
+        const auto out = renderResonator (
+            *string, hz, 1.0f, 0.0f, total,
+            [&state] (size_t) {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                return static_cast<float> (state >> 8) * (2.0f / 16777216.0f) - 1.0f;
+            },
+            shape);
+        // Media de la potencia de cada armónico en 24 ventanas de 1/8 de segundo (el ruido varía de una a otra).
+        std::vector<double> power (8, 0.0);
+        const auto length = static_cast<size_t> (sr / 8.0);
+        for (size_t k = 0; k < 24; ++k)
+            for (size_t h = 0; h < power.size(); ++h)
+            {
+                const double a = amplitudeAt (out, static_cast<double> (h + 1) * hz, sr, static_cast<size_t> (sr) + k * length, length);
+                power[h] += a * a;
+            }
+        std::vector<double> levels;
+        for (const double p : power)
+            levels.push_back (std::sqrt (p));
+        return levels;
+    };
+    const auto open = run ({ StringExcitation::sources, 0.0f, 20000.0f });
+    const auto centre = run ({ StringExcitation::sources, 0.5f, 20000.0f });
+    const auto dark = run ({ StringExcitation::sources, 0.0f, 300.0f });
+    const double evenDrop = meanPowerDb (centre, 2, 8, 2) - meanPowerDb (centre, 1, 7, 2);
+    const double openEven = meanPowerDb (open, 2, 8, 2) - meanPowerDb (open, 1, 7, 2);
+    const double darkening = (meanPowerDb (dark, 6, 8, 1) - meanPowerDb (dark, 1, 2, 1))
+                             - (meanPowerDb (open, 6, 8, 1) - meanPowerDb (open, 1, 2, 1));
+    // Lo mismo con la respuesta del paso bajo de 1 polo (bilineal) en cada armónico.
+    std::vector<double> lowPass;
+    const double g = std::tan (pi * 300.0 / sr);
+    for (int h = 1; h <= 8; ++h)
+    {
+        const double t = std::tan (pi * h * hz / sr);
+        lowPass.push_back (g / std::sqrt (g * g + t * t));
+    }
+    const double expected = meanPowerDb (lowPass, 6, 8, 1) - meanPowerDb (lowPass, 1, 2, 1);
+    std::printf ("  pares respecto a impares: sin peine %+.1f dB, Pick Position 50 %% %+.1f dB | Pick Tone 300 Hz: armónicos "
+                 "6-8 respecto a 1-2 %+.1f dB (el paso bajo: %+.1f dB)\n", openEven, evenDrop, darkening, expected);
+    CHECK (std::abs (openEven) < 3.0);
+    CHECK (evenDrop < -25.0);
+    CHECK (std::abs (darkening - expected) < 1.0);
+}
+
+// Voz con Osc A en sierra (Basic Shapes) y la cuerda en modo resonador.
+SourceSettings resonatorSources()
+{
+    SourceSettings sources;
+    sources.subTable = &factoryBank().get (0);
+    for (auto& osc : sources.oscillators)
+    {
+        osc.table = &factoryBank().get (0);
+        osc.position = 2.0f / 3.0f; // sierra
+    }
+    sources.oscillators[0].level = 0.5f;
+    sources.string.enabled = true;
+    sources.string.level = 1.0f;
+    sources.string.decaySeconds = 1.0f;
+    sources.string.damping = 0.3f;
+    sources.string.pluck = { StringExcitation::sources, 0.0f, 20000.0f };
+    return sources;
+}
+
+void testResonatorInVoice()
+{
+    std::printf ("Resonador en la voz: sin fuentes no suena (no hay punteo); una sierra afinada conserva su fundamental; "
+                 "con la cuerda apagada, bit a bit la voz sin cuerda\n");
+
+    constexpr double sr = 48000.0;
+    const int note = 57;
+    const double hz = deepwater::dsp::midiNoteToHz (note);
+    const auto total = static_cast<size_t> (3.0 * sr);
+    const auto play = [&] (const SourceSettings& sources) {
+        auto manager = std::make_unique<VoiceManager>();
+        prepareWithSources (*manager, sr, sources);
+        return playString (*manager, note, 1.0f, total);
+    };
+
+    auto silentSources = resonatorSources();
+    silentSources.oscillators[0].enabled = false;
+    const auto silence = play (silentSources);
+    CHECK (std::all_of (silence.begin(), silence.end(), [] (float x) { return x == 0.0f; }));
+
+    auto dry = resonatorSources();
+    dry.string.enabled = false;
+    const auto drySignal = play (dry);
+    const auto wetSignal = play (resonatorSources());
+    const auto length = static_cast<size_t> (16.0 * sr / hz);
+    const auto ratioDb = [&] (const std::vector<float>& wet, double partialHz) {
+        return toDb (amplitudeAt (wet, partialHz, sr, total - length, length)
+                     / amplitudeAt (drySignal, partialHz, sr, total - length, length));
+    };
+    const double fundamental = ratioDb (wetSignal, hz);
+    const double fifth = ratioDb (wetSignal, 5.0 * hz);
+    std::printf ("  sierra afinada, resonador / directa: fundamental %+.2f dB, 5.º armónico %+.1f dB (Damping 30 %%)\n",
+                 fundamental, fifth);
+    CHECK (std::abs (fundamental) < 1.0);
+    CHECK (fifth < 0.0);
+
+    // Input sube lo que entra: +20 dB a la entrada = +20 dB a la salida (la cuerda es lineal).
+    auto louder = resonatorSources();
+    louder.string.inputDb = 20.0f;
+    const double inputGain = ratioDb (play (louder), hz) - fundamental;
+    std::printf ("  Input +20 dB: el fundamental sube %+.2f dB\n", inputGain);
+    CHECK (std::abs (inputGain - 20.0) < 0.1);
+
+    // Excitation = Sources con la cuerda apagada: la voz es la de siempre (y las perillas de la cuerda no cuentan).
+    auto off = resonatorSources();
+    off.string.enabled = false;
+    off.string.decaySeconds = 25.0f;
+    off.string.pluck.pickPosition = 0.3f;
+    auto offPluck = off;
+    offPluck.string.pluck.excitation = StringExcitation::impulse;
+    CHECK (play (off) == play (offPluck));
+
+    // La cuerda una quinta por debajo de la sierra (String Semi −7): solo pasan los armónicos que coinciden.
+    auto fifthApart = resonatorSources();
+    fifthApart.string.semitones = -7;
+    fifthApart.string.decaySeconds = 3.0f;
+    const auto shifted = play (fifthApart);
+    const double common = ratioDb (shifted, 2.0 * hz); // 2.º de la sierra ≈ 3.º de la cuerda (2 cents de diferencia)
+    const double rejected = ratioDb (shifted, hz);     // fundamental de la sierra: entre el 1.º y el 2.º de la cuerda
+    std::printf ("  cuerda una quinta por debajo de la sierra: 2.º armónico de la sierra (= 3.º de la cuerda) %+.1f dB, "
+                 "su fundamental (entre dos de la cuerda) %+.1f dB\n", common, rejected);
+    CHECK (rejected < common - 15.0);
+
+    // El ruido es casi todo "desafinado": por el resonador baja tanto como estrechos son los picos. Teoría (ruido blanco,
+    // sin Damping): potencia × (1 − g) / (1 + g). Informativo, para el cuaderno.
+    std::printf ("  ruido blanco solo, resonador / directo (A4 de FL, 220 Hz, Damping 30 %%):");
+    for (const float decay : { 0.2f, 0.5f, 2.0f })
+    {
+        auto noisy = resonatorSources();
+        noisy.oscillators[0].enabled = false;
+        noisy.noise.enabled = true;
+        noisy.noise.level = 1.0f;
+        noisy.string.decaySeconds = decay;
+        auto direct = noisy;
+        direct.string.enabled = false;
+        const auto tail = [&] (const std::vector<float>& x) {
+            return rmsOf (std::vector<float> (x.begin() + static_cast<long> (total / 2), x.end()));
+        };
+        const double g = std::pow (10.0, -3.0 / (static_cast<double> (decay) * hz));
+        std::printf (" Decay %.1f s %+.1f dB (teoría %+.1f)%s", decay, toDb (tail (play (noisy)) / tail (play (direct))),
+                     10.0 * std::log10 ((1.0 - g) / (1.0 + g)), decay < 2.0f ? "," : "\n");
+    }
+}
+
+void testResonatorChangesAreClickFree()
+{
+    std::printf ("Resonador: encender/apagar la cuerda, cambiar Excitation, mover Pick Pos / Pick Tone y soltar la tecla "
+                 "no hace clic\n");
+    // Un clic es una segunda diferencia mayor que la de las dos ondas, la de antes y la de después del cambio (la sierra
+    // directa es mucho más "afilada" que la que sale de la cuerda: compararla solo con la de antes no serviría).
+
+    constexpr double sr = 48000.0;
+    const auto settle = static_cast<size_t> (0.5 * sr);
+    const auto window = static_cast<size_t> (0.02 * sr);
+
+    struct Change
+    {
+        const char* name;
+        std::function<void (SourceSettings&)> before, after;
+    };
+    const auto none = [] (SourceSettings&) {};
+    const std::array<Change, 8> changes { {
+        { "String On -> Off", none, [] (SourceSettings& s) { s.string.enabled = false; } },
+        { "String Off -> On", [] (SourceSettings& s) { s.string.enabled = false; }, [] (SourceSettings& s) { s.string.enabled = true; } },
+        { "Sources -> Impulse", none, [] (SourceSettings& s) { s.string.pluck.excitation = StringExcitation::impulse; } },
+        { "Impulse -> Sources", [] (SourceSettings& s) { s.string.pluck.excitation = StringExcitation::impulse; },
+          [] (SourceSettings& s) { s.string.pluck.excitation = StringExcitation::sources; } },
+        { "Pick Pos 0 -> 50 %", none, [] (SourceSettings& s) { s.string.pluck.pickPosition = 0.5f; } },
+        { "Pick Tone 20k -> 300", none, [] (SourceSettings& s) { s.string.pluck.pickToneHz = 300.0f; } },
+        { "Decay 1 s -> 30 s", none, [] (SourceSettings& s) { s.string.decaySeconds = 30.0f; } },
+        { "Input 0 -> +24 dB", none, [] (SourceSettings& s) { s.string.inputDb = 24.0f; } },
+    } };
+
+    float worstRatio = 0.0f;
+    for (const auto& change : changes)
+    {
+        auto sources = resonatorSources();
+        change.before (sources);
+        auto manager = std::make_unique<VoiceManager>();
+        prepareWithSources (*manager, sr, sources);
+        manager->setEnvelopeParameters ({ 0.001f, 0.001f, 1.0f, 2.0f });
+        manager->noteOn (57, 1.0f);
+        std::vector<float> signal (settle + 2 * window, 0.0f);
+        manager->render (signal.data(), static_cast<int> (settle));
+        change.after (sources);
+        manager->setSourceSettings (sources);
+        manager->render (signal.data() + settle, static_cast<int> (2 * window));
+        const float ratio = maxSecondDifference (signal, settle, settle + window)
+                            / std::max (maxSecondDifference (signal, settle - window, settle),
+                                        maxSecondDifference (signal, settle + window, settle + 2 * window));
+        std::printf ("  %-22s segunda diferencia en el cambio / la mayor de las dos ondas: %.2f\n", change.name, ratio);
+        worstRatio = std::max (worstRatio, ratio);
+    }
+
+    // Note-off con el Release de Env 1 en 2 s: el resonador no tiene palma, baja lo mismo que la sierra directa.
+    const auto releaseDrop = [&] (const SourceSettings& sources) {
+        auto manager = std::make_unique<VoiceManager>();
+        prepareWithSources (*manager, sr, sources);
+        manager->setEnvelopeParameters ({ 0.001f, 0.001f, 1.0f, 2.0f });
+        manager->noteOn (57, 1.0f);
+        std::vector<float> signal (settle + window * 5, 0.0f);
+        manager->render (signal.data(), static_cast<int> (settle));
+        manager->noteOff (57);
+        manager->render (signal.data() + settle, static_cast<int> (signal.size() - settle));
+        const double before = rmsOf (std::vector<float> (signal.begin() + static_cast<long> (settle - window),
+                                                         signal.begin() + static_cast<long> (settle)));
+        const double after = rmsOf (std::vector<float> (signal.end() - static_cast<long> (window), signal.end()));
+        return toDb (after / before);
+    };
+    auto dry = resonatorSources();
+    dry.string.enabled = false;
+    const double wetDrop = releaseDrop (resonatorSources()), dryDrop = releaseDrop (dry);
+    std::printf ("  note-off: 0.1 s después %.1f dB con el resonador, %.1f dB la sierra directa (solo el Release de Env 1)\n",
+                 wetDrop, dryDrop);
+    CHECK (worstRatio < 1.25f);
+    CHECK (std::abs (wetDrop - dryDrop) < 1.0);
+}
+
+void testResonatorExtremesAreSafe()
+{
+    std::printf ("Resonador con entrada, frecuencias, Decay, Damping, Stiffness y punteo al azar (y en la voz con S&H): "
+                 "sin NaN y acotado\n");
+
+    std::mt19937 rng (16);
+    std::uniform_real_distribution<float> unit (0.0f, 1.0f);
+    bool finite = true;
+    float peak = 0.0f;
+    for (const double sr : sampleRates)
+    {
+        auto string = std::make_unique<PluckedString>();
+        string->prepare (sr);
+        double phase = 0.0;
+        for (int i = 0; i < 400; ++i)
+        {
+            const double hz = 0.5 * std::pow (1.0e5, unit (rng));
+            string->setFrequency (hz);
+            string->setDecay (0.01f + 40.0f * unit (rng), 4.0f * unit (rng) - 2.0f);
+            string->setDamping (unit (rng));
+            string->setStiffness (1.4f * unit (rng) - 0.2f);
+            string->setResonatorShape ({ StringExcitation::sources, 0.6f * unit (rng) - 0.05f, 30000.0f * unit (rng) });
+            // Entrada: una cuadrada de amplitud 1 a una frecuencia al azar cerca de la cuerda (o lejos), o silencio.
+            const double inputHz = hz * std::exp2 (4.0 * unit (rng) - 2.0);
+            const bool quiet = unit (rng) < 0.2f;
+            for (int k = 0; k < 997; ++k)
+            {
+                phase += inputHz / sr;
+                phase -= std::floor (phase);
+                const float y = string->resonate (quiet ? 0.0f : (phase < 0.5 ? 1.0f : -1.0f));
+                finite = finite && std::isfinite (y);
+                peak = std::max (peak, std::abs (y));
+            }
+        }
+    }
+    std::printf ("  cuerda directa con una cuadrada de amplitud 1: pico %.2f\n", peak);
+
+    auto sources = resonatorSources();
+    sources.noise.enabled = true;
+    sources.sub.enabled = true;
+    sources.oscillators[1].enabled = true;
+    sources.oscillators[1].unison = 5;
+    ModulationSettings modulation;
+    modulation.lfos[0] = { LfoShape::sampleAndHold, LfoMode::free, false, 40.0f, 5 };
+    modulation.slots[0] = { ModSource::lfo1, ModDestination::stringPickPosition, 1.0f };
+    modulation.slots[1] = { ModSource::lfo1, ModDestination::stringPickTone, -1.0f };
+    modulation.slots[2] = { ModSource::lfo1, ModDestination::stringPitch, 1.0f };
+    modulation.slots[3] = { ModSource::lfo1, ModDestination::stringDecay, 1.0f };
+    modulation.slots[4] = { ModSource::lfo1, ModDestination::stringStiffness, 1.0f };
+    float voicePeak = 0.0f;
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        auto manager = stringVoice (sr, sources, modulation);
+        manager->setPolyphony (16);
+        std::vector<float> left (4096), right (4096);
+        for (int block = 0; block < 300; ++block)
+        {
+            sources.string.decaySeconds = 0.05f + 29.95f * unit (rng);
+            sources.string.pluck.excitation = unit (rng) < 0.8f ? StringExcitation::sources : StringExcitation::impulse;
+            sources.string.enabled = unit (rng) < 0.9f;
+            sources.oscillators[0].warpMode = unit (rng) < 0.5f ? undertow::dsp::WarpMode::none : undertow::dsp::WarpMode::sync;
+            manager->setSourceSettings (sources);
+            if (unit (rng) < 0.4f)
+                manager->noteOn (static_cast<int> (unit (rng) * 128.0f) % 128, unit (rng));
+            if (unit (rng) < 0.2f)
+                manager->noteOff (static_cast<int> (unit (rng) * 128.0f) % 128);
+            const int n = 1 + static_cast<int> (unit (rng) * 4095.0f);
+            std::fill (left.begin(), left.end(), 0.0f);
+            std::fill (right.begin(), right.end(), 0.0f);
+            manager->render (left.data(), right.data(), n);
+            for (size_t i = 0; i < static_cast<size_t> (n); ++i)
+            {
+                finite = finite && std::isfinite (left[i]) && std::isfinite (right[i]);
+                voicePeak = std::max (voicePeak, std::abs (left[i]));
+            }
+        }
+    }
+    std::printf ("  voz con S&H a Pick Pos, Pick Tone, String Pitch, Decay y Stiffness (y Excitation / On al azar): pico %.2f\n",
+                 voicePeak);
+    CHECK (finite);
+    CHECK (peak < 4.0f);
+    CHECK (voicePeak < 30.0f);
+}
+
+void testResonatorCpuCost()
+{
+    std::printf ("CPU del resonador (48 kHz, 16 notas, bloques de 256)\n");
+
+    auto sources = resonatorSources();
+    sources.string.enabled = false;
+    const double oscillatorOnly = voiceScenarioCpu (sources, {}, {}, 16);
+    sources.string.enabled = true;
+    const double resonator = voiceScenarioCpu (sources, {}, {}, 16);
+    sources.string.pluck.pickPosition = 0.2f;
+    ModulationSettings moving; // vibrato: el peine de la entrada se recalcula en cada muestra
+    moving.lfos[0] = { LfoShape::sine, LfoMode::retrigger, false, 5.0f, 5 };
+    moving.slots[0] = { ModSource::lfo1, ModDestination::globalPitch, 0.01f };
+    const double modulated = voiceScenarioCpu (sources, {}, moving, 16);
+    std::printf ("  sierra sola %.1f %%, sierra por el resonador %.1f %%, + Pick Position y vibrato %.1f %% de un núcleo\n",
+                 100.0 * oscillatorOnly, 100.0 * resonator, 100.0 * modulated);
+    CHECK (modulated < 0.20);
+}
+
 } // namespace
 
 
 int main (int argc, char** argv)
 {
     std::setvbuf (stdout, nullptr, _IONBF, 0); // sin buffer: si el programa se cae, se ve en qué test fue
-    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 / --fase12 / --fase13 / --fase15
+    // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 / --fase12 / --fase13 / --fase15 /
+    // --fase16
     // (solo los tests de esa fase); --cpu (solo la tabla de CPU de la Fase 11, sin tests).
     bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false, onlyPhase12 = false, onlyPhase13 = false,
-         onlyPhase15 = false;
+         onlyPhase15 = false, onlyPhase16 = false;
     for (int i = 1; i < argc; ++i)
     {
         if (std::string_view (argv[i]) == "--cpu")
@@ -4763,8 +5208,10 @@ int main (int argc, char** argv)
         onlyPhase12 = onlyPhase12 || std::string_view (argv[i]) == "--fase12";
         onlyPhase13 = onlyPhase13 || std::string_view (argv[i]) == "--fase13";
         onlyPhase15 = onlyPhase15 || std::string_view (argv[i]) == "--fase15";
+        onlyPhase16 = onlyPhase16 || std::string_view (argv[i]) == "--fase16";
     }
-    const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9 && ! onlyPhase12 && ! onlyPhase13 && ! onlyPhase15;
+    const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9 && ! onlyPhase12 && ! onlyPhase13 && ! onlyPhase15
+                     && ! onlyPhase16;
     if (all)
     {
         testSegmentTimesAreExactAtEverySampleRate();
@@ -4898,6 +5345,17 @@ int main (int argc, char** argv)
         testStiffnessAppliesOnNextPluck();
         testStiffStringExtremesAreSafe();
         testStiffnessCpuCost();
+    }
+
+    if (all || onlyPhase16)
+    {
+        testResonatorPeakIsUnity();
+        testResonatorRingsOutAndGoesSilent();
+        testPickPositionShapesTheResonator();
+        testResonatorInVoice();
+        testResonatorChangesAreClickFree();
+        testResonatorExtremesAreSafe();
+        testResonatorCpuCost();
     }
 
     if (failures == 0)

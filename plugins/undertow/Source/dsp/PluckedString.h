@@ -8,7 +8,9 @@
 #include <numbers>
 #include <vector>
 
+#include "deepwater/dsp/DcBlocker.h"
 #include "deepwater/dsp/DelayLine.h"
+#include "deepwater/dsp/OnePole.h"
 
 namespace undertow::dsp
 {
@@ -19,9 +21,11 @@ enum class StringExcitation
     whiteNoise,    // ruido blanco: todos los armónicos con la misma fuerza (el sonido de la Fase 12)
     filteredNoise, // ruido por el paso bajo de Pick Tone: una púa más blanda, o un dedo
     impulse,       // un solo golpe (1 muestra) por el mismo paso bajo: siempre igual, sin el "grano" del ruido
+    sources,       // Fase 16: sin punteo; las fuentes de la voz entran sin parar (la cuerda como resonador, ver resonate)
 };
 
 // Cómo es el punteo. Se lee solo al puntear: moverlo con la cuerda sonando cambia la nota siguiente, no esta.
+// Fase 16: con 'sources' no hay punteo; Pick Position y Pick Tone dan forma a la entrada continua y se leen siempre.
 struct PluckShape
 {
     StringExcitation excitation = StringExcitation::whiteNoise;
@@ -80,6 +84,21 @@ struct PluckShape
 // estable como sin él. Una excepción: si la matriz sube tanto la nota que el retardo del all-pass ya no cabe en la vuelta,
 // 'a' se acerca a 0 lo justo (como una cuerda que se tensa: B baja con la tensión), solo en esa dirección. Aunque la nota
 // vuelva a bajar, 'a' no vuelve: el nivel cambia una vez como mucho y no hay paseo al azar.
+//
+// Fase 16: la cuerda como resonador. En vez de un golpe al empezar, una señal entra en el lazo en cada muestra (las
+// fuentes de la voz: osciladores, sub, ruido). El lazo es un filtro peine realimentado: H = 1 / (1 − G·z⁻ᴺ). Donde
+// la vuelta suma una fase de 2π·k (los armónicos de la cuerda) cada vuelta refuerza a la anterior y la ganancia es
+// 1 / (1 − |G|); entre armónicos las vueltas se cancelan, 1 / (1 + |G|). Con un Decay largo |G| roza 1: los picos son
+// altos y estrechos (la cuerda "elige" sus armónicos de lo que le llega) y tardan en llenarse y en vaciarse.
+//
+//   entrada ──► filtro DC ──► Pick Tone (paso bajo) ──► Pick Position (peine) ──► × (1 − |G|) ──(+)──► lazo
+//
+// Nivel: la entrada se multiplica por 1 − |G| (|G| = la ganancia real de la vuelta en el fundamental). Así un tono
+// afinado con la cuerda sale con su mismo nivel en el fundamental, con cualquier Decay, y nunca más fuerte; lo
+// desafinado sale más bajo (ese es el efecto). Probado y descartado: normalizar la potencia del ruido blanco, que
+// deja el ruido igual de fuerte pero sube un tono afinado hasta +40 dB con un Decay largo.
+// El filtro DC (5 Hz) protege la continua: el filtro de lazo la deja pasar más que al fundamental (ver arriba) y
+// con esta normalización saldría hasta ×4.
 class PluckedString
 {
 public:
@@ -103,6 +122,8 @@ public:
         scratch.assign (static_cast<size_t> (maxPeriod), 0.0f);
         smoothingCoef = static_cast<float> (1.0 - std::exp (-1.0 / (smoothingSeconds * sampleRate)));
         muteCoef = static_cast<float> (1.0 - std::exp (-1.0 / (muteSeconds * sampleRate)));
+        inputLine.prepare (maxPeriod / 2 + 8); // Fase 16: el peine de la entrada (como mucho medio período)
+        inputDcBlocker.prepare (inputDcCutoffHz, sampleRate);
         reset();
     }
 
@@ -110,6 +131,12 @@ public:
     void reset() noexcept
     {
         line.reset();
+        inputLine.reset();
+        inputDcBlocker.reset();
+        inputTone.reset();
+        inputPickPosition = targetInputPickPosition;
+        inputLogTone = targetInputLogTone;
+        inputToneDirty = inputCombDirty = true;
         filterState = 0.0f;
         excitationLength = excitationIndex = 0;
         mute = targetMute = 0.0f;
@@ -172,23 +199,11 @@ public:
     void pluck (std::uint32_t seed, const PluckShape& shape = {}) noexcept
     {
         targetMute = 0.0f; // si se estaba apagando, la nota nueva la vuelve a dejar libre
-        if (silent)
-        {
-            // No suena nada: no hay nada que suavizar (y en silencio los deslizamientos no avanzan).
-            logDecay = targetLogDecay;
-            damping = targetDamping;
-            mute = targetMute;
-            // La rigidez de esta vibración: el all-pass existe solo si hace falta (sin él, el cálculo de la Fase 14).
-            clearDispersion();
-            if (targetStiffness > 0.0f)
-            {
-                stiffness = targetStiffness;
-                sections = sectionsForPeriod (sampleRate / clampedFrequency());
-                designPending = true; // updateCoefficients elige 'a' (necesita el filtro de lazo)
-            }
-        }
+        const bool fromSilence = silent;
+        if (fromSilence)
+            wakeUp();
         updateCoefficients();
-        if (silent)
+        if (fromSilence)
             jumpToTargets();
         const int length = std::clamp (static_cast<int> (std::lround (period)), 1, maxPeriod);
         excitationLength = makeExcitation (seed, shape, length);
@@ -202,7 +217,128 @@ public:
     // apaga rápido pero sin corte (un corte seco sería un clic).
     void release() noexcept { targetMute = 1.0f; }
 
-    [[nodiscard]] float processSample() noexcept
+    // Fase 16: deshace la palma (una nota nueva en modo resonador, que no puntea).
+    void letRing() noexcept { targetMute = 0.0f; }
+
+    // Fase 16: Pick Position y Pick Tone de la entrada del resonador. Se deslizan 10 ms (mover el peine de golpe
+    // haría clic); con la matriz se pueden mover con la nota sonando.
+    void setResonatorShape (const PluckShape& shape) noexcept
+    {
+        targetInputPickPosition = std::clamp (shape.pickPosition, 0.0f, maxPickPosition);
+        targetInputLogTone = std::log (std::clamp (shape.pickToneHz, minPickToneHz, maxPickToneHz));
+    }
+
+    // La cuerda sin entrada: lo que ya vibra (un punteo) sigue y se apaga solo.
+    [[nodiscard]] float processSample() noexcept { return tick<false> (0.0f); }
+
+    // Fase 16: una muestra con 'input' entrando en el lazo (ver el comentario de la clase). Una cuerda en silencio
+    // empieza a vibrar cuando llega algo por encima de −100 dB, y vuelve al silencio cuando la entrada y la cola callan.
+    [[nodiscard]] float resonate (float input) noexcept
+    {
+        const float shaped = shapeInput (input);
+        if (silent)
+        {
+            if (std::abs (shaped) < silenceThreshold)
+                return 0.0f;
+            wakeUp();
+            updateCoefficients();
+            jumpToTargets();
+            silent = false;
+            silentCount = 0;
+            quietPeak = 0.0f;
+        }
+        return tick<true> (shaped);
+    }
+
+    // Para los tests.
+    [[nodiscard]] double getPeriod() const noexcept { return period; }
+    [[nodiscard]] double getLoopGain() const noexcept { return targetLoopGain; }
+    [[nodiscard]] double getPole() const noexcept { return 1.0 - targetFeedforward; }
+    [[nodiscard]] double getInputGain() const noexcept { return targetInputGain; }
+    [[nodiscard]] bool isSilent() const noexcept { return silent; }
+    [[nodiscard]] int getDispersionSections() const noexcept { return sections; }
+    [[nodiscard]] std::vector<float> getExcitation() const // el último punteo (reserva memoria: solo tests)
+    {
+        return { excitation.begin(), excitation.begin() + excitationLength };
+    }
+
+    // Polo p de un paso bajo de 1 polo con ganancia 1 en continua, H = (1 − p) / (1 − p·z⁻¹), tal que |H(ω)|² = r.
+    // De (1 − p)² = r·(1 − 2p·cos ω + p²) sale una cuadrática cuyas raíces multiplican 1: la buena es la menor,
+    // p = a / (b + √(b² − a²)) con a = 1 − r, b = 1 − r·cos ω (esta forma no pierde precisión en graves).
+    // 'oneMinusCos' = 1 − cos ω, calculado aparte (= 2·sin²(ω/2)) por la misma razón.
+    [[nodiscard]] static double poleForSquaredGain (double r, double oneMinusCos) noexcept
+    {
+        if (r >= 1.0)
+            return 0.0;
+        r = std::max (r, 0.0);
+        const double a = 1.0 - r;
+        const double b = a + r * oneMinusCos;
+        return a / (b + std::sqrt (std::max (b * b - a * a, 0.0)));
+    }
+
+private:
+    // Empezar a vibrar desde el silencio: no hay nada que suavizar (y en silencio los deslizamientos no avanzan).
+    void wakeUp() noexcept
+    {
+        logDecay = targetLogDecay;
+        damping = targetDamping;
+        mute = targetMute;
+        // La rigidez de esta vibración: el all-pass existe solo si hace falta (sin él, el cálculo de la Fase 14).
+        clearDispersion();
+        if (targetStiffness > 0.0f)
+        {
+            stiffness = targetStiffness;
+            sections = sectionsForPeriod (sampleRate / clampedFrequency());
+            designPending = true; // updateCoefficients elige 'a' (necesita el filtro de lazo)
+        }
+    }
+
+    // Fase 16: la entrada del resonador antes del lazo: filtro DC → Pick Tone → Pick Position (el peine de la
+    // Fase 13, aquí en tiempo real sobre una línea propia). Sin el factor 1 − |G|, que va en tick con su rampa.
+    [[nodiscard]] float shapeInput (float x) noexcept
+    {
+        if (inputLogTone != targetInputLogTone)
+        {
+            glide (inputLogTone, targetInputLogTone, smoothingCoef);
+            inputToneDirty = true;
+        }
+        if (inputPickPosition != targetInputPickPosition)
+        {
+            glide (inputPickPosition, targetInputPickPosition, smoothingCoef);
+            inputCombDirty = true;
+        }
+        if (inputToneDirty) // tan(): solo cuando Pick Tone se mueve
+        {
+            inputToneDirty = false;
+            inputToneCoef = deepwater::dsp::OnePole::coefficientForCutoff (std::exp (static_cast<double> (inputLogTone)),
+                                                                           sampleRate);
+        }
+        if (inputCombDirty) // también con cada cambio del período (un vibrato)
+            updateInputComb();
+
+        x = inputTone.lowPass (inputDcBlocker.process (x), inputToneCoef);
+        inputLine.push (x);
+        if (inputCombWeight > 0.0f)
+            x = (x - inputCombWeight * inputLine.readLagrange (inputCombTaps)) * inputCombNorm;
+        return x;
+    }
+
+    // El peine de la entrada, como en el punteo: D = β·período, peso que sube de 0 a 1 en el primer 5 %, y nivel
+    // dividido por √(1 + w²) (la energía que suma para una entrada de ruido).
+    void updateInputComb() noexcept
+    {
+        inputCombDirty = false;
+        inputCombWeight = std::min (inputPickPosition / fullCombPosition, 1.0f);
+        if (inputCombWeight > 0.0f)
+        {
+            inputCombTaps = deepwater::dsp::LagrangeTaps::forDelay (static_cast<double> (inputPickPosition) * period);
+            inputCombNorm = 1.0f / std::sqrt (1.0f + inputCombWeight * inputCombWeight);
+        }
+    }
+
+    // Una muestra del lazo. 'withInput' (Fase 16) suma la entrada del resonador; sin ella, el cálculo de siempre.
+    template <bool withInput>
+    [[nodiscard]] float tick (float input) noexcept
     {
         if (silent)
             return 0.0f;
@@ -226,6 +362,8 @@ public:
         {
             loopGain += gainStep;
             feedforward += feedforwardStep;
+            if constexpr (withInput)
+                inputGain += inputGainStep;
             if (--rampSamples == 0)
                 jumpToTargets();
         }
@@ -243,6 +381,8 @@ public:
         float y = loopGain * filterState;
         if (excitationIndex < excitationLength)
             y += excitation[static_cast<size_t> (excitationIndex++)];
+        if constexpr (withInput)
+            y += inputGain * input;
         line.push (y);
 
         // Una vuelta entera por debajo de −100 dB: la cuerda ya no se oye y deja de calcularse hasta el próximo punteo.
@@ -258,38 +398,13 @@ public:
         return y;
     }
 
-    // Para los tests.
-    [[nodiscard]] double getPeriod() const noexcept { return period; }
-    [[nodiscard]] double getLoopGain() const noexcept { return targetLoopGain; }
-    [[nodiscard]] double getPole() const noexcept { return 1.0 - targetFeedforward; }
-    [[nodiscard]] bool isSilent() const noexcept { return silent; }
-    [[nodiscard]] int getDispersionSections() const noexcept { return sections; }
-    [[nodiscard]] std::vector<float> getExcitation() const // el último punteo (reserva memoria: solo tests)
-    {
-        return { excitation.begin(), excitation.begin() + excitationLength };
-    }
-
-    // Polo p de un paso bajo de 1 polo con ganancia 1 en continua, H = (1 − p) / (1 − p·z⁻¹), tal que |H(ω)|² = r.
-    // De (1 − p)² = r·(1 − 2p·cos ω + p²) sale una cuadrática cuyas raíces multiplican 1: la buena es la menor,
-    // p = a / (b + √(b² − a²)) con a = 1 − r, b = 1 − r·cos ω (esta forma no pierde precisión en graves).
-    // 'oneMinusCos' = 1 − cos ω, calculado aparte (= 2·sin²(ω/2)) por la misma razón.
-    [[nodiscard]] static double poleForSquaredGain (double r, double oneMinusCos) noexcept
-    {
-        if (r >= 1.0)
-            return 0.0;
-        r = std::max (r, 0.0);
-        const double a = 1.0 - r;
-        const double b = a + r * oneMinusCos;
-        return a / (b + std::sqrt (std::max (b * b - a * a, 0.0)));
-    }
-
-private:
     // Fase 13: escribe la excitación en 'excitation' y devuelve cuántas muestras dura. Pasos:
     //   1. la fuente, de un período: ruido blanco (el de la Fase 12, la misma secuencia) o un golpe de 1 muestra;
     //   2. Pick Tone: paso bajo de 1 polo (solo Filtered Noise e Impulse), circular: el período se repite en la cuerda;
     //   3. quitar la media;
     //   4. Pick Position: el peine x[n] − w·x[n − D], que alarga la excitación D muestras;
     //   5. ajustar el nivel.
+    // (Con 'sources' la voz no puntea; si alguien lo hace, sale como Filtered Noise.)
     int makeExcitation (std::uint32_t seed, const PluckShape& shape, int length) noexcept
     {
         const auto n = static_cast<size_t> (length);
@@ -462,6 +577,7 @@ private:
     {
         lengthDirty = false;
         period = sampleRate / clampedFrequency();
+        inputCombDirty = true;
         if (sections == 0)
         {
             taps = deepwater::dsp::LagrangeTaps::forDelay (period * periodScale - delayOffset);
@@ -618,12 +734,19 @@ private:
         rampSamples = controlInterval;
         gainStep = (targetLoopGain - loopGain) / static_cast<float> (controlInterval);
         feedforwardStep = (targetFeedforward - feedforward) / static_cast<float> (controlInterval);
+
+        // Fase 16: la entrada del resonador × (1 − |G|), con |G| la ganancia real de la vuelta en el modo (la del
+        // lazo × la del filtro y Lagrange): así el pico del fundamental vale 1.
+        targetInputGain = static_cast<float> (std::max (1.0 - static_cast<double> (targetLoopGain) * filterGain, 0.0));
+        inputGainStep = (targetInputGain - inputGain) / static_cast<float> (controlInterval);
+        inputCombDirty = true;
     }
 
     void jumpToTargets() noexcept
     {
         loopGain = targetLoopGain;
         feedforward = targetFeedforward;
+        inputGain = targetInputGain;
         rampSamples = 0;
     }
 
@@ -755,9 +878,21 @@ private:
     static inline const float logMinDecay = std::log (minDecaySeconds);
     static inline const float logMaxDecay = std::log (maxDecaySeconds);
     static inline const float logDecayRange = logMaxDecay - logMinDecay;
+    static inline const float logMaxPickTone = std::log (maxPickToneHz);
+    static constexpr double inputDcCutoffHz = 5.0; // Fase 16: por debajo de la nota más grave (8 Hz)
     static constexpr int controlInterval = 32; // 0.7 ms a 44.1 kHz: la longitud de la línea sí sigue al tono en cada muestra
 
     deepwater::dsp::DelayLine line;
+    // Fase 16: la entrada del resonador.
+    deepwater::dsp::DelayLine inputLine;
+    deepwater::dsp::DcBlocker inputDcBlocker;
+    deepwater::dsp::OnePole inputTone;
+    deepwater::dsp::LagrangeTaps inputCombTaps;
+    float inputToneCoef = 1.0f, inputCombWeight = 0.0f, inputCombNorm = 1.0f;
+    float inputPickPosition = 0.0f, targetInputPickPosition = 0.0f;
+    float inputLogTone = logMaxPickTone, targetInputLogTone = logMaxPickTone;
+    float inputGain = 0.0f, targetInputGain = 0.0f, inputGainStep = 0.0f;
+    bool inputToneDirty = true, inputCombDirty = true;
     std::vector<float> excitation;
     std::vector<float> scratch; // Fase 13: la fuente de la excitación antes del peine
     deepwater::dsp::LagrangeTaps taps;

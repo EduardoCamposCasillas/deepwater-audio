@@ -173,6 +173,7 @@ private:
         std::atomic<float>* pickPosition = nullptr;
         std::atomic<float>* pickTone = nullptr;
         std::atomic<float>* stiffness = nullptr; // Fase 15
+        std::atomic<float>* input = nullptr;     // Fase 16
     };
     StringParams stringParams;
 

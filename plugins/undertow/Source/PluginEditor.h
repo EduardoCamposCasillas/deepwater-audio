@@ -280,9 +280,11 @@ private:
     juce::Label excitationLabel;
     juce::ComboBox excitationBox;
     std::unique_ptr<ComboBoxAttachment> excitationAttachment;
-    std::array<Knob, 2> pluckKnobs; // Pick Position, Pick Tone
+    std::array<Knob, 3> pluckKnobs; // Pick Position, Pick Tone, Input (Fase 16)
     juce::Label pluckHelp;
     std::atomic<float>* excitationParam = nullptr;
+    bool showingResonatorHelp = false; // Fase 16: la ayuda de "Punteo" cambia con Excitation = Sources
+    static juce::String pluckHelpText (bool resonator);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UndertowAudioProcessorEditor)
 };

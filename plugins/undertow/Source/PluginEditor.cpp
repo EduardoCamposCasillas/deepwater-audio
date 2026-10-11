@@ -406,19 +406,12 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
     stringPage.addAndMakeVisible (excitationLabel);
     setUpComboBox (excitationBox, stringPage, id::stringExcitation, excitationAttachment);
     excitationParam = apvts.getRawParameterValue (id::stringExcitation);
-    const std::array<KnobInfo, 2> pluckInfos { { { id::stringPickPosition, "Pick Pos" }, { id::stringPickTone, "Pick Tone" } } };
+    const std::array<KnobInfo, 3> pluckInfos { { { id::stringPickPosition, "Pick Pos" },
+                                                 { id::stringPickTone, "Pick Tone" },
+                                                 { id::stringInput, "Input" } } };
     for (size_t k = 0; k < pluckKnobs.size(); ++k)
         setUpKnob (pluckKnobs[k], stringPage, pluckInfos[k].parameterId, pluckInfos[k].name, knobWidth);
-    pluckHelp.setText (juce::String::fromUTF8 (
-                            "Excitation = con qu\xc3\xa9 se puntea. White Noise: ruido blanco, todos los "
-                            "arm\xc3\xb3nicos (el sonido de siempre). Filtered Noise: el ruido pasa por un paso bajo "
-                            "(Pick Tone): p\xc3\xba" "a blanda o dedo, ataque m\xc3\xa1s redondo. Impulse: un golpe "
-                            "seco por el mismo paso bajo, id\xc3\xa9ntico en cada nota. Pick Position = d\xc3\xb3nde "
-                            "se puntea: 0 % sin efecto; cerca del puente (5-15 %) brillante y nasal; 50 % en el "
-                            "centro: sin arm\xc3\xb3nicos pares, hueco. Pick Position y Pick Tone se leen al puntear: "
-                            "se oyen en la nota siguiente (y la matriz puede moverlos por nota: Velocity \xe2\x86\x92 "
-                            "Pick Tone)."),
-                       juce::dontSendNotification);
+    pluckHelp.setText (pluckHelpText (false), juce::dontSendNotification);
     pluckHelp.setJustificationType (juce::Justification::topLeft);
     pluckHelp.setColour (juce::Label::textColourId, undertow::gui::theme::dimText);
     stringPage.addAndMakeVisible (pluckHelp);
@@ -755,9 +748,43 @@ void UndertowAudioProcessorEditor::timerCallback()
     delayDivisionLabel.setVisible (delaySynced);
 
     // Pick Tone no hace nada con White Noise: se atenúa (sigue aceptando modulación, por si se cambia de excitación).
-    const bool toneUsed = static_cast<int> (excitationParam->load()) != static_cast<int> (undertow::dsp::StringExcitation::whiteNoise);
+    const auto excitation = static_cast<undertow::dsp::StringExcitation> (static_cast<int> (excitationParam->load()));
+    const bool toneUsed = excitation != undertow::dsp::StringExcitation::whiteNoise;
     pluckKnobs[1].slider.setAlpha (toneUsed ? 1.0f : 0.4f);
     pluckKnobs[1].label.setAlpha (toneUsed ? 1.0f : 0.4f);
+
+    // Fase 16: con Sources la cuerda no se puntea; la ayuda explica el resonador. Input solo actúa en ese modo.
+    const bool resonator = excitation == undertow::dsp::StringExcitation::sources;
+    pluckKnobs[2].slider.setAlpha (resonator ? 1.0f : 0.4f);
+    pluckKnobs[2].label.setAlpha (resonator ? 1.0f : 0.4f);
+    if (resonator != showingResonatorHelp)
+    {
+        showingResonatorHelp = resonator;
+        pluckHelp.setText (pluckHelpText (resonator), juce::dontSendNotification);
+    }
+}
+
+juce::String UndertowAudioProcessorEditor::pluckHelpText (bool resonator)
+{
+    if (resonator)
+        return juce::String::fromUTF8 (
+            "Sources = la cuerda como resonador: no se puntea; lo que suena en la voz (osciladores, sub, ruido) entra en "
+            "ella sin parar y sale por ella, y esas fuentes ya no se oyen directas. La cuerda refuerza sus "
+            "arm\xc3\xb3nicos y apaga lo dem\xc3\xa1s: un tono afinado con ella sale igual de fuerte; lo desafinado, "
+            "m\xc3\xa1s bajo. Decay largo = resonancia m\xc3\xa1s estrecha y m\xc3\xa1s lenta (tarda en llenarse y "
+            "en vaciarse). Ruido + Sources = cuerda frotada o soplada. Pick Pos y Pick Tone dan forma a lo que entra y "
+            "se pueden mover con la nota sonando. Input sube lo que entra: con 0 dB un tono afinado sale igual; "
+            "el ruido baja 15-30 dB (casi todo queda fuera) y hay que subirlo. Sin palma: al soltar manda el Release "
+            "de Env 1.");
+    return juce::String::fromUTF8 (
+        "Excitation = con qu\xc3\xa9 se puntea. White Noise: ruido blanco, todos los "
+        "arm\xc3\xb3nicos (el sonido de siempre). Filtered Noise: el ruido pasa por un paso bajo "
+        "(Pick Tone): p\xc3\xba" "a blanda o dedo, ataque m\xc3\xa1s redondo. Impulse: un golpe "
+        "seco por el mismo paso bajo, id\xc3\xa9ntico en cada nota. Sources: la cuerda como resonador de las "
+        "dem\xc3\xa1s fuentes. Pick Position = d\xc3\xb3nde se puntea: 0 % sin efecto; cerca del puente (5-15 %) "
+        "brillante y nasal; 50 % en el centro: sin arm\xc3\xb3nicos pares, hueco. Pick Position y Pick Tone se leen "
+        "al puntear: se oyen en la nota siguiente (y la matriz puede moverlos por nota: Velocity \xe2\x86\x92 "
+        "Pick Tone).");
 }
 
 void UndertowAudioProcessorEditor::paint (juce::Graphics& g)
@@ -1086,7 +1113,7 @@ void UndertowAudioProcessorEditor::layoutContent()
         // Fila 2 (Fase 13): el punteo (selector y 2 perillas) y su explicación al lado.
         auto row = page.removeFromTop (rowHeight);
         page.removeFromTop (groupPadding);
-        auto pluckArea = row.removeFromLeft (groupPadding * 2 + effectColumnWidth + 2 * knobWidth);
+        auto pluckArea = row.removeFromLeft (groupPadding * 2 + effectColumnWidth + 3 * knobWidth);
         pluckGroup.setBounds (pluckArea);
         auto pluckInner = innerOf (pluckArea);
         auto column = pluckInner.removeFromLeft (effectColumnWidth).withTrimmedRight (8);

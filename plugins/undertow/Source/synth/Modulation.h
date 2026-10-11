@@ -75,7 +75,7 @@ inline constexpr std::array<const char*, 27> modDestinationNames {
     "String Pitch",     // como los Pitch de los osciladores: 100 % = ±24 semitonos
     "String Decay",     // 100 % = toda la perilla, en su escala logarítmica
     "String Damping",
-    "String Pick Pos",  // Pick Position y Pick Tone solo se leen al puntear (el valor de la nota cuando empieza)
+    "String Pick Pos",  // al puntear (el valor de la nota cuando empieza); con Excitation = Sources, siempre (Fase 16)
     "String Pick Tone", // 100 % = toda la perilla (200 Hz - 20 kHz, logarítmica)
     "String Stiffness", // 100 % = toda la perilla; se lee al puntear la cuerda en silencio (no al redisparar)
 };

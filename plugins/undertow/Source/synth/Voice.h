@@ -13,6 +13,7 @@
 #include "dsp/WavetableOscillator.h"
 #include "synth/Modulation.h"
 #include "synth/SourceSettings.h"
+#include "deepwater/dsp/Decibels.h"
 #include "deepwater/dsp/Halfband.h"
 #include "deepwater/dsp/Pitch.h"
 
@@ -237,6 +238,8 @@ public:
             string.reset();
             stringLevel.snap (sourceSettings.string.enabled, sourceSettings.string.level);
             stringTuning = sourceSettings.string.tuningSemitones();
+            stringResonance = wantsResonator() ? 1.0f : 0.0f;
+            stringInputGain = deepwater::dsp::dbToGain (sourceSettings.string.inputDb);
 
             filter.reset();
             filterStereo = false;
@@ -256,8 +259,12 @@ public:
         // puntear una cuerda que todavía suena). Apagada no se puntea: encenderla después no suena hasta la nota siguiente.
         // Fase 13: el punteo se hace en la primera muestra de la nota (en renderSources), después de calcular la
         // matriz: así Velocity → Pick Tone, String Pitch o Global Pitch ya valen lo de esta nota al puntear.
-        pendingPluck = sourceSettings.string.enabled;
+        // Fase 16: en modo resonador (Excitation = Sources) no hay punteo: la cuerda vibra con lo que le llega de las
+        // fuentes. Una nota nueva le quita la palma de la anterior.
+        pendingPluck = sourceSettings.string.enabled && ! isResonatorMode();
         pluckSeed = seed ^ 0x5D1A6E2Bu;
+        if (isResonatorMode())
+            string.letRing();
 
         // Retrigger / One Shot: cada nota reinicia el LFO. (En modo Free, render lo vuelve a alinear con el reloj común.)
         for (size_t l = 0; l < lfos.size(); ++l)
@@ -275,7 +282,10 @@ public:
         envelope.noteOff();
         envelope2.noteOff();
         envelope3.noteOff();
-        string.release(); // apagar la cuerda con la palma (ver PluckedString::release)
+        // Apagar la cuerda con la palma (ver PluckedString::release). Fase 16: el resonador no: lo que le llega sigue
+        // sonando durante el Release de Env 1, y su cola también; apagarlo de golpe cambiaría el timbre al soltar.
+        if (! isResonatorMode())
+            string.release();
     }
 
     // Tecla soltada con el pedal pisado: la nota sigue en sustain hasta levantar el pedal.
@@ -619,6 +629,15 @@ private:
         }
         pendingPluck = false;
 
+        // Fase 16: en modo resonador la cuerda no se suma con las demás fuentes: las recibe (feedString). El paso
+        // entre los dos papeles (encender/apagar la cuerda, cambiar Excitation con la nota sonando) es un fundido de 5 ms.
+        SourceLevel::glide (stringResonance, wantsResonator() ? 1.0f : 0.0f, smoothingCoef);
+        if (! frame.stringAudible)
+            stringResonance = 0.0f;
+        const bool resonating = stringResonance > 0.0f;
+        if (resonating)
+            frame.stringAudible = false;
+
         if (! complexPath)
         {
             mixSources (frame, left, right, stereo);
@@ -627,9 +646,17 @@ private:
                 left *= duckGain;
                 right *= duckGain;
             }
-            return;
         }
+        else
+        {
+            renderModulatedSources (frame, left, right, stereo);
+        }
+        if (resonating)
+            feedString (frame.stringGain, left, right, stereo);
+    }
 
+    void renderModulatedSources (const SourceFrame& frame, float& left, float& right, bool stereo) noexcept
+    {
         // Camino de la Fase 7: las fuentes se calculan 'oversampling' veces por muestra de salida y el decimador
         // halfband vuelve a la frecuencia del host quitando todo lo que está por encima de ~20 kHz.
         // El fundido de updateDuck se aplica ANTES del decimador: así la señal le llega ya suavizada (si se aplicara
@@ -653,6 +680,26 @@ private:
         if (stereo)
             right += decimators[1].process (fastRight[0], fastRight[1]);
     }
+
+    // Fase 16: la cuerda como resonador. La mezcla de las fuentes (en mono: la cuerda es mono) entra en la cuerda y
+    // sale por ella; con 'stringResonance' entre 0 y 1 (el fundido), una parte sigue sonando directa.
+    void feedString (float gain, float& left, float& right, bool stereo) noexcept
+    {
+        string.setResonatorShape (modulatedPluckShape());
+        SourceLevel::glide (stringInputGain, deepwater::dsp::dbToGain (sourceSettings.string.inputDb), smoothingCoef);
+        const float input = stringInputGain * stringResonance * (stereo ? 0.5f * (left + right) : left);
+        const float wet = gain * string.resonate (input);
+        const float dry = 1.0f - stringResonance;
+        left = dry * left + wet;
+        right = dry * right + wet;
+    }
+
+    [[nodiscard]] bool isResonatorMode() const noexcept
+    {
+        return sourceSettings.string.pluck.excitation == dsp::StringExcitation::sources;
+    }
+
+    [[nodiscard]] bool wantsResonator() const noexcept { return sourceSettings.string.enabled && isResonatorMode(); }
 
     // Suma de las 4 fuentes, cada una con su nivel. Sub y ruido son mono (van igual a los dos canales).
     // Sin warp ni FM/RM: es exactamente la mezcla de la Fase 6.
@@ -903,6 +950,8 @@ private:
     float appliedStringDecay = -1.0f, appliedStringDecayModulation = 0.0f, appliedStringDamping = -1.0f; // -1: sin aplicar
     float appliedStringStiffness = -1.0f;
     bool pendingPluck = false;      // Fase 13: puntear en la primera muestra de la nota
+    float stringResonance = 0.0f;   // Fase 16: 1 = las fuentes pasan por la cuerda (resonador); 0 = suenan directas
+    float stringInputGain = 1.0f;   // Fase 16: Input (lineal, suavizado)
     std::uint32_t pluckSeed = 0;
     double appliedStringNote = 0.0;
     float smoothingCoef = 1.0f; // 5 ms, para niveles y afinación

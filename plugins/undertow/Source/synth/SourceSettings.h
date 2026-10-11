@@ -104,7 +104,8 @@ struct NoiseSettings
 };
 
 // Fase 13: el orden coincide con dsp::StringExcitation y se guarda (índice): solo añadir al final.
-inline constexpr std::array<const char*, 3> stringExcitationNames { "White Noise", "Filtered Noise", "Impulse" };
+// Fase 16: "Sources" = la cuerda como resonador de las demás fuentes de la voz.
+inline constexpr std::array<const char*, 4> stringExcitationNames { "White Noise", "Filtered Noise", "Impulse", "Sources" };
 
 // Fase 12: cuerda pulsada (Karplus-Strong). Una fuente más de la voz, como el sub y el ruido: mono, a la frecuencia del
 // host (no pasa por el camino sobremuestreado del warp/FM) y apagada por defecto.
@@ -121,6 +122,9 @@ struct StringSettings
     dsp::PluckShape pluck;
     // Fase 15: rigidez (0 = cuerda ideal, armónica: el sonido de la Fase 14; 1 = campana). B = 0.05·stiffness⁴.
     float stiffness = 0.0f;
+    // Fase 16: con Excitation = Sources, ganancia de lo que entra en la cuerda (0 dB = un tono afinado sale igual de
+    // fuerte; subirla compensa lo que la cuerda deja fuera, p. ej. el ruido).
+    float inputDb = 0.0f;
 
     [[nodiscard]] float tuningSemitones() const noexcept
     {
