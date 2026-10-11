@@ -83,7 +83,7 @@ warp/FM), un solo juego de parámetros, y apagada no se calcula.
       note-off con "palma", afinación < 1 cent (MIDI 12–96, 4 sample rates), pestaña "Cuerda".
 - [x] Fase 13 — Excitación: Pick Position (peine en la excitación), ruido filtrado (tono de la púa) e impulso;
       destinos de la matriz (al final): String Level, Pitch, Decay, Damping, Pick Position, Pick Tone.
-- [ ] Fase 14 — Presets de cuerda (guitarra, koto, arpa, plucks) con notas, y APRENDIZAJE.md.
+- [x] Fase 14 — Presets de cuerda (guitarra, koto, arpa, plucks) con notas, y APRENDIZAJE.md.
 - [ ] Fase 15 (opcional) — Stiffness / inharmonicidad (all-pass de dispersión en el lazo).
 - [ ] Fase 16 (opcional) — La cuerda como resonador: excitación = las fuentes de la voz (opción al final de la lista).
 
@@ -538,7 +538,7 @@ la cuerda con White Noise y Pick Position 0 % suena igual que en la Fase 12 (hue
   Fase 12 (bucles dependientes: paso bajo, sumas); con D < 2 muestras (Pick Position muy bajo en notas muy agudas) la
   compensación de nivel es aproximada.
 
-Fase 14 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Sin cambios en el motor: solo presets y cuaderno.
+Fase 14 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. Sin cambios en el motor: solo presets y cuaderno.
 - 6 presets de fábrica nuevos en `Presets/Factory/Pluck/` (49 en total): Guitarra Nylon, Guitarra Acústica Acero, Koto,
   Arpa de Concierto, Pluck Cuerda Pop (cuerda + sierra con unison) y Kalimba de Madera. Categoría Pluck (las
   categorías no cambian); las notas empiezan por "Instrumento: …" o "Género: …" y dicen "cuerda pulsada".
