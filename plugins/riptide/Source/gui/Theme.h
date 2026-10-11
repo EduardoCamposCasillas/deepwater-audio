@@ -15,6 +15,7 @@ inline const juce::Colour track { 0xff2c3540 };    // recorrido "vacío" de las 
 inline const juce::Colour text { 0xffe3e9ef };
 inline const juce::Colour dimText { 0xff8794a1 };
 inline const juce::Colour accent { 0xffff7a45 };   // valor de las perillas
+inline const juce::Colour modulation { 0xff4fc3d9 }; // lo que mueven la envolvente y el LFO (frío, para distinguirlo)
 
 // Medidores: verde = nivel cómodo, ámbar = cerca del máximo, rojo = por encima de 0 dBFS (se recorta al exportar).
 inline const juce::Colour meterSafe { 0xff4caf7d };

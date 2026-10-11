@@ -4,7 +4,8 @@
 
 namespace
 {
-constexpr int editorWidth = 900;
+constexpr int modulationWidth = 250;
+constexpr int editorWidth = 900 + modulationWidth + 12;
 constexpr int editorHeight = 760;
 constexpr int headerHeight = 44;
 constexpr int padding = 12;
@@ -23,6 +24,8 @@ constexpr int crossoverColumnWidth = 76;
 constexpr int bandKnobSize = 54;
 constexpr int bandStripHeight = 186;
 constexpr int levelKnobsHeight = 132;
+constexpr int modKnobSize = 50;
+constexpr int modRowHeight = 16 + modKnobSize + 18;
 
 // "80 Hz", "2.5 kHz" o "20 kHz".
 juce::String formatHz (float hz)
@@ -193,6 +196,40 @@ RiptideAudioProcessorEditor::RiptideAudioProcessorEditor (RiptideAudioProcessor&
     bandCountAttachment->sendInitialUpdate();
     updateBandReadouts();
 
+    // Modulación.
+    setUpSectionLabel (modulationSection, juce::String::fromUTF8 ("MODULACI\xc3\x93N"));
+    setUpSectionLabel (envelopeTitle, "ENVOLVENTE");
+    setUpSectionLabel (lfoTitle, "LFO");
+    for (auto* title : { &envelopeTitle, &lfoTitle })
+        title->setColour (juce::Label::textColourId, riptide::gui::theme::modulation);
+    setUpKnob (envAttackKnob, id::envAttack, "Attack", juce::String::fromUTF8 ("Cu\xc3\xa1nto tarda la envolvente en subir cuando la se\xc3\xb1" "al se pone fuerte. Corto (0.1-2 ms): reacciona a cada transitorio (el golpe del bombo ya sale modulado). Largo (20-100 ms): deja pasar el golpe y reacciona despu\xc3\xa9s."));
+    setUpKnob (envReleaseKnob, id::envRelease, "Release", juce::String::fromUTF8 ("Cu\xc3\xa1nto tarda en bajar cuando la se\xc3\xb1" "al se calma (cae 8.7 dB cada vez que pasa este tiempo). Corto: sigue cada nota y puede ondular con los graves; largo: suave, pero tarda en soltar."));
+    setUpKnob (envSensitivityKnob, id::envSensitivity, "Sens", juce::String::fromUTF8 ("Sensibilidad: ganancia del detector. La envolvente va de 0 (se\xc3\xb1" "al a -40 dBFS o menos) a 1 (0 dBFS). S\xc3\xba" "bela si tu pista es baja: con +12 dB llega al m\xc3\xa1ximo a -12 dBFS. La barra de arriba muestra cu\xc3\xa1nto marca."));
+    setUpRoute (envelopeRoute, id::envTarget, id::envAmount, "la envolvente");
+
+    setUpCaption (lfoShapeLabel, "FORMA");
+    lfoShapeBox.addItemList (processor.getParameters().getParameter (id::lfoShape)->getAllValueStrings(), 1);
+    lfoShapeBox.setTooltip (juce::String::fromUTF8 ("Forma del LFO. Sine/Triangle: un vaiv\xc3\xa9n suave. Saw: sube (o baja) y vuelve de golpe. Square: salta entre dos valores (redondeado 2 ms, sin clics). Sample & Hold: un valor al azar en cada ciclo."));
+    addAndMakeVisible (lfoShapeBox);
+    lfoShapeAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), id::lfoShape, lfoShapeBox);
+    setUpToggle (lfoSyncButton, lfoSyncAttachment, id::lfoSync, juce::String::fromUTF8 ("SYNC encendido: la velocidad es una figura musical (1/4, 1/8 T...) al tempo de FL, y con la canci\xc3\xb3n sonando el LFO cae en el pulso. Apagado: velocidad libre en Hz."));
+    lfoSyncButton.onStateChange = [this] { showLfoSync (lfoSyncButton.getToggleState()); };
+    setUpKnob (lfoRateKnob, id::lfoRate, "Rate", juce::String::fromUTF8 ("Velocidad del LFO en ciclos por segundo (sin SYNC). 0.1-1 Hz: un movimiento lento que se siente como \"respiraci\xc3\xb3n\"; 4-8 Hz: tr\xc3\xa9molo; m\xc3\xa1s r\xc3\xa1pido, un aleteo."));
+    setUpCaption (lfoDivisionLabel, juce::String::fromUTF8 ("DIVISI\xc3\x93N"));
+    lfoDivisionBox.addItemList (processor.getParameters().getParameter (id::lfoDivision)->getAllValueStrings(), 1);
+    lfoDivisionBox.setTooltip (juce::String::fromUTF8 ("Duraci\xc3\xb3n de un ciclo del LFO en figuras musicales: 1/4 = una negra, 1 bar = un comp\xc3\xa1s. T = tresillo, D = con puntillo."));
+    addAndMakeVisible (lfoDivisionBox);
+    lfoDivisionAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), id::lfoDivision, lfoDivisionBox);
+    setUpRoute (lfoRoute, id::lfoTarget, id::lfoAmount, "el LFO");
+    showLfoSync (lfoSyncButton.getToggleState());
+
+    modulationHelp.setText (juce::String::fromUTF8 ("Amount 100 % = todo el recorrido de la perilla destino. El arco celeste en esa perilla muestra hasta d\xc3\xb3nde la mueve. Con AUTO GAIN, mover el drive cambia el car\xc3\xa1" "cter y no el volumen."),
+                            juce::dontSendNotification);
+    modulationHelp.setFont (juce::FontOptions (11.0f));
+    modulationHelp.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
+    modulationHelp.setJustificationType (juce::Justification::topLeft);
+    addAndMakeVisible (modulationHelp);
+
     setSize (editorWidth, editorHeight);
     lastFrameMs = juce::Time::getMillisecondCounterHiRes();
     startTimerHz (framesPerSecond);
@@ -303,6 +340,106 @@ void RiptideAudioProcessorEditor::updateBandReadouts()
     }
 }
 
+void RiptideAudioProcessorEditor::setUpRoute (RouteControls& route, const char* targetId, const char* amountId,
+                                              const juce::String& source)
+{
+    setUpCaption (route.targetLabel, "DESTINO");
+    route.target.addItemList (processor.getParameters().getParameter (targetId)->getAllValueStrings(), 1);
+    route.target.setTooltip (juce::String::fromUTF8 ("Qu\xc3\xa9 perilla mueve ") + source + juce::String::fromUTF8 (". Drive = el Input (cu\xc3\xa1nto satura todo); Band N Drive = solo esa banda; Mix, Emphasis, Emph Freq y Tilt = esas perillas. Cambiarlo hace un fundido de 20 ms."));
+    addAndMakeVisible (route.target);
+    route.targetAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), targetId, route.target);
+    setUpKnob (route.amount, amountId, "Amount",
+               juce::String::fromUTF8 ("Cu\xc3\xa1nto mueve ") + source + juce::String::fromUTF8 (" al destino. 100 % = todo el recorrido de su perilla (en Drive, 48 dB); 25 % = un cuarto. Negativo = en sentido contrario (con la envolvente: lo fuerte satura MENOS). En 0 no hace nada."));
+}
+
+// Etiqueta chica sobre un selector ("DESTINO", "FORMA").
+void RiptideAudioProcessorEditor::setUpCaption (juce::Label& label, const juce::String& text)
+{
+    label.setText (text, juce::dontSendNotification);
+    label.setJustificationType (juce::Justification::centredLeft);
+    label.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+    label.setColour (juce::Label::textColourId, riptide::gui::theme::dimText);
+    addAndMakeVisible (label);
+}
+
+void RiptideAudioProcessorEditor::showLfoSync (bool sync)
+{
+    // Con SYNC se elige una figura (división); sin SYNC, la velocidad en Hz. Solo se ve el control que cuenta.
+    lfoRateKnob.slider.setVisible (! sync);
+    lfoRateKnob.label.setVisible (! sync);
+    lfoDivisionBox.setVisible (sync);
+    lfoDivisionLabel.setVisible (sync);
+}
+
+juce::Slider* RiptideAudioProcessorEditor::targetSlider (riptide::dsp::ModTarget target) noexcept
+{
+    using riptide::dsp::ModTarget;
+    switch (target)
+    {
+        case ModTarget::drive:        return &inputKnob.slider;
+        case ModTarget::mix:          return &mixKnob.slider;
+        case ModTarget::emphasis:     return &emphasisKnob.slider;
+        case ModTarget::emphasisFreq: return &emphasisFreqKnob.slider;
+        case ModTarget::tilt:         return &tiltKnob.slider;
+        case ModTarget::band1Drive:
+        case ModTarget::band2Drive:
+        case ModTarget::band3Drive:
+        case ModTarget::band4Drive:
+            return &bandStrips[static_cast<size_t> (static_cast<int> (target) - static_cast<int> (ModTarget::band1Drive))].drive;
+    }
+    return nullptr;
+}
+
+void RiptideAudioProcessorEditor::updateModulation()
+{
+    using riptide::dsp::ModTarget;
+    // Barras de las fuentes (solo se redibuja su rectángulo).
+    const float envelope = processor.getEnvelopeValue();
+    const float lfo = processor.getLfoValue();
+    if (std::abs (envelope - shownEnvelope) > 0.002f || std::abs (lfo - shownLfo) > 0.002f)
+    {
+        shownEnvelope = envelope;
+        shownLfo = lfo;
+        repaint (envelopeBar.expanded (2));
+        repaint (lfoBar.expanded (2));
+    }
+
+    // El arco de cada perilla destino: su valor + la modulación, en las unidades de esa perilla y dentro de su rango.
+    const auto& property = riptide::gui::RiptideLookAndFeel::modulationProperty;
+    for (int t = 0; t < riptide::dsp::numModTargets; ++t)
+    {
+        const auto target = static_cast<ModTarget> (t);
+        auto* slider = targetSlider (target);
+        if (slider == nullptr)
+            continue;
+        const float offset = processor.getModulation (target);
+        if (offset == 0.0f)
+        {
+            if (slider->getProperties().contains (property))
+            {
+                slider->getProperties().remove (property);
+                slider->repaint();
+            }
+            continue;
+        }
+        double value = slider->getValue();
+        switch (target)
+        {
+            case ModTarget::mix:          value += 100.0 * offset; break;             // la perilla está en %
+            case ModTarget::emphasisFreq: value *= std::exp2 (static_cast<double> (offset)); break; // octavas
+            default:                      value += offset; break;                     // dB
+        }
+        value = juce::jlimit (slider->getMinimum(), slider->getMaximum(), value);
+        const double position = slider->valueToProportionOfLength (value);
+        const auto* previous = slider->getProperties().getVarPointer (property);
+        if (previous == nullptr || std::abs (static_cast<double> (*previous) - position) > 0.002)
+        {
+            slider->getProperties().set (property, position);
+            slider->repaint();
+        }
+    }
+}
+
 void RiptideAudioProcessorEditor::setUpSectionLabel (juce::Label& label, const juce::String& text)
 {
     label.setText (text, juce::dontSendNotification);
@@ -330,6 +467,7 @@ void RiptideAudioProcessorEditor::timerCallback()
     outputMeter.update (channels, elapsed);
     updateAutoGainReadout();
     updateBandReadouts();
+    updateModulation();
 }
 
 void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
@@ -343,23 +481,66 @@ void RiptideAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("RIPTIDE", header.removeFromLeft (110), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("saturador  -  Fase 6", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
+    g.drawText ("saturador  -  Fase 7", header.withTrimmedRight (oversamplingLabel.getRight() - oversamplingLabel.getX() + 180),
                 juce::Justification::centredLeft);
 
-    // Panel de las perillas, entre los dos medidores.
-    const auto body = getLocalBounds().withTrimmedTop (headerHeight).reduced (padding);
-    auto knobsPanel = body.reduced (meterWidth + padding, 0).toFloat();
-    g.setColour (theme::panel);
-    g.fillRoundedRectangle (knobsPanel, 8.0f);
-    g.setColour (theme::panelOutline);
-    g.drawRoundedRectangle (knobsPanel.reduced (0.5f), 8.0f, 1.0f);
+    // Paneles de las perillas y de la modulación, entre los dos medidores.
+    auto knobsPanel = mainArea.toFloat();
+    for (const auto panel : { knobsPanel, modulationArea.toFloat() })
+    {
+        g.setColour (theme::panel);
+        g.fillRoundedRectangle (panel, 8.0f);
+        g.setColour (theme::panelOutline);
+        g.drawRoundedRectangle (panel.reduced (0.5f), 8.0f, 1.0f);
+    }
     paintBands (g);
+    paintModulation (g);
 
     // Flecha del recorrido de la señal: IN → perillas → OUT.
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
     g.drawText (juce::String::fromUTF8 ("input \xe2\x86\x92 PRE \xe2\x86\x92 emphasis \xe2\x86\x92 BANDAS (drive \xc2\xb7 modo \xc2\xb7 auto gain) \xe2\x86\x92 de-emph. \xe2\x86\x92 POST \xe2\x86\x92 tilt \xe2\x86\x92 mix \xe2\x86\x92 delta \xe2\x86\x92 output"),
                 knobsPanel.removeFromBottom (static_cast<float> (signalFlowHeight)), juce::Justification::centred);
+}
+
+void RiptideAudioProcessorEditor::paintModulation (juce::Graphics& g)
+{
+    using namespace riptide::gui;
+    // Separador entre la envolvente y el LFO.
+    g.setColour (theme::panelOutline);
+    g.drawHorizontalLine (separatorY, static_cast<float> (modulationArea.getX() + 10), static_cast<float> (modulationArea.getRight() - 10));
+
+    // Envolvente: barra de 0 a 1 desde la izquierda. LFO: desde el centro, hacia la derecha si es positivo.
+    for (const auto* bar : { &envelopeBar, &lfoBar })
+    {
+        const auto area = bar->toFloat();
+        g.setColour (theme::display);
+        g.fillRoundedRectangle (area, 3.0f);
+        g.setColour (theme::modulation);
+        if (bar == &envelopeBar)
+        {
+            g.fillRoundedRectangle (area.withWidth (area.getWidth() * juce::jlimit (0.0f, 1.0f, shownEnvelope)), 3.0f);
+        }
+        else
+        {
+            const float half = area.getWidth() * 0.5f * juce::jlimit (-1.0f, 1.0f, shownLfo);
+            const float centre = area.getCentreX();
+            g.fillRect (juce::Rectangle<float> (juce::jmin (centre, centre + half), area.getY(), std::abs (half), area.getHeight()));
+            g.setColour (theme::dimText.withAlpha (0.6f));
+            g.drawVerticalLine (juce::roundToInt (centre), area.getY(), area.getBottom());
+        }
+    }
+}
+
+void RiptideAudioProcessorEditor::layOutRoute (RouteControls& route, juce::Rectangle<int> area)
+{
+    // Destino a la izquierda (etiqueta + selector, centrados en la fila) y Amount a la derecha.
+    auto knob = area.removeFromRight (area.getWidth() * 2 / 5);
+    route.amount.label.setBounds (knob.removeFromTop (16));
+    route.amount.slider.setBounds (knob);
+    auto left = area.withSizeKeepingCentre (area.getWidth() - 8, 16 + 24);
+    route.targetLabel.setBounds (left.removeFromTop (16));
+    route.target.setBounds (left.removeFromTop (24));
 }
 
 void RiptideAudioProcessorEditor::paintBands (juce::Graphics& g)
@@ -388,9 +569,60 @@ void RiptideAudioProcessorEditor::resized()
     auto body = getLocalBounds().withTrimmedTop (headerHeight).reduced (padding);
     inputMeter.setBounds (body.removeFromLeft (meterWidth));
     outputMeter.setBounds (body.removeFromRight (meterWidth));
+    body.reduce (padding, 0);
+    modulationArea = body.removeFromRight (modulationWidth);
+    body.removeFromRight (padding);
+    mainArea = body;
+
+    // Modulación: ENVOLVENTE (título y barra, Attack | Release | Sens, destino y Amount) y LFO (título y barra, forma y
+    // SYNC | Rate o división, destino y Amount).
+    {
+        auto column = modulationArea.reduced (10, padding);
+        modulationSection.setBounds (column.removeFromTop (sectionLabelHeight));
+        column.removeFromTop (6);
+        auto envelopeHeader = column.removeFromTop (20);
+        envelopeBar = envelopeHeader.removeFromRight (110).withSizeKeepingCentre (110, 8);
+        envelopeTitle.setBounds (envelopeHeader);
+        column.removeFromTop (4);
+        auto envelopeKnobs = column.removeFromTop (modRowHeight);
+        const int third = envelopeKnobs.getWidth() / 3;
+        for (auto* knob : { &envAttackKnob, &envReleaseKnob, &envSensitivityKnob })
+        {
+            auto cell = envelopeKnobs.removeFromLeft (third);
+            knob->label.setBounds (cell.removeFromTop (16));
+            knob->slider.setBounds (cell);
+        }
+        column.removeFromTop (6);
+        layOutRoute (envelopeRoute, column.removeFromTop (modRowHeight));
+
+        column.removeFromTop (10);
+        separatorY = column.getY();
+        column.removeFromTop (10);
+        auto lfoHeader = column.removeFromTop (20);
+        lfoBar = lfoHeader.removeFromRight (110).withSizeKeepingCentre (110, 8);
+        lfoTitle.setBounds (lfoHeader);
+        column.removeFromTop (4);
+        auto lfoRow = column.removeFromTop (modRowHeight);
+        auto speed = lfoRow.removeFromRight (lfoRow.getWidth() * 2 / 5);
+        lfoRateKnob.label.setBounds (speed.removeFromTop (16));
+        lfoRateKnob.slider.setBounds (speed);
+        auto division = lfoRateKnob.slider.getBounds().withSizeKeepingCentre (speed.getWidth(), 16 + 24);
+        lfoDivisionLabel.setBounds (division.removeFromTop (16));
+        lfoDivisionBox.setBounds (division.removeFromTop (24).reduced (2, 0));
+        auto shape = lfoRow.withSizeKeepingCentre (lfoRow.getWidth() - 8, 16 + 24 + 6 + 24);
+        lfoShapeLabel.setBounds (shape.removeFromTop (16));
+        lfoShapeBox.setBounds (shape.removeFromTop (24));
+        shape.removeFromTop (6);
+        lfoSyncButton.setBounds (shape.removeFromTop (24).removeFromLeft (70));
+        column.removeFromTop (6);
+        layOutRoute (lfoRoute, column.removeFromTop (modRowHeight));
+
+        column.removeFromTop (14);
+        modulationHelp.setBounds (column.removeFromTop (70));
+    }
 
     // Modos: dos filas de tres botones y la descripción del activo.
-    auto panel = body.reduced (padding, padding);
+    auto panel = mainArea.reduced (0, padding);
     for (int row = 0; row < 2; ++row)
     {
         auto line = panel.removeFromTop (modeButtonHeight);

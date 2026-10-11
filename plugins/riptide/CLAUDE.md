@@ -28,11 +28,12 @@ un plugin de nivel profesional y que él entienda cada parte y sepa cuándo y c�
 - `Crossover.h` (Fase 6): crossover Linkwitz-Riley de 24 dB/oct, su allpass y el divisor multibanda con suma plana.
 - `OnePole.h`: filtro de 1 polo TPT (pre/de-énfasis de Tape, high-pass de Rectify) y `TiltFilter` (Fase 4).
 - `Smoothing.h`: suavizado de gain, drive y mix; fundidos de bypass.
+- `Lfo.h` (Fase 7, movido desde Undertow) y `EnvelopeFollower.h` (Fase 7): las fuentes de modulación.
 - `FastMath.h` (`fastTanh`), `Fft.h` (analizador fuera del hilo de audio), `Simd.h`.
 
-Todo DSP nuevo que sirva para futuros plugins (EQ, compresor, delay, reverb) va en la librería, con tests. Candidatos
-que hoy están en Undertow y podrían moverse cuando haga falta: el ADAA de `Distortion.h` (Fase 2/3) y el LFO
-(`Lfo.h`, Fase 7). Moverlos exige el null test de Undertow (ver el `CLAUDE.md` raíz).
+Todo DSP nuevo que sirva para futuros plugins (EQ, compresor, delay, reverb) va en la librería, con tests. Candidato
+que hoy está en Undertow y podría moverse cuando haga falta: el ADAA de `Distortion.h`. Moverlo exige el null test de
+Undertow (ver el `CLAUDE.md` raíz).
 
 ## Aprendizaje de mezcla y diseño sonoro (igual de importante que el código)
 Al terminar cada fase:
@@ -73,6 +74,7 @@ plugins/riptide/
     dsp/Tone.h               # cortes PRE/POST, emphasis y tilt (coeficientes compartidos + estado por canal)
     dsp/AutoGain.h           # auto gain: tabla de pérdida de volumen de cada curva + nivel lento con puerta
     dsp/Bands.h              # multibanda: ajustes por banda, separación de los cruces y sus coeficientes suavizados
+    dsp/Modulation.h         # envolvente y LFO: destinos, rutas (destino + amount) y el modulador por muestra
     gui/                     # tema, LookAndFeel, medidores
   tests/EngineTests.cpp    # tests del motor (sin JUCE)
 ```
@@ -101,6 +103,56 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
+Fase 7 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+- Cadena: igual que la Fase 6, más dos fuentes que se calculan una vez por muestra (compartidas por los canales: la
+  imagen estéreo no se mueve) y mueven una perilla cada una: envolvente (de lo que llega al plugin, el mayor |x| de los
+  canales, antes de Input y del tono) y LFO. Destinos (`ModTarget`, índice guardado: solo añadir al final): Drive (el
+  Input), Mix, Emphasis, Emph Freq, Tilt, Band 1..4 Drive. Cada destino se modula donde actúa su perilla y alineado con
+  el audio: los de antes de la curva (drive, drive de banda, emphasis) con la modulación de esta muestra; los de
+  después (de-emphasis, tilt, mix) con la de hace `latency` muestras (historial de 256 en `ToneControls` para el
+  emphasis y `mixModDelay`/`tiltModDelay` en el motor).
+- Escala (la de Undertow): amount 100 % con la fuente al máximo = TODO el recorrido de la perilla (`modTargetSpans`:
+  Drive 48 dB, Mix 1, Emphasis 24 dB, Emph Freq 7.64 oct, Tilt 12 dB, banda 48 dB). Envolvente 0..1 (unipolar), LFO
+  −1..+1. Las dos se suman y el resultado se limita al rango de la perilla (drives a ±24 dB con `modulateDrive`).
+- Librería (nuevo): `EnvelopeFollower.h` = detector de picos desacoplado (Giannoulis, Massberg y Reiss, JAES 2012):
+  pico instantáneo con relajación exponencial (8.7 dB por τ) y después el ataque (1 polo); estado en double. La versión
+  de una etapa (ataque si sube, relajación si baja) se descartó: con un tono sostenido se queda bajo el pico (−2 dB con
+  1 kHz y 5 ms de ataque, distinto según la frecuencia). `Lfo.h` movido desde Undertow sin cambios de lógica, con
+  `lfoShapeNames`, `LfoDivision`/`lfoDivisions` (17, orden guardado) y `lfoDivisionHz`. Null test de Undertow: bit a bit.
+- `dsp/Modulation.h`: `ModRoute` (amount con `LinearRamp` de 20 ms; cambiar de destino = la ruta baja a 0 en 20 ms CON
+  el amount viejo, cambia y sube con el nuevo: si cambian destino y amount a la vez, el amount nuevo nunca llega al
+  destino viejo; el primer intento sí lo hacía y un test lo encontró: +12 dB de drive no pedidos) y `Modulator`:
+  envolvente → dB + sensibilidad (`LinearRamp`) → 0..1 entre −40 y 0 dBFS; LFO con fase en double, suavizado de 2 ms
+  (redondea cuadrada y S&H), S&H con semilla fija; sync = `lfoDivisionHz` al tempo del host y, con la canción sonando,
+  fase = ppq / beats en cada bloque (cae en el pulso; sigue los saltos de un loop). Sin host, 120 BPM.
+- `Tone.h`: `advance (emphasisDbOffset, emphasisOctaveOffset, tiltDbOffset, latency)`; coeficientes solo cuando el valor
+  cambia. La de-emphasis usa el emphasis de hace `latency` muestras. Medido (Hard Clip a nivel bajo, ×4, Emph Freq ±3.8
+  octavas con LFO): residuo con el retraso −101.6 / −88.5 / −77.4 dB con LFO de 1 / 4 / 15 Hz a 44.1 kHz; sin el
+  retraso habría sido −40.6 / −27.5 / −16.3 dB (audible). Mover la perilla de emphasis también queda alineado ahora.
+- Amount 0 en las dos fuentes = idéntico bit a bit a la Fase 6: comprobado renderizando el motor de la Fase 6 (HEAD) y
+  el nuevo (6 modos × 3 factores × 2 sample rates × 4 variantes: sin tono, con tono, mix 60 % + auto gain + delta, 3
+  bandas; estéreo, con cambios a mitad).
+- Parámetros nuevos (versionHint 7): `envAttack` (0.1–100 ms log, def. 5), `envRelease` (5–2000 ms log, def. 150),
+  `envSensitivity` (±24 dB, def. 0), `envTarget` / `lfoTarget` (choice `modTargetNames`, def. Drive), `envAmount` /
+  `lfoAmount` (−100..+100 %, def. 0), `lfoShape` (choice de `lfoShapeNames`, def. Sine), `lfoSync` (bool, def. on),
+  `lfoRate` (0.02–20 Hz log, def. 1), `lfoDivision` (choice de `lfoDivisions`, def. 1/4). El procesador lee el tempo y
+  la posición del host (`getPlayHead()->getPosition()`) en cada bloque y publica en atómicos el valor de cada fuente y
+  cuánto mueve cada destino.
+- GUI 1162 × 760: columna MODULACIÓN a la derecha (ENVOLVENTE: barra 0..1, Attack | Release | Sens, DESTINO + Amount;
+  LFO: barra bipolar, FORMA + SYNC | Rate o DIVISIÓN según SYNC, DESTINO + Amount; texto de ayuda). La perilla de cada
+  destino dibuja un arco celeste (`theme::modulation`) hasta el valor que suena (propiedad "modulation" del Slider, que
+  el editor actualiza a 30 fps). Cabecera "Fase 7".
+- Tests: `DeepwaterDspTests` (+2: envolvente 63 % en un ataque, 8.69 dB por τ de relajación, pico de un seno a −0.06 dB
+  con ondulación < 0.1 dB, ataque 0 instantáneo; divisiones de tempo y período del LFO) y `RiptideTests` (+9: amount 0
+  bit a bit, envolvente → cada destino (0.5 a −40 dBFS + 20 dB; ±12 dB de drive medidos en la salida), dinámica
+  (+20.4 dB en lo fuerte, 0 en lo suave, ataque y relajación, ≤ 0.1 dB por muestra pasada la arrancada), LFO libre /
+  sync / en fase con la canción (a 0.025 del valor exacto, también tras un salto de loop), cuadrada de 20 Hz y cambios
+  de destino/forma/amount sin saltos, el destino viejo no recibe el amount nuevo, emphasis modulado sigue inverso
+  (< −50 dB), drive modulado con auto gain (+11.2 dB sin, −2.6 dB con), independencia de bloque y bypass bit a bit).
+- Release con 0 warnings; ctest 4/4; null test de Undertow: idéntico bit a bit; pluginval strictness 10 ampliado:
+  SUCCESS. GUI revisada con
+  captura del Standalone (el arco y las barras, con valores forzados: en este entorno el Standalone no tiene audio).
+
 Fase 6 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena: entrada → × input (drive) → tono pre → [IN] → divisor (1–4 bandas) → por banda: × drive → modo → × auto gain →
   × solo/mute → Σ → tono post → filtro DC = wet; dry = entrada retrasada la latencia → filtro DC gemelo → divisor gemelo
@@ -301,4 +353,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 7 (dinámica y modulación).
+Siguiente: que el usuario pruebe la Fase 7 en FL; después, Fase 8 (GUI profesional).

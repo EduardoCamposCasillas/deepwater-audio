@@ -102,38 +102,13 @@ enum class LfoMode
     oneShot,   // como retrigger, pero hace un solo ciclo y se detiene: una "envolvente dibujada"
 };
 
-inline constexpr std::array<const char*, 6> lfoShapeNames { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Sample & Hold" };
 inline constexpr std::array<const char*, 3> lfoModeNames { "Free", "Retrigger", "One Shot" };
 
-// Divisiones de tempo. 'beats' = duración de un ciclo en negras (compás de 4/4).
-// T = tresillo (2/3 de la duración), D = con puntillo (3/2 de la duración).
-struct LfoDivision
-{
-    const char* name;
-    double beats;
-};
-
-inline constexpr std::array<LfoDivision, 17> lfoDivisions { {
-    { "8 bars", 32.0 },
-    { "4 bars", 16.0 },
-    { "2 bars", 8.0 },
-    { "1 bar", 4.0 },
-    { "1/2", 2.0 },
-    { "1/4", 1.0 },
-    { "1/8", 0.5 },
-    { "1/16", 0.25 },
-    { "1/32", 0.125 },
-    { "1/2 T", 4.0 / 3.0 },
-    { "1/4 T", 2.0 / 3.0 },
-    { "1/8 T", 1.0 / 3.0 },
-    { "1/16 T", 1.0 / 6.0 },
-    { "1/2 D", 3.0 },
-    { "1/4 D", 1.5 },
-    { "1/8 D", 0.75 },
-    { "1/16 D", 0.375 },
-} };
-
-inline constexpr int defaultLfoDivision = 5; // 1/4
+// Formas y divisiones de tempo: vienen con el LFO de la librería (deepwater/dsp/Lfo.h).
+using deepwater::dsp::defaultLfoDivision;
+using deepwater::dsp::LfoDivision;
+using deepwater::dsp::lfoDivisions;
+using deepwater::dsp::lfoShapeNames;
 
 struct LfoSettings
 {

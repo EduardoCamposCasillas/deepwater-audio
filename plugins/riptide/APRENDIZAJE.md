@@ -721,3 +721,155 @@ densidad, no en el volumen. Inténtalo y después pide pistas.
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 7 — Dinámica y modulación: que la saturación se mueva sola
+
+Hasta ahora Riptide era **estático**: con las perillas quietas, el golpe del bombo y la cola de la reverb pasaban por la
+misma curva con el mismo drive. Una consola o una cinta real no son así: responden a lo fuerte que llega la señal, y
+los efectos más vivos se mueven con el ritmo. Esta fase agrega dos "manos invisibles" que mueven una perilla cada una:
+una **envolvente** que sigue el volumen de lo que entra y un **LFO** que oscila, libre o al tempo de FL.
+
+### Conceptos aprendidos
+
+- **Modulación.** Que un parámetro cambie solo, siguiendo una **fuente** (algo que se mueve: la envolvente, el LFO). Se
+  arma con una **ruta**: fuente → **destino** (qué perilla mueve) × **amount** (cuánto). Es lo mismo que la matriz de
+  modulación de Undertow, pero en un efecto: allá el LFO movía el filtro de cada nota; aquí mueve la saturación.
+- **Escala del amount (la misma de Undertow).** 100 % con la fuente al máximo mueve la perilla destino **todo su
+  recorrido**; 50 %, media perilla; 25 %, un cuarto. En Drive (−24..+24 dB) el recorrido son 48 dB, así que 25 % = 12 dB.
+  Negativo = en sentido contrario. Las dos fuentes se suman si van al mismo destino, y el resultado nunca sale del rango
+  de la perilla.
+- **Seguidor de envolvente (envelope follower).** Convierte la señal (que sube y baja cientos de veces por segundo) en
+  una curva lenta que dice "qué tan fuerte suena ahora". Riptide lo hace en dos pasos: primero un **detector de picos**
+  que salta al instante a cada pico nuevo y, si no llega otro, va cayendo (eso es el **release**); después un suavizado
+  que decide qué tan rápido sube la curva (eso es el **attack**). Separar los dos pasos importa: la versión simple de un
+  solo paso se queda por debajo del pico real en los sonidos sostenidos (2 dB con un tono de 1 kHz y 5 ms de ataque).
+- **Attack y release.** El attack es cuánto tarda la envolvente en subir: 0.1–2 ms reacciona dentro del transitorio
+  (el golpe ya sale modulado); 20–100 ms deja pasar el golpe tal cual y reacciona después. El release es cuánto tarda en
+  bajar: cada vez que pasa ese tiempo cae 8.7 dB (una recta en dB, pareja en todo el rango). Corto, sigue cada nota y
+  con graves puede **ondular** (sigue cada ciclo del bajo); largo, suaviza pero tarda en soltar.
+- **La envolvente se mide en dB.** 0 con la entrada a −40 dBFS (o menos), 1 a 0 dBFS. En dB porque así oímos el volumen:
+  subir 6 dB mueve el destino lo mismo a cualquier nivel. La **sensibilidad** corre esa ventana: con +12 dB la envolvente
+  llega al máximo a −12 dBFS. La barra celeste de ENVOLVENTE muestra cuánto marca: si siempre está llena o siempre
+  vacía, la sensibilidad está mal puesta.
+- **Saturación dinámica, en los dos sentidos.** Envolvente → Drive con amount **positivo**: lo fuerte satura más; los
+  golpes "rompen" y lo suave queda limpio. Exagera la diferencia entre fuerte y suave (más dinámica de carácter). Con
+  amount **negativo**: lo fuerte satura **menos**; los transitorios pasan limpios y con pegada, y la saturación engorda
+  las colas, los sustains y lo que suena bajito. Es parecido a lo que hace una compresión paralela: más densidad sin
+  aplastar el golpe.
+- **LFO (Low Frequency Oscillator).** Un oscilador demasiado lento para oírse como nota (0.02–20 Hz) que no suena: mueve.
+  Formas: **Sine/Triangle** (vaivén suave), **Saw Up/Down** (sube o baja y vuelve de golpe), **Square** (salta entre
+  dos valores), **Sample & Hold** (un valor al azar por ciclo, "escalones"). Los saltos se redondean en 2 ms: sin eso,
+  un salto de drive sería un clic.
+- **Sync al tempo.** Con SYNC la velocidad es una figura musical: 1/4 = un ciclo por negra (a 120 BPM, 2 Hz), 1 bar = un
+  compás, T = tresillo (2/3 de la duración), D = con puntillo (3/2). Con la canción sonando, la fase sale de la posición
+  en la canción: un LFO de 1/4 cae siempre en el pulso, aunque empieces a reproducir a mitad de compás o se repita un
+  loop. Sin SYNC, la velocidad es libre en Hz (no se alinea con nada: útil para movimientos "orgánicos").
+- **Alinear la modulación con el audio.** El oversampling retrasa la señal (la latencia). Lo que va **antes** de la curva
+  (drive, emphasis) se mueve con la modulación de ahora; lo que va **después** (la de-emphasis, el tilt, el mix) con la de
+  hace una latencia, que es cuando entró a la curva el audio que sale ahora. Sin eso, un LFO sobre Emph Freq dejaba la
+  de-emphasis desfasada del emphasis y quedaba una "EQ fantasma" ondulando: medido, −27.5 dB de residuo con un LFO de
+  4 Hz a 44.1 kHz (audible); con la alineación, −88.5 dB (nada).
+- **Modulación + AUTO GAIN.** El auto gain calcula su compensación muestra a muestra con el drive que de verdad sonó, así
+  que también compensa el drive modulado: con AUTO GAIN puesto, la envolvente y el LFO cambian **cuánto satura** cada
+  momento, no su volumen. Medido con ruido rosa y el drive saltando entre 0 y +24 dB: sin auto gain la parte saturada
+  sale 11.2 dB más fuerte; con auto gain, 2.6 dB más baja (el lado seguro del modelo de la Fase 5). Sin AUTO GAIN, un LFO
+  en el drive también es un trémolo de volumen.
+
+### Qué hace cada control
+
+- **ENVOLVENTE** (barra: lo que marca ahora, de 0 a 1):
+  - **Attack** (0.1–100 ms, por defecto 5 ms) y **Release** (5 ms–2 s, por defecto 150 ms): ver arriba.
+  - **Sens** (±24 dB, por defecto 0): sensibilidad del detector. Escucha lo que **entra** a Riptide, antes de Input y del
+    tono: mover Input no cambia lo que marca.
+  - **DESTINO** y **Amount** (−100..+100 %, por defecto 0 = apagada).
+- **LFO** (barra: su valor, de −1 a +1 desde el centro):
+  - **FORMA** y **SYNC** (por defecto encendido). Con SYNC, **DIVISIÓN** (por defecto 1/4); sin SYNC, **Rate**
+    (0.02–20 Hz, por defecto 1 Hz).
+  - **DESTINO** y **Amount**.
+- **Destinos**: **Drive** (el Input: cuánto satura todo), **Mix**, **Emphasis**, **Emph Freq**, **Tilt** y **Band 1..4
+  Drive** (solo esa banda). Cambiar de destino hace un fundido de 20 ms.
+- **El arco celeste.** La perilla destino dibuja, por dentro de su anillo naranja, un arco celeste hasta el valor que
+  suena de verdad. Lo que ves en la perilla es lo que pusiste; lo celeste es lo que hace la modulación encima.
+- El medidor **IN** también se mueve: muestra el nivel que llega a la curva, ya con el drive modulado.
+- En el analizador (Fruity Parametric EQ 2 después de Riptide): con el drive modulado, los armónicos **aparecen y
+  desaparecen** al ritmo de la fuente (con amount positivo, en cada golpe; con el LFO, en cada ciclo). Con Emph Freq
+  modulado, la zona más saturada (la que tiene más armónicos encima) **se desplaza** por el espectro.
+
+### Ejercicio de escucha guiado: el mismo drive, en sentidos opuestos (con volumen igualado)
+
+1. Un loop de batería en un insert con Riptide y el Parametric EQ 2 después. **Transistor**, Oversampling 4x, **AUTO
+   GAIN puesto**, 1 banda, **Input +12 dB**.
+2. Mira la barra de la ENVOLVENTE mientras suena: tiene que llegar casi al final en los golpes y bajar entre ellos. Si
+   queda siempre llena, baja **Sens**; si apenas se mueve, súbela.
+3. **Envolvente → Drive, Amount +25 %** (12 dB). Attack 1 ms, Release 80 ms. Qué notar: los golpes de bombo y caja se
+   rompen más; entre golpes, la batería queda más limpia. El arco celeste de Input salta con cada golpe.
+4. Ahora **Amount −25 %**. Qué notar: el golpe queda limpio y con pegada (el transitorio pasa antes de que la envolvente
+   baje el drive), y lo que viene detrás (la cola de la caja, el ambiente) se satura y se engorda. La batería suena más
+   densa y más "larga" sin perder el ataque.
+5. Con −25 %, sube el **Attack** a 30 ms: el golpe alcanza a saturarse antes de que el drive baje. Vuelve a 1 ms. Ahí
+   escuchas para qué sirve el attack: decide si el transitorio entra o no en la modulación.
+6. Baja el **Release** a 10 ms: el drive "tiembla" dentro de cada golpe (sigue los ciclos de los graves) y aparece una
+   aspereza nueva. Súbelo a 400 ms: la saturación tarda en volver y la batería respira más lento.
+7. Compara con Amount 0 y con el bypass, siempre con AUTO GAIN puesto: la diferencia tiene que ser de carácter, no de
+   volumen.
+
+### Receta de uso: una batería que pega y además suena gorda
+
+1. Riptide en el bus de la batería. **Tape** (o **Tube** para más cuerpo), **AUTO GAIN puesto**, Oversampling 4x.
+2. **Input +9 a +15 dB**: la batería entera bien saturada (en este punto suena gorda pero el golpe se ablanda).
+3. **Envolvente → Drive, Amount −20 a −35 %**, **Attack 0.5–2 ms**, **Release 60–150 ms** (más corto en tempos rápidos).
+   Ajusta **Sens** para que la barra llegue casi al final en los golpes.
+4. Qué pasa: en cada golpe el drive baja de inmediato y el transitorio pasa casi limpio; detrás de él el drive vuelve y
+   satura el cuerpo y las colas. Tienes la pegada de la batería seca y la densidad de la saturada **en la misma señal**.
+5. Si el golpe suena "cortado" o se oye el drive volviendo (un "swoosh"), alarga el Release. Si el golpe todavía suena
+   blando, acorta el Attack o sube el amount negativo.
+6. **Variante creativa con el LFO**: en un pad o una guitarra, **Emphasis +9 dB**, **LFO → Emph Freq, SYNC 1 bar,
+   Triangle, Amount 20–30 %**. La zona que más se satura sube y baja una vez por compás: un movimiento parecido a un
+   filtro lento, pero hecho de armónicos. Con **Sample & Hold a 1/8** el color cambia a saltos, al ritmo.
+
+### Reto sin receta
+
+Tienes una **voz** que en los versos se canta suave y en el estribillo se empuja fuerte. Quieres que en los versos
+suene **limpia y cercana** y que en el estribillo **se ensucie sola**, con un poco de mordida, **sin automatizar nada**
+en FL y sin que el estribillo salte de volumen respecto de los versos. Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Modulación / ruta / destino / amount**: una fuente que mueve un parámetro, a cuál y cuánto. *En música:* el
+  "wobble" del dubstep es un LFO moviendo el filtro de un bajo.
+- **Envelope follower (seguidor de envolvente)**: el detector que convierte el volumen en una curva de control. *En
+  música:* el auto-wah de una guitarra funk (la envolvente abre el filtro con cada púa).
+- **Attack / release**: lo rápido que la envolvente sube y baja. *En música:* los mismos controles de un compresor; un
+  release mal elegido es lo que hace "bombear" una mezcla.
+- **Saturación dinámica**: saturación cuyo drive depende del nivel. *En música:* una cinta o una consola empujadas,
+  donde los golpes fuertes se comprimen y ensucian más que lo suave.
+- **LFO**: oscilador lento que no se oye, mueve. *En música:* el trémolo de un amplificador Fender (un LFO al volumen).
+- **Sync / división de tempo / tresillo / puntillo**: velocidades atadas al tempo. *En música:* los delays y LFOs "a
+  1/8 con puntillo" del rock de los 80 (el galope de The Edge, de U2).
+- **Sample & Hold**: un valor al azar que se mantiene un tiempo y salta. *En música:* los "bleeps" aleatorios de los
+  sintetizadores modulares y del sonido de la ciencia ficción de los 70.
+- **Profundidad (depth)**: otra forma de decir amount. *En música:* "trémolo profundo" = el volumen baja mucho en cada
+  ciclo.
+
+### Errores comunes
+
+- **Sensibilidad mal puesta.** Si la barra de la envolvente está siempre llena (o siempre vacía), la modulación es un
+  valor fijo: no hay dinámica. Ajusta Sens mirando la barra con la música real.
+- **Release muy corto con graves.** Con un bajo o un 808 y release de 5–20 ms, la envolvente sigue cada ciclo de la
+  onda: el drive se mueve dentro de la forma de onda y eso es distorsión nueva (y a veces fea). En graves, release de
+  80 ms o más.
+- **Amount muy alto en Drive.** 100 % son 48 dB de recorrido: con la envolvente, de limpio a destrozado. Empieza con
+  15–30 % y sube de a poco.
+- **LFO en el drive sin AUTO GAIN.** Además del carácter, el volumen sube y baja con el LFO (trémolo). Si es lo que
+  quieres, perfecto; si no, enciende AUTO GAIN.
+- **Olvidar que SYNC está puesto.** Si mueves Rate y no pasa nada, es porque manda la división. Y al revés: sin SYNC, el
+  LFO no cae en el pulso aunque suene "parecido".
+- **Modular sin propósito.** Un LFO que se mueve sin relación con la música distrae; en una mezcla, la modulación tiene
+  que servir a algo (pegada, respiración, movimiento en una parte estática).
+- **Cuándo NO usarla:** en el master y en buses donde la saturación tiene que ser un "pegamento" estable, la envolvente
+  con mucho amount se oye como bombeo; ahí, amount bajo o nada. Y en material que ya tiene mucha modulación propia (un
+  pad con LFO, una guitarra con trémolo) otra modulación encima suele estorbar.
+
+### Retos completados
+
+(Ninguno todavía.)

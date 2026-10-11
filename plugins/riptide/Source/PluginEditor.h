@@ -5,6 +5,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "dsp/Bands.h"
+#include "dsp/Modulation.h"
 #include "dsp/Saturator.h"
 
 #include "gui/LevelMeterView.h"
@@ -14,7 +15,8 @@ class RiptideAudioProcessor;
 
 // GUI funcional (la profesional llega en la Fase 8). Medidor IN | modos, tono (cortes con PRE/POST, emphasis, tilt),
 // bandas (número de bandas, cruces entre ellas y, por banda, modo, drive, solo, mute y su auto gain), nivel y mezcla
-// (Input, Mix, Output, AUTO GAIN, DELTA) | medidor OUT; en la cabecera, el selector de oversampling y el bypass.
+// (Input, Mix, Output, AUTO GAIN, DELTA) | modulación (envolvente y LFO) | medidor OUT; en la cabecera, el selector de
+// oversampling y el bypass.
 // Un temporizador a 30 cuadros por segundo recoge los niveles que publicó el audio y redibuja los medidores.
 class RiptideAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -104,6 +106,36 @@ private:
     std::array<BandStrip, riptide::dsp::maxBands> bandStrips;
     std::array<Knob, riptide::dsp::maxCrossovers> crossoverKnobs;
     int shownBands = 1;
+
+    // Modulación (Fase 7). Una columna a la derecha: ENVOLVENTE (attack, release, sensibilidad, destino, amount) y LFO
+    // (forma, sync, rate o división, destino, amount), cada una con una barra que muestra su valor en vivo. La perilla de
+    // cada destino dibuja un arco celeste hasta el valor que suena (propiedad "modulation" del Slider, ver el LookAndFeel).
+    struct RouteControls
+    {
+        juce::Label targetLabel;
+        juce::ComboBox target;
+        std::unique_ptr<ComboBoxAttachment> targetAttachment;
+        Knob amount;
+    };
+    void setUpRoute (RouteControls& route, const char* targetId, const char* amountId, const juce::String& source);
+    void setUpCaption (juce::Label& label, const juce::String& text);
+    void showLfoSync (bool sync);
+    void updateModulation();
+    juce::Slider* targetSlider (riptide::dsp::ModTarget target) noexcept;
+    void layOutRoute (RouteControls& route, juce::Rectangle<int> area);
+    void paintModulation (juce::Graphics& g);
+
+    juce::Label modulationSection, envelopeTitle, lfoTitle, modulationHelp;
+    Knob envAttackKnob, envReleaseKnob, envSensitivityKnob, lfoRateKnob;
+    RouteControls envelopeRoute, lfoRoute;
+    juce::Label lfoShapeLabel, lfoDivisionLabel;
+    juce::ComboBox lfoShapeBox, lfoDivisionBox;
+    std::unique_ptr<ComboBoxAttachment> lfoShapeAttachment, lfoDivisionAttachment;
+    juce::TextButton lfoSyncButton { "SYNC" };
+    std::unique_ptr<ButtonAttachment> lfoSyncAttachment;
+    juce::Rectangle<int> mainArea, modulationArea, envelopeBar, lfoBar; // fondos y barras (paint)
+    int separatorY = 0;
+    float shownEnvelope = 0.0f, shownLfo = 0.0f;
 
     double lastFrameMs = 0.0;
 

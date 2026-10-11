@@ -14,6 +14,9 @@ namespace riptide::gui
 class RiptideLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
+    // Propiedad de un Slider con la posición modulada (0..1); sin ella no se dibuja el arco de modulación.
+    static inline const juce::Identifier modulationProperty { "modulation" };
+
     RiptideLookAndFeel()
     {
         using namespace theme;
@@ -72,6 +75,24 @@ public:
                                     juce::jmax (angle, originAngle), true);
             g.setColour (slider.findColour (juce::Slider::rotarySliderFillColourId).withAlpha (slider.isEnabled() ? 1.0f : 0.4f));
             g.strokePath (valueArc, stroke);
+        }
+
+        // Fase 7: si la envolvente o el LFO mueven esta perilla, el editor guarda en la propiedad "modulation" la posición
+        // (0..1 del recorrido) que suena de verdad. Un arco interior frío va de la perilla a esa posición, con un punto.
+        if (const auto* modulated = slider.getProperties().getVarPointer (modulationProperty))
+        {
+            const float modAngle = startAngle + static_cast<float> (static_cast<double> (*modulated)) * (endAngle - startAngle);
+            const float modRadius = ringRadius - lineWidth * 1.3f;
+            if (std::abs (modAngle - angle) > 0.001f)
+            {
+                juce::Path modArc;
+                modArc.addCentredArc (centre.x, centre.y, modRadius, modRadius, 0.0f, juce::jmin (angle, modAngle),
+                                      juce::jmax (angle, modAngle), true);
+                g.setColour (theme::modulation.withAlpha (slider.isEnabled() ? 0.9f : 0.35f));
+                g.strokePath (modArc, juce::PathStrokeType (lineWidth * 0.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+            g.setColour (theme::modulation);
+            g.fillEllipse (juce::Rectangle<float> (lineWidth, lineWidth).withCentre (centre.getPointOnCircumference (modRadius, modAngle)));
         }
 
         const float body = radius * 0.65f;

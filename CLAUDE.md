@@ -50,7 +50,8 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
   (`Oversampler.h`), filtro DC (`DcBlocker.h`), SVF TPT/ZDF (`Svf.h`), crossover Linkwitz-Riley y divisor multibanda
   (`Crossover.h`), filtro de 1 polo TPT y tilt EQ (`OnePole.h`), suavizado de parámetros y fundidos
   (`Smoothing.h`), línea de retardo (`DelayLine.h`), SIMD SSE2 (`Simd.h`), `fastTanh` (`FastMath.h`), FFT (`Fft.h`),
-  `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`) y medidores de pico/RMS (`LevelMeter.h`).
+  `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de pico/RMS (`LevelMeter.h`), LFO con divisiones
+  de tempo (`Lfo.h`, venía de Undertow) y seguidor de envolvente (`EnvelopeFollower.h`).
 - Suavizado: usar `LinearRamp` (llega exacto al objetivo). `SmoothedParameter` tiene un bug conocido (nunca termina de
   llegar) y solo lo usa Undertow; arreglarlo cambiaría su sonido.
 - Sin JUCE ni GUI, C++20 estándar. Lo que corre en el hilo de audio va en headers (para que se inlinee); lo que corre

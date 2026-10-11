@@ -9,6 +9,7 @@
 #include "deepwater/dsp/Smoothing.h"
 #include "dsp/AutoGain.h"
 #include "dsp/Bands.h"
+#include "dsp/Modulation.h"
 #include "dsp/Saturator.h"
 #include "dsp/Tone.h"
 
@@ -35,9 +36,13 @@ struct EngineSettings
     int numBands = 1;      // 1..maxBands
     std::array<float, maxCrossovers> crossoverHz = defaultCrossoverHz;
     std::array<BandSettings, maxBands> bands {};
+    ModulationSettings modulation {}; // amount 0 en las dos fuentes = sin modulación (como la Fase 6)
 };
 
-// Fase 6: cadena de audio completa del saturador, sin JUCE (se prueba en tests/EngineTests.cpp):
+// Fase 7: cadena de audio completa del saturador, sin JUCE (se prueba en tests/EngineTests.cpp):
+//
+//   entrada ─ |x| ─ envolvente ─┐
+//                          LFO ─┴─ rutas (destino × amount) ─→ drive · drive de banda · emphasis · tilt · mix
 //
 //                                                         ┌─ banda 1: × drive ─ modo ─ × auto gain ─ × solo/mute ─┐
 //   entrada ─┬─ × input (drive) ─ tono pre ─[IN]─ divisor ┼─ ...                                                  ┼─ Σ ─ tono post ─ filtro DC ── wet ─┐
@@ -79,6 +84,14 @@ struct EngineSettings
 // se retrasa lo mismo para que los dos lleguen alineados al fundido (si no, el fundido mezclaría dos señales desfasadas:
 // filtro de peine y clics).
 //
+// Modulación (Modulation.h, Fase 7): la envolvente (sigue el volumen de lo que entra) y el LFO mueven una perilla cada
+// uno. Se calculan una vez por muestra, compartidas por los canales. Cada destino se mueve en el punto de la cadena donde
+// actúa su perilla, alineado con el audio: lo que va ANTES de la curva (drive, drive de banda, emphasis) con la
+// modulación de esta muestra; lo que va DESPUÉS (de-emphasis, tilt, mix) con la de hace 'latency' muestras, que es
+// cuando entró a la curva el audio que sale ahora. Así un golpe que sube el drive y baja el mix lo hace sobre el mismo
+// golpe. Con AUTO GAIN el drive modulado también se compensa (driveDelay lo guarda muestra a muestra): la envolvente
+// cambia cuánto satura cada golpe, no su volumen.
+//
 // Cambiar el factor de oversampling o el número de bandas cambia la estructura (la latencia, qué entra a cada
 // saturador) y borra la historia de los filtros: es un salto. Por eso se hace en silencio: la salida baja a cero en
 // 10 ms, se cambia la estructura y vuelve a subir. Mover un cruce, en cambio, es continuo (sus frecuencias se suavizan).
@@ -106,6 +119,9 @@ public:
         requestedBands = activeBands = clampBands (settings.numBands);
         crossoverHz = settings.crossoverHz;
         crossovers.prepare (sampleRate, crossoverHz, activeBands);
+        modulator.prepare (sampleRate, settings.modulation);
+        mixModDelay.fill (0.0f);
+        tiltModDelay.fill (0.0f);
 
         // Al preparar no hay nada que suavizar: se empieza directamente en los valores actuales.
         inputGain.snap (deepwater::dsp::dbToGain (settings.inputGainDb));
@@ -170,7 +186,11 @@ public:
         autoGainOn = settings.autoGain;
         deltaOn = settings.delta;
         setBandSettings (settings);
+        modulator.setSettings (settings.modulation);
     }
+
+    // Tempo y posición de la canción (para el LFO sincronizado). Una vez por bloque, después de setSettings.
+    void setTransport (const Transport& transport) noexcept { modulator.setTransport (transport); }
 
     // Procesa en el sitio. Con más de maxChannels canales, los de más se dejan intactos.
     void process (float* const* audio, int numChannels, int numSamples) noexcept
@@ -186,16 +206,27 @@ public:
             if (! structureSettled && level == 0.0f)
                 applyRequestedStructure();
 
+            // La modulación de esta muestra: la envolvente escucha la entrada tal cual llega (el mayor |x| de los canales).
+            float inputPeak = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+                inputPeak = std::max (inputPeak, std::abs (audio[ch][i]));
+            const auto& mod = modulator.advance (inputPeak);
+            const size_t readIndex = (dryWriteIndex - static_cast<size_t> (latency)) & (dryDelaySize - 1);
+            mixModDelay[dryWriteIndex] = mod[static_cast<size_t> (ModTarget::mix)];
+            tiltModDelay[dryWriteIndex] = mod[static_cast<size_t> (ModTarget::tilt)];
+
             // Las rampas avanzan una vez por muestra para todos los canales: L y R reciben exactamente la misma ganancia.
-            const float gainIn = inputGain.next();
+            const float gainIn = modulateDrive (inputGain.next(), mod[static_cast<size_t> (ModTarget::drive)], driveLimit);
             const float gainOut = outputGain.next();
             const float wet = bypassFade.next (processing); // 1 = procesado, 0 = original
-            const float mixAmount = mix.next();
+            float mixAmount = mix.next();
+            if (const float offset = mixModDelay[readIndex]; offset != 0.0f)
+                mixAmount = clampMix (mixAmount + offset);
             const float autoAmount = autoGainFade.next (autoGainOn);
             const float deltaAmount = deltaFade.next (deltaOn);
-            tone.advance();
+            tone.advance (mod[static_cast<size_t> (ModTarget::emphasis)], mod[static_cast<size_t> (ModTarget::emphasisFreq)],
+                          tiltModDelay[readIndex], latency);
             crossovers.advance();
-            const size_t readIndex = (dryWriteIndex - static_cast<size_t> (latency)) & (dryDelaySize - 1);
             const float inverseDrive = 1.0f / gainIn;
 
             // Lo de cada banda que comparten los canales.
@@ -216,7 +247,7 @@ public:
                         blend[b] = band.modeFade.next();
                 }
 
-                bandDrive[b] = band.drive.next();
+                bandDrive[b] = modulateDrive (band.drive.next(), mod[static_cast<size_t> (bandDriveTarget (b))], bandDriveLimit);
                 audible[b] = band.audible.next (band.audibleOn);
 
                 // Lo que sale ahora del saturador entró hace 'latency' muestras: la compensación usa el drive de
@@ -323,6 +354,18 @@ public:
         return deepwater::dsp::gainToDb (bands[static_cast<size_t> (band)].autoGain.getGain());
     }
 
+    // Modulación, para la GUI: el valor de cada fuente y cuánto mueve cada destino (en sus unidades) en la última muestra.
+    [[nodiscard]] float getEnvelopeValue() const noexcept { return modulator.getEnvelopeValue(); }
+    [[nodiscard]] float getLfoValue() const noexcept { return modulator.getLfoValue(); }
+    [[nodiscard]] float getModulation (ModTarget target) const noexcept
+    {
+        return modulator.getOffsets()[static_cast<size_t> (target)];
+    }
+    // El emphasis y el tilt que suenan ahora (perilla + modulación).
+    [[nodiscard]] float getEmphasisHz() const noexcept { return tone.getEmphasisHz(); }
+    [[nodiscard]] float getEmphasisDb() const noexcept { return tone.getEmphasisDb(); }
+    [[nodiscard]] float getTiltDb() const noexcept { return tone.getTiltDb(); }
+
     [[nodiscard]] LevelMeter& inputMeter (int channel) noexcept { return channels[static_cast<size_t> (channel)].input; }
     [[nodiscard]] LevelMeter& outputMeter (int channel) noexcept { return channels[static_cast<size_t> (channel)].output; }
 
@@ -330,6 +373,7 @@ private:
     // La latencia máxima (×16 a frecuencias bajas, donde todas las etapas usan el filtro más largo) es de unas 140
     // muestras: el retardo del camino original cabe en 256.
     static constexpr size_t dryDelaySize = 256;
+    static_assert (dryDelaySize <= ToneControls::historySize);
 
     // Lo que comparten los canales de una banda.
     struct Band
@@ -363,6 +407,17 @@ private:
     static int clampStages (int index) noexcept { return std::clamp (index, 0, numOversamplingChoices - 1); }
     static int clampBands (int count) noexcept { return std::clamp (count, 1, maxBands); }
     static float clampMix (float amount) noexcept { return std::clamp (amount, 0.0f, 1.0f); }
+
+    // Un drive (ganancia lineal) movido 'offsetDb' por la modulación, sin salirse del rango de su perilla (±limit, como
+    // ganancia). Sin modulación devuelve el drive tal cual (bit a bit).
+    static float modulateDrive (float drive, float offsetDb, float limit) noexcept
+    {
+        if (offsetDb == 0.0f)
+            return drive;
+        return std::clamp (drive * deepwater::dsp::dbToGain (offsetDb), 1.0f / limit, limit);
+    }
+    static inline const float driveLimit = deepwater::dsp::dbToGain (maxDriveDb);
+    static inline const float bandDriveLimit = deepwater::dsp::dbToGain (maxBandDriveDb);
 
     void setBandSettings (const EngineSettings& settings) noexcept
     {
@@ -448,6 +503,9 @@ private:
     deepwater::dsp::EffectSwitch deltaFade;
     ToneControls tone;
     CrossoverControls crossovers;
+    Modulator modulator;
+    // La modulación de los destinos que van después de la curva, retrasada la latencia (como la dry).
+    std::array<float, dryDelaySize> mixModDelay {}, tiltModDelay {};
     std::array<float, maxCrossovers> crossoverHz = defaultCrossoverHz; // lo que piden las perillas
     bool autoGainOn = false;
     bool deltaOn = false;

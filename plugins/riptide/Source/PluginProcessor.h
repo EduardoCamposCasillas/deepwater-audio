@@ -7,10 +7,12 @@
 
 #include "dsp/Engine.h"
 
-// Fase 6: efecto mono/estéreo: input (drive) → tono pre (cortes, emphasis) → 1-4 bandas Linkwitz-Riley, cada una con su
+// Fase 7: efecto mono/estéreo: input (drive) → tono pre (cortes, emphasis) → 1-4 bandas Linkwitz-Riley, cada una con su
 // modo, drive, auto gain y solo/mute (saturación con oversampling) → tono post (de-emphasis, cortes, tilt) → filtro DC →
-// mix con la original alineada → delta → output, con medidores de entrada y salida y bypass con fundido. Todo el audio está en riptide::dsp::Engine (sin JUCE); aquí solo
-// se conectan los parámetros, el estado, la latencia y los medidores con la GUI.
+// mix con la original alineada → delta → output, con medidores de entrada y salida y bypass con fundido. Una envolvente
+// y un LFO (libre o al tempo del host) mueven el drive, el mix, el emphasis, el tilt o el drive de una banda. Todo el
+// audio está en riptide::dsp::Engine (sin JUCE); aquí solo se conectan los parámetros, el estado, el tempo del host, la
+// latencia y los medidores con la GUI.
 //
 // El temporizador corre en el hilo de mensajes: informa al host la latencia nueva cuando el audio cambia de factor de
 // oversampling (setLatencySamples avisa al host, y eso no se hace desde el hilo de audio).
@@ -72,10 +74,19 @@ public:
     {
         return crossoverHz[static_cast<size_t> (index)].load (std::memory_order_relaxed);
     }
+    // Modulación (al final del último bloque): el valor de la envolvente (0..1) y del LFO (−1..+1), y cuánto mueve cada
+    // destino en sus unidades (dB, mezcla 0..1 u octavas).
+    float getEnvelopeValue() const noexcept { return envelopeValue.load (std::memory_order_relaxed); }
+    float getLfoValue() const noexcept { return lfoValue.load (std::memory_order_relaxed); }
+    float getModulation (riptide::dsp::ModTarget target) const noexcept
+    {
+        return modulation[static_cast<size_t> (target)].load (std::memory_order_relaxed);
+    }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     riptide::dsp::EngineSettings readSettings() const noexcept;
+    riptide::dsp::Transport readTransport() noexcept;
     void publishMeters (int numChannels) noexcept;
     void publishBands() noexcept;
     void timerCallback() override;
@@ -100,6 +111,17 @@ private:
     std::array<std::atomic<float>*, riptide::dsp::maxCrossovers> crossoverParams {};
     std::array<std::atomic<float>*, riptide::dsp::maxBands> bandModeParams {}, bandDriveParams {}, bandSoloParams {},
         bandMuteParams {};
+    std::atomic<float>* envAttackParam = nullptr;
+    std::atomic<float>* envReleaseParam = nullptr;
+    std::atomic<float>* envSensitivityParam = nullptr;
+    std::atomic<float>* envTargetParam = nullptr;
+    std::atomic<float>* envAmountParam = nullptr;
+    std::atomic<float>* lfoShapeParam = nullptr;
+    std::atomic<float>* lfoSyncParam = nullptr;
+    std::atomic<float>* lfoRateParam = nullptr;
+    std::atomic<float>* lfoDivisionParam = nullptr;
+    std::atomic<float>* lfoTargetParam = nullptr;
+    std::atomic<float>* lfoAmountParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     riptide::dsp::Engine engine;
@@ -110,6 +132,8 @@ private:
     std::atomic<int> engineLatency { 0 }; // la escribe el audio; el temporizador se la informa al host
     std::array<std::atomic<float>, riptide::dsp::maxBands> autoGainDb {};      // la compensación de cada banda, para la GUI
     std::array<std::atomic<float>, riptide::dsp::maxCrossovers> crossoverHz {}; // los cruces que suenan, para la GUI
+    std::atomic<float> envelopeValue { 0.0f }, lfoValue { 0.0f };
+    std::array<std::atomic<float>, riptide::dsp::numModTargets> modulation {};  // cuánto se mueve cada destino
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RiptideAudioProcessor)
 };

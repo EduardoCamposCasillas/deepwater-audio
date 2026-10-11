@@ -435,4 +435,10 @@ idéntico bit a bit). FL: la ruta de búsqueda es `build\plugins` como VST3 (edi
   de estar `settled`, y tras mover una perilla de chorus/delay/reverb esos efectos recalculan coeficientes en cada
   muestra. Solo cuesta CPU.
 
+Cambio desde Riptide Fase 7 (2026-10-10). El sonido no cambia (null test: idéntico bit a bit).
+- El LFO pasó a la librería: `dsp/Lfo.h` → `libs/dsp/include/deepwater/dsp/Lfo.h` (namespace `deepwater::dsp`), junto
+  con `lfoShapeNames`, `LfoDivision`, `lfoDivisions` y `defaultLfoDivision` (antes en `synth/Modulation.h`). Su código no
+  cambió. `Source/dsp/Lfo.h` quedó como un header que declara `using deepwater::dsp::Lfo/LfoPhase/LfoShape`, y
+  `synth/Modulation.h` toma las formas y las divisiones con `using`.
+
 Siguiente: todas las fases de la hoja de ruta están hechas. Próximos pasos posibles, a decidir con el usuario.

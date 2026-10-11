@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 #include "deepwater/dsp/Decibels.h"
@@ -51,10 +52,17 @@ struct ToneSettings
 //
 // Con todo en su posición neutra (cortes apagados, emphasis y tilt a 0 dB) la señal pasa bit a bit: Riptide suena igual
 // que en la Fase 3.
+//
+// Fase 7: el emphasis y el tilt pueden moverse en cada muestra (envolvente y LFO). La de-emphasis tiene que deshacer el
+// emphasis que la señal recibió AL ENTRAR a la curva, y lo que sale de la curva ahora entró hace 'latency' muestras (el
+// oversampling la retrasa). Por eso los valores del emphasis se guardan en un historial y la de-emphasis usa los de hace
+// 'latency' muestras: con el emphasis quieto las dos son inversas exactas, y moviéndose siguen siéndolo (sin el retraso,
+// un LFO rápido sobre Emph Freq dejaría una ondulación de EQ en la salida).
 class ToneControls
 {
 public:
     static constexpr double rampSeconds = 0.02;
+    static constexpr size_t historySize = 256; // potencia de 2, mayor que la latencia máxima del oversampling
     static constexpr double cutQ = 0.70710678; // Butterworth: 12 dB/oct sin pico en el corte
     static constexpr double emphasisQ = 0.7;    // campana ancha (unas 2 octavas): "zona", no una frecuencia exacta
     static constexpr double tiltPivotHz = 1000.0;
@@ -87,7 +95,13 @@ public:
         highCutPostFade.snap (highCutPostOn());
         updateLowCut();
         updateHighCut();
-        updateEmphasis();
+        preEmphasis = { emphasisOctaves.value, emphasisDb.value };
+        postEmphasis = preEmphasis;
+        emphasisHistory.fill (preEmphasis);
+        historyIndex = 0;
+        updateEmphasis (preEmphasis, emphasis.pre, emphasis.preAmount, false);
+        updateEmphasis (postEmphasis, emphasis.post, emphasis.postAmount, true);
+        tiltValue = tiltDb.value;
         updateTilt();
         advanceFades();
     }
@@ -106,8 +120,9 @@ public:
         highCutPost = settings.highCutPost;
     }
 
-    // Una vez por muestra, antes de procesar los canales.
-    void advance() noexcept
+    // Una vez por muestra, antes de procesar los canales. Los offsets son la modulación de esta muestra (0 = ninguna):
+    // emphasis en dB y en octavas, tilt en dB (ya alineado con lo que sale de la curva). 'latency' = la del oversampling.
+    void advance (float emphasisDbOffset, float emphasisOctaveOffset, float tiltDbOffset, int latency) noexcept
     {
         if (! lowCutOctaves.isSteady())
         {
@@ -119,19 +134,40 @@ public:
             highCutOctaves.next();
             updateHighCut();
         }
-        if (! emphasisOctaves.isSteady() || ! emphasisDb.isSteady())
+
+        // Emphasis: los coeficientes solo se recalculan (tan()) cuando el valor cambia. Con offset 0 el valor es el de la
+        // perilla tal cual.
+        emphasisOctaves.next();
+        emphasisDb.next();
+        const EmphasisValue current { std::clamp (emphasisOctaves.value + emphasisOctaveOffset, minEmphasisOctave, maxEmphasisOctave),
+                                      std::clamp (emphasisDb.value + emphasisDbOffset, -maxEmphasisDb, maxEmphasisDb) };
+        if (current != preEmphasis)
         {
-            emphasisOctaves.next();
-            emphasisDb.next();
-            updateEmphasis();
+            preEmphasis = current;
+            updateEmphasis (preEmphasis, emphasis.pre, emphasis.preAmount, false);
         }
-        if (! tiltDb.isSteady())
+        emphasisHistory[historyIndex] = current;
+        const auto& delayed = emphasisHistory[(historyIndex - static_cast<size_t> (latency)) & (historySize - 1)];
+        historyIndex = (historyIndex + 1) & (historySize - 1);
+        if (delayed != postEmphasis)
         {
-            tiltDb.next();
+            postEmphasis = delayed;
+            updateEmphasis (postEmphasis, emphasis.post, emphasis.postAmount, true);
+        }
+
+        tiltDb.next();
+        if (const float tiltNow = std::clamp (tiltDb.value + tiltDbOffset, -maxTiltDb, maxTiltDb); tiltNow != tiltValue)
+        {
+            tiltValue = tiltNow;
             updateTilt();
         }
         advanceFades();
     }
+
+    // Los valores que suenan ahora (perilla + modulación), para la GUI y los tests.
+    [[nodiscard]] float getEmphasisHz() const noexcept { return std::exp2 (preEmphasis.octave); }
+    [[nodiscard]] float getEmphasisDb() const noexcept { return preEmphasis.db; }
+    [[nodiscard]] float getTiltDb() const noexcept { return tiltValue; }
 
     // Lo que leen los canales en la muestra actual.
     deepwater::dsp::SvfStage::Coefficients lowCut, highCut;
@@ -140,6 +176,16 @@ public:
     float lowCutPreMix = 0.0f, lowCutPostMix = 0.0f, highCutPreMix = 0.0f, highCutPostMix = 0.0f;
 
 private:
+    struct EmphasisValue
+    {
+        float octave = 0.0f; // log2 de la frecuencia
+        float db = 0.0f;
+        bool operator== (const EmphasisValue&) const = default;
+    };
+
+    static inline const float minEmphasisOctave = std::log2 (emphasisMinHz);
+    static inline const float maxEmphasisOctave = std::log2 (emphasisMaxHz);
+
     [[nodiscard]] bool lowCutPreOn() const noexcept { return lowCutOn && ! lowCutPost; }
     [[nodiscard]] bool lowCutPostOn() const noexcept { return lowCutOn && lowCutPost; }
     [[nodiscard]] bool highCutPreOn() const noexcept { return highCutOn && ! highCutPost; }
@@ -163,26 +209,30 @@ private:
         highCut = deepwater::dsp::SvfStage::Coefficients::forCutoff (std::exp2 (highCutOctaves.value), cutQ, sampleRate);
     }
 
-    void updateEmphasis() noexcept
+    // La campana del emphasis (antes de la curva) o su inversa (después), para unos valores dados.
+    void updateEmphasis (const EmphasisValue& value, deepwater::dsp::SvfStage::Coefficients& coefficients, float& amount,
+                         bool inverse) const noexcept
     {
         using deepwater::dsp::SvfStage;
-        const auto bell = SvfStage::Coefficients::forCutoff (std::exp2 (emphasisOctaves.value), emphasisQ, sampleRate);
-        const float a = deepwater::dsp::dbToGain (emphasisDb.value); // 0 dB = 1 exacto: las dos campanas no tocan nada
-        emphasis.pre = bell;
-        emphasis.post = SvfStage::Coefficients::make (bell.g, a * bell.k);
-        emphasis.preAmount = (a - 1.0f) * bell.k;
-        emphasis.postAmount = (1.0f - a) * bell.k;
+        const auto bell = SvfStage::Coefficients::forCutoff (std::exp2 (value.octave), emphasisQ, sampleRate);
+        const float a = deepwater::dsp::dbToGain (value.db); // 0 dB = 1 exacto: las dos campanas no tocan nada
+        coefficients = inverse ? SvfStage::Coefficients::make (bell.g, a * bell.k) : bell;
+        amount = inverse ? (1.0f - a) * bell.k : (a - 1.0f) * bell.k;
     }
 
     void updateTilt() noexcept
     {
-        tilt = deepwater::dsp::TiltFilter::Coefficients::forTilt (tiltPivotHz, tiltDb.value, sampleRate);
+        tilt = deepwater::dsp::TiltFilter::Coefficients::forTilt (tiltPivotHz, tiltValue, sampleRate);
     }
 
     double sampleRate = 44100.0;
     deepwater::dsp::LinearRamp lowCutOctaves, highCutOctaves, emphasisOctaves, emphasisDb, tiltDb;
     deepwater::dsp::EffectSwitch lowCutPreFade, lowCutPostFade, highCutPreFade, highCutPostFade;
     bool lowCutOn = false, highCutOn = false, lowCutPost = false, highCutPost = true;
+    EmphasisValue preEmphasis, postEmphasis;      // los que suenan antes y después de la curva
+    std::array<EmphasisValue, historySize> emphasisHistory {};
+    size_t historyIndex = 0;
+    float tiltValue = 0.0f;
 };
 
 // Los filtros de tono de un canal (solo su estado; los coeficientes vienen de ToneControls).

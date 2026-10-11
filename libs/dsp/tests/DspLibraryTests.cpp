@@ -10,16 +10,19 @@
 #include <cstdio>
 #include <cstring>
 #include <numbers>
+#include <string_view>
 #include <vector>
 
 #include "deepwater/dsp/Crossover.h"
 #include "deepwater/dsp/DcBlocker.h"
 #include "deepwater/dsp/Decibels.h"
 #include "deepwater/dsp/DelayLine.h"
+#include "deepwater/dsp/EnvelopeFollower.h"
 #include "deepwater/dsp/FastMath.h"
 #include "deepwater/dsp/Fft.h"
 #include "deepwater/dsp/Halfband.h"
 #include "deepwater/dsp/LevelMeter.h"
+#include "deepwater/dsp/Lfo.h"
 #include "deepwater/dsp/OnePole.h"
 #include "deepwater/dsp/Oversampler.h"
 #include "deepwater/dsp/Pitch.h"
@@ -839,6 +842,103 @@ void testMidiNoteToHz()
     CHECK (std::abs (dw::midiNoteToHz (60) - 261.6255653) < 1.0e-6);
 }
 
+// --- Modulación: seguidor de envolvente y LFO ----------------------------------------------------------------------
+
+double gainToDbD (double gain)
+{
+    return 20.0 * std::log10 (gain);
+}
+
+void testEnvelopeFollower()
+{
+    std::printf ("EnvelopeFollower: 63 %% en un ataque, cae 8.7 dB por cada relajación, sigue el pico de un seno\n");
+
+    for (const double sr : sampleRates)
+    {
+        dw::EnvelopeFollower follower;
+        follower.prepare (sr);
+        follower.setTimes (0.010, 0.200);
+
+        // Escalón de 0 a 1: tras τ de ataque vale 1 − 1/e.
+        const int attackSamples = static_cast<int> (std::lround (0.010 * sr));
+        for (int i = 0; i < attackSamples; ++i)
+            follower.process (1.0);
+        CHECK (std::abs (follower.getValue() - (1.0 - std::exp (-1.0))) < 0.002);
+
+        // Asentado en 1 y soltado: cada τ de relajación cae 1/e = 8.69 dB (una recta en dB). El ataque solo retrasa un
+        // poco el arranque de la caída (el primer τ cae 8.2 dB).
+        for (int i = 0; i < static_cast<int> (sr); ++i)
+            follower.process (1.0);
+        const int releaseSamples = static_cast<int> (std::lround (0.200 * sr));
+        std::array<double, 4> releaseDb {};
+        for (size_t k = 1; k < releaseDb.size(); ++k)
+        {
+            for (int i = 0; i < releaseSamples; ++i)
+                follower.process (0.0);
+            releaseDb[k] = gainToDbD (follower.getValue());
+        }
+        CHECK (std::abs (releaseDb[1] + 8.24) < 0.05);
+        CHECK (std::abs (releaseDb[2] - releaseDb[1] + 8.686) < 0.02);
+        CHECK (std::abs (releaseDb[3] - releaseDb[2] + 8.686) < 0.02);
+
+        // Un pico nuevo, aunque sea de una sola muestra, entra entero en la primera etapa: con ataque 0 la envolvente
+        // lo marca al instante.
+        follower.setTimes (0.0, 0.200);
+        follower.process (0.9);
+        CHECK (follower.getValue() == 0.9);
+        follower.setTimes (0.010, 0.200);
+
+        // Un seno de 100 Hz con ataque rápido y relajación larga: la envolvente queda en su pico, con poca ondulación.
+        follower.setTimes (0.0005, 0.300);
+        follower.reset();
+        double low = 1.0, high = 0.0;
+        for (int i = 0; i < static_cast<int> (sr); ++i)
+        {
+            const double value = follower.process (std::abs (0.5 * std::sin (2.0 * pi * 100.0 * i / sr)));
+            if (i > static_cast<int> (sr) / 2)
+            {
+                low = std::min (low, value);
+                high = std::max (high, value);
+            }
+        }
+        // El ataque no es instantáneo: en la cima del seno se queda un poco por debajo (−0.06 dB). Entre dos picos de |x|
+        // (5 ms) la relajación de 300 ms la deja caer ~0.05 dB.
+        CHECK (high <= 0.5 && gainToDbD (high / 0.5) > -0.1);
+        CHECK (gainToDbD (high / low) < 0.1);
+    }
+
+    // Tiempo 0 = sigue al instante.
+    dw::EnvelopeFollower instant;
+    instant.prepare (48000.0);
+    instant.setTimes (0.0, 0.0);
+    CHECK (instant.process (0.7) == 0.7 && instant.process (0.2) == 0.2);
+}
+
+void testLfoDivisions()
+{
+    std::printf ("LFO: divisiones de tempo (1/4 a 120 BPM = 2 Hz) y un ciclo por período\n");
+
+    CHECK (std::abs (dw::lfoDivisionHz (dw::lfoDivisions[dw::defaultLfoDivision], 120.0) - 2.0) < 1.0e-12);
+    CHECK (std::string_view (dw::lfoDivisions[dw::defaultLfoDivision].name) == "1/4");
+    CHECK (std::abs (dw::lfoDivisionHz (dw::lfoDivisions[3], 120.0) - 0.5) < 1.0e-12);         // 1 bar = 4 negras
+    CHECK (std::abs (dw::lfoDivisionHz (dw::lfoDivisions[11], 90.0) - 4.5) < 1.0e-12);         // 1/8 T a 90 BPM
+    CHECK (std::abs (dw::lfoDivisions[14].beats - 1.5 * dw::lfoDivisions[5].beats) < 1.0e-12); // puntillo = ×1.5
+
+    // Seno de 3 Hz a 48 kHz: tras 16 000 muestras vuelve a la fase 0 habiendo hecho exactamente un ciclo.
+    dw::Lfo lfo;
+    lfo.reset (1u);
+    lfo.setShape (dw::LfoShape::sine);
+    const double increment = 3.0 / 48000.0;
+    float peak = 0.0f;
+    for (int i = 0; i < 16000; ++i)
+    {
+        peak = std::max (peak, lfo.getValue());
+        lfo.advance (increment);
+    }
+    CHECK (std::abs (peak - 1.0f) < 1.0e-6f);
+    CHECK (lfo.getPhase() < 1.0e-6 || lfo.getPhase() > 1.0 - 1.0e-6);
+}
+
 } // namespace
 
 int main()
@@ -865,6 +965,8 @@ int main()
     testFastTanh();
     testSimdMatchesScalar();
     testMidiNoteToHz();
+    testEnvelopeFollower();
+    testLfoDivisions();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de deepwater::dsp pasaron.\n");

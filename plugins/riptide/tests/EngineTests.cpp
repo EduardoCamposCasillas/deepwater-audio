@@ -1432,6 +1432,409 @@ void testMultibandBlockSizeAndBypass()
     CHECK (exact);
 }
 
+// --- Fase 7: modulación ----------------------------------------------------------------------------------------------
+
+using riptide::dsp::ModTarget;
+using riptide::dsp::Transport;
+using deepwater::dsp::LfoShape;
+
+EngineSettings withEnvelope (ModTarget target, float amount, float sensitivityDb = 0.0f, EngineSettings settings = {})
+{
+    settings.modulation.envelope.target = target;
+    settings.modulation.envelope.amount = amount;
+    settings.modulation.envelope.sensitivityDb = sensitivityDb;
+    return settings;
+}
+
+EngineSettings withLfo (ModTarget target, float amount, LfoShape shape, bool sync, float rateHz, EngineSettings settings = {})
+{
+    settings.modulation.lfo.target = target;
+    settings.modulation.lfo.amount = amount;
+    settings.modulation.lfo.shape = shape;
+    settings.modulation.lfo.sync = sync;
+    settings.modulation.lfo.rateHz = rateHz;
+    return settings;
+}
+
+float span (ModTarget target)
+{
+    return riptide::dsp::modTargetSpans[static_cast<size_t> (target)];
+}
+
+void testModulationOffIsTransparent()
+{
+    std::printf ("Modulación: con amount 0 en las dos fuentes, el sonido es bit a bit el de sin modulación\n");
+
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        auto plain = withBands (2, withTone ({ 80.0f, false, 12000.0f, true, -2.0f, 6.0f, 1500.0f },
+                                             withMode (Mode::tube, { 9.0f, 0.0f, false })));
+        plain.mix = 0.7f;
+        auto configured = withEnvelope (ModTarget::emphasisFreq, 0.0f, 12.0f, plain);
+        configured = withLfo (ModTarget::tilt, 0.0f, LfoShape::square, false, 7.0f, configured);
+        const auto inputL = noise (static_cast<size_t> (sr * 0.5), 0.6f, 3u);
+        const auto inputR = noise (static_cast<size_t> (sr * 0.5), 0.6f, 4u);
+
+        std::vector<std::vector<float>> outputs;
+        for (const auto* settings : { &plain, &configured })
+        {
+            auto engineOwner = std::make_unique<Engine>();
+            auto& engine = *engineOwner;
+            engine.prepare (sr, *settings);
+            engine.setTransport ({ 128.0, 3.5, true, true });
+            auto left = inputL, right = inputR;
+            processInBlocks (engine, left, right, 333);
+            outputs.push_back (left);
+            outputs.push_back (right);
+        }
+        CHECK (outputs[0] == outputs[2] && outputs[1] == outputs[3]);
+    }
+}
+
+void testEnvelopeMovesTarget()
+{
+    std::printf ("Envolvente: -40 dBFS + 20 dB de sensibilidad = 0.5; amount 50 %% = un cuarto de perilla en cada destino\n");
+
+    const double sr = 48000.0;
+    // Seno de 1 kHz con pico de −40 dBFS (Tape a −28 dBFS es casi recta: la ganancia medida es el drive).
+    const auto input = sine (1000.0, sr, static_cast<size_t> (sr), 0.01f);
+    for (int t = 0; t < riptide::dsp::numModTargets; ++t)
+    {
+        const auto target = static_cast<ModTarget> (t);
+        for (const float amount : { 0.5f, -0.5f })
+        {
+            auto engineOwner = std::make_unique<Engine>();
+            auto& engine = *engineOwner;
+            engine.prepare (sr, withEnvelope (target, amount, 20.0f, withMode (Mode::tape)));
+            auto out = input;
+            std::vector<float> none;
+            processInBlocks (engine, out, none, 256);
+            CHECK (std::abs (engine.getEnvelopeValue() - 0.5f) < 0.005f);
+            CHECK (std::abs (engine.getModulation (target) - amount * 0.5f * span (target)) < 0.01f * span (target));
+            if (target == ModTarget::drive)
+            {
+                // ±12 dB de drive: la salida sube o baja lo mismo.
+                const double gainDb = dw::gainToDb (static_cast<float> (toneAmplitude (out, 1000.0, sr, out.size() / 2) / 0.01));
+                CHECK (std::abs (gainDb - amount * 24.0) < 0.25);
+            }
+        }
+    }
+}
+
+void testEnvelopeFollowsDynamics()
+{
+    std::printf ("Envolvente: lo fuerte sube el drive y lo suave no; sube con el ataque y baja con la relajación, sin saltos\n");
+
+    const double sr = 48000.0;
+    // 0.4 s fuerte (pico −6 dBFS) y 0.6 s suave (−46 dBFS).
+    auto input = sine (200.0, sr, static_cast<size_t> (sr), 0.5f);
+    for (size_t i = static_cast<size_t> (0.4 * sr); i < input.size(); ++i)
+        input[i] *= 0.01f;
+
+    auto settings = withEnvelope (ModTarget::drive, 0.5f, 0.0f, withMode (Mode::tape));
+    settings.modulation.envelope.attackMs = 5.0f;
+    settings.modulation.envelope.releaseMs = 100.0f;
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
+    engine.prepare (sr, settings);
+    std::vector<float> drive;
+    float sample = 0.0f;
+    float* channels[1] { &sample };
+    for (const float x : input)
+    {
+        sample = x;
+        engine.process (channels, 1, 1);
+        drive.push_back (engine.getModulation (ModTarget::drive));
+    }
+
+    const auto at = [&] (double seconds) { return drive[static_cast<size_t> (seconds * sr)]; };
+    // Fuerte: (−6 + 40) / 40 = 0.85 → 0.85 · 50 % · 48 dB = +20.4 dB. Suave: por debajo de −40 dBFS, 0.
+    CHECK (std::abs (at (0.35) - 20.4f) < 0.3f);
+    CHECK (at (0.95) == 0.0f);
+    // Ataque de 5 ms: a los 5 ms el nivel ya pasó el 63 %, que en dB es casi todo el camino.
+    CHECK (at (0.005) > 15.0f);
+    // Relajación de 100 ms: 8.7 dB cada 100 ms. A los 100 ms de soltar el nivel está en −14.7 dBFS: (−14.7 + 40) / 40 · 24.
+    CHECK (std::abs (at (0.5) - (40.0f - 6.0f - 8.69f) / 40.0f * 24.0f) < 0.5f);
+    // En los primeros 2 ms el drive sube rápido (el nivel arranca desde silencio, y en dB eso es mucho camino: hasta 0.5 dB
+    // por muestra, justo cuando empieza el sonido); después, nunca más de 0.1 dB de una muestra a la siguiente.
+    float worstStep = 0.0f;
+    for (size_t i = static_cast<size_t> (0.002 * sr); i < drive.size(); ++i)
+        worstStep = std::max (worstStep, std::abs (drive[i] - drive[i - 1]));
+    CHECK (worstStep < 0.1f);
+}
+
+void testLfoRateAndSync()
+{
+    std::printf ("LFO: frecuencia libre, al tempo (1/4 a 120 BPM = 2 Hz) y en fase con la posición de la canción\n");
+
+    const double sr = 48000.0;
+    // El período medido con los cruces por cero hacia arriba (amount 100 % sobre Mix: el offset es el valor del LFO).
+    const auto period = [&] (const EngineSettings& settings, const Transport& transport)
+    {
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
+        engine.prepare (sr, settings);
+        engine.setTransport (transport);
+        std::vector<size_t> crossings;
+        float previous = 0.0f, sample = 0.0f;
+        float* channels[1] { &sample };
+        for (size_t i = 0; i < static_cast<size_t> (sr * 3.0); ++i)
+        {
+            sample = 0.0f;
+            engine.process (channels, 1, 1);
+            const float value = engine.getModulation (ModTarget::mix);
+            if (previous < 0.0f && value >= 0.0f)
+                crossings.push_back (i);
+            previous = value;
+        }
+        return crossings.size() < 2 ? 0.0
+                                    : static_cast<double> (crossings.back() - crossings.front())
+                                          / static_cast<double> (crossings.size() - 1);
+    };
+    CHECK (std::abs (period (withLfo (ModTarget::mix, 1.0f, LfoShape::sine, false, 5.0f), {}) - sr / 5.0) < 1.0);
+    CHECK (std::abs (period (withLfo (ModTarget::mix, 1.0f, LfoShape::triangle, true, 1.0f), {}) - sr / 2.0) < 1.0);
+    auto eighthTriplet = withLfo (ModTarget::mix, 1.0f, LfoShape::sine, true, 1.0f);
+    eighthTriplet.modulation.lfo.division = 11; // 1/8 T a 90 BPM = 4.5 Hz
+    CHECK (std::abs (period (eighthTriplet, { 90.0, 0.0, false, false }) - sr / 4.5) < 1.0);
+
+    // Con la canción sonando la fase sale de la posición: bloques de 10 ms a 120 BPM avanzan 0.02 negras cada uno.
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
+    engine.prepare (sr, withLfo (ModTarget::mix, 1.0f, LfoShape::sine, true, 1.0f));
+    std::vector<float> block (480, 0.0f);
+    float* channels[1] { block.data() };
+    double worst = 0.0;
+    for (int k = 0; k < 200; ++k)
+    {
+        // A mitad de camino la canción salta hacia atrás (un loop que vuelve a empezar): el LFO salta con ella.
+        const double ppq = (k < 100 ? 0.37 : -1.63) + 0.02 * k;
+        engine.setTransport ({ 120.0, ppq, true, true });
+        engine.process (channels, 1, 480);
+        // Al final del bloque la fase es la de ppq + 0.02; el suavizado de 2 ms la retrasa 0.004 ciclos. Tras un salto se
+        // le dan 3 bloques para alcanzar el valor nuevo.
+        if (k > 3 && (k < 100 || k > 103))
+        {
+            const double expected = std::sin (2.0 * pi * (ppq + 0.02));
+            worst = std::max (worst, std::abs (engine.getModulation (ModTarget::mix) - expected));
+        }
+    }
+    std::printf ("   LFO sincronizado con la canción: a %.3f del valor exacto de la fase\n", worst);
+    CHECK (worst < 0.03);
+}
+
+void testModulationIsClickless()
+{
+    std::printf ("Modulación: cuadrada de 20 Hz sobre el drive, cambios de destino, forma y amount, sin saltos\n");
+
+    for (const double sr : sampleRates)
+    {
+        const auto input = sine (150.0, sr, static_cast<size_t> (sr * 0.8), 0.4f);
+        // Referencia: la onda quieta más empinada entre los extremos del drive y del emphasis.
+        float reference = 0.0f;
+        for (const float driveDb : { -24.0f, 0.0f, 24.0f })
+            for (const float emphasisDb : { -12.0f, 0.0f, 12.0f })
+            {
+                auto still = withMode (Mode::tape, { driveDb, 0.0f, false });
+                still.tone.emphasisDb = emphasisDb;
+                reference = std::max (reference, maxStep (render (sr, still, input)));
+            }
+
+        std::vector<EngineSettings> stages;
+        auto settings = withLfo (ModTarget::drive, 0.5f, LfoShape::square, false, 20.0f, withMode (Mode::tape));
+        stages.push_back (settings);
+        settings.modulation.lfo.target = ModTarget::band1Drive; // el drive viejo pierde la modulación en 20 ms
+        stages.push_back (settings);
+        settings.modulation.lfo.amount = -1.0f;
+        settings.modulation.lfo.shape = LfoShape::sampleAndHold;
+        stages.push_back (settings);
+        // La envolvente lleva el emphasis de −12 a +12 dB mientras el S&H se apaga.
+        settings = withEnvelope (ModTarget::emphasis, 1.0f, 24.0f, settings);
+        settings.tone.emphasisDb = -12.0f;
+        settings.modulation.lfo.amount = 0.0f;
+        stages.push_back (settings);
+
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
+        engine.prepare (sr, stages.front());
+        std::vector<float> output, none;
+        const size_t length = input.size() / stages.size();
+        for (size_t s = 0; s < stages.size(); ++s)
+        {
+            engine.setSettings (stages[s]);
+            std::vector<float> block (input.begin() + static_cast<std::ptrdiff_t> (s * length),
+                                      input.begin() + static_cast<std::ptrdiff_t> ((s + 1) * length));
+            processInBlocks (engine, block, none, 64);
+            output.insert (output.end(), block.begin(), block.end());
+        }
+        // La cuadrada pasa de −24 a +24 dB de drive en los 2 ms del suavizado: la onda cambia de forma sin escalones.
+        const float worst = maxStep (output);
+        if (sr == 48000.0)
+            std::printf ("   paso máximo %.4f (la onda quieta más empinada: %.4f)\n", worst, reference);
+        CHECK (worst <= 1.1f * reference);
+    }
+}
+
+void testRouteChangeKeepsOldAmount()
+{
+    std::printf ("Modulación: si cambian a la vez el destino y el amount, el destino viejo nunca recibe el amount nuevo\n");
+
+    const double sr = 48000.0;
+    // La envolvente marca 1 todo el tiempo (seno fuerte y +24 dB de sensibilidad). Primero mueve el Mix un 10 %; después
+    // pasa a mover el drive con amount 100 %. El Mix tiene que bajar de 0.1 a 0 sin subir nunca, y el drive no puede
+    // moverse hasta que el Mix ya no tenga nada.
+    auto before = withEnvelope (ModTarget::mix, -0.1f, 24.0f, withMode (Mode::tape));
+    auto after = withEnvelope (ModTarget::drive, 1.0f, 24.0f, withMode (Mode::tape));
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
+    engine.prepare (sr, before);
+    const auto input = sine (200.0, sr, static_cast<size_t> (sr * 0.2), 0.5f);
+    float sample = 0.0f;
+    float* channels[1] { &sample };
+    float mixMod = -1.0f, highestMix = -1.0f;
+    bool driveWaited = true;
+    for (size_t i = 0; i < input.size(); ++i)
+    {
+        if (i == input.size() / 2)
+            engine.setSettings (after);
+        sample = input[i];
+        engine.process (channels, 1, 1);
+        if (i >= input.size() / 2)
+        {
+            mixMod = engine.getModulation (ModTarget::mix);
+            highestMix = std::max (highestMix, mixMod);
+            driveWaited = driveWaited && (engine.getModulation (ModTarget::drive) == 0.0f || mixMod == 0.0f);
+        }
+    }
+    CHECK (highestMix <= 0.0f && highestMix >= -0.1f);
+    CHECK (mixMod == 0.0f);
+    CHECK (driveWaited);
+    CHECK (std::abs (engine.getModulation (ModTarget::drive) - span (ModTarget::drive)) < 0.01f);
+}
+
+void testEmphasisModulationStaysInverse()
+{
+    std::printf ("Modulación: con el emphasis moviéndose, la de-emphasis sigue siendo su inversa (alineada con la latencia)\n");
+
+    for (const double sr : sampleRates)
+    {
+        // Nivel bajo con Hard Clip: la curva es recta, lo único que podría cambiar la señal es el par emphasis/de-emphasis.
+        const auto input = noise (static_cast<size_t> (sr), 0.003f, 77u);
+        const auto flat = withOversampling (2, withMode (Mode::hardClip));
+        auto moving = flat;
+        moving.tone.emphasisDb = 12.0f;
+        moving = withLfo (ModTarget::emphasisFreq, 0.5f, LfoShape::sine, false, 4.0f, moving); // ±3.8 octavas a 4 Hz
+        moving = withEnvelope (ModTarget::emphasis, -0.5f, 30.0f, moving);
+        const auto reference = render (sr, flat, input);
+        const auto out = render (sr, moving, input);
+        double error = 0.0, energy = 0.0;
+        for (size_t i = out.size() / 4; i < out.size(); ++i)
+        {
+            error += static_cast<double> (out[i] - reference[i]) * (out[i] - reference[i]);
+            energy += static_cast<double> (reference[i]) * reference[i];
+        }
+        const double residualDb = 10.0 * std::log10 (error / energy + 1.0e-30);
+        if (sr == 44100.0)
+            std::printf ("   residuo con Emph Freq barriendo ±3.8 octavas a 4 Hz: %.1f dB\n", residualDb);
+        CHECK (residualDb < -50.0);
+    }
+}
+
+void testModulatedDriveWithAutoGain()
+{
+    std::printf ("Modulación + auto gain: el drive salta entre 0 y +24 dB y el volumen casi no cambia (cambia el carácter)\n");
+
+    const double sr = 48000.0;
+    const auto input = pinkNoise (static_cast<size_t> (sr * 4.0), 0.18f, 5u); // −15 dBFS RMS
+    // Input +12 dB y una cuadrada de 2 Hz de ±12 dB: 250 ms con +24 dB de drive, 250 ms con 0 dB.
+    auto settings = withLfo (ModTarget::drive, 0.25f, LfoShape::square, false, 2.0f, withMode (Mode::tape, { 12.0f, 0.0f, false }));
+    // Diferencia de volumen entre los medios ciclos con mucho y con poco drive (sin los 31 ms de después de cada cambio).
+    // No sirve mirar ventanas de 10 ms: el ruido rosa ya varía ±3 dB de una a otra por sí solo.
+    const auto difference = [&] (bool autoGain)
+    {
+        settings.autoGain = autoGain;
+        const auto out = render (sr, settings, input);
+        const auto half = static_cast<size_t> (sr * 0.25);
+        double high = 0.0, low = 0.0;
+        for (size_t k = 8; k < 16; ++k)
+        {
+            const std::vector<float> part (out.begin() + static_cast<std::ptrdiff_t> (k * half + half / 8),
+                                           out.begin() + static_cast<std::ptrdiff_t> ((k + 1) * half));
+            (k % 2 == 0 ? high : low) += rmsDb (part, 0) / 4.0;
+        }
+        return high - low;
+    };
+    const double without = difference (false);
+    const double with = difference (true);
+    std::printf ("   +24 dB contra 0 dB de drive: %+.1f dB sin auto gain, %+.1f dB con auto gain\n", without, with);
+    CHECK (without > 6.0);
+    CHECK (with < 0.5 && with > -3.0); // el modelo deja la saturación fuerte un poco más baja, nunca más alta
+}
+
+void testModulationBlockSizeAndBypass()
+{
+    std::printf ("Modulación: el resultado no depende del tamaño de bloque; con bypass, la entrada retrasada bit a bit\n");
+
+    constexpr size_t changeEvery = 24000;
+    auto a = withLfo (ModTarget::emphasisFreq, 0.4f, LfoShape::square, true, 1.0f, withMode (Mode::transistor, { 6.0f, 0.0f, false }));
+    a = withEnvelope (ModTarget::drive, 0.7f, 6.0f, a);
+    a.tone.emphasisDb = 9.0f;
+    a.mix = 0.8f;
+    auto b = a;
+    b.numBands = 3;
+    b.modulation.envelope.target = ModTarget::band2Drive;
+    b.modulation.lfo.target = ModTarget::mix;
+    b.modulation.lfo.sync = false;
+    b.modulation.lfo.rateHz = 9.0f;
+    auto c = b;
+    c.modulation.envelope.target = ModTarget::tilt;
+    c.modulation.envelope.amount = -1.0f;
+    c.modulation.lfo.shape = LfoShape::sampleAndHold;
+    const std::array<EngineSettings, 3> changes { a, b, c };
+    const auto inputL = noise (changeEvery * changes.size(), 0.5f, 31u);
+    const auto inputR = noise (changeEvery * changes.size(), 0.5f, 32u);
+
+    std::vector<float> referenceL, referenceR;
+    for (const int blockSize : { 1, 64, 4096 })
+    {
+        auto engineOwner = std::make_unique<Engine>();
+        auto& engine = *engineOwner;
+        engine.prepare (44100.0, {});
+        std::vector<float> outL, outR;
+        for (size_t k = 0; k < changes.size(); ++k)
+        {
+            engine.setSettings (changes[k]);
+            engine.setTransport ({ 140.0, 0.0, false, false });
+            std::vector<float> left (inputL.begin() + static_cast<std::ptrdiff_t> (k * changeEvery),
+                                     inputL.begin() + static_cast<std::ptrdiff_t> ((k + 1) * changeEvery));
+            std::vector<float> right (inputR.begin() + static_cast<std::ptrdiff_t> (k * changeEvery),
+                                      inputR.begin() + static_cast<std::ptrdiff_t> ((k + 1) * changeEvery));
+            processInBlocks (engine, left, right, blockSize);
+            outL.insert (outL.end(), left.begin(), left.end());
+            outR.insert (outR.end(), right.begin(), right.end());
+        }
+        if (referenceL.empty())
+        {
+            referenceL = outL;
+            referenceR = outR;
+        }
+        CHECK (outL == referenceL);
+        CHECK (outR == referenceR);
+    }
+
+    auto bypassed = a;
+    bypassed.bypassed = true;
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
+    engine.prepare (44100.0, bypassed);
+    const auto latency = static_cast<size_t> (engine.getLatency());
+    auto left = inputL, right = inputR;
+    processInBlocks (engine, left, right, 512);
+    bool exact = true;
+    for (size_t i = latency; i < left.size(); ++i)
+        exact = exact && left[i] == inputL[i - latency] && right[i] == inputR[i - latency];
+    CHECK (exact);
+}
+
 int main()
 {
     testBypassIsDelayedInput();
@@ -1471,6 +1874,15 @@ int main()
     testBandChangesAreClickless();
     testBandAutoGain();
     testMultibandBlockSizeAndBypass();
+    testModulationOffIsTransparent();
+    testEnvelopeMovesTarget();
+    testEnvelopeFollowsDynamics();
+    testLfoRateAndSync();
+    testModulationIsClickless();
+    testRouteChangeKeepsOldAmount();
+    testEmphasisModulationStaysInverse();
+    testModulatedDriveWithAutoGain();
+    testModulationBlockSizeAndBypass();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de Riptide pasaron.\n");

@@ -65,6 +65,67 @@ std::unique_ptr<juce::AudioParameterChoice> makePositionParameter (const char* i
                                                          juce::StringArray { "Pre", "Post" }, post ? 1 : 0);
 }
 
+// Rango logarítmico (cada octava, o cada ×2 de tiempo, ocupa lo mismo en el recorrido de la perilla).
+juce::NormalisableRange<float> logRange (float minimum, float maximum)
+{
+    return { minimum, maximum,
+             [] (float start, float end, float proportion) { return start * std::pow (end / start, proportion); },
+             [] (float start, float end, float value) { return std::log (value / start) / std::log (end / start); } };
+}
+
+// Tiempos como "0.5 ms", "35 ms" o "1.20 s".
+juce::String timeToText (float ms)
+{
+    if (ms < 9.95f)
+        return juce::String (ms, 1) + " ms";
+    return ms < 999.5f ? juce::String (juce::roundToInt (ms)) + " ms" : juce::String (ms / 1000.0f, 2) + " s";
+}
+
+float textToTime (const juce::String& text)
+{
+    // "1.2 s" son segundos; "35", "35 ms", milisegundos.
+    const auto trimmed = text.trim();
+    const bool seconds = trimmed.endsWithIgnoreCase ("s") && ! trimmed.endsWithIgnoreCase ("ms");
+    return trimmed.getFloatValue() * (seconds ? 1000.0f : 1.0f);
+}
+
+std::unique_ptr<juce::AudioParameterFloat> makeTimeParameter (const char* id, const juce::String& name, float minMs,
+                                                              float maxMs, float defaultMs)
+{
+    return std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id, riptide::params::versionHintPhase7 }, name, logRange (minMs, maxMs), defaultMs,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("ms")
+            .withStringFromValueFunction ([] (float ms, int) { return timeToText (ms); })
+            .withValueFromStringFunction (textToTime));
+}
+
+// Cantidad de una ruta de modulación: −100..+100 % ("+35 %"). 0 = no mueve nada.
+std::unique_ptr<juce::AudioParameterFloat> makeAmountParameter (const char* id, const juce::String& name)
+{
+    return std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id, riptide::params::versionHintPhase7 }, name, juce::NormalisableRange<float> (-100.0f, 100.0f, 0.1f),
+        0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("%")
+            .withStringFromValueFunction ([] (float percent, int)
+                                          {
+                                              const int rounded = juce::roundToInt (percent);
+                                              return (rounded > 0 ? "+" : "") + juce::String (rounded) + " %";
+                                          })
+            .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); }));
+}
+
+// Destino de una ruta: los nombres salen de riptide::dsp::modTargetNames (índice = valor del enum; solo añadir al final).
+std::unique_ptr<juce::AudioParameterChoice> makeTargetParameter (const char* id, const juce::String& name)
+{
+    juce::StringArray targets;
+    for (const auto* target : riptide::dsp::modTargetNames)
+        targets.add (target);
+    return std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id, riptide::params::versionHintPhase7 }, name,
+                                                         targets, static_cast<int> (riptide::dsp::ModTarget::drive));
+}
+
 // Publica el pico de este bloque sin perder el de bloques anteriores que la GUI aún no leyó: se queda con el mayor.
 // compare_exchange en bucle = "máximo atómico" sin locks (en x64 casi siempre acierta a la primera).
 void publishPeak (std::atomic<float>& target, float peak) noexcept
@@ -108,6 +169,17 @@ RiptideAudioProcessor::RiptideAudioProcessor()
         bandSoloParams[b] = parameters.getRawParameterValue (id::bandSolo[b]);
         bandMuteParams[b] = parameters.getRawParameterValue (id::bandMute[b]);
     }
+    envAttackParam = parameters.getRawParameterValue (id::envAttack);
+    envReleaseParam = parameters.getRawParameterValue (id::envRelease);
+    envSensitivityParam = parameters.getRawParameterValue (id::envSensitivity);
+    envTargetParam = parameters.getRawParameterValue (id::envTarget);
+    envAmountParam = parameters.getRawParameterValue (id::envAmount);
+    lfoShapeParam = parameters.getRawParameterValue (id::lfoShape);
+    lfoSyncParam = parameters.getRawParameterValue (id::lfoSync);
+    lfoRateParam = parameters.getRawParameterValue (id::lfoRate);
+    lfoDivisionParam = parameters.getRawParameterValue (id::lfoDivision);
+    lfoTargetParam = parameters.getRawParameterValue (id::lfoTarget);
+    lfoAmountParam = parameters.getRawParameterValue (id::lfoAmount);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
     startTimerHz (20);
@@ -181,6 +253,34 @@ juce::AudioProcessorValueTreeState::ParameterLayout RiptideAudioProcessor::creat
         layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bandMute[b], id::versionHintPhase6 },
                                                                 band + " Mute", false));
     }
+
+    // Modulación. Amount 0 en las dos fuentes: un proyecto de la Fase 6 suena igual. Destino por defecto: Drive, el uso más
+    // común (la envolvente hace la saturación dinámica; el LFO la hace "respirar" al tempo).
+    layout.add (makeTimeParameter (id::envAttack, "Env Attack", dsp::envelopeMinAttackMs, dsp::envelopeMaxAttackMs, 5.0f));
+    layout.add (makeTimeParameter (id::envRelease, "Env Release", dsp::envelopeMinReleaseMs, dsp::envelopeMaxReleaseMs, 150.0f));
+    layout.add (makeDbParameter (id::envSensitivity, "Env Sensitivity", dsp::maxSensitivityDb, id::versionHintPhase7));
+    layout.add (makeTargetParameter (id::envTarget, "Env Target"));
+    layout.add (makeAmountParameter (id::envAmount, "Env Amount"));
+
+    juce::StringArray shapes;
+    for (const auto* shape : deepwater::dsp::lfoShapeNames)
+        shapes.add (shape);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::lfoShape, id::versionHintPhase7 }, "LFO Shape",
+                                                              shapes, 0));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::lfoSync, id::versionHintPhase7 }, "LFO Sync", true));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::lfoRate, id::versionHintPhase7 }, "LFO Rate", logRange (dsp::lfoMinHz, dsp::lfoMaxHz), 1.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("Hz")
+            .withStringFromValueFunction ([] (float hz, int) { return juce::String (hz, hz < 1.0f ? 2 : 1) + " Hz"; })
+            .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
+    juce::StringArray divisions;
+    for (const auto& division : deepwater::dsp::lfoDivisions)
+        divisions.add (division.name);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::lfoDivision, id::versionHintPhase7 },
+                                                              "LFO Division", divisions, deepwater::dsp::defaultLfoDivision));
+    layout.add (makeTargetParameter (id::lfoTarget, "LFO Target"));
+    layout.add (makeAmountParameter (id::lfoAmount, "LFO Amount"));
     return layout;
 }
 
@@ -217,7 +317,47 @@ riptide::dsp::EngineSettings RiptideAudioProcessor::readSettings() const noexcep
         band.solo = bandSoloParams[b]->load() >= 0.5f;
         band.mute = bandMuteParams[b]->load() >= 0.5f;
     }
+
+    const auto target = [] (const std::atomic<float>* parameter)
+    {
+        return static_cast<riptide::dsp::ModTarget> (
+            juce::jlimit (0, riptide::dsp::numModTargets - 1, static_cast<int> (std::lround (parameter->load()))));
+    };
+    auto& envelope = settings.modulation.envelope;
+    envelope.attackMs = envAttackParam->load();
+    envelope.releaseMs = envReleaseParam->load();
+    envelope.sensitivityDb = envSensitivityParam->load();
+    envelope.target = target (envTargetParam);
+    envelope.amount = envAmountParam->load() / 100.0f;
+    auto& lfo = settings.modulation.lfo;
+    const int lastShape = static_cast<int> (deepwater::dsp::lfoShapeNames.size()) - 1;
+    lfo.shape = static_cast<deepwater::dsp::LfoShape> (juce::jlimit (0, lastShape, static_cast<int> (std::lround (lfoShapeParam->load()))));
+    lfo.sync = lfoSyncParam->load() >= 0.5f;
+    lfo.rateHz = lfoRateParam->load();
+    lfo.division = static_cast<int> (std::lround (lfoDivisionParam->load()));
+    lfo.target = target (lfoTargetParam);
+    lfo.amount = lfoAmountParam->load() / 100.0f;
     return settings;
+}
+
+riptide::dsp::Transport RiptideAudioProcessor::readTransport() noexcept
+{
+    // El host informa el tempo y la posición de la canción. getPosition() está pensado para llamarse desde processBlock:
+    // no reserva memoria ni bloquea. Sin host (Standalone) quedan los 120 BPM por defecto.
+    riptide::dsp::Transport transport;
+    if (auto* host = getPlayHead())
+        if (const auto position = host->getPosition())
+        {
+            if (const auto bpm = position->getBpm())
+                transport.bpm = *bpm;
+            if (const auto ppq = position->getPpqPosition())
+            {
+                transport.ppqPosition = *ppq;
+                transport.hasPosition = true;
+            }
+            transport.isPlaying = position->getIsPlaying();
+        }
+    return transport;
 }
 
 void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
@@ -225,6 +365,7 @@ void RiptideAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBl
     // El motor no reserva memoria: todo (las etapas de los cinco factores, el retardo del camino original) es de tamaño
     // fijo. Aquí solo se diseñan los filtros para esta frecuencia de muestreo.
     engine.prepare (sampleRate, readSettings());
+    engine.setTransport (readTransport());
     for (auto* meter : { &inputMeter, &outputMeter })
         for (auto& channel : *meter)
         {
@@ -257,6 +398,7 @@ void RiptideAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         buffer.clear (ch, 0, buffer.getNumSamples());
 
     engine.setSettings (readSettings());
+    engine.setTransport (readTransport());
     engine.process (buffer.getArrayOfWritePointers(), numChannels, buffer.getNumSamples());
     engineLatency.store (engine.getLatency(), std::memory_order_relaxed);
     publishBands();
@@ -269,6 +411,10 @@ void RiptideAudioProcessor::publishBands() noexcept
         autoGainDb[b].store (engine.getAutoGainDb (static_cast<int> (b)), std::memory_order_relaxed);
     for (size_t i = 0; i < crossoverHz.size(); ++i)
         crossoverHz[i].store (engine.getCrossoverHz (static_cast<int> (i)), std::memory_order_relaxed);
+    envelopeValue.store (engine.getEnvelopeValue(), std::memory_order_relaxed);
+    lfoValue.store (engine.getLfoValue(), std::memory_order_relaxed);
+    for (size_t t = 0; t < modulation.size(); ++t)
+        modulation[t].store (engine.getModulation (static_cast<riptide::dsp::ModTarget> (t)), std::memory_order_relaxed);
 }
 
 void RiptideAudioProcessor::timerCallback()

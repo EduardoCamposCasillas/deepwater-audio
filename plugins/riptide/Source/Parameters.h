@@ -39,6 +39,19 @@ inline constexpr std::array<const char*, 4> bandDrive { "band1Drive", "band2Driv
 inline constexpr std::array<const char*, 4> bandSolo { "band1Solo", "band2Solo", "band3Solo", "band4Solo" };
 inline constexpr std::array<const char*, 4> bandMute { "band1Mute", "band2Mute", "band3Mute", "band4Mute" };
 
+// Fase 7. Envolvente (envelope follower) y LFO, cada uno con su destino y su cantidad.
+inline constexpr const char* envAttack = "envAttack";
+inline constexpr const char* envRelease = "envRelease";
+inline constexpr const char* envSensitivity = "envSensitivity";
+inline constexpr const char* envTarget = "envTarget";
+inline constexpr const char* envAmount = "envAmount";
+inline constexpr const char* lfoShape = "lfoShape";
+inline constexpr const char* lfoSync = "lfoSync";
+inline constexpr const char* lfoRate = "lfoRate";
+inline constexpr const char* lfoDivision = "lfoDivision";
+inline constexpr const char* lfoTarget = "lfoTarget";
+inline constexpr const char* lfoAmount = "lfoAmount";
+
 // Versión en la que apareció cada parámetro (la usa el VST3 para ordenar y reconocer parámetros nuevos).
 inline constexpr int versionHint = 1;
 inline constexpr int versionHintPhase2 = 2;
@@ -46,4 +59,5 @@ inline constexpr int versionHintPhase3 = 3;
 inline constexpr int versionHintPhase4 = 4;
 inline constexpr int versionHintPhase5 = 5;
 inline constexpr int versionHintPhase6 = 6;
+inline constexpr int versionHintPhase7 = 7;
 } // namespace riptide::params
