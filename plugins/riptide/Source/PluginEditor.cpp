@@ -625,7 +625,7 @@ void RiptideAudioProcessorEditor::paintContent (juce::Graphics& g)
     const auto info = header.withRight (presetsHeaderX - padding);
     g.setFont (juce::FontOptions (12.0f));
     g.setColour (message.isNotEmpty() ? theme::meterHot : theme::dimText);
-    g.drawFittedText (message.isNotEmpty() ? message : juce::String ("saturador  -  Fase 9"), info, juce::Justification::centredLeft,
+    g.drawFittedText (message.isNotEmpty() ? message : juce::String ("saturador  -  Fase 10"), info, juce::Justification::centredLeft,
                       1, 0.8f);
 
     // Paneles de las perillas y de la modulación, entre los dos medidores (los visores dibujan el suyo).

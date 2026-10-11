@@ -39,9 +39,18 @@ public:
 
     void setState (const DisplayState& newState, float inputPeak, double elapsedSeconds)
     {
-        state = newState;
-        // El pico sube al instante y cae con τ = 300 ms: se puede leer sin que tiemble con cada golpe.
+        // El pico sube al instante y cae con τ = 300 ms: se puede leer sin que tiemble con cada golpe. Por debajo de
+        // −100 dBFS ya se lee "-inf": se deja en 0 (si no, la caída exponencial nunca termina).
         shownPeak = juce::jmax (inputPeak, shownPeak * static_cast<float> (std::exp (-elapsedSeconds / 0.3)));
+        if (shownPeak < 1.0e-5f)
+            shownPeak = 0.0f;
+
+        // Fase 10: repintar cuesta CPU del hilo de mensajes (el de la interfaz de FL). Solo si cambió algo visible: la
+        // curva o el pico (su lectura tiene un decimal: 0.05 dB). Con la canción parada, el visor queda quieto.
+        if (newState == state && std::abs (deepwater::dsp::gainToDb (shownPeak) - deepwater::dsp::gainToDb (paintedPeak)) < 0.05f)
+            return;
+        state = newState;
+        paintedPeak = shownPeak;
         repaint();
     }
 
@@ -180,6 +189,7 @@ private:
 
     DisplayState state;
     float shownPeak = 0.0f;
+    float paintedPeak = -1.0f; // el pico del último repintado (−1: todavía ninguno)
 };
 
 } // namespace riptide::gui

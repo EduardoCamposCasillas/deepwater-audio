@@ -68,9 +68,16 @@ public:
                 trace->analyzer.prepare (order);
             scratch.assign (static_cast<size_t> (before.analyzer.getSize()), 0.0f);
         }
-        updateTrace (before, processor.getInputTap(), sampleRate, elapsedSeconds);
-        updateTrace (after, processor.getOutputTap(), sampleRate, elapsedSeconds);
-        repaint();
+        // Fase 10: solo se repinta si algo cambió de forma visible (las bandas o algún punto del espectro). Sin audio, las
+        // curvas terminan de caer al piso y el visor queda quieto.
+        bool changed = ! (newState == paintedState);
+        changed = updateTrace (before, processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
+        changed = updateTrace (after, processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
+        if (changed)
+        {
+            paintedState = newState;
+            repaint();
+        }
     }
 
     void resized() override
@@ -231,7 +238,8 @@ private:
         return plot.getY() + plot.getHeight() * (topDb - db) / (topDb - bottomDb);
     }
 
-    void updateTrace (Trace& trace, const RiptideAudioProcessor::AnalyzerTap& tap, double sampleRate, double elapsed)
+    // Devuelve true si algún punto se movió de forma visible (0.05 dB: menos de un píxel).
+    bool updateTrace (Trace& trace, const RiptideAudioProcessor::AnalyzerTap& tap, double sampleRate, double elapsed)
     {
         const auto size = static_cast<size_t> (trace.analyzer.getSize());
         const auto written = tap.getWritten();
@@ -250,18 +258,22 @@ private:
         // Cada punto cubre su tramo de frecuencias (entre la mitad de su píxel y el siguiente).
         const auto points = trace.shown.size();
         if (points < 2)
-            return;
+            return false;
         const float fall = static_cast<float> (fallDbPerSecond * elapsed);
         const double ratio = std::pow (static_cast<double> (maxHz / minHz), 1.0 / static_cast<double> (points - 1));
         const double halfStep = std::sqrt (ratio);
+        bool changed = false;
         for (size_t i = 0; i < points; ++i)
         {
             const double centre = minHz * std::pow (ratio, static_cast<double> (i));
             const float level = silent ? deepwater::dsp::SpectrumAnalyzer::floorDb
                                        : trace.analyzer.levelDb (centre / halfStep, centre * halfStep, sampleRate);
             float& shown = trace.shown[i];
+            const float previous = shown;
             shown = level > shown ? shown + (level - shown) * 0.7f : juce::jmax (level, shown - fall);
+            changed = changed || std::abs (shown - previous) >= 0.05f;
         }
+        return changed;
     }
 
     juce::Path tracePath (const std::vector<float>& levels, bool closed) const
@@ -438,6 +450,7 @@ private:
     Trace before, after;
     std::vector<float> scratch;
     DisplayState state;
+    DisplayState paintedState; // el del último repintado
     juce::Rectangle<float> plot, titleArea;
     juce::Point<float> mouse { -1.0f, -1.0f };
     int dragging = -1;

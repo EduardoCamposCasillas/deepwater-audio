@@ -762,6 +762,73 @@ int main (int argc, char* argv[])
         check (largestStep < 0.08f, "salto entre muestras de " + juce::String (largestStep, 3));
     });
 
+    runTest ("Tortura (Fase 10): todos los parametros al azar cada pocos bloques, bloques de tamano al azar, 4 sample rates", [] {
+        // Lo que hace pluginval con --randomise, pero más tiempo y con señal de música: cualquier combinación de modo,
+        // factor, bandas, tono, mezcla y modulación, cambiando a mitad de sonido. Nada debe dar NaN, explotar (un filtro
+        // inestable crece sin límite) ni reservar memoria.
+        TemporaryFolder temp;
+        auto processor = makeProcessor (temp.folder);
+        auto& parameters = processor->getParameters();
+        juce::Random random (0x52697074); // repetible
+        constexpr int maxBlock = 4096;
+        for (const double sampleRate : { 44100.0, 48000.0, 88200.0, 96000.0 })
+        {
+            processor->setRateAndBufferSizeDetails (sampleRate, maxBlock);
+            processor->prepareToPlay (sampleRate, maxBlock);
+            const auto input = makeSignal (Material::mix, sampleRate, 6.0);
+            juce::AudioBuffer<float> buffer (2, maxBlock);
+            juce::MidiBuffer midi;
+            float peak = 0.0f;
+            bool finite = true;
+            int allocations = 0, changes = 0;
+            for (int start = 0, block = 0; start < input.getNumSamples(); ++block)
+            {
+                // Sobre todo bloques chicos e irregulares; de vez en cuando uno grande.
+                const int wanted = random.nextInt (10) == 0 ? 1 + random.nextInt (maxBlock) : 1 + random.nextInt (300);
+                const int count = std::min (wanted, input.getNumSamples() - start);
+                if (block % 6 == 0)
+                {
+                    // Un tercio de los parámetros cambia a un valor cualquiera (el bypass también).
+                    for (auto* parameter : processor->juce::AudioProcessor::getParameters())
+                        if (random.nextInt (3) == 0)
+                        {
+                            parameter->setValueNotifyingHost (random.nextFloat());
+                            ++changes;
+                        }
+                    // Que no se quede casi todo el tiempo en bypass: ahí no se prueba nada.
+                    if (auto* bypass = parameters.getParameter (id::bypass); bypass->getValue() >= 0.5f && random.nextInt (2) == 0)
+                        bypass->setValueNotifyingHost (0.0f);
+                }
+                buffer.setSize (2, count, false, false, true);
+                for (int ch = 0; ch < 2; ++ch)
+                    buffer.copyFrom (ch, 0, input, ch, start, count);
+                allocation::count = 0;
+                {
+                    const allocation::Scope countAllocations;
+                    processor->processBlock (buffer, midi);
+                }
+                allocations += allocation::count.load();
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < count; ++i)
+                    {
+                        const float y = buffer.getSample (ch, i);
+                        finite = finite && std::isfinite (y);
+                        if (std::isfinite (y))
+                            peak = std::max (peak, std::abs (y));
+                    }
+                start += count;
+            }
+            processor->releaseResources();
+            const auto tag = juce::String (sampleRate / 1000.0, 1) + " kHz";
+            std::printf ("    %s: %d cambios de parametros, pico %+.1f dBFS\n", tag.toRawUTF8(), changes, toDb (peak));
+            check (finite, tag + ": NaN o infinito");
+            check (allocations == 0, tag + ": reservas de memoria: " + juce::String (allocations));
+            // Output llega a +24 dB y el drive a +48 dB: picos altos son posibles, pero +40 dBFS solo sale de algo que
+            // explota.
+            check (peak < 100.0f, tag + ": pico de " + juce::String (toDb (peak), 1) + " dBFS");
+        }
+    });
+
     std::printf ("\n%s (%d fallos)\n", failures == 0 ? "TODOS LOS TESTS PASAN" : "HAY FALLOS", failures);
     return failures == 0 ? 0 : 1;
 }

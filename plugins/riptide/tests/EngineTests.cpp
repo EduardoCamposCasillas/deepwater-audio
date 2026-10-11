@@ -3,13 +3,18 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <functional>
 #include <memory>
 #include <numbers>
 #include <utility>
 #include <vector>
+
+#include <xmmintrin.h>
 
 #include "dsp/Engine.h"
 
@@ -1843,8 +1848,166 @@ void testModulationBlockSizeAndBypass()
     CHECK (exact);
 }
 
-int main()
+// --- Fase 10: proceso en bloque -----------------------------------------------------------------------------------------
+
+void testSaturatorBlockIsBitExact()
 {
+    std::printf ("Saturador en bloque: idéntico bit a bit a muestra a muestra (6 modos, 5 factores, bloques de 1 a 32)\n");
+
+    const auto input = noise (5000, 2.0f, 77u);
+    for (const double sr : { 44100.0, 96000.0 })
+        for (const auto mode : allModes)
+            for (int stages = 0; stages <= 4; ++stages)
+            {
+                riptide::dsp::Saturator perSample, perBlock;
+                perSample.prepare (sr, stages, mode);
+                perBlock.prepare (sr, stages, mode);
+                std::vector<float> expected (input.size()), actual (input.size());
+                for (size_t i = 0; i < input.size(); ++i)
+                    expected[i] = perSample.process (input[i]);
+                for (size_t start = 0; start < input.size();)
+                {
+                    const size_t size = std::min<size_t> (1 + (start * 5 + 1) % 32, input.size() - start);
+                    perBlock.process (input.data() + start, actual.data() + start, static_cast<int> (size));
+                    start += size;
+                }
+                CHECK (actual == expected);
+            }
+}
+
+// --- Fase 10: tabla de CPU (RiptideTests --cpu) ----------------------------------------------------------------------
+//
+// Cada escenario procesa 2 s de ruido estéreo (bloques de 256) con un motor ya "caliente" y se mide 5 veces: se queda la
+// más rápida (los demás programas del equipo solo pueden hacer una medida más LENTA, así que el mínimo es lo más parecido
+// al coste propio del plugin). Resultado en "% de un núcleo": cuánto de un núcleo hace falta para procesar en tiempo real.
+// Los números dependen del equipo: sirven para comparar antes/después en la misma máquina, no como absolutos.
+
+double bestOfFive (const std::function<double()>& measureOnce)
+{
+    double best = 1.0e9;
+    for (int run = 0; run < 5; ++run)
+        best = std::min (best, measureOnce());
+    return best;
+}
+
+// Denormales: cuando una señal se apaga, los filtros recursivos (IIR) siguen dividiendo su estado y llegan a números
+// diminutos (< 1.2·10⁻³⁸) que el procesador x86 calcula por un camino lentísimo (decenas de veces más lento). El plugin lo
+// evita con juce::ScopedNoDenormals en processBlock: activa los bits FTZ/DAZ del registro MXCSR, que convierten esos
+// números en 0 (inaudible: están 700 dB por debajo de 0 dBFS). La tabla mide igual que el plugin, salvo una fila.
+class ScopedFlushToZero
+{
+public:
+    explicit ScopedFlushToZero (bool enabled) : previous (_mm_getcsr())
+    {
+        if (enabled)
+            _mm_setcsr (previous | 0x8040); // FTZ (bit 15) + DAZ (bit 6)
+    }
+    ~ScopedFlushToZero() { _mm_setcsr (previous); }
+    ScopedFlushToZero (const ScopedFlushToZero&) = delete;
+    ScopedFlushToZero& operator= (const ScopedFlushToZero&) = delete;
+
+private:
+    unsigned int previous;
+};
+
+// Fracción de un núcleo que cuesta procesar 'settings' (estéreo). 'silentTail' = la mitad final es silencio digital
+// (los filtros que se apagan caen en denormales); 'flushDenormals' = como en el plugin.
+double engineCpu (double sampleRate, const EngineSettings& settings, bool silentTail = false, bool flushDenormals = true)
+{
+    const ScopedFlushToZero noDenormals (flushDenormals);
+    constexpr double seconds = 2.0;
+    const auto count = static_cast<size_t> (sampleRate * seconds);
+    auto left = noise (count, 0.35f, 21u);
+    auto right = noise (count, 0.35f, 22u);
+    if (silentTail)
+    {
+        std::fill (left.begin() + static_cast<std::ptrdiff_t> (count / 2), left.end(), 0.0f);
+        std::fill (right.begin() + static_cast<std::ptrdiff_t> (count / 2), right.end(), 0.0f);
+    }
+
+    auto engineOwner = std::make_unique<Engine>();
+    auto& engine = *engineOwner;
+    engine.prepare (sampleRate, settings);
+    return bestOfFive ([&] {
+        auto l = left, r = right;
+        const auto start = std::chrono::steady_clock::now();
+        processInBlocks (engine, l, r, 256);
+        return std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count() / seconds;
+    });
+}
+
+void printCpuTable()
+{
+    std::printf ("Tabla de CPU de Riptide (estéreo, ruido a -12 dBFS + 12 dB de Input, bloques de 256; mejor de 5)\n");
+    const auto row = [] (const char* label, double sampleRate, double fraction) {
+        std::printf ("  %-68s %4.1f kHz %6.2f %%\n", label, sampleRate / 1000.0, 100.0 * fraction);
+    };
+    constexpr std::array<const char*, 5> factorNames { "Off", "2x", "4x", "8x", "16x" };
+
+    EngineSettings base;
+    base.inputGainDb = 12.0f;
+
+    row ("Init (Tape, 4x, 1 banda)", 48000.0, engineCpu (48000.0, base));
+    for (int stages = 0; stages <= 4; ++stages)
+    {
+        char label[96];
+        std::snprintf (label, sizeof (label), "Tape, oversampling %s", factorNames[static_cast<size_t> (stages)]);
+        row (label, 48000.0, engineCpu (48000.0, withOversampling (stages, base)));
+    }
+    for (const auto mode : allModes)
+    {
+        char label[96];
+        std::snprintf (label, sizeof (label), "%s, 16x", riptide::dsp::modeNames[static_cast<size_t> (mode)]);
+        row (label, 48000.0, engineCpu (48000.0, withOversampling (4, withMode (mode, base))));
+    }
+
+    auto tone = base;
+    tone.tone = { 80.0f, false, 9000.0f, true, 2.0f, 6.0f, 2500.0f };
+    row ("Tape 4x + tono completo (cortes, emphasis, tilt)", 48000.0, engineCpu (48000.0, tone));
+
+    auto parallel = tone;
+    parallel.mix = 0.6f;
+    parallel.autoGain = true;
+    row ("  + mix 60 % y auto gain", 48000.0, engineCpu (48000.0, parallel));
+
+    auto modulated = parallel;
+    modulated.modulation.envelope = { 5.0f, 150.0f, 0.0f, riptide::dsp::ModTarget::emphasisFreq, 0.5f };
+    modulated.modulation.lfo.target = riptide::dsp::ModTarget::tilt;
+    modulated.modulation.lfo.amount = 0.5f;
+    row ("  + envolvente -> Emph Freq y LFO -> Tilt (coeficientes en movimiento)", 48000.0, engineCpu (48000.0, modulated));
+
+    auto multiband = base;
+    multiband.numBands = 4;
+    multiband.bands[1] = { true, Mode::tube, 3.0f, false, false };
+    multiband.bands[2] = { true, Mode::transistor, -3.0f, false, false };
+    multiband.bands[3] = { true, Mode::hardClip, 0.0f, false, false };
+    row ("4 bandas (Tape/Tube/Transistor/Hard Clip), 4x", 48000.0, engineCpu (48000.0, multiband));
+    row ("4 bandas, 16x", 48000.0, engineCpu (48000.0, withOversampling (4, multiband)));
+
+    auto worst = withOversampling (4, multiband);
+    worst.tone = modulated.tone;
+    worst.mix = 0.6f;
+    worst.autoGain = true;
+    worst.modulation = modulated.modulation;
+    worst.modulation.lfo.target = riptide::dsp::ModTarget::band2Drive;
+    row ("Peor caso: 4 bandas 16x + tono + mix + auto gain + modulación", 48000.0, engineCpu (48000.0, worst));
+    row ("Peor caso a 96 kHz", 96000.0, engineCpu (96000.0, worst));
+    row ("Peor caso, la mitad final en silencio", 48000.0, engineCpu (48000.0, worst, true));
+    row ("Peor caso, la mitad final en silencio, SIN quitar denormales", 48000.0, engineCpu (48000.0, worst, true, false));
+
+    auto bypassed = worst;
+    bypassed.bypassed = true;
+    row ("Peor caso con BYPASS (el motor sigue calculando)", 48000.0, engineCpu (48000.0, bypassed));
+}
+
+int main (int argc, char** argv)
+{
+    if (argc > 1 && std::strcmp (argv[1], "--cpu") == 0)
+    {
+        printCpuTable();
+        return 0;
+    }
+
     testBypassIsDelayedInput();
     testCurves();
     testTapeEmphasisCancels();
@@ -1891,6 +2054,7 @@ int main()
     testEmphasisModulationStaysInverse();
     testModulatedDriveWithAutoGain();
     testModulationBlockSizeAndBypass();
+    testSaturatorBlockIsBitExact();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de Riptide pasaron.\n");

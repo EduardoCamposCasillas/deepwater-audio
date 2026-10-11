@@ -58,6 +58,11 @@ struct ToneSettings
 // oversampling la retrasa). Por eso los valores del emphasis se guardan en un historial y la de-emphasis usa los de hace
 // 'latency' muestras: con el emphasis quieto las dos son inversas exactas, y moviéndose siguen siéndolo (sin el retraso,
 // un LFO rápido sobre Emph Freq dejaría una ondulación de EQ en la salida).
+//
+// Fase 10: el motor procesa por tramos (primero todo lo de antes de la curva, después la curva en bloque, después lo de
+// después), así que los controles avanzan en dos mitades: advancePre en la primera pasada y advancePost en la última.
+// Cada mitad tiene sus propias rampas de los cortes (con los mismos objetivos y pasos dan exactamente los mismos
+// valores) y lee el historial del emphasis con su propio índice.
 class ToneControls
 {
 public:
@@ -77,40 +82,58 @@ public:
         float postAmount = 0.0f;
     };
 
+    // Los dos cortes de una mitad (pre o post): frecuencias suavizadas, coeficientes y cuánto se oye cada uno.
+    struct Cuts
+    {
+        deepwater::dsp::LinearRamp lowOctaves, highOctaves;
+        deepwater::dsp::EffectSwitch lowFade, highFade;
+        deepwater::dsp::SvfStage::Coefficients low, high;
+        float lowMix = 0.0f, highMix = 0.0f;
+    };
+
     void prepare (double newSampleRate, const ToneSettings& settings) noexcept
     {
         sampleRate = newSampleRate;
-        for (auto* ramp : { &lowCutOctaves, &highCutOctaves, &emphasisOctaves, &emphasisDb, &tiltDb })
+        for (auto* ramp : { &pre.lowOctaves, &pre.highOctaves, &post.lowOctaves, &post.highOctaves, &emphasisOctaves,
+                            &emphasisDb, &tiltDb })
             ramp->setTime (rampSeconds, sampleRate);
-        for (auto* fade : { &lowCutPreFade, &lowCutPostFade, &highCutPreFade, &highCutPostFade })
+        for (auto* fade : { &pre.lowFade, &pre.highFade, &post.lowFade, &post.highFade })
             fade->setTime (rampSeconds, sampleRate);
 
         // Al preparar no hay nada que suavizar: todo empieza en su valor actual.
         setSettings (settings);
-        for (auto* ramp : { &lowCutOctaves, &highCutOctaves, &emphasisOctaves, &emphasisDb, &tiltDb })
+        for (auto* ramp : { &pre.lowOctaves, &pre.highOctaves, &post.lowOctaves, &post.highOctaves, &emphasisOctaves,
+                            &emphasisDb, &tiltDb })
             ramp->snap (ramp->target);
-        lowCutPreFade.snap (lowCutPreOn());
-        lowCutPostFade.snap (lowCutPostOn());
-        highCutPreFade.snap (highCutPreOn());
-        highCutPostFade.snap (highCutPostOn());
-        updateLowCut();
-        updateHighCut();
+        pre.lowFade.snap (lowCutPreOn());
+        post.lowFade.snap (lowCutPostOn());
+        pre.highFade.snap (highCutPreOn());
+        post.highFade.snap (highCutPostOn());
+        for (auto* cuts : { &pre, &post })
+        {
+            updateLowCut (*cuts);
+            updateHighCut (*cuts);
+        }
         preEmphasis = { emphasisOctaves.value, emphasisDb.value };
         postEmphasis = preEmphasis;
         emphasisHistory.fill (preEmphasis);
-        historyIndex = 0;
+        historyIndex = postHistoryIndex = 0;
         updateEmphasis (preEmphasis, emphasis.pre, emphasis.preAmount, false);
         updateEmphasis (postEmphasis, emphasis.post, emphasis.postAmount, true);
         tiltValue = tiltDb.value;
         updateTilt();
-        advanceFades();
+        advanceFades (pre, lowCutPreOn(), highCutPreOn());
+        advanceFades (post, lowCutPostOn(), highCutPostOn());
     }
 
     void setSettings (const ToneSettings& settings) noexcept
     {
         // Las frecuencias se suavizan en octavas (log2): la perilla barre igual de rápido en graves que en agudos.
-        lowCutOctaves.setTarget (std::log2 (std::clamp (settings.lowCutHz, lowCutOffHz, lowCutMaxHz)));
-        highCutOctaves.setTarget (std::log2 (std::clamp (settings.highCutHz, highCutMinHz, highCutOffHz)));
+        for (auto* cuts : { &pre, &post })
+        {
+            cuts->lowOctaves.setTarget (std::log2 (std::clamp (settings.lowCutHz, lowCutOffHz, lowCutMaxHz)));
+            cuts->highOctaves.setTarget (std::log2 (std::clamp (settings.highCutHz, highCutMinHz, highCutOffHz)));
+        }
         emphasisOctaves.setTarget (std::log2 (std::clamp (settings.emphasisHz, emphasisMinHz, emphasisMaxHz)));
         emphasisDb.setTarget (std::clamp (settings.emphasisDb, -maxEmphasisDb, maxEmphasisDb));
         tiltDb.setTarget (std::clamp (settings.tiltDb, -maxTiltDb, maxTiltDb));
@@ -120,20 +143,11 @@ public:
         highCutPost = settings.highCutPost;
     }
 
-    // Una vez por muestra, antes de procesar los canales. Los offsets son la modulación de esta muestra (0 = ninguna):
-    // emphasis en dB y en octavas, tilt en dB (ya alineado con lo que sale de la curva). 'latency' = la del oversampling.
-    void advance (float emphasisDbOffset, float emphasisOctaveOffset, float tiltDbOffset, int latency) noexcept
+    // Una vez por muestra, antes de la curva (ToneChannel::pre). Los offsets son la modulación de esta muestra (0 =
+    // ninguna): emphasis en dB y en octavas.
+    void advancePre (float emphasisDbOffset, float emphasisOctaveOffset) noexcept
     {
-        if (! lowCutOctaves.isSteady())
-        {
-            lowCutOctaves.next();
-            updateLowCut();
-        }
-        if (! highCutOctaves.isSteady())
-        {
-            highCutOctaves.next();
-            updateHighCut();
-        }
+        advanceCuts (pre);
 
         // Emphasis: los coeficientes solo se recalculan (tan()) cuando el valor cambia. Con offset 0 el valor es el de la
         // perilla tal cual.
@@ -147,8 +161,20 @@ public:
             updateEmphasis (preEmphasis, emphasis.pre, emphasis.preAmount, false);
         }
         emphasisHistory[historyIndex] = current;
-        const auto& delayed = emphasisHistory[(historyIndex - static_cast<size_t> (latency)) & (historySize - 1)];
         historyIndex = (historyIndex + 1) & (historySize - 1);
+        advanceFades (pre, lowCutPreOn(), highCutPreOn());
+    }
+
+    // Una vez por muestra, después de la curva (ToneChannel::post), para la misma muestra que su advancePre (que ya se
+    // llamó: el historial tiene su emphasis). tiltDbOffset = la modulación del tilt, ya alineada con lo que sale de la
+    // curva. 'latency' = la del oversampling. Entre un advancePre y su advancePost pueden pasar, como mucho,
+    // historySize − latency muestras.
+    void advancePost (float tiltDbOffset, int latency) noexcept
+    {
+        advanceCuts (post);
+
+        const auto& delayed = emphasisHistory[(postHistoryIndex - static_cast<size_t> (latency)) & (historySize - 1)];
+        postHistoryIndex = (postHistoryIndex + 1) & (historySize - 1);
         if (delayed != postEmphasis)
         {
             postEmphasis = delayed;
@@ -161,7 +187,7 @@ public:
             tiltValue = tiltNow;
             updateTilt();
         }
-        advanceFades();
+        advanceFades (post, lowCutPostOn(), highCutPostOn());
     }
 
     // Los valores que suenan ahora (perilla + modulación), para la GUI y los tests.
@@ -169,11 +195,10 @@ public:
     [[nodiscard]] float getEmphasisDb() const noexcept { return preEmphasis.db; }
     [[nodiscard]] float getTiltDb() const noexcept { return tiltValue; }
 
-    // Lo que leen los canales en la muestra actual.
-    deepwater::dsp::SvfStage::Coefficients lowCut, highCut;
+    // Lo que leen los canales en la muestra actual (pre: la de advancePre; el resto: la de advancePost).
+    Cuts pre, post;
     Emphasis emphasis;
     deepwater::dsp::TiltFilter::Coefficients tilt;
-    float lowCutPreMix = 0.0f, lowCutPostMix = 0.0f, highCutPreMix = 0.0f, highCutPostMix = 0.0f;
 
 private:
     struct EmphasisValue
@@ -191,22 +216,35 @@ private:
     [[nodiscard]] bool highCutPreOn() const noexcept { return highCutOn && ! highCutPost; }
     [[nodiscard]] bool highCutPostOn() const noexcept { return highCutOn && highCutPost; }
 
-    void advanceFades() noexcept
+    static void advanceFades (Cuts& cuts, bool lowOn, bool highOn) noexcept
     {
-        lowCutPreMix = lowCutPreFade.next (lowCutPreOn());
-        lowCutPostMix = lowCutPostFade.next (lowCutPostOn());
-        highCutPreMix = highCutPreFade.next (highCutPreOn());
-        highCutPostMix = highCutPostFade.next (highCutPostOn());
+        cuts.lowMix = cuts.lowFade.next (lowOn);
+        cuts.highMix = cuts.highFade.next (highOn);
     }
 
-    void updateLowCut() noexcept
+    // Coeficientes con tan(): solo mientras la perilla se mueve.
+    void advanceCuts (Cuts& cuts) noexcept
     {
-        lowCut = deepwater::dsp::SvfStage::Coefficients::forCutoff (std::exp2 (lowCutOctaves.value), cutQ, sampleRate);
+        if (! cuts.lowOctaves.isSteady())
+        {
+            cuts.lowOctaves.next();
+            updateLowCut (cuts);
+        }
+        if (! cuts.highOctaves.isSteady())
+        {
+            cuts.highOctaves.next();
+            updateHighCut (cuts);
+        }
     }
 
-    void updateHighCut() noexcept
+    void updateLowCut (Cuts& cuts) noexcept
     {
-        highCut = deepwater::dsp::SvfStage::Coefficients::forCutoff (std::exp2 (highCutOctaves.value), cutQ, sampleRate);
+        cuts.low = deepwater::dsp::SvfStage::Coefficients::forCutoff (std::exp2 (cuts.lowOctaves.value), cutQ, sampleRate);
+    }
+
+    void updateHighCut (Cuts& cuts) noexcept
+    {
+        cuts.high = deepwater::dsp::SvfStage::Coefficients::forCutoff (std::exp2 (cuts.highOctaves.value), cutQ, sampleRate);
     }
 
     // La campana del emphasis (antes de la curva) o su inversa (después), para unos valores dados.
@@ -226,12 +264,11 @@ private:
     }
 
     double sampleRate = 44100.0;
-    deepwater::dsp::LinearRamp lowCutOctaves, highCutOctaves, emphasisOctaves, emphasisDb, tiltDb;
-    deepwater::dsp::EffectSwitch lowCutPreFade, lowCutPostFade, highCutPreFade, highCutPostFade;
+    deepwater::dsp::LinearRamp emphasisOctaves, emphasisDb, tiltDb;
     bool lowCutOn = false, highCutOn = false, lowCutPost = false, highCutPost = true;
     EmphasisValue preEmphasis, postEmphasis;      // los que suenan antes y después de la curva
     std::array<EmphasisValue, historySize> emphasisHistory {};
-    size_t historyIndex = 0;
+    size_t historyIndex = 0, postHistoryIndex = 0;
     float tiltValue = 0.0f;
 };
 
@@ -249,8 +286,8 @@ public:
     // Antes de la curva: cortes en posición PRE y emphasis.
     [[nodiscard]] float pre (float x, const ToneControls& c) noexcept
     {
-        x = mix (x, lowCutPre.process (x, c.lowCut).highPass, c.lowCutPreMix);
-        x = mix (x, highCutPre.process (x, c.highCut).lowPass, c.highCutPreMix);
+        x = mix (x, lowCutPre.process (x, c.pre.low).highPass, c.pre.lowMix);
+        x = mix (x, highCutPre.process (x, c.pre.high).lowPass, c.pre.highMix);
         return x + c.emphasis.preAmount * emphasisPre.process (x, c.emphasis.pre).bandPass;
     }
 
@@ -258,8 +295,8 @@ public:
     [[nodiscard]] float post (float x, const ToneControls& c) noexcept
     {
         x += c.emphasis.postAmount * emphasisPost.process (x, c.emphasis.post).bandPass;
-        x = mix (x, lowCutPost.process (x, c.lowCut).highPass, c.lowCutPostMix);
-        x = mix (x, highCutPost.process (x, c.highCut).lowPass, c.highCutPostMix);
+        x = mix (x, lowCutPost.process (x, c.post.low).highPass, c.post.lowMix);
+        x = mix (x, highCutPost.process (x, c.post.high).lowPass, c.post.highMix);
         return tiltFilter.process (x, c.tilt);
     }
 

@@ -58,9 +58,11 @@ Desde la raíz del repositorio (ver también los comandos generales en el `CLAUD
 ```
 cmake --build build --config Release --target Riptide_VST3          # solo el plugin
 build/plugins/riptide/Release/RiptideTests.exe                       # tests del motor (sin JUCE)
+build/plugins/riptide/Release/RiptideTests.exe --cpu                 # tabla de CPU (Fase 10; mejor de 5, este equipo)
 build/plugins/riptide/RiptidePresetTests_artefacts/Release/RiptidePresetTests.exe   # presets (--verbose: niveles)
 RiptidePresetTests --render <carpeta>   # WAV de las señales de prueba y de cada preset (escuchar, null tests)
 RiptidePresetTests --notes              # las notas como las muestra el navegador
+python scripts/level_match.py <carpeta> [--ref x.wav] [--ciego]    # comparar versiones con la sonoridad igualada
 ```
 - VST3: `build/plugins/riptide/Riptide_artefacts/Release/VST3/Riptide.vst3`.
 - Standalone: `build/plugins/riptide/Riptide_artefacts/Release/Standalone/Riptide.exe` (la entrada de audio arranca
@@ -111,6 +113,52 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
+Fase 10 IMPLEMENTADA (2026-10-11), pendiente de que el usuario la pruebe en FL Studio. El audio no cambia: idéntico bit
+a bit a la Fase 9.
+- CPU (`RiptideTests --cpu`, 48 kHz estéreo, ruido −12 dBFS + 12 dB de Input, bloques de 256, mejor de 5, con FTZ/DAZ
+  como el plugin; este equipo, ±10 %): Init (Tape 4x) 1.55 → 0.98 %; Tape Off 0.79 → 0.59; 2x 1.15 → 0.78; 8x 2.39 → 1.39;
+  16x 4.19 → 2.17; los 6 modos a 16x 4.2–4.8 → 2.1–2.7 %; tono completo + mix + auto gain + modulación 1.78 → 1.38;
+  4 bandas 4x 5.07 → 3.18; 4 bandas 16x 16.6 → 8.5; peor caso (4 bandas 16x + tono + mix + auto gain + modulación)
+  16.6 → 9.3 % (96 kHz: 33.2 → 17.5 %). Con bypass cuesta lo mismo (el motor sigue calculando: al quitarlo no hay
+  saltos). Silencio SIN quitar denormales: 60 % (con FTZ/DAZ, 9.3 %): `juce::ScopedNoDenormals` es imprescindible.
+- Dónde se iba: cada etapa halfband costaba ~12 ns por llamada sin importar su longitud (la de 12 coeficientes igual que
+  la de 40). Muestra a muestra, cada llamada escribe una muestra en la historia y enseguida la lee con una carga SIMD de
+  4 floats que la incluye: el procesador no puede reenviar una escritura de 4 bytes a una carga de 16 (store-to-load
+  forwarding) y espera ~10 ciclos. Medido: la misma cuenta en bloque, 7 ns (etapa larga) y 3.9 ns (cortas).
+- Librería: `HalfbandInterpolator::processBlock` / `HalfbandDecimator::processBlock` (tandas de 32: escribe la tanda y
+  después calcula sus salidas; ventana + tanda ≤ buffer, con static_assert) y `Oversampler::process (in, out, n, shape)`
+  en bloque (hasta `maxBlockSize` = 32; el relleno y la curva en dos pasadas). Los de muestra a muestra no cambiaron:
+  Undertow no usa lo nuevo (ctest y sus huellas de presets pasan).
+- `Saturator::process (in, out, n)` en bloque (Tape: énfasis del bloque → curva → de-énfasis y head bump).
+- `Engine::process` por tramos de 32 en tres pasadas: (1) `prepareChunk`, muestra a muestra, todo lo de antes de la curva
+  (modulación, rampas, tono pre, divisores, la dry, auto gain) y lo que cada muestra decide para después, guardado en
+  `Chunk`; (2) `flushCurves`, cada saturador procesa su banda del tramo de una vez; (3) `finishChunk`, muestra a muestra,
+  tono post, filtro DC, mix, delta, output, bypass, medidor OUT. Lo único que cambia de estado a mitad de un tramo son
+  los saturadores (empieza o termina un cruce de modos, cambio de estructura): antes se pasa por las curvas lo pendiente
+  con el estado viejo. `Tone.h`: `advancePre` / `advancePost` (cada mitad con sus propias rampas de los cortes: mismos
+  objetivos y pasos = mismos valores; el historial del emphasis con un índice por mitad). El auto gain apagado se
+  calcula una vez por tramo (solo para la GUI: no suena).
+- Verificación de "mismo sonido": el motor de la Fase 9 (HEAD) y el nuevo, compilados aparte, renderizaron 384
+  escenarios (4 sample rates × bloques 1/7/64/256/333/4096 × 8 variantes × mono/estéreo; 1.2 s de ruido con un silencio
+  y cambios cada 0.1 s de modo, factor, bandas, perillas, tono, solo, bypass, mix/delta/auto gain, cruces y modulación):
+  190 MB idénticos byte a byte (mismo SHA-256).
+- GUI: curva, espectro y medidores solo se repintan si algo cambió de forma visible (0.05 dB; `DisplayState` con
+  `operator==`); con la canción parada quedan quietos. El pico de la curva cae a 0 por debajo de −100 dBFS. Cabecera
+  "Fase 10".
+- Tests: `DeepwaterDspTests` (+1: halfband y oversampler en bloque = muestra a muestra bit a bit, 4 sample rates, etapas
+  sueltas y 5 factores, bloques irregulares de 1–32), `RiptideTests` (+1: saturador en bloque bit a bit, 6 modos × 5
+  factores; y `--cpu`), `RiptidePresetTests` (+1, tortura: un tercio de TODOS los parámetros al azar cada 6 bloques,
+  bloques de 1–300 y a veces hasta 4096, 6 s de mezcla en 4 sample rates; 1900–4200 cambios: sin NaN, sin reservas, pico
+  ≤ +17.8 dBFS).
+- Comparación gain-matched: `scripts/level_match.py` (numpy, sin scipy): sonoridad integrada BS.1770 (filtro K para
+  cualquier sample rate desde el prototipo analógico; a 48 kHz da los coeficientes de la norma; seno de 997 Hz a −20 dBFS
+  en estéreo = −20.0 LUFS), pico, PLR, balance por octavas respecto de la referencia ya igualada; escribe `igualados/` y,
+  con `--ciego`, `ciego/A.wav...` (también la referencia) + `clave.txt`. Probado con los renders de los presets de batería.
+- Release con 0 warnings; ctest 5/5; pluginval strictness 10 ampliado: SUCCESS.
+- Límites conocidos: con bypass el motor sigue calculando todo (a propósito: al volver no hay saltos); el coste fijo por
+  muestra (modulación, tono, auto gain, medidores: ~0.6 % con oversampling Off) no se vectorizó; los cortes del tono
+  procesan aunque estén apagados (para que el PRE/POST cruce sin saltos).
+
 Fase 9 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. El audio no cambia (el motor no se
 tocó).
 - Presets en la librería compartida: el sistema de Undertow pasó a `libs/presets` (ver el `CLAUDE.md` raíz y el de
@@ -416,4 +464,5 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Fase 10 (pulido: CPU, pluginval estricto, comparación gain-matched contra referencias).
+Siguiente: probar la Fase 10 en FL Studio (y la comparación contra referencias con `scripts/level_match.py`). Es la
+última fase de Riptide; después, el plugin 3 (EQ paramétrico).

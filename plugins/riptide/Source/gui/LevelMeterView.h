@@ -34,14 +34,25 @@ public:
 
     void update (int numChannels, double elapsedSeconds)
     {
-        channels = juce::jlimit (1, static_cast<int> (source.size()), numChannels);
+        const int newChannels = juce::jlimit (1, static_cast<int> (source.size()), numChannels);
+        bool changed = newChannels != channels;
+        channels = newChannels;
         for (size_t ch = 0; ch < source.size(); ++ch)
         {
             // exchange(0): recoge el pico máximo que publicó el audio desde el cuadro anterior y empieza de nuevo.
+            const auto before = peaks[ch];
+            const float rmsBefore = rmsDb[ch];
             peaks[ch].update (source[ch].peak.exchange (0.0f, std::memory_order_relaxed), elapsedSeconds);
             rmsDb[ch] = deepwater::dsp::gainToDb (source[ch].rms.load (std::memory_order_relaxed));
+
+            // Fase 10: solo se repinta si algo se movió de forma visible (0.05 dB es menos de un píxel). En silencio
+            // todo queda en el piso y el medidor deja de repintarse.
+            const auto moved = [] (float a, float b) { return std::abs (a - b) >= 0.05f; };
+            changed = changed || moved (peaks[ch].levelDb, before.levelDb) || moved (peaks[ch].holdDb, before.holdDb)
+                      || moved (rmsDb[ch], rmsBefore) || peaks[ch].clipped != before.clipped;
         }
-        repaint();
+        if (changed)
+            repaint();
     }
 
     void mouseDown (const juce::MouseEvent&) override

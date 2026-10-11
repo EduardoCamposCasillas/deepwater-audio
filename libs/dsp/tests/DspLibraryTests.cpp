@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <numbers>
@@ -218,6 +219,80 @@ void testOversamplerLatency()
             CHECK (latency < 100); // a 44.1 kHz y ×16 son unas 80 muestras (1.8 ms)
         }
         std::printf ("\n");
+    }
+}
+
+// Fase 10 de Riptide: las versiones en bloque hacen las mismas cuentas en el mismo orden que las de muestra a muestra.
+void testBlockProcessingIsBitExact()
+{
+    std::printf ("Halfband y oversampler en bloque: idénticos bit a bit a muestra a muestra (bloques de 1 a 32)\n");
+
+    // Ruido con tamaños de bloque irregulares: cruza muchas veces la vuelta de los buffers circulares.
+    std::vector<float> input (6000);
+    std::uint32_t seed = 0x2468ACE1u;
+    for (auto& x : input)
+    {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        x = 1.5f * (static_cast<float> (seed) / 4294967295.0f * 2.0f - 1.0f);
+    }
+    const auto nextBlock = [] (size_t& position, size_t total) {
+        const size_t size = std::min<size_t> (1 + (position * 7 + 3) % 32, total - position);
+        position += size;
+        return size;
+    };
+
+    for (const double sr : sampleRates)
+    {
+        // Etapas sueltas (la frecuencia más baja y la más alta de un ×16).
+        for (const double rate : { sr, 8.0 * sr })
+        {
+            dw::HalfbandInterpolator upSample, upBlock;
+            dw::HalfbandDecimator downSample, downBlock;
+            upSample.prepare (rate);
+            upBlock.prepare (rate);
+            downSample.prepare (rate);
+            downBlock.prepare (rate);
+            std::vector<float> upExpected (2 * input.size()), upActual (2 * input.size());
+            std::vector<float> downExpected (input.size() / 2), downActual (input.size() / 2);
+            for (size_t i = 0; i < input.size(); ++i)
+                upSample.process (input[i], upExpected[2 * i], upExpected[2 * i + 1]);
+            for (size_t i = 0; i < input.size() / 2; ++i)
+                downExpected[i] = downSample.process (input[2 * i], input[2 * i + 1]);
+            for (size_t position = 0; position < input.size();)
+            {
+                const size_t start = position;
+                const size_t size = nextBlock (position, input.size());
+                upBlock.processBlock (input.data() + start, upActual.data() + 2 * start, static_cast<int> (size));
+            }
+            for (size_t position = 0; position < input.size() / 2;)
+            {
+                const size_t start = position;
+                const size_t size = nextBlock (position, input.size() / 2);
+                downBlock.processBlock (input.data() + 2 * start, downActual.data() + start, static_cast<int> (size));
+            }
+            CHECK (upActual == upExpected);
+            CHECK (downActual == downExpected);
+        }
+
+        for (int stages = 0; stages <= dw::Oversampler::maxStages; ++stages)
+        {
+            dw::Oversampler perSample, perBlock;
+            perSample.prepare (sr, stages);
+            perBlock.prepare (sr, stages);
+            const auto curve = [] (float x) { return x / std::sqrt (1.0f + x * x); };
+            std::vector<float> expected (input.size()), actual (input.size());
+            for (size_t i = 0; i < input.size(); ++i)
+                expected[i] = perSample.process (input[i], curve);
+            for (size_t position = 0; position < input.size();)
+            {
+                const size_t start = position;
+                const size_t size = nextBlock (position, input.size());
+                perBlock.process (input.data() + start, actual.data() + start, static_cast<int> (size), curve);
+            }
+            CHECK (actual == expected);
+        }
     }
 }
 
@@ -1105,6 +1180,7 @@ int main()
     testHalfbandDecimator();
     testHalfbandInterpolator();
     testOversamplerLatency();
+    testBlockProcessingIsBitExact();
     testOversamplerReducesAliasing();
     testDcBlocker();
     testOnePole();

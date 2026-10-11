@@ -206,6 +206,40 @@ public:
         return x;
     }
 
+    // Fase 10: lo mismo para un bloque de hasta maxBlockSize muestras ('output' puede ser 'input'). Idéntico bit a bit a
+    // llamar a process muestra a muestra: cada filtro hace las mismas cuentas en el mismo orden, solo que recorre el
+    // bloque entero antes de pasar al siguiente (y el oversampler en bloque es bastante más rápido).
+    static constexpr int maxBlockSize = deepwater::dsp::Oversampler::maxBlockSize;
+
+    void process (const float* input, float* output, int numSamples) noexcept
+    {
+        switch (mode)
+        {
+            case Mode::tape:
+            {
+                std::array<float, maxBlockSize> emphasized;
+                for (int i = 0; i < numSamples; ++i)
+                    emphasized[static_cast<size_t> (i)] = emphasis.emphasize (input[i]);
+                oversampler.process (emphasized.data(), output, numSamples, curves::tape);
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    const float flat = emphasis.deEmphasize (output[i]);
+                    output[i] = flat + headBumpAmount * headBumpFilter.process (flat, headBump).bandPass;
+                }
+                return;
+            }
+            case Mode::tube:       oversampler.process (input, output, numSamples, curves::tube); return;
+            case Mode::transistor: oversampler.process (input, output, numSamples, curves::transistor); return;
+            case Mode::hardClip:   oversampler.process (input, output, numSamples, curves::hardClip); return;
+            case Mode::rectify:
+                oversampler.process (input, output, numSamples, [this] (float v)
+                                     { return deepwater::dsp::fastTanh (rectifyHighPass.highPass (curves::rectify (v), rectifyCoefficient)); });
+                return;
+            case Mode::fold:       oversampler.process (input, output, numSamples, curves::fold); return;
+        }
+        std::copy (input, input + numSamples, output);
+    }
+
 private:
     Mode mode = Mode::tape;
     deepwater::dsp::Oversampler oversampler;

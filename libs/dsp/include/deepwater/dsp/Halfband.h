@@ -156,6 +156,39 @@ public:
         return 0.5f * centre + dotProduct (window, filter.window.data(), filter.windowLength);
     }
 
+    // Fase 10 de Riptide: lo mismo para un bloque. 'input' tiene 2·numSamples muestras (parejas, la más antigua primero)
+    // y 'output' recibe numSamples; puede ser el mismo buffer que 'input' (la salida i se escribe después de leer la
+    // pareja i, que nunca está por detrás). El resultado es idéntico bit a bit al de llamar a process muestra a muestra.
+    //
+    // ¿Por qué es más rápido? Muestra a muestra, cada llamada escribe una muestra en la historia y enseguida la vuelve a
+    // leer con una carga SIMD de 4 floats que la incluye. El procesador no puede pasar el dato de la escritura pendiente a
+    // esa carga (no coinciden en tamaño) y espera a que la escritura llegue a la caché: unos 10 ciclos perdidos por
+    // llamada, más que todo el producto escalar de un filtro corto. En bloque se escriben primero varias parejas y después
+    // se calculan sus salidas: cuando se leen, las escrituras ya terminaron.
+    void processBlock (const float* input, float* output, int numSamples) noexcept
+    {
+        for (int start = 0; start < numSamples; start += blockBatch)
+        {
+            const int count = std::min (blockBatch, numSamples - start);
+            const size_t first = writeIndex;
+            for (int i = 0; i < count; ++i)
+            {
+                const size_t index = (first + static_cast<size_t> (i)) & (bufferSize - 1);
+                firsts[index] = firsts[index + bufferSize] = input[2 * (start + i)];
+                seconds[index] = seconds[index + bufferSize] = input[2 * (start + i) + 1];
+            }
+            writeIndex = (first + static_cast<size_t> (count)) & (bufferSize - 1);
+
+            for (int i = 0; i < count; ++i)
+            {
+                const size_t newest = ((first + static_cast<size_t> (i)) & (bufferSize - 1)) + bufferSize;
+                const float centre = firsts[newest - static_cast<size_t> ((filter.halfLength - 1) / 2)];
+                const float* window = seconds.data() + newest - static_cast<size_t> (filter.windowLength - 1);
+                output[start + i] = 0.5f * centre + dotProduct (window, filter.window.data(), filter.windowLength);
+            }
+        }
+    }
+
     // Para pasar de mono a estéreo sin salto: el canal derecho empieza con la historia del izquierdo.
     void copyStateFrom (const HalfbandDecimator& other) noexcept
     {
@@ -172,6 +205,10 @@ public:
 
 private:
     static constexpr size_t bufferSize = 128; // potencia de 2 mayor que la ventana
+    // Muestras que se escriben de una vez en processBlock. Las que se escriben "por delante" de una salida no pueden
+    // pisar su ventana: ventana + tanda ≤ bufferSize.
+    static constexpr int blockBatch = 32;
+    static_assert (HalfbandDesign::maxWindowLength + blockBatch <= static_cast<int> (bufferSize));
 
     HalfbandDesign filter;
     std::array<float, 2 * bufferSize> firsts {}, seconds {};
@@ -217,11 +254,38 @@ public:
         second = newest[-(filter.halfLength - 1) / 2];
     }
 
+    // Fase 10 de Riptide: lo mismo para un bloque (ver HalfbandDecimator::processBlock: idéntico bit a bit, sin la espera
+    // de leer justo lo que se acaba de escribir). 'output' recibe 2·numSamples muestras y no puede ser 'input'.
+    void processBlock (const float* input, float* output, int numSamples) noexcept
+    {
+        for (int start = 0; start < numSamples; start += blockBatch)
+        {
+            const int count = std::min (blockBatch, numSamples - start);
+            const int first = writeIndex;
+            for (int i = 0; i < count; ++i)
+            {
+                const int index = (first + i) & (bufferSize - 1);
+                history[static_cast<size_t> (index)] = history[static_cast<size_t> (index + bufferSize)] = input[start + i];
+            }
+            writeIndex = (first + count) & (bufferSize - 1);
+
+            for (int i = 0; i < count; ++i)
+            {
+                const float* newest = history.data() + ((first + i) & (bufferSize - 1)) + bufferSize;
+                float* pair = output + 2 * (start + i);
+                pair[0] = 2.0f * dotProduct (newest - (filter.windowLength - 1), filter.window.data(), filter.windowLength);
+                pair[1] = newest[-(filter.halfLength - 1) / 2];
+            }
+        }
+    }
+
     // Retardo en muestras de ENTRADA: H muestras a la frecuencia doble.
     [[nodiscard]] double getLatency() const noexcept { return 0.5 * filter.halfLength; }
 
 private:
     static constexpr int bufferSize = 128; // potencia de 2 mayor que la ventana
+    static constexpr int blockBatch = 32;  // ver HalfbandDecimator
+    static_assert (HalfbandDesign::maxWindowLength + blockBatch <= bufferSize);
 
     HalfbandDesign filter;
     std::array<float, 2 * bufferSize> history {};

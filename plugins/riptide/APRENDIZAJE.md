@@ -1156,3 +1156,146 @@ para el reto de la Fase 6, sin resolverlo.)
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 10 — Pulido: menos CPU, pruebas de estrés y comparar contra referencias sin engañarse
+
+Esta fase no agrega controles. Riptide suena **exactamente igual** que en la Fase 9 (comprobado bit a bit), pero gasta
+**la mitad de CPU** (el peor caso, 4 bandas a 16x, bajó de 16.6 % a 9.3 % de un núcleo; Init, de 1.55 % a 0.98 %), la
+interfaz deja de redibujarse cuando nada cambia, pasó una prueba de tortura con miles de cambios al azar, y hay una
+herramienta para **comparar Riptide contra otros saturadores con el volumen igualado**, incluso a ciegas.
+
+### Conceptos aprendidos
+
+- **El presupuesto de tiempo real.** Con un buffer de 256 muestras a 48 kHz, FL le pide audio a cada plugin cada
+  5.3 ms; si la cadena entera no termina a tiempo, el audio se corta (clics, "underruns"). "% de un núcleo" = qué parte
+  de ese tiempo se come el plugin. Riptide en Init: ~1 %, o sea unas 100 instancias por núcleo. 16x con 4 bandas: ~9 %.
+- **Qué cuesta en un saturador**: casi todo es el **oversampling**. A 16x la curva se calcula 16 veces por muestra y cada
+  etapa ×2 tiene dos filtros halfband (subir y bajar). Cada **banda** es un saturador completo: 4 bandas ≈ 4 veces. El
+  resto (tono, modulación, auto gain, medidores) es un coste fijo pequeño.
+- **Medir antes de optimizar.** La primera idea ("las curvas son caras, hay que vectorizarlas") era falsa: midiendo cada
+  pieza por separado, una etapa halfband costaba lo mismo con 12 coeficientes que con 40. El tiempo no se iba en las
+  cuentas, sino en **esperar a la memoria**: el filtro escribía una muestra y la volvía a leer enseguida, y el
+  procesador tiene que esperar a que esa escritura termine (unos 10 ciclos) antes de leerla en grupo de 4 (SIMD).
+- **Procesar por bloques.** La solución: en vez de llevar cada muestra por toda la cadena antes de pasar a la siguiente,
+  Riptide hace tramos de 32 muestras en tres pasadas: (1) todo lo de antes de la curva, muestra a muestra; (2) las curvas
+  con oversampling, el tramo entero de una vez (escribe primero las 32 muestras, después las lee: ya no espera); (3) todo
+  lo de después de la curva. Se puede porque lo de antes de la curva no depende de lo que sale de ella.
+- **Optimizar sin cambiar el sonido.** Las tres pasadas hacen **las mismas cuentas en el mismo orden**: el resultado es
+  idéntico bit a bit. Se comprobó compilando el motor viejo y el nuevo y renderizando 384 escenarios (4 sample rates,
+  bloques de 1 a 4096, mono y estéreo, con cambios de modo, factor, bandas, bypass y modulación a mitad): 190 MB
+  idénticos byte a byte. Es el **null test** llevado al extremo: si la resta es silencio digital, no hay nada que oír.
+- **Denormales.** Cuando la señal se apaga, los filtros recursivos siguen dividiendo su "memoria" hasta números diminutos
+  (menos de 10⁻³⁸) que el procesador calcula por un camino lentísimo. Medido: el peor caso de Riptide pasa de 9 % a
+  **60 %** de CPU cuando la pista queda en silencio, si no se hace nada. El plugin activa "flush to zero" al empezar cada
+  bloque (convierte esos números en 0: están 700 dB por debajo de lo audible). Por eso un plugin mal hecho puede
+  disparar la CPU justo cuando la pista se calla.
+- **La interfaz también gasta CPU** (la de la interfaz de FL, no la del audio). Antes la curva, el espectro y los
+  medidores se redibujaban 30 veces por segundo aunque nada cambiara; ahora solo si algo se movió de forma visible. Con la
+  canción parada, Riptide abierto ya no gasta.
+- **Pruebas de estrés.** pluginval (strictness 10, 4 sample rates, bloques de 1 a 4096, valores al azar, 3 repeticiones)
+  y una prueba propia de "tortura": todos los parámetros cambiando al azar cada pocos bloques, con bloques de tamaño al
+  azar, sobre música, en 4 sample rates. Ni un NaN, ni una reserva de memoria en el audio, ni un filtro que explote.
+- **El oído cree que lo más fuerte es mejor.** Una diferencia de 0.5–1 dB ya no se oye como "más fuerte" sino como "más
+  lleno, más brillante, más cerca". Casi todos los saturadores suben el volumen, así que comparar sin igualar es comparar
+  volúmenes. Igualar por **pico** no sirve (la saturación baja los picos y sube la energía); por **RMS** es mejor; por
+  **sonoridad (LUFS)** es lo más parecido a cómo oímos: pesa menos los subgraves y un poco más los agudos, como el oído.
+- **Prueba ciega.** Saber cuál es cuál cambia lo que oímos (si sabes que es el plugin caro, te va a gustar más). Con
+  archivos con nombres al azar, el oído decide solo.
+
+### Qué hace cada control
+
+No hay controles nuevos. Lo que cambia es **cuánto cuesta cada uno** (CPU a 48 kHz, estéreo, en este equipo):
+
+| Ajuste | CPU | Cuándo |
+|---|---|---|
+| Oversampling Off | ~0.6 % | Monitorear mientras grabas; modos suaves (Tape) con poco drive |
+| 2x / **4x** | ~0.8 / ~1.0 % | **4x**: el punto de partida de siempre |
+| 8x / 16x | ~1.4 / ~2.2 % | Hard Clip, Fold o Rectify con mucho drive; el master; al exportar |
+| 4 bandas a 4x / 16x | ~3.2 / ~8.5 % | Buses y master; no en cada pista |
+| BYPASS | lo mismo que activo | El motor sigue calculando para que al volver no haya saltos: para ahorrar CPU, quita el plugin |
+
+Y la herramienta nueva, `scripts/level_match.py` (en la carpeta del proyecto):
+
+- `python scripts/level_match.py <carpeta>`: mide cada WAV de la carpeta y escribe en `<carpeta>/igualados/` copias a la
+  **misma sonoridad** que la referencia (el archivo que empiece con `dry`, `original` o `seco`). La tabla dice:
+  - **LUFS**: sonoridad (la de Spotify y YouTube); **pico**: el máximo en dBFS;
+  - **PLR** (pico menos sonoridad): cuánto sobresalen los golpes. La saturación lo **baja**: menos PLR = más denso, menos
+    pegada;
+  - **sube**: cuánto más fuerte dejó el procesado al audio (eso es lo que te engañaría al comparar);
+  - **balance por octavas**, ya igualado: dónde agrega (+) o quita (−) energía cada versión. Arriba de 4 kHz es brillo y
+    "fizz"; 125–500 Hz, cuerpo o barro; 31–63 Hz, subgraves.
+- `--ciego`: además copia todo (la referencia también) como `ciego/A.wav`, `B.wav`... y la clave en `ciego/clave.txt`.
+
+### Ejercicio de escucha guiado: Riptide contra los saturadores de FL, a ciegas (con volumen igualado)
+
+1. Un loop de batería de 8 compases en un insert del mixer. Exporta el insert **sin efectos** (`File > Export > Wave
+   file`, 32 bits float) con el nombre `dry-bateria.wav`, en una carpeta nueva.
+2. Pon **Riptide** con **Bus Batería Cinta** y exporta `riptide-cinta.wav`. Quítalo.
+3. Pon **Fruity Blood Overdrive** (o **Fruity Soft Clipper**, o **Fruity Waveshaper** con una curva en S suave) y
+   ajústalo de oído hasta que **sature más o menos lo mismo** que Riptide (sin preocuparte por el volumen). Exporta
+   `fl-overdrive.wav`. Si tienes otro saturador (Softube Saturation Knob y Klanghelm IVGI son gratuitos; Decapitator o
+   Saturn 2 si los tienes), exporta uno por cada uno.
+4. Abre una terminal en la carpeta del proyecto y corre `python scripts/level_match.py <tu carpeta> --ciego`.
+5. Mira la columna **sube**: ¿cuánto más fuerte dejó cada uno el loop? Eso es lo que habrías "preferido" sin igualar.
+6. Escucha `ciego/A.wav`, `B.wav`... en loop (arrástralos a FL, uno por pista, y usa solo). Para cada uno escribe: ¿cuál
+   es el original?, ¿cuál tiene más pegada?, ¿cuál tiene platillos más ásperos?, ¿cuál prefieres? **Después** abre
+   `clave.txt`.
+7. Compara tus notas con la tabla: lo que oíste como "más brillante" debería verse en las octavas de 4–16 kHz; "más
+   denso", en un PLR más bajo.
+
+### Receta de uso: decidir el oversampling (y la CPU) de un proyecto grande
+
+1. Mientras produces, todas las instancias en **4x** (o Off en lo que grabas en vivo, para menos latencia).
+2. Si una pista con Hard Clip, Fold o Rectify suena "sucia" en los agudos de una forma que no debería (tonos que no
+   siguen la nota), súbele el oversampling **solo a esa**: es aliasing (Fase 2).
+3. Las multibanda (3–4 bandas) en los buses, no en cada pista: cada banda es un saturador entero.
+4. Mira el medidor de CPU de FL (barra superior) con el tema sonando y con la canción parada: con Riptide el número no
+   debería subir cuando la pista se calla (denormales: Riptide ya está protegido; si otro plugin lo hace, ya sabes por
+   qué).
+5. Para el render final puedes subir a 8x o 16x las instancias del bus y del master: exportar no es tiempo real.
+6. ¿Por qué así? El oversampling alto solo se nota con curvas duras y mucho drive; con Tape a 4x la diferencia con 16x
+   está por debajo de lo audible y cuesta el doble.
+
+### Reto sin receta
+
+Elige un saturador de referencia (uno de FL o uno que tengas) y **haz que Riptide suene lo más parecido posible** a él
+sobre un bajo: mismo material, misma sonoridad. Usa `level_match.py` para medir: la meta es que el **balance por
+octavas** de las dos versiones quede a ±1 dB en todas las octavas y que en una prueba ciega no aciertes cuál es cuál más
+de la mitad de las veces. Anota qué controles de Riptide te acercaron (modo, Emphasis, tilt, cortes, Mix) y qué no
+pudiste imitar. Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Buffer / underrun**: el bloque de audio que el host le pide a los plugins de una vez; si no llega a tiempo, se oye un
+  clic o un corte. *En música:* los "crujidos" de un proyecto pesado en una laptop; subir el buffer en Audio Settings de
+  FL los quita a costa de más latencia.
+- **CPU (% de un núcleo)**: cuánto del tiempo de un núcleo del procesador necesita un plugin para no cortarse. *En
+  música:* por qué un proyecto con 40 instancias de un plugin pesado se traba y con uno ligero no.
+- **Denormal**: un número tan pequeño que el procesador lo calcula muy lento. *En música:* plugins viejos que
+  disparaban la CPU en los silencios del final de un tema (las colas de reverb).
+- **Null test**: restar dos versiones; si da silencio, son iguales. *En música:* la forma de comprobar si un plugin de
+  "emulación" cambia algo con un ajuste dado, o si dos exportaciones de un tema son idénticas.
+- **LUFS**: la unidad de sonoridad de la norma BS.1770, la que usan Spotify, YouTube y Apple Music para igualar los
+  temas. *En música:* por eso un master muy aplastado no suena más fuerte en Spotify: lo bajan a ~−14 LUFS.
+- **Gain matching (volumen igualado)**: comparar dos versiones a la misma sonoridad. *En música:* los ingenieros de
+  mastering igualan el antes y el después para saber si su cadena mejoró algo o solo subió el volumen.
+- **PLR (peak to loudness ratio)**: cuánto sobresalen los picos de la sonoridad media. *En música:* un tema de jazz
+  acústico tiene PLR alto (golpes vivos); uno de EDM moderno, bajo (todo denso).
+- **Prueba ciega (ABX)**: escuchar sin saber qué es cada versión. *En música:* las pruebas que muestran que mucha gente
+  no distingue un MP3 de 320 kbps de un WAV.
+
+### Errores comunes
+
+- **Comparar saturadores sin igualar el volumen.** Gana siempre el más fuerte. Iguala por sonoridad, no por pico.
+- **Igualar "a ojo" con el fader.** Medio dB de diferencia ya inclina la balanza y no se nota como "volumen".
+- **Juzgar un plugin por el analizador.** El balance por octavas dice DÓNDE cambió algo, no si suena mejor. Primero el
+  oído (a ciegas), después la tabla para entender por qué.
+- **Oversampling 16x en todo "porque es mejor".** Con curvas suaves no se oye y en un proyecto grande multiplica la CPU.
+- **Dejar Riptide en BYPASS para ahorrar CPU.** El bypass no ahorra (está pensado para comparar sin saltos). Si no lo
+  usas, quítalo del slot.
+- **Cuándo NO comparar contra referencias:** cuando todavía no sabes qué le falta a la pista. Elegir saturador es el
+  último paso; primero el problema (falta cuerpo, falta presencia, falta pegamento), después la herramienta.
+
+### Retos completados
+
+(Ninguno todavía.)

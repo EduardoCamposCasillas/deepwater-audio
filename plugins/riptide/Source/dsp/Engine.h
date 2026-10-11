@@ -193,150 +193,27 @@ public:
     void setTransport (const Transport& transport) noexcept { modulator.setTransport (transport); }
 
     // Procesa en el sitio. Con más de maxChannels canales, los de más se dejan intactos.
+    //
+    // Fase 10 (CPU): por tramos de hasta chunkSize muestras, en tres pasadas. La curva con oversampling es lo más caro
+    // y en bloque cuesta bastante menos que muestra a muestra (ver Oversampler::process en bloque); el resto de la cadena
+    // depende de controles que cambian en cada muestra (rampas, modulación), así que va muestra a muestra alrededor:
+    //  1. controles: todo lo de ANTES de la curva (modulación, rampas, tono pre, divisores, la dry) y lo que se decide en
+    //     cada muestra para después (ganancias, mezclas, fundidos), guardado por muestra en el tramo;
+    //  2. curvas: cada saturador procesa su banda del tramo de una vez;
+    //  3. salida: tono post, filtro DC, mix, delta, output, bypass y medidor OUT, con lo guardado en la pasada 1.
+    // Nada de lo de antes de la curva depende de lo que sale de ella, así que el orden de las cuentas no cambia: el
+    // resultado es idéntico bit a bit al del motor de la Fase 9, muestra a muestra. Lo único que cambia de estado a
+    // mitad de un tramo son los saturadores (un cruce de modos que empieza o termina, un cambio de estructura): antes de
+    // tocarlos se procesa en bloque lo que ya estaba pendiente con el estado viejo (flushCurves).
     void process (float* const* audio, int numChannels, int numSamples) noexcept
     {
         numChannels = std::min (numChannels, maxChannels);
-
-        for (int i = 0; i < numSamples; ++i)
+        for (int start = 0; start < numSamples; start += chunkSize)
         {
-            // El fundido de estructura baja mientras haya un cambio pendiente (factor o bandas); en silencio se aplica y
-            // vuelve a subir.
-            const bool structureSettled = requestedStages == activeStages && requestedBands == activeBands;
-            const float level = structureFade.next (structureSettled);
-            if (! structureSettled && level == 0.0f)
-                applyRequestedStructure();
-
-            // La modulación de esta muestra: la envolvente escucha la entrada tal cual llega (el mayor |x| de los canales).
-            float inputPeak = 0.0f;
-            for (int ch = 0; ch < numChannels; ++ch)
-                inputPeak = std::max (inputPeak, std::abs (audio[ch][i]));
-            const auto& mod = modulator.advance (inputPeak);
-            const size_t readIndex = (dryWriteIndex - static_cast<size_t> (latency)) & (dryDelaySize - 1);
-            mixModDelay[dryWriteIndex] = mod[static_cast<size_t> (ModTarget::mix)];
-            tiltModDelay[dryWriteIndex] = mod[static_cast<size_t> (ModTarget::tilt)];
-
-            // Las rampas avanzan una vez por muestra para todos los canales: L y R reciben exactamente la misma ganancia.
-            const float gainIn = modulateDrive (inputGain.next(), mod[static_cast<size_t> (ModTarget::drive)], driveLimit);
-            const float gainOut = outputGain.next();
-            const float wet = bypassFade.next (processing); // 1 = procesado, 0 = original
-            float mixAmount = mix.next();
-            if (const float offset = mixModDelay[readIndex]; offset != 0.0f)
-                mixAmount = clampMix (mixAmount + offset);
-            const float autoAmount = autoGainFade.next (autoGainOn);
-            const float deltaAmount = deltaFade.next (deltaOn);
-            tone.advance (mod[static_cast<size_t> (ModTarget::emphasis)], mod[static_cast<size_t> (ModTarget::emphasisFreq)],
-                          tiltModDelay[readIndex], latency);
-            crossovers.advance();
-            const float inverseDrive = 1.0f / gainIn;
-
-            // Lo de cada banda que comparten los canales.
-            std::array<float, maxBands> bandDrive {}, blend {}, wetGain {}, audible {};
-            std::array<double, maxBands> levelPower {};
-            for (size_t b = 0; b < static_cast<size_t> (activeBands); ++b)
-            {
-                auto& band = bands[b];
-
-                // Cruce de modos: 'blend' = cuánto se oye el saturador entrante (0 mientras se llena su oversampler).
-                if (! band.switching && band.requestedMode != band.activeMode)
-                    beginModeSwitch (band, b);
-                if (band.switching)
-                {
-                    if (band.warmUpRemaining > 0)
-                        --band.warmUpRemaining;
-                    else
-                        blend[b] = band.modeFade.next();
-                }
-
-                bandDrive[b] = modulateDrive (band.drive.next(), mod[static_cast<size_t> (bandDriveTarget (b))], bandDriveLimit);
-                audible[b] = band.audible.next (band.audibleOn);
-
-                // Lo que sale ahora del saturador entró hace 'latency' muestras: la compensación usa el drive de
-                // entonces (si no, al bajar Input de golpe la salida subiría un instante). Se calcula siempre: la GUI
-                // la muestra.
-                band.driveDelay[dryWriteIndex] = gainIn * bandDrive[b];
-                const Mode incoming = band.switching ? band.incomingMode : band.activeMode;
-                const float compensation = band.autoGain.gain (band.driveDelay[readIndex], band.activeMode, incoming, blend[b]);
-                wetGain[b] = autoAmount == 0.0f   ? 1.0f
-                             : autoAmount == 1.0f ? compensation
-                                                  : 1.0f + (compensation - 1.0f) * autoAmount;
-            }
-
-            for (int ch = 0; ch < numChannels; ++ch)
-            {
-                auto& channel = channels[static_cast<size_t> (ch)];
-                float& sample = audio[ch][i];
-
-                channel.dryDelay[dryWriteIndex] = sample;
-                const float dry = channel.dryDelay[readIndex];
-                // La dry, con la misma fase que la wet (filtro DC y cruces) y los mismos solo/mute.
-                float alignedDry = channel.dryDcBlocker.process (dry);
-                if (activeBands > 1)
-                {
-                    std::array<float, maxBands> dryBands {};
-                    channel.drySplitter.process (alignedDry, crossovers.coefficients, activeBands, dryBands.data());
-                    alignedDry = 0.0f;
-                    for (size_t b = 0; b < static_cast<size_t> (activeBands); ++b)
-                        alignedDry += dryBands[b] * audible[b];
-                }
-                else if (audible[0] != 1.0f)
-                {
-                    alignedDry *= audible[0];
-                }
-
-                const float driven = channel.tone.pre (sample * gainIn, tone);
-                channel.input.push (driven);
-                std::array<float, maxBands> bandSignals {};
-                channel.wetSplitter.process (driven, crossovers.coefficients, activeBands, bandSignals.data());
-
-                float saturatedSum = 0.0f;
-                for (size_t b = 0; b < static_cast<size_t> (activeBands); ++b)
-                {
-                    auto& band = bands[b];
-                    auto& slots = channel.slots[b];
-                    const float x = bandSignals[b];
-
-                    const float undriven = x * inverseDrive; // el tono pre y el divisor son lineales
-                    levelPower[b] += static_cast<double> (undriven) * undriven;
-
-                    const float bandInput = bandDrive[b] == 1.0f ? x : x * bandDrive[b];
-                    float saturated = slots[band.activeSlot].process (bandInput);
-                    if (band.switching)
-                    {
-                        const float incoming = slots[1 - band.activeSlot].process (bandInput);
-                        saturated = blend[b] == 1.0f ? incoming : saturated + (incoming - saturated) * blend[b];
-                    }
-                    if (wetGain[b] != 1.0f)
-                        saturated *= wetGain[b];
-                    if (audible[b] != 1.0f)
-                        saturated *= audible[b];
-                    saturatedSum = b == 0 ? saturated : saturatedSum + saturated;
-                }
-
-                float processed = channel.dcBlocker.process (channel.tone.post (saturatedSum, tone));
-                // Con mix al 100 % y sin delta la wet pasa tal cual: los valores por defecto suenan bit a bit como la Fase 5.
-                if (mixAmount != 1.0f)
-                    processed = alignedDry + (processed - alignedDry) * mixAmount;
-                if (deltaAmount != 0.0f)
-                    processed -= alignedDry * deltaAmount;
-                processed *= gainOut;
-
-                // Fuera de los fundidos se copia la señal tal cual: con el bypass puesto la salida es la entrada
-                // retrasada, bit a bit.
-                float out = wet == 1.0f ? processed : wet == 0.0f ? dry : dry + (processed - dry) * wet;
-                if (level != 1.0f)
-                    out *= level;
-                channel.output.push (out);
-                sample = out;
-            }
-
-            for (size_t b = 0; b < static_cast<size_t> (activeBands); ++b)
-            {
-                auto& band = bands[b];
-                band.autoGain.push (levelPower[b] / numChannels);
-                if (band.switching && blend[b] == 1.0f)
-                    finishModeSwitch (band);
-            }
-            dryWriteIndex = (dryWriteIndex + 1) & (dryDelaySize - 1);
+            const int count = std::min (chunkSize, numSamples - start);
+            prepareChunk (audio, numChannels, start, count);
+            flushCurves (numChannels, count);
+            finishChunk (audio, numChannels, start, count);
         }
     }
 
@@ -494,6 +371,248 @@ private:
         band.switching = false;
     }
 
+    // --- Fase 10: el proceso por tramos (ver process) ---------------------------------------------------------------
+    // Tramo = lo que cabe de una vez en un saturador en bloque.
+    static constexpr int chunkSize = Saturator::maxBlockSize;
+    // La de-emphasis de una muestra lee el historial del emphasis 'latency' muestras atrás, pero la pasada 1 ya escribió
+    // hasta el final del tramo: el historial tiene que tener sitio para las dos cosas (latencia máxima ~140).
+    static_assert (chunkSize + 160 <= static_cast<int> (ToneControls::historySize));
+
+    // Lo que la pasada 1 decide en cada muestra del tramo y usan las pasadas 2 y 3.
+    struct Chunk
+    {
+        // Compartido por los canales.
+        std::array<float, chunkSize> level {}, gainOut {}, wet {}, mixAmount {}, deltaAmount {}, tiltOffset {};
+        std::array<int, chunkSize> latency {}, bands {};
+        // Por banda.
+        std::array<std::array<float, chunkSize>, maxBands> blend {}, wetGain {}, audible {};
+        std::array<std::array<bool, chunkSize>, maxBands> switching {};
+        // Por canal (y banda): la entrada a cada curva y lo que sale del saturador activo y del que entra en un cruce.
+        std::array<std::array<float, chunkSize>, maxChannels> dry {}, alignedDry {};
+        std::array<std::array<std::array<float, chunkSize>, maxBands>, maxChannels> curveInput {}, activeOutput {}, incomingOutput {};
+        int saturated = 0; // muestras del tramo que ya pasaron por las curvas
+    };
+
+    // Pasada 1: muestra a muestra, todo lo de antes de la curva.
+    void prepareChunk (float* const* audio, int numChannels, int start, int count) noexcept
+    {
+        chunk.saturated = 0;
+        for (int n = 0; n < count; ++n)
+        {
+            const auto sampleIndex = static_cast<size_t> (n);
+
+            // El fundido de estructura baja mientras haya un cambio pendiente (factor o bandas); en silencio se aplica y
+            // vuelve a subir.
+            const bool structureSettled = requestedStages == activeStages && requestedBands == activeBands;
+            const float level = structureFade.next (structureSettled);
+            if (! structureSettled && level == 0.0f)
+            {
+                flushCurves (numChannels, n); // lo pendiente, con la estructura vieja
+                applyRequestedStructure();
+            }
+            chunk.level[sampleIndex] = level;
+            chunk.latency[sampleIndex] = latency;
+            chunk.bands[sampleIndex] = activeBands;
+
+            // La modulación de esta muestra: la envolvente escucha la entrada tal cual llega (el mayor |x| de los canales).
+            float inputPeak = 0.0f;
+            for (int ch = 0; ch < numChannels; ++ch)
+                inputPeak = std::max (inputPeak, std::abs (audio[ch][start + n]));
+            const auto& mod = modulator.advance (inputPeak);
+            const size_t readIndex = (dryWriteIndex - static_cast<size_t> (latency)) & (dryDelaySize - 1);
+            mixModDelay[dryWriteIndex] = mod[static_cast<size_t> (ModTarget::mix)];
+            tiltModDelay[dryWriteIndex] = mod[static_cast<size_t> (ModTarget::tilt)];
+
+            // Las rampas avanzan una vez por muestra para todos los canales: L y R reciben exactamente la misma ganancia.
+            const float gainIn = modulateDrive (inputGain.next(), mod[static_cast<size_t> (ModTarget::drive)], driveLimit);
+            chunk.gainOut[sampleIndex] = outputGain.next();
+            chunk.wet[sampleIndex] = bypassFade.next (processing); // 1 = procesado, 0 = original
+            float mixAmount = mix.next();
+            if (const float offset = mixModDelay[readIndex]; offset != 0.0f)
+                mixAmount = clampMix (mixAmount + offset);
+            chunk.mixAmount[sampleIndex] = mixAmount;
+            const float autoAmount = autoGainFade.next (autoGainOn);
+            chunk.deltaAmount[sampleIndex] = deltaFade.next (deltaOn);
+            tone.advancePre (mod[static_cast<size_t> (ModTarget::emphasis)], mod[static_cast<size_t> (ModTarget::emphasisFreq)]);
+            chunk.tiltOffset[sampleIndex] = tiltModDelay[readIndex];
+            crossovers.advance();
+            const float inverseDrive = 1.0f / gainIn;
+
+            // Lo de cada banda que comparten los canales.
+            std::array<float, maxBands> bandDrive {};
+            std::array<double, maxBands> levelPower {};
+            for (size_t b = 0; b < static_cast<size_t> (activeBands); ++b)
+            {
+                auto& band = bands[b];
+
+                // Cruce de modos: 'blend' = cuánto se oye el saturador entrante (0 mientras se llena su oversampler).
+                if (! band.switching && band.requestedMode != band.activeMode)
+                {
+                    flushCurves (numChannels, n); // lo pendiente, sin el saturador entrante
+                    beginModeSwitch (band, b);
+                }
+                float blend = 0.0f;
+                if (band.switching)
+                {
+                    if (band.warmUpRemaining > 0)
+                        --band.warmUpRemaining;
+                    else
+                        blend = band.modeFade.next();
+                }
+                chunk.blend[b][sampleIndex] = blend;
+                chunk.switching[b][sampleIndex] = band.switching;
+
+                bandDrive[b] = modulateDrive (band.drive.next(), mod[static_cast<size_t> (bandDriveTarget (b))], bandDriveLimit);
+                chunk.audible[b][sampleIndex] = band.audible.next (band.audibleOn);
+
+                // Lo que sale ahora del saturador entró hace 'latency' muestras: la compensación usa el drive de
+                // entonces (si no, al bajar Input de golpe la salida subiría un instante). Apagado no cambia el sonido:
+                // se calcula solo una vez por tramo, para la lectura de la GUI.
+                band.driveDelay[dryWriteIndex] = gainIn * bandDrive[b];
+                float gain = 1.0f;
+                if (autoAmount != 0.0f || n == count - 1)
+                {
+                    const Mode incoming = band.switching ? band.incomingMode : band.activeMode;
+                    const float compensation = band.autoGain.gain (band.driveDelay[readIndex], band.activeMode, incoming, blend);
+                    gain = autoAmount == 0.0f   ? 1.0f
+                           : autoAmount == 1.0f ? compensation
+                                                : 1.0f + (compensation - 1.0f) * autoAmount;
+                }
+                chunk.wetGain[b][sampleIndex] = gain;
+            }
+
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                auto& channel = channels[static_cast<size_t> (ch)];
+                const auto chIndex = static_cast<size_t> (ch);
+                const float sample = audio[ch][start + n];
+
+                channel.dryDelay[dryWriteIndex] = sample;
+                const float dry = channel.dryDelay[readIndex];
+                chunk.dry[chIndex][sampleIndex] = dry;
+                // La dry, con la misma fase que la wet (filtro DC y cruces) y los mismos solo/mute.
+                float alignedDry = channel.dryDcBlocker.process (dry);
+                if (activeBands > 1)
+                {
+                    std::array<float, maxBands> dryBands {};
+                    channel.drySplitter.process (alignedDry, crossovers.coefficients, activeBands, dryBands.data());
+                    alignedDry = 0.0f;
+                    for (size_t b = 0; b < static_cast<size_t> (activeBands); ++b)
+                        alignedDry += dryBands[b] * chunk.audible[b][sampleIndex];
+                }
+                else if (chunk.audible[0][sampleIndex] != 1.0f)
+                {
+                    alignedDry *= chunk.audible[0][sampleIndex];
+                }
+                chunk.alignedDry[chIndex][sampleIndex] = alignedDry;
+
+                const float driven = channel.tone.pre (sample * gainIn, tone);
+                channel.input.push (driven);
+                std::array<float, maxBands> bandSignals {};
+                channel.wetSplitter.process (driven, crossovers.coefficients, activeBands, bandSignals.data());
+
+                for (size_t b = 0; b < static_cast<size_t> (activeBands); ++b)
+                {
+                    const float x = bandSignals[b];
+                    const float undriven = x * inverseDrive; // el tono pre y el divisor son lineales
+                    levelPower[b] += static_cast<double> (undriven) * undriven;
+                    chunk.curveInput[chIndex][b][sampleIndex] = bandDrive[b] == 1.0f ? x : x * bandDrive[b];
+                }
+            }
+
+            for (size_t b = 0; b < static_cast<size_t> (activeBands); ++b)
+            {
+                auto& band = bands[b];
+                band.autoGain.push (levelPower[b] / numChannels);
+                if (band.switching && chunk.blend[b][sampleIndex] == 1.0f)
+                {
+                    flushCurves (numChannels, n + 1); // esta muestra todavía con los dos saturadores
+                    finishModeSwitch (band);
+                }
+            }
+            dryWriteIndex = (dryWriteIndex + 1) & (dryDelaySize - 1);
+        }
+    }
+
+    // Pasada 2: las curvas de las muestras del tramo que faltan hasta 'end', en bloque, con el estado actual de los
+    // saturadores (cuál suena y si hay uno entrando).
+    void flushCurves (int numChannels, int end) noexcept
+    {
+        const int from = chunk.saturated;
+        if (end <= from)
+            return;
+        for (size_t b = 0; b < static_cast<size_t> (activeBands); ++b)
+        {
+            const auto& band = bands[b];
+            for (size_t ch = 0; ch < static_cast<size_t> (numChannels); ++ch)
+            {
+                auto& slots = channels[ch].slots[b];
+                const float* input = chunk.curveInput[ch][b].data() + from;
+                slots[band.activeSlot].process (input, chunk.activeOutput[ch][b].data() + from, end - from);
+                if (band.switching)
+                    slots[1 - band.activeSlot].process (input, chunk.incomingOutput[ch][b].data() + from, end - from);
+            }
+        }
+        chunk.saturated = end;
+    }
+
+    // Pasada 3: muestra a muestra, todo lo de después de la curva.
+    void finishChunk (float* const* audio, int numChannels, int start, int count) noexcept
+    {
+        for (int n = 0; n < count; ++n)
+        {
+            const auto sampleIndex = static_cast<size_t> (n);
+            tone.advancePost (chunk.tiltOffset[sampleIndex], chunk.latency[sampleIndex]);
+            const float mixAmount = chunk.mixAmount[sampleIndex];
+            const float deltaAmount = chunk.deltaAmount[sampleIndex];
+            const float gainOut = chunk.gainOut[sampleIndex];
+            const float wet = chunk.wet[sampleIndex];
+            const float level = chunk.level[sampleIndex];
+            const auto numBands = static_cast<size_t> (chunk.bands[sampleIndex]);
+
+            for (int ch = 0; ch < numChannels; ++ch)
+            {
+                auto& channel = channels[static_cast<size_t> (ch)];
+                const auto chIndex = static_cast<size_t> (ch);
+
+                float saturatedSum = 0.0f;
+                for (size_t b = 0; b < numBands; ++b)
+                {
+                    float saturated = chunk.activeOutput[chIndex][b][sampleIndex];
+                    if (chunk.switching[b][sampleIndex])
+                    {
+                        const float incoming = chunk.incomingOutput[chIndex][b][sampleIndex];
+                        const float blend = chunk.blend[b][sampleIndex];
+                        saturated = blend == 1.0f ? incoming : saturated + (incoming - saturated) * blend;
+                    }
+                    if (const float gain = chunk.wetGain[b][sampleIndex]; gain != 1.0f)
+                        saturated *= gain;
+                    if (const float audible = chunk.audible[b][sampleIndex]; audible != 1.0f)
+                        saturated *= audible;
+                    saturatedSum = b == 0 ? saturated : saturatedSum + saturated;
+                }
+
+                const float alignedDry = chunk.alignedDry[chIndex][sampleIndex];
+                float processed = channel.dcBlocker.process (channel.tone.post (saturatedSum, tone));
+                // Con mix al 100 % y sin delta la wet pasa tal cual: los valores por defecto suenan bit a bit como la Fase 5.
+                if (mixAmount != 1.0f)
+                    processed = alignedDry + (processed - alignedDry) * mixAmount;
+                if (deltaAmount != 0.0f)
+                    processed -= alignedDry * deltaAmount;
+                processed *= gainOut;
+
+                // Fuera de los fundidos se copia la señal tal cual: con el bypass puesto la salida es la entrada
+                // retrasada, bit a bit.
+                const float dry = chunk.dry[chIndex][sampleIndex];
+                float out = wet == 1.0f ? processed : wet == 0.0f ? dry : dry + (processed - dry) * wet;
+                if (level != 1.0f)
+                    out *= level;
+                channel.output.push (out);
+                audio[ch][start + n] = out;
+            }
+        }
+    }
+
     deepwater::dsp::LinearRamp inputGain;
     deepwater::dsp::LinearRamp outputGain;
     deepwater::dsp::EffectSwitch bypassFade;
@@ -519,6 +638,7 @@ private:
     std::array<Band, maxBands> bands;
     std::array<Channel, maxChannels> channels;
     size_t dryWriteIndex = 0;
+    Chunk chunk;
 };
 
 } // namespace riptide::dsp

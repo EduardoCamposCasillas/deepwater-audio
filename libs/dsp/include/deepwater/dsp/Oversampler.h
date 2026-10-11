@@ -131,6 +131,57 @@ public:
         return source[0];
     }
 
+    // Fase 10 de Riptide: lo mismo para un bloque de hasta maxBlockSize muestras ('output' puede ser 'input'). Cada etapa
+    // procesa todas las muestras del bloque de una vez (ver HalfbandDecimator::processBlock: así no espera a leer lo que
+    // acaba de escribir) y la curva recorre un buffer seguido. El resultado es idéntico bit a bit al de process muestra a
+    // muestra: las mismas cuentas en el mismo orden.
+    static constexpr int maxBlockSize = 32;
+
+    template <typename Shape>
+    void process (const float* input, float* output, int numSamples, Shape&& shape) noexcept
+    {
+        if (numStages == 0)
+        {
+            for (int i = 0; i < numSamples; ++i)
+                output[i] = shape (input[i]);
+            return;
+        }
+
+        std::array<float, maxBlockSize * maxFactor> a, b;
+        float* source = a.data();
+        float* target = b.data();
+        std::copy (input, input + numSamples, source);
+        int count = numSamples;
+
+        for (int s = 0; s < numStages; ++s)
+        {
+            stages[static_cast<size_t> (s)].up.processBlock (source, target, count);
+            count *= 2;
+            std::swap (source, target);
+        }
+
+        // El relleno (retardo puro) y la curva, en dos pasadas: la curva sobre un buffer seguido.
+        const int pad = paddings[static_cast<size_t> (numStages)];
+        if (pad > 0)
+        {
+            for (int i = 0; i < count; ++i)
+            {
+                padding[paddingIndex] = source[i];
+                source[i] = padding[(paddingIndex - static_cast<size_t> (pad)) & (paddingSize - 1)];
+                paddingIndex = (paddingIndex + 1) & (paddingSize - 1);
+            }
+        }
+        for (int i = 0; i < count; ++i)
+            source[i] = shape (source[i]);
+
+        for (int s = numStages - 1; s >= 0; --s)
+        {
+            count /= 2;
+            stages[static_cast<size_t> (s)].down.processBlock (source, source, count);
+        }
+        std::copy (source, source + numSamples, output);
+    }
+
 private:
     struct Stage
     {
