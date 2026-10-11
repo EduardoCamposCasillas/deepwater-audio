@@ -107,12 +107,12 @@ plugins/riptide/
 - [x] Fase 7 — Dinámica y modulación: envelope follower y LFO que modulan el drive u otros parámetros.
 - [x] Fase 8 — GUI profesional: curva de transferencia en vivo, analizador de espectro antes/después,
       visualización de bandas, escalable.
-- [ ] Fase 9 — Presets con notas educativas (batería, bajo, voz, bus, master, efectos creativos).
+- [x] Fase 9 — Presets con notas educativas (batería, bajo, voz, bus, master, efectos creativos).
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 9 IMPLEMENTADA (2026-10-11), pendiente de que el usuario la pruebe en FL Studio. El audio no cambia (el motor no
-se tocó).
+Fase 9 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. El audio no cambia (el motor no se
+tocó).
 - Presets en la librería compartida: el sistema de Undertow pasó a `libs/presets` (ver el `CLAUDE.md` raíz y el de
   Undertow) y Riptide lo usa con su `PresetFormat` (`presets/RiptidePresets.cpp`): `<RiptidePreset>`, `.rtpreset`,
   `Documentos\Riptide\Presets`, categorías Init, Batería, Bajo, Voz, Instrumentos, Bus, Master, Creativo, Otros. El
@@ -416,4 +416,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: probar la Fase 9 en FL Studio; después Fase 10 (pulido).
+Siguiente: Fase 10 (pulido: CPU, pluginval estricto, comparación gain-matched contra referencias).
