@@ -92,7 +92,7 @@ plugins/riptide/
       para decidir qué frecuencias se saturan más.
 - [x] Fase 5 — Mix dry/wet con compensación de fase/latencia, compensación automática de volumen
       (auto gain) y modo delta (escuchar solo lo que agrega la saturación).
-- [ ] Fase 6 — Multibanda: crossovers Linkwitz-Riley (hasta 4 bandas), modo y drive por banda,
+- [x] Fase 6 — Multibanda: crossovers Linkwitz-Riley (hasta 4 bandas), modo y drive por banda,
       solo/mute por banda, suma plana cuando no hay saturación.
 - [ ] Fase 7 — Dinámica y modulación: envelope follower y LFO que modulan el drive u otros parámetros.
 - [ ] Fase 8 — GUI profesional: curva de transferencia en vivo, analizador de espectro antes/después,
@@ -101,7 +101,7 @@ plugins/riptide/
 - [ ] Fase 10 — Pulido: optimización de CPU, pluginval estricto, comparación gain-matched contra referencias.
 
 ## Estado actual
-Fase 6 IMPLEMENTADA (2026-10-10), pendiente de que el usuario la pruebe en FL Studio.
+Fase 6 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
 - Cadena: entrada → × input (drive) → tono pre → [IN] → divisor (1–4 bandas) → por banda: × drive → modo → × auto gain →
   × solo/mute → Σ → tono post → filtro DC = wet; dry = entrada retrasada la latencia → filtro DC gemelo → divisor gemelo
   → × solo/mute por banda → Σ; mix → − delta·dry → × output → fundido de bypass (original intacta, bit a bit) → ×
@@ -301,4 +301,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: que el usuario pruebe la Fase 6 en FL; después, Fase 7 (dinámica y modulación).
+Siguiente: Fase 7 (dinámica y modulación).
