@@ -79,7 +79,7 @@ plugins/undertow/
 Ampliación: cuerda pulsada (Karplus-Strong, Jaffe & Smith; desde la literatura publicada, sin código ajeno). Elegida
 como fuente nueva por voz (como el sub y el ruido), no como tipo de oscilador: corre a 1× (no depende del camino de
 warp/FM), un solo juego de parámetros, y apagada no se calcula.
-- [ ] Fase 12 — Núcleo: retardo fraccionario Lagrange en libs/dsp, cuerda con ruido blanco, Decay (T60), Damping,
+- [x] Fase 12 — Núcleo: retardo fraccionario Lagrange en libs/dsp, cuerda con ruido blanco, Decay (T60), Damping,
       note-off con "palma", afinación < 1 cent (MIDI 12–96, 4 sample rates), pestaña "Cuerda".
 - [ ] Fase 13 — Excitación: Pick Position (peine en la excitación), ruido filtrado (tono de la púa) e impulso;
       destinos de la matriz (al final): String Level, Decay, Damping, Pick Position, Pitch.
@@ -452,7 +452,8 @@ Cambio desde Riptide Fase 7 (2026-10-10). El sonido no cambia (null test: idént
   cambió. `Source/dsp/Lfo.h` quedó como un header que declara `using deepwater::dsp::Lfo/LfoPhase/LfoShape`, y
   `synth/Modulation.h` toma las formas y las divisiones con `using`.
 
-Fase 12 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio. Lo existente suena igual (null test bit a bit).
+Fase 12 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. Lo existente suena igual (null test
+bit a bit).
 - `libs/dsp` `DelayLine.h`: `LagrangeTaps` (Lagrange de 3.er orden, fracción en [1, 2): ganancia ≤ 1; `forDelay`,
   `response`, `phaseDelay`, `magnitude`) y `DelayLine::readLagrange`. Solo se añadió: chorus/delay/reverb idénticos.
   Test en DeepwaterDspTests (cúbicas exactas, retardo exacto en graves, |H| ≤ 1, fase medida = teoría).
