@@ -99,7 +99,7 @@ incluyen notas de para qué sirven y por qué.
 - [x] Fase 3 — Curvas: presets de forma (como las de Kickstart) y editor de curva propio con puntos y tensión.
 - [x] Fase 4 — Modo MIDI trigger: cada nota MIDI recibida dispara la curva (para seguir el patrón real del kick del
       dembow). Explicar cómo rutear MIDI hacia el plugin en FL Studio.
-- [ ] Fase 5 — Modo audio sidechain: entrada sidechain real (bus auxiliar VST3), detección de transitorios con umbral
+- [x] Fase 5 — Modo audio sidechain: entrada sidechain real (bus auxiliar VST3), detección de transitorios con umbral
       y retención, y opción de lookahead (reportando latencia al host). Explicar cómo configurar el sidechain en el
       mixer de FL Studio.
 - [ ] Fase 6 — Ducking por bandas: aplicar la curva solo a graves (crossover ajustable) para que el bajo le deje
@@ -110,7 +110,7 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 5 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 5 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - Librería: `deepwater/dsp/TransientDetector.h` (nuevo, con test en `DeepwaterDspTests`): envolvente de
   `EnvelopeFollower` (ataque 0, relajación 50 ms) → golpe al cruzar el umbral hacia arriba (exacto a la muestra); se
   rearma al bajar 6 dB por debajo del umbral (histéresis), y durante la retención no dispara ni se rearma. Limitación
@@ -143,7 +143,7 @@ Fase 5 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
   falla: comprobado) y luego retraso exacto. Release con 0 warnings; ctest 6/6; pluginval strictness 10 ampliado:
   SUCCESS (lista el bus sidechain).
 
-Siguiente: que el usuario pruebe la Fase 5 en FL Studio; después, Fase 6 (ducking por bandas).
+Siguiente: Fase 6 (ducking por bandas).
 
 ### Fase 4 (completada 2026-10-12, probada en FL)
 - `dsp/Triggers.h`: `TriggerMode`, `Trigger` (muestra dentro del bloque + velocidad 0–1), filtro de nota (0 = todas,
