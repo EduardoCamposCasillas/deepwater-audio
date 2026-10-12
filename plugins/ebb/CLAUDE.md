@@ -105,7 +105,7 @@ incluyen notas de para qué sirven y por qué.
 - [x] Fase 5 — Modo audio sidechain: entrada sidechain real (bus auxiliar VST3), detección de transitorios con umbral
       y retención, y opción de lookahead (reportando latencia al host). Explicar cómo configurar el sidechain en el
       mixer de FL Studio.
-- [ ] Fase 6 — Ducking por bandas: aplicar la curva solo a graves (crossover ajustable) para que el bajo le deje
+- [x] Fase 6 — Ducking por bandas: aplicar la curva solo a graves (crossover ajustable) para que el bajo le deje
       espacio al kick sin "bombear" los agudos; mix dry/wet.
 - [ ] Fase 7 — GUI: visualización de la curva y de la forma de onda en vivo, cursor de reproducción, indicador de
       cuándo se dispara.
@@ -113,7 +113,7 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 6 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 6 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - `dsp/Bands.h` (nuevo): `DuckBand` (Todo, Graves, Agudos; el parámetro guarda el índice: solo añadir al final) y
   `BandDucker`: un `LinkwitzRileySplit` (libs/dsp, LR4 24 dB/oct) por canal que corre SIEMPRE (también en Todo, para
   que al cambiar de banda los filtros ya estén en régimen). Graves = low·g + high; Agudos = low + high·g; Todo = x·g
@@ -140,7 +140,7 @@ Fase 6 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
   barrido del cruce 30 Hz–2 kHz finito y acotado. Release con 0 warnings; ctest 6/6; pluginval strictness 10
   ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 6 en FL Studio; después, Fase 7 (GUI).
+Siguiente: Fase 7 (GUI).
 
 ### Fase 5 (completada 2026-10-12, probada en FL)
 - Librería: `deepwater/dsp/TransientDetector.h` (con test): envolvente de `EnvelopeFollower` (ataque 0, relajación
