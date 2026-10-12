@@ -23,7 +23,9 @@ namespace fathom::gui
 //  - DOS escalas verticales sobre las mismas líneas: a la derecha la del EQ (cuánto sube o baja la curva, ±12 dB por
 //    defecto; el botón la cambia) y a la izquierda la del analizador (0 a −96 dBFS). Son independientes: una banda de
 //    +3 dB tiene que verse bien aunque el espectro ocupe 90 dB.
-//  - La curva (blanca) es la respuesta TOTAL del EQ. En la Fase 1 solo hay ganancia de salida, así que es una recta.
+//  - La curva (blanca) es la respuesta TOTAL del EQ: la banda más la ganancia de salida. Se calcula con los mismos
+//    coeficientes que usa el audio (EqCoefficients::response), así que es lo que suena, no un dibujo aproximado. La zona
+//    que la banda sube o baja va rellena, y su nodo marca el centro (Fase 4: se podrá arrastrar).
 //  - Analizador: ENTRADA (línea gris) y SALIDA (relleno azul), medidos igual (un seno de 0 dBFS marca 0 dB). Cada punto
 //    sube casi al instante y baja a 40 dB/s, para que la música se pueda leer sin que tiemble.
 //  - Al pasar el mouse, arriba se lee la frecuencia, la nota (nombres de FL) y los dos niveles en ese punto.
@@ -79,8 +81,15 @@ public:
         // Solo se repinta si algo cambió de forma visible: sin audio, las curvas terminan de caer al piso y el visor
         // queda quieto (no gasta CPU).
         const float gainDb = outputGain->load();
-        bool changed = gainDb != paintedGainDb;
-        paintedGainDb = gainDb;
+        const auto band = processor.getBand1Settings();
+        bool changed = gainDb != paintedGainDb || ! sameSettings (band, paintedBand) || sampleRate != curveSampleRate;
+        if (changed)
+        {
+            paintedGainDb = gainDb;
+            paintedBand = band;
+            curveSampleRate = sampleRate;
+            updateCurve();
+        }
         changed = updateTrace (input, processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
         changed = updateTrace (output, processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
         if (changed)
@@ -107,6 +116,8 @@ public:
         const auto points = static_cast<size_t> (plot.getWidth() / 2.0f) + 1;
         for (auto* trace : { &input, &output })
             trace->shown.assign (points, analyzerBottomDb - 10.0f);
+        curveDb.assign (points, 0.0f);
+        updateCurve();
     }
 
     void paint (juce::Graphics& g) override
@@ -381,23 +392,76 @@ private:
         return {};
     }
 
-    // La curva del EQ: la respuesta total. Fase 1: la ganancia de salida (una recta); si se sale de la escala, se
-    // dibuja en el borde punteada.
+    static bool sameSettings (const dsp::BandSettings& a, const dsp::BandSettings& b) noexcept
+    {
+        return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q;
+    }
+
+    // La respuesta total en dB en una frecuencia: la banda (con sus coeficientes reales) más la ganancia de salida.
+    float totalDb (float hz) const noexcept
+    {
+        return static_cast<float> (bandCoefficients.magnitudeDb (hz, curveSampleRate)) + paintedGainDb;
+    }
+
+    // Recalcula la curva (un valor por punto, como el analizador). Solo cuando cambia un ajuste o el tamaño.
+    void updateCurve()
+    {
+        bandCoefficients = dsp::Band::coefficientsFor (paintedBand, curveSampleRate);
+        const auto points = curveDb.size();
+        if (points < 2)
+            return;
+        const double ratio = std::pow (static_cast<double> (maxHz / minHz), 1.0 / static_cast<double> (points - 1));
+        for (size_t i = 0; i < points; ++i)
+            curveDb[i] = totalDb (static_cast<float> (minHz * std::pow (ratio, static_cast<double> (i))));
+    }
+
+    // La curva del EQ: la respuesta total. Lo que la banda sube o baja (respecto de la línea de la salida) va relleno;
+    // si la curva se sale de la escala, se dibuja pegada al borde. Encima, el nodo de la banda.
     void paintCurve (juce::Graphics& g) const
     {
-        const float db = paintedGainDb;
-        const bool outside = std::abs (db) > eqRange();
-        const float y = eqDbToY (juce::jlimit (-eqRange(), eqRange(), db));
+        const auto points = curveDb.size();
+        if (points < 2)
+            return;
+        const float step = plot.getWidth() / static_cast<float> (points - 1);
+        const float top = plot.getY() + 1.0f, bottom = plot.getBottom() - 1.0f;
+        juce::Path curve;
+        for (size_t i = 0; i < points; ++i)
+        {
+            const float x = plot.getX() + step * static_cast<float> (i);
+            const float y = juce::jlimit (top, bottom, eqDbToY (curveDb[i]));
+            if (i == 0)
+                curve.startNewSubPath (x, y);
+            else
+                curve.lineTo (x, y);
+        }
+
+        if (paintedBand.enabled && paintedBand.gainDb != 0.0f)
+        {
+            const float baseY = juce::jlimit (top, bottom, eqDbToY (paintedGainDb));
+            juce::Path area (curve);
+            area.lineTo (plot.getRight(), baseY);
+            area.lineTo (plot.getX(), baseY);
+            area.closeSubPath();
+            g.setColour (theme::accent.withAlpha (0.16f));
+            g.fillPath (area);
+        }
         g.setColour (theme::text.withAlpha (0.9f));
-        if (outside)
+        g.strokePath (curve, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        // El nodo: en la frecuencia de la banda y sobre la curva (apagada: hueco, sobre la línea de la salida).
+        const float hz = juce::jlimit (minHz, maxHz, paintedBand.frequency);
+        const float nodeDb = paintedGainDb + (paintedBand.enabled ? paintedBand.gainDb : 0.0f);
+        const auto centre = juce::Point<float> (hzToX (hz), juce::jlimit (plot.getY() + 6.0f, plot.getBottom() - 6.0f, eqDbToY (nodeDb)));
+        const auto node = juce::Rectangle<float> (14.0f, 14.0f).withCentre (centre);
+        if (paintedBand.enabled)
         {
-            const float dashes[] { 6.0f, 4.0f };
-            g.drawDashedLine ({ plot.getX(), y, plot.getRight(), y }, dashes, 2, 1.8f);
+            g.setColour (theme::accent);
+            g.fillEllipse (node);
         }
-        else
-        {
-            g.drawLine (plot.getX(), y, plot.getRight(), y, 1.8f);
-        }
+        g.setColour (paintedBand.enabled ? theme::text : theme::dimText);
+        g.drawEllipse (node, 1.5f);
+        g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+        g.drawText ("1", node, juce::Justification::centred);
     }
 
     // Arriba, al pasar el mouse por el visor: frecuencia · nota · escala del EQ · escala del analizador.
@@ -409,7 +473,8 @@ private:
         const auto dot = juce::String::fromUTF8 ("  \xc2\xb7  ");
         g.setColour (theme::text);
         g.setFont (juce::FontOptions (11.0f));
-        g.drawText (format::hz (hz) + dot + format::noteName (hz) + dot + "EQ " + format::db (yToEqDb (mouse.y)) + dot
+        g.drawText (format::hz (hz) + dot + format::noteName (hz) + dot + "curva " + format::db (totalDb (hz)) + dot
+                        + "EQ " + format::db (yToEqDb (mouse.y)) + dot
                         + juce::String::fromUTF8 ("analizador ") + juce::String (juce::roundToInt (yToAnalyzerDb (mouse.y))) + " dB",
                     titleArea.withTrimmedLeft (30.0f), juce::Justification::centred);
     }
@@ -423,6 +488,10 @@ private:
     Trace input, output;
     std::vector<float> scratch;
     float paintedGainDb = 0.0f;
+    dsp::BandSettings paintedBand;
+    deepwater::dsp::EqCoefficients bandCoefficients;
+    double curveSampleRate = 44100.0;
+    std::vector<float> curveDb; // la respuesta total en dB, un valor por punto
     juce::Rectangle<float> plot, titleArea, zoneArea;
     juce::Point<float> mouse { -1.0f, -1.0f };
 };

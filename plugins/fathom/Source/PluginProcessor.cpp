@@ -1,14 +1,29 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Parameters.h"
+#include "gui/Format.h"
 
 namespace
 {
-// "+3.5 dB", "-12.0 dB" o "0.0 dB".
-juce::String gainToText (float db, int /*maximumLength*/)
+juce::String gainToText (float db, int /*maximumLength*/) { return fathom::gui::format::db (db); }
+juce::String hzToText (float hz, int /*maximumLength*/) { return fathom::gui::format::hz (hz); }
+juce::String qToText (float q, int /*maximumLength*/) { return juce::String (q, q < 10.0f ? 2 : 1); }
+
+// "2.5 kHz", "2.5k" o "2500" → 2500 Hz.
+float textToHz (const juce::String& text)
 {
-    const float rounded = std::round (db * 10.0f) / 10.0f;
-    return (rounded > 0.0f ? "+" : "") + juce::String (rounded == 0.0f ? 0.0f : rounded, 1) + " dB";
+    const float value = text.getFloatValue();
+    return text.containsIgnoreCase ("k") ? value * 1000.0f : value;
+}
+
+// Rango logarítmico exacto: cada vuelta de perilla (o de automatización) recorre lo mismo en octavas o en "veces Q".
+// skewFactor de JUCE es solo una aproximación; con las tres funciones el mapeo es log de verdad.
+juce::NormalisableRange<float> logRange (float minimum, float maximum)
+{
+    return { minimum, maximum,
+             [] (float start, float end, float proportion) { return start * std::pow (end / start, proportion); },
+             [] (float start, float end, float value) { return std::log (value / start) / std::log (end / start); },
+             [] (float start, float end, float value) { return juce::jlimit (start, end, value); } };
 }
 } // namespace
 
@@ -21,6 +36,10 @@ FathomAudioProcessor::FathomAudioProcessor()
     namespace id = fathom::params;
     bypassParam = parameters.getRawParameterValue (id::bypass);
     outputGainParam = parameters.getRawParameterValue (id::outputGain);
+    band1EnabledParam = parameters.getRawParameterValue (id::band1Enabled);
+    band1FrequencyParam = parameters.getRawParameterValue (id::band1Frequency);
+    band1GainParam = parameters.getRawParameterValue (id::band1Gain);
+    band1QParam = parameters.getRawParameterValue (id::band1Q);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
 }
@@ -39,13 +58,39 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
             .withLabel ("dB")
             .withStringFromValueFunction (gainToText)
             .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
+
+    // Fase 2: la banda 1 (campana). Rangos como los de un EQ profesional: 10 Hz–30 kHz (encima de Nyquist se limita),
+    // ±30 dB y Q de 0.025 (casi 9 octavas de ancho) a 40 (un 1/36 de octava: para cazar una resonancia).
+    using Band = fathom::dsp::BandSettings;
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::band1Enabled, id::versionHintPhase2 }, "Band 1 On", true));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::band1Frequency, id::versionHintPhase2 }, "Band 1 Freq", logRange (Band::minFrequency, Band::maxFrequency),
+        1000.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("Hz").withStringFromValueFunction (hzToText).withValueFromStringFunction (textToHz)));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::band1Gain, id::versionHintPhase2 }, "Band 1 Gain",
+        juce::NormalisableRange<float> (Band::minGainDb, Band::maxGainDb, 0.01f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("dB")
+            .withStringFromValueFunction (gainToText)
+            .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::band1Q, id::versionHintPhase2 }, "Band 1 Q", logRange (Band::minQ, Band::maxQ), 1.0f,
+        juce::AudioParameterFloatAttributes()
+            .withStringFromValueFunction (qToText)
+            .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
     return layout;
+}
+
+fathom::dsp::BandSettings FathomAudioProcessor::getBand1Settings() const noexcept
+{
+    return { band1EnabledParam->load() >= 0.5f, band1FrequencyParam->load(), band1GainParam->load(), band1QParam->load() };
 }
 
 void FathomAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
 {
-    // Fase 1 no tiene buffers propios: el motor procesa en el sitio y las tomas del analizador son de tamaño fijo.
-    engine.prepare (sampleRate, bypassParam->load() >= 0.5f, outputGainParam->load());
+    // Sin buffers propios: el motor procesa en el sitio y las tomas del analizador son de tamaño fijo.
+    engine.prepare (sampleRate, bypassParam->load() >= 0.5f, outputGainParam->load(), getBand1Settings());
     analyzerSampleRate.store (sampleRate);
     setLatencySamples (0);
 }
@@ -79,6 +124,7 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     engine.setBypassed (bypassParam->load() >= 0.5f);
     engine.setOutputDb (outputGainParam->load());
+    engine.setBand (getBand1Settings());
     engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples);
 
     if (feedAnalyzer)

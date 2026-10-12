@@ -90,3 +90,101 @@ pausa y mira el espectro quieto; acuérdate de que A5 de FL = 440 Hz, así que A
 - **Esperar que el analizador muestre todo igual de "plano"**: la música real cae hacia los agudos (más energía en
   graves). Un espectro plano sonaría chillón. (En la Fase 5 llega la inclinación de 4.5 dB/oct que compensa eso al
   mirar.)
+
+## Fase 2 — La campana: subir o bajar una zona
+
+Ya ecualiza: una banda **campana** (en inglés *peaking* o *bell*) sube o baja una zona alrededor de una frecuencia y
+deja el resto como estaba. Es la forma más usada de un EQ: casi todo lo que se hace en una mezcla con un EQ es una
+campana, o varias.
+
+### Conceptos aprendidos
+
+- **Cómo se construye.** El filtro de estado variable (SVF, el mismo de Undertow) separa la señal en graves, una banda
+  alrededor del corte y agudos. La campana es la señal original **más** un poco de esa banda (o **menos**, para
+  cortar). Cuánto sumar sale de la ganancia; qué tan angosta es la banda, del Q. Es la fórmula del prototipo analógico
+  de un EQ de consola, pasada a digital sin perder la estabilidad aunque muevas las perillas en pleno audio.
+- **La curva es el sonido.** La línea blanca no es un dibujo aproximado: se calcula con los mismos números que usa el
+  audio. Los tests comprueban que lo que mide un seno al pasar por Fathom coincide con la curva en menos de 0.0001 dB.
+- **Q y ancho de banda.** El Q dice lo angosta que es la campana; el **ancho en octavas** (lo muestra el panel) es lo
+  mismo dicho en musical. Q 0.7 ≈ 2 octavas (ancha, suave), Q 1.41 = 1 octava, Q 4.3 ≈ 1/3 de octava, Q 10 ≈ 1/7 de
+  octava (quirúrgica). El ancho se mide donde la campana vale la mitad de su ganancia: una campana de +12 dB con Q 1.41
+  vale +6 dB media octava a cada lado del centro.
+- **Simétrica.** Subir +6 dB y bajar −6 dB con la misma frecuencia y Q son exactamente inversas: si pones dos Fathom
+  seguidos así, la señal sale igual que entró. Y en la escala de octavas la campana es simétrica (mismo dB una octava
+  abajo que una arriba), salvo muy cerca de 20 kHz (ver "aplastamiento" en Errores comunes).
+- **Sin clics.** Mover la frecuencia, la ganancia o el Q de golpe haría clic (el filtro "recuerda" las muestras
+  anteriores, que de pronto no cuadran con los ajustes nuevos). Fathom no salta: recorre el cambio en 20 ms, la
+  frecuencia en octavas, la ganancia en dB y el Q en "veces". Apagar la banda baja su ganancia a 0 dB en 20 ms.
+- **0 dB = intacto.** Con la ganancia en 0 dB (o la banda apagada) la señal sale **bit a bit** igual: no hay "color"
+  escondido por tener el plugin puesto.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **FRECUENCIA** (10 Hz–30 kHz): dónde está el centro. Mueve el nodo "1" a izquierda y derecha. La franja de abajo te
+  dice en qué zona estás (SUB, BARRO, PRESENCIA...) y el panel, qué nota de FL es (sirve para cazar la nota que
+  retumba en un 808).
+- **GANANCIA** (±30 dB): cuánto sube o baja el centro. Mueve el nodo arriba o abajo; la zona rellena es lo que la
+  banda cambia. En el analizador, la SALIDA (azul) se separa de la ENTRADA (gris) justo con la forma de la curva.
+- **Q** (0.025–40): lo angosta que es. Q bajo = una colina ancha que cambia el "color" general; Q alto = una aguja que
+  toca una sola resonancia. El panel lo traduce a octavas.
+- **ON**: comparar con y sin la banda (sin clic).
+- **Lectura del mouse**: ahora dice también "curva +x dB": cuánto cambia el EQ el volumen en esa frecuencia exacta.
+
+### Ejercicio de escucha guiado en FL Studio
+
+1. **Ver que la curva es el sonido.** En un canal pon el 3xOsc con la forma de onda de ruido (o cualquier sample de
+   ruido) y Fathom en su mixer. Toca una nota larga. Sube GANANCIA a +12 dB: la SALIDA azul toma la forma de la curva,
+   montada sobre la ENTRADA gris. Mueve FRECUENCIA y Q y mira cómo la siguen.
+2. **Ancho vs. angosto.** Sobre un loop de dembow completo: GANANCIA +6 dB en 2 kHz con Q 0.7 y luego con Q 8.
+   ¿Cuál cambia más el "carácter" de toda la mezcla? (la ancha). ¿Cuál suena a "un tono" agregado? (la angosta).
+3. **Q alto suena (resuena).** Pon solo el kick o un rim/clap. Campana de +18 dB con Q 20 en 1 kHz: el golpe empieza a
+   "cantar" una nota. Una campana angosta y alta no solo sube volumen: hace que esa frecuencia **dure** más (por eso
+   las subidas se hacen anchas). Baja a +4 dB y Q 1: el golpe vuelve a ser golpe.
+4. **Con el volumen igualado.** Haz una subida de +4 dB en 3 kHz con Q 1 sobre la voz. Activa y desactiva ON: ¿mejor?
+   Ahora baja SALIDA hasta que con ON y sin ON suene igual de fuerte (unos −1 a −1.5 dB) y vuelve a comparar. Muchas
+   veces la "mejora" se achica a la mitad: parte era solo volumen. (En la Fase 6 llega el auto gain que lo hace solo.)
+
+### Receta: "barrer y cortar" una resonancia del 808
+
+1. Pon Fathom en el 808 (después del Riptide si lo saturas). Busca la zona que suena a "cartón" o "caja", que suele
+   estar en BARRO o MEDIOS (200–800 Hz).
+2. GANANCIA +10 dB, Q 6. Reproduce y mueve FRECUENCIA despacio por esa zona: en algún punto algo "silba" o se pone
+   feísimo. Ese es el candidato.
+3. Ahora invierte: GANANCIA −4 a −6 dB, mismo Q. Compara con ON/OFF **dentro del beat**, no en solo.
+4. Por qué funciona: el 808 distorsionado genera armónicos que se acumulan en los medios-graves; restar una zona
+   angosta limpia sin quitarle peso (el sub queda intacto) y le deja sitio al kick y a la voz. **Restar antes que
+   sumar**: un corte angosto rara vez se oye como "EQ"; una subida angosta casi siempre sí.
+
+### Reto sin receta
+
+Haz que la voz principal se entienda mejor sobre los acordes **sin subirle el volumen ni tocar la voz**: solo con una
+campana en el canal de los acordes. Pistas (si no sale): ¿en qué zona vive la claridad de la voz? (PRESENCIA); ¿qué le
+pasa a esa zona en los acordes si la bajas 2–3 dB con un Q ancho (1–1.5)?; compara con ON/OFF con todo sonando, no en
+solo; si los acordes se oyen "lejanos", te pasaste.
+
+### Vocabulario
+
+- **Campana / peaking / bell**: la forma de esta fase. En los EQ de consola (SSL, Neve) es la banda "MID".
+- **Realce (boost) / corte (cut)**: subir o bajar. "Un corte de 3 dB en 400" = campana de −3 dB en 400 Hz.
+- **Q**: lo angosta que es la campana. "Q alto" = angosta. Viene de "factor de calidad" de los circuitos resonantes.
+- **Ancho de banda (en octavas)**: el mismo dato que el Q, en musical. "Un tercio de octava" es angosto.
+- **Resonancia**: una frecuencia que sobresale y dura (el "boing" de una caja, el silbido de un 808 saturado).
+- **Barrido (sweep)**: subir mucho una campana angosta y moverla para encontrar lo que molesta (la receta de arriba).
+- **Quirúrgico**: un corte muy angosto que solo toca una resonancia; lo contrario de un EQ "musical" (ancho).
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Barrer para siempre.** Con +10 dB y Q 6, TODO suena feo en alguna parte: el barrido sirve para encontrar algo que
+  ya oías, no para inventar problemas. Si no oías nada raro antes, no cortes.
+- **Subidas angostas y altas.** Hacen resonar (ejercicio 3). Para dar carácter, subidas anchas y suaves (Q 0.5–1.5,
+  +1 a +4 dB).
+- **Ecualizar en solo.** Una voz "delgada" en solo puede ser justo la que se entiende en la mezcla. Decide con todo
+  sonando.
+- **Comparar sin igualar el volumen** (ejercicio 4).
+- **Usar una campana donde va otra forma.** Para quitar los graves que sobran de una voz o un hi-hat, una campana
+  ancha en 60 Hz no sirve: hace falta un corte de graves (Fase 3). Para "aire" en los agudos, un shelf (Fase 3).
+- **Cuando el problema no es fijo.** Si una resonancia aparece solo en algunas notas del 808 o solo cuando la voz
+  canta fuerte, un corte fijo le quita también cuando no hace falta: eso es un EQ dinámico (Fases 9 y 11).
+- **El aplastamiento cerca de 20 kHz.** A 44.1 o 48 kHz, una campana en 15 kHz sale un poco más angosta del lado de
+  arriba que la de un EQ analógico (es un límite de la forma de digitalizarla). La curva lo muestra tal cual es. En la
+  Fase 7 se corrige; mientras, a 88.2/96 kHz casi no pasa.

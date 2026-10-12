@@ -23,6 +23,7 @@
 #include "deepwater/dsp/Decibels.h"
 #include "deepwater/dsp/DelayLine.h"
 #include "deepwater/dsp/EnvelopeFollower.h"
+#include "deepwater/dsp/EqFilter.h"
 #include "deepwater/dsp/FastMath.h"
 #include "deepwater/dsp/Fft.h"
 #include "deepwater/dsp/Halfband.h"
@@ -655,6 +656,133 @@ void testSvfIsStableWhenModulated()
     // Cutoff en Nyquist o por encima: forCutoff lo limita (tan(π/2) sería infinito).
     const auto top = dw::SvfStage::Coefficients::forCutoff (30000.0, 0.7, 48000.0);
     CHECK (std::isfinite (top.g) && std::isfinite (top.a1));
+}
+
+// --- Filtros de EQ (EqFilter.h) --------------------------------------------------------------------------------------
+
+// Prototipo analógico de la campana (RBJ): (s² + (A/Q)·s + 1) / (s² + s/(A·Q) + 1), con s = j·f/f0.
+double analogBellDb (double hz, double centre, double q, double gainDb)
+{
+    const double a = std::pow (10.0, gainDb / 40.0);
+    const Complex s { 0.0, hz / centre };
+    return toDb (std::abs ((s * s + (a / q) * s + 1.0) / (s * s + s / (a * q) + 1.0)));
+}
+
+void testEqBellMatchesTheory()
+{
+    std::printf ("EQ campana: medida = response() a 4 sample rates; centro = ganancia pedida; graves = analógico\n");
+
+    double worstMeasured = 0.0, worstCentre = 0.0, worstAnalog = 0.0;
+    for (const double sr : sampleRates)
+        for (const double centre : { 60.0, 1000.0, 9000.0 })
+            for (const double q : { 0.3, 1.0, 8.0 })
+                for (const double gainDb : { -18.0, 6.0, 24.0 })
+                {
+                    const auto c = dw::EqCoefficients::bell (centre, q, gainDb, sr);
+                    worstCentre = std::max (worstCentre, std::abs (c.magnitudeDb (centre, sr) - gainDb));
+                    for (const double ratio : { 0.3, 0.8, 1.0, 1.25, 3.0 })
+                    {
+                        const double hz = centre * ratio;
+                        if (hz >= 0.45 * sr)
+                            continue;
+                        // Se mide después de que la resonancia se asienta: el transitorio decae con τ = 2/(k·ω0), y una
+                        // campana angosta y alta en graves (Q 8, +24 dB, 60 Hz) tarda casi 0.2 s en cada τ.
+                        const double tau = 2.0 / (static_cast<double> (c.svf.k) * 2.0 * pi * centre);
+                        const auto settle = std::max<size_t> (16384, static_cast<size_t> (10.0 * tau * sr));
+                        const auto input = sineSignal (hz, sr, settle + 16384);
+                        std::vector<float> output (input.size());
+                        dw::EqFilter filter;
+                        for (size_t i = 0; i < input.size(); ++i)
+                            output[i] = filter.process (input[i], c);
+                        const double measured = toDb (toneAmplitude (output, hz, sr, settle));
+                        worstMeasured = std::max (worstMeasured, std::abs (measured - c.magnitudeDb (hz, sr)));
+                        // En graves (lejos de Nyquist) la bilineal casi no deforma: digital ≈ analógico.
+                        if (centre <= 1000.0 && hz <= 2000.0)
+                            worstAnalog = std::max (worstAnalog, std::abs (c.magnitudeDb (hz, sr) - analogBellDb (hz, centre, q, gainDb)));
+                    }
+                }
+    std::printf ("  peor diferencia: medida %.5f dB, centro %.5f dB, vs. analógico (graves) %.4f dB\n", worstMeasured,
+                 worstCentre, worstAnalog);
+    CHECK (worstMeasured < 0.01);
+    CHECK (worstCentre < 0.001);
+    CHECK (worstAnalog < 0.1);
+
+    // La campana es simétrica en octavas alrededor del centro (en graves, donde la bilineal no deforma).
+    const auto c = dw::EqCoefficients::bell (200.0, 1.0, 9.0, 96000.0);
+    CHECK (std::abs (c.magnitudeDb (100.0, 96000.0) - c.magnitudeDb (400.0, 96000.0)) < 0.01);
+
+    // Q en la definición del Cookbook: el ancho de banda en octavas BW cumple 1/Q = 2·sinh(ln2/2·BW), medido entre los
+    // puntos donde la campana vale la MITAD de su ganancia en dB. Q = 1.4142 ↔ 1 octava.
+    const double q = std::sqrt (2.0);
+    const auto wide = dw::EqCoefficients::bell (1000.0, q, 12.0, 192000.0);
+    CHECK (std::abs (wide.magnitudeDb (1000.0 / std::sqrt (2.0), 192000.0) - 6.0) < 0.05);
+    CHECK (std::abs (wide.magnitudeDb (1000.0 * std::sqrt (2.0), 192000.0) - 6.0) < 0.05);
+}
+
+void testEqBellIdentityAndInverse()
+{
+    std::printf ("EQ campana: 0 dB = bit a bit; +x dB seguida de -x dB = señal original\n");
+
+    const auto input = sineSignal (440.0, 48000.0, 8192);
+    const auto flat = dw::EqCoefficients::bell (1000.0, 2.0, 0.0, 48000.0);
+    CHECK (flat.dry == 1.0f && flat.bandPass == 0.0f && flat.lowPass == 0.0f);
+    dw::EqFilter filter;
+    bool exact = true;
+    for (const float x : input)
+        exact = exact && filter.process (x, flat) == x;
+    CHECK (exact);
+
+    // La respuesta de +x y la de −x se anulan en todas las frecuencias...
+    double worst = 0.0;
+    for (const double sr : sampleRates)
+        for (const double hz : { 50.0, 700.0, 3000.0, 15000.0 })
+        {
+            const auto up = dw::EqCoefficients::bell (2000.0, 0.7, 15.0, sr);
+            const auto down = dw::EqCoefficients::bell (2000.0, 0.7, -15.0, sr);
+            worst = std::max (worst, std::abs (up.magnitudeDb (hz, sr) + down.magnitudeDb (hz, sr)));
+        }
+    CHECK (worst < 0.001);
+
+    // ...y en el audio: la cascada devuelve el seno con su amplitud original.
+    const auto up = dw::EqCoefficients::bell (500.0, 3.0, 12.0, 48000.0);
+    const auto down = dw::EqCoefficients::bell (500.0, 3.0, -12.0, 48000.0);
+    dw::EqFilter first, second;
+    const auto tone = sineSignal (500.0, 48000.0, 32768);
+    std::vector<float> output (tone.size());
+    for (size_t i = 0; i < tone.size(); ++i)
+        output[i] = second.process (first.process (tone[i], up), down);
+    CHECK (std::abs (toDb (toneAmplitude (output, 500.0, 48000.0, 16384))) < 0.01);
+}
+
+void testEqBellIsStableWhenModulated()
+{
+    std::printf ("EQ campana: estable con frecuencia, Q y ganancia saltando en cada muestra (extremos y Nyquist)\n");
+
+    for (const double sr : sampleRates)
+    {
+        dw::EqFilter filter;
+        unsigned seed = 777;
+        auto random = [&seed] {
+            seed = seed * 1664525u + 1013904223u;
+            return static_cast<double> (seed >> 8) / 16777216.0;
+        };
+        float peak = 0.0f;
+        for (int i = 0; i < 100000; ++i)
+        {
+            const double hz = 10.0 * std::pow (3000.0, random());    // 10 Hz–30 kHz (encima de Nyquist se limita)
+            const double q = 0.025 * std::pow (1600.0, random());    // 0.025–40
+            const double gainDb = -30.0 + 60.0 * random();
+            const auto c = dw::EqCoefficients::bell (hz, q, gainDb, sr);
+            const float x = (i / 37) % 2 == 0 ? 0.5f : -0.5f;
+            peak = std::max (peak, std::abs (filter.process (x, c)));
+        }
+        CHECK (std::isfinite (peak));
+        CHECK (peak < 1000.0f);
+
+        // Respuesta en y por encima de Nyquist: finita.
+        const auto top = dw::EqCoefficients::bell (30000.0, 40.0, 30.0, sr);
+        CHECK (std::isfinite (top.magnitudeDb (0.4999 * sr, sr)) && std::isfinite (top.magnitudeDb (sr, sr)));
+    }
 }
 
 // --- Suavizado ------------------------------------------------------------------------------------------------------
@@ -1376,6 +1504,9 @@ int main()
     testTiltFilter();
     testSvfMatchesTheory();
     testSvfIsStableWhenModulated();
+    testEqBellMatchesTheory();
+    testEqBellIdentityAndInverse();
+    testEqBellIsStableWhenModulated();
     testLinkwitzRileySplit();
     testMultibandSplitterSumsFlat();
     testSmoothedParameter();

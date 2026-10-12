@@ -1,8 +1,9 @@
-// Tests de Fathom sin JUCE: el motor de audio. Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass y la banda). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -26,6 +27,7 @@ int failures = 0;
 
 using namespace fathom::dsp;
 
+constexpr double pi = 3.141592653589793;
 constexpr std::array<double, 4> sampleRates { 44100.0, 48000.0, 88200.0, 96000.0 };
 
 // Generador de tamaños de bloque "al azar" pero repetible (FL cambia el tamaño del bloque de un callback a otro).
@@ -167,6 +169,154 @@ void testMonoAndExtraChannels()
     engine.process (three, 3, 64);
     CHECK (c.back() == 1.0f);
 }
+// Amplitud de un seno de frecuencia 'hz' dentro de 'signal' (desde 'start'), por correlación con ventana de Hann.
+double toneAmplitude (const std::vector<float>& signal, double hz, double sampleRate, size_t start)
+{
+    const size_t count = signal.size() - start;
+    std::complex<double> correlation {};
+    double windowSum = 0.0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        const double window = 0.5 - 0.5 * std::cos (2.0 * pi * static_cast<double> (i) / static_cast<double> (count - 1));
+        correlation += window * static_cast<double> (signal[start + i])
+                       * std::polar (1.0, -2.0 * pi * hz * static_cast<double> (start + i) / sampleRate);
+        windowSum += window;
+    }
+    return 2.0 * std::abs (correlation) / windowSum;
+}
+
+std::vector<float> sine (double hz, double amplitude, double sampleRate, size_t numSamples)
+{
+    std::vector<float> signal (numSamples);
+    for (size_t i = 0; i < numSamples; ++i)
+        signal[i] = static_cast<float> (amplitude * std::sin (2.0 * pi * hz * static_cast<double> (i) / sampleRate));
+    return signal;
+}
+
+// Lo más "puntiagudo" de una señal: la mayor segunda diferencia |y[n] − 2·y[n−1] + y[n−2]|. Un seno de frecuencia f y
+// amplitud A no pasa de A·(2·sin(π·f/fs))²; un clic (un escalón) la dispara al tamaño del salto.
+float biggestSecondDifference (const std::vector<float>& y)
+{
+    float biggest = 0.0f;
+    for (size_t i = 2; i < y.size(); ++i)
+        biggest = std::max (biggest, std::abs (y[i] - 2.0f * y[i - 1] + y[i - 2]));
+    return biggest;
+}
+
+void testBandMatchesItsCurve()
+{
+    std::printf ("Banda: el audio medido = la curva que dibuja la GUI (mismos coeficientes), con la salida sumada\n");
+    double worst = 0.0;
+    for (const double sampleRate : sampleRates)
+    {
+        const BandSettings band { true, 1000.0f, 9.0f, 2.0f };
+        const auto curve = Band::coefficientsFor (band, sampleRate);
+        for (const double hz : { 100.0, 700.0, 1000.0, 1300.0, 6000.0 })
+        {
+            Engine engine;
+            engine.prepare (sampleRate, false, -3.0f, band);
+            auto left = sine (hz, 0.25, sampleRate, 32768);
+            auto right = left;
+            float* channels[] { left.data(), right.data() };
+            engine.process (channels, 2, static_cast<int> (left.size()));
+            const double measured = 20.0 * std::log10 (toneAmplitude (left, hz, sampleRate, 16384) / 0.25);
+            worst = std::max (worst, std::abs (measured - (curve.magnitudeDb (hz, sampleRate) - 3.0)));
+            CHECK (left == right);
+        }
+    }
+    std::printf ("  peor diferencia: %.5f dB\n", worst);
+    CHECK (worst < 0.01);
+}
+
+void testBandAutomationHasNoClicks()
+{
+    std::printf ("Banda: frecuencia, ganancia, Q y encendido saltando en cada bloque (automatización) no hacen clic\n");
+    for (const double sampleRate : sampleRates)
+    {
+        // Un seno de 1 kHz; la banda salta entre extremos al azar cada bloque (de 1 a 256 muestras).
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f, { true, 1000.0f, 0.0f, 1.0f });
+        auto left = sine (1000.0, 0.05, sampleRate, static_cast<size_t> (sampleRate));
+        auto right = left;
+        BlockSizes sizes;
+        std::uint32_t seed = 99;
+        auto pick = [&seed] (auto a, auto b) {
+            seed = seed * 1664525u + 1013904223u;
+            return (seed >> 16) % 2 == 0 ? a : b;
+        };
+        const int total = static_cast<int> (left.size());
+        for (int start = 0; start < total;)
+        {
+            const int count = std::min (sizes.next (256), total - start);
+            engine.setBand ({ pick (true, false), pick (300.0f, 3000.0f), pick (-24.0f, 24.0f), pick (0.5f, 4.0f) });
+            float* channels[] { left.data() + start, right.data() + start };
+            engine.process (channels, 2, count);
+            start += count;
+        }
+
+        // Cota: el seno de 1 kHz amplificado al máximo (+24 dB ≈ ×16), con margen. Sin el suavizado (probado con rampas
+        // de 1 µs) la medida sale 10-100 veces más alta que esta cota; con él, casi 10 veces más baja.
+        const double steepest = 16.0 * 0.05 * std::pow (2.0 * std::sin (pi * 1000.0 / sampleRate), 2.0);
+        const float measured = biggestSecondDifference (left);
+        std::printf ("  %6.0f Hz: segunda diferencia %.4f (cota %.4f)\n", sampleRate, static_cast<double> (measured), 1.5 * steepest);
+        CHECK (measured < 1.5 * steepest);
+        CHECK (left == right);
+    }
+}
+
+void testBandOffAndZeroDbAreBitExact()
+{
+    std::printf ("Banda: apagarla (o llevarla a 0 dB) baja en rampa y después la señal pasa bit a bit\n");
+    for (const double sampleRate : sampleRates)
+        for (const bool switchOff : { true, false })
+        {
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, { true, 2000.0f, 12.0f, 1.0f });
+            StereoSignal signal (static_cast<int> (sampleRate * 0.3), sampleRate);
+            const StereoSignal original = signal;
+            const int switchAt = static_cast<int> (sampleRate * 0.1);
+            processInBlocks (engine, signal, 300, [&] (int start) {
+                if (start >= switchAt)
+                    engine.setBand ({ ! switchOff, 2000.0f, switchOff ? 12.0f : 0.0f, 1.0f });
+            });
+            const auto before = static_cast<size_t> (switchAt / 2);
+            CHECK (signal.right[before] != original.right[before]); // antes del cambio, la banda sí suena
+            const auto settled = static_cast<size_t> (switchAt + static_cast<int> (sampleRate * Band::rampSeconds) + 301);
+            bool exact = true;
+            for (size_t i = settled; i < signal.left.size(); ++i)
+                exact = exact && signal.left[i] == original.left[i] && signal.right[i] == original.right[i];
+            CHECK (exact);
+        }
+}
+
+void testBandIsStableAtExtremes()
+{
+    std::printf ("Banda: estable con ajustes extremos al azar (Q 40, +-30 dB, frecuencias sobre Nyquist)\n");
+    for (const double sampleRate : sampleRates)
+    {
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f, { true, 30000.0f, 30.0f, 40.0f });
+        std::uint32_t seed = 4242;
+        auto random = [&seed] {
+            seed = seed * 1664525u + 1013904223u;
+            return static_cast<float> (seed >> 8) / 16777216.0f;
+        };
+        float peak = 0.0f;
+        std::array<float, 64> left {}, right {};
+        for (int block = 0; block < 4000; ++block)
+        {
+            engine.setBand ({ true, 10.0f * std::pow (3000.0f, random()), -30.0f + 60.0f * random(), 0.025f * std::pow (1600.0f, random()) });
+            for (size_t i = 0; i < left.size(); ++i)
+                left[i] = right[i] = random() - 0.5f;
+            float* channels[] { left.data(), right.data() };
+            engine.process (channels, 2, static_cast<int> (left.size()));
+            for (const float x : left)
+                peak = std::max (peak, std::abs (x));
+        }
+        CHECK (std::isfinite (peak));
+        CHECK (peak < 1000.0f);
+    }
+}
 } // namespace
 
 int main()
@@ -175,6 +325,10 @@ int main()
     testOutputGain();
     testBypassFadeHasNoClicks();
     testMonoAndExtraChannels();
+    testBandMatchesItsCurve();
+    testBandAutomationHasNoClicks();
+    testBandOffAndZeroDbAreBitExact();
+    testBandIsStableAtExtremes();
 
     if (failures > 0)
     {

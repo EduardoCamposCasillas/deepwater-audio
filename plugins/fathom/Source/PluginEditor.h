@@ -2,13 +2,14 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "gui/BandPanel.h"
 #include "gui/EqDisplay.h"
 #include "gui/FathomLookAndFeel.h"
 
 class FathomAudioProcessor;
 
-// Fase 1: GUI funcional. El visor (lienzo del EQ con el analizador), el bypass en la cabecera y la perilla de salida.
-// Un temporizador a 30 cuadros por segundo actualiza el analizador.
+// El visor (lienzo del EQ con el analizador y la curva), debajo el panel de la banda, el bypass en la cabecera y la
+// perilla de salida. Un temporizador a 30 cuadros por segundo actualiza el analizador y la curva.
 class FathomAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -29,6 +30,7 @@ private:
     juce::TooltipWindow tooltips { this, 600 };
 
     fathom::gui::EqDisplay display;
+    fathom::gui::BandPanel bandPanel;
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<ButtonAttachment> bypassAttachment;
     juce::Slider outputKnob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };

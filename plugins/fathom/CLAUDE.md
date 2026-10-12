@@ -33,6 +33,8 @@ libros, blogs técnicos) y se explica antes de implementarla.
 ## Librería DSP compartida
 Lo que Fathom va a usar de `libs/dsp` (`deepwater::dsp`):
 - `Svf.h`: base de los filtros de las bandas (TPT/ZDF: estable al modular).
+- `EqFilter.h` (nació en la Fase 2): `EqCoefficients` (mezcla de la entrada con las salidas del SVF: hoy `bell`) con
+  `response()`/`magnitudeDb()` exactas para esos coeficientes, y `EqFilter` (un canal). Las formas de la Fase 3 van ahí.
 - `SpectrumAnalyzer.h` + `AnalyzerTap.h` (vienen de Riptide): el analizador y la toma audio → GUI.
 - `Smoothing.h` (`LinearRamp`, `EffectSwitch`), `Decibels.h`, `Pitch.h`, `LevelMeter.h`.
 - `Fft.h`: fase lineal y dinámica espectral (Fases 10–11).
@@ -62,8 +64,10 @@ plugins/fathom/
     PluginProcessor.h/.cpp   # parámetros, estado, processBlock y las tomas del analizador
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
-    dsp/Engine.h             # cadena de audio completa, sin JUCE: ganancia de salida y bypass
-    gui/                     # tema, LookAndFeel, formato de valores, visor (EqDisplay: cuadrícula y analizador)
+    dsp/Engine.h             # cadena de audio completa, sin JUCE: bandas, ganancia de salida y bypass
+    dsp/Band.h               # una banda: ajustes (BandSettings), parámetros suavizados y coeficientes para la GUI
+    gui/                     # tema, LookAndFeel, formato de valores, visor (EqDisplay: cuadrícula, analizador y curva),
+                             # panel de la banda (BandPanel)
   tests/EngineTests.cpp    # tests del motor (sin JUCE)
 ```
 
@@ -90,7 +94,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       Passthrough, ganancia de salida y bypass sin clics. El visor que será el "lienzo" del EQ: eje de frecuencias
       logarítmico (20 Hz–20 kHz), escala en dB, lectura de frecuencia + nota bajo el mouse y el analizador de entrada
       y salida (`SpectrumAnalyzer` de la librería). Tests y pluginval.
-- [ ] Fase 2 — La campana: una banda peaking (frecuencia, ganancia, Q) construida desde el SVF; filtro de EQ en la
+- [x] Fase 2 — La campana: una banda peaking (frecuencia, ganancia, Q) construida desde el SVF; filtro de EQ en la
       librería con su respuesta en frecuencia analítica (para dibujar la curva real) y tests contra la teoría.
       Coeficientes suavizados sin clics. La curva dibujada sobre el analizador.
 - [ ] Fase 3 — Todas las formas y 24 bandas: shelves grave/agudo, tilt shelf, flat tilt, notch, band-pass, all-pass,
@@ -124,21 +128,30 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 1 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
-- `dsp/Engine.h`: ganancia de salida (±24 dB, `LinearRamp` de 20 ms: llega exacta, 0 dB = bit a bit) y fundido de
-  bypass de 20 ms. Mono y estéreo; un tercer canal se deja intacto.
-- Parámetros (`versionHintPhase1`): `bypass` (también el bypass del host) y `outputGain` (−24–+24 dB, 0).
-- Procesador: tomas `AnalyzerTap<16384>` de entrada (antes del motor) y salida; solo se alimentan con el editor
-  abierto (`setAnalyzerActive`). Latencia 0.
-- GUI 960 × 560: cabecera (BYPASS), visor `EqDisplay` y perilla SALIDA (bipolar: el arco sale de 0 dB). El visor:
-  20 Hz–20 kHz logarítmico; dos escalas sobre las mismas 8 divisiones (derecha EQ ±6/12/24/36 dB con el botón,
-  izquierda analizador 0 a −96 dBFS); analizador ENTRADA (línea) y SALIDA (relleno) como el de Riptide (sube casi al
-  instante, cae a 40 dB/s, silencio tras 0.25 s sin audio, solo repinta si algo cambia); la curva = la respuesta total
-  (hoy la ganancia de salida; punteada en el borde si se sale de la escala); lectura bajo el mouse (Hz, nota de FL con
-  cents, dB de cada escala); franja de zonas del mapa de frecuencias con tooltip. Revisada con captura del Standalone.
-- Tests `FathomTests`: passthrough bit a bit (con y sin bypass, 4 sample rates, bloques variables), rampa de salida
-  (exacta a los 20 ms, sin saltos, límite de ±24 dB), bypass sonando con +12 dB sin clic y bit a bit al terminar,
-  mono y canales de más.
+Fase 2 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
+- Librería: `EqFilter.h` (`EqCoefficients::bell`, `response`, `magnitudeDb`; `EqFilter`). Campana = x + k·(A²−1)·BP
+  del SVF con k = 1/(Q·A), A = 10^(dB/40): el prototipo analógico del Cookbook (RBJ), definición de Q del Cookbook
+  (ancho medido a la mitad de la ganancia en dB; Q 1.41 = 1 octava). Tests en `DeepwaterDspTests`: medida = response()
+  (< 0.01 dB, 4 sample rates, Q 0.3–8, −18 a +24 dB), centro = ganancia exacta, graves = analógico (< 0.03 dB),
+  ancho de 1 octava con Q 1.41, 0 dB bit a bit, +x seguida de −x = identidad, estable modulada en cada muestra.
+- `dsp/Band.h`: rampas `LinearRamp` de 20 ms sobre log2(Hz), dB y log2(Q); mientras se mueven, coeficientes por
+  muestra; quietas, nada. Apagar = rampa de la ganancia a 0 dB (después, bit a bit). `coefficientsFor()` da a la GUI los
+  mismos coeficientes que el audio alcanza. El SVF corre siempre (también en bypass y en 0 dB): sin transitorios al
+  volver. Límites: 10 Hz–30 kHz (el filtro se limita a 0.49·fs), ±30 dB, Q 0.025–40.
+- Parámetros (`versionHintPhase2`, IDs definitivos de la banda 1, esquema `band<N><Ajuste>`): `band1Enabled` (on),
+  `band1Frequency` (1 kHz, rango log exacto), `band1Gain` (0 dB, paso 0.01), `band1Q` (1, rango log exacto).
+- GUI 960 × 620 (680 no cabía en una laptop con escala 150 %): el visor dibuja la respuesta total (banda + salida)
+  con `magnitudeDb` de los coeficientes reales, rellena lo que la banda sube/baja, nodo "1" sobre la curva (hueco si
+  está apagada; se arrastrará en la Fase 4); la lectura bajo el mouse suma "curva ±x dB". Debajo, `BandPanel`: ON,
+  FRECUENCIA / GANANCIA (bipolar) / Q con tooltips y doble clic al valor por defecto, ancho en octavas y nota del
+  centro. Revisada con captura del Standalone.
+- Tests `FathomTests` nuevos: audio medido = curva de la GUI (< 0.0001 dB, con la salida sumada), automatización al
+  azar cada bloque (frecuencia, ganancia, Q, encendido) sin clics (segunda diferencia ~10 veces bajo la cota; sin
+  suavizado sale 10–100 veces sobre ella), apagar y 0 dB terminan bit a bit, estable con extremos al azar.
+- Sin cambios desde la Fase 1: salida ±24 dB (`LinearRamp` de 20 ms), bypass con fundido de 20 ms (también el del
+  host), tomas `AnalyzerTap<16384>` de entrada y salida solo con el editor abierto, latencia 0; visor con dos escalas
+  (EQ a la derecha, ±6/12/24/36 dB; analizador a la izquierda, 0 a −96 dBFS), analizador como el de Riptide (cae a
+  40 dB/s, solo repinta si algo cambia), lectura bajo el mouse y franja de zonas del mapa de frecuencias.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 2 (la campana).
+Siguiente: Fase 3 (todas las formas y 24 bandas), cuando el usuario confirme la Fase 2 en FL.

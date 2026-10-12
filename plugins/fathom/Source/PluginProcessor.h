@@ -5,7 +5,7 @@
 #include "deepwater/dsp/AnalyzerTap.h"
 #include "dsp/Engine.h"
 
-// Fase 1: efecto mono/estéreo que por ahora solo aplica la ganancia de salida. El audio deja una copia de lo que entra
+// Efecto mono/estéreo: una banda campana y la ganancia de salida (Fase 2). El audio deja una copia de lo que entra
 // y de lo que sale en dos tomas lock-free (AnalyzerTap) para el analizador de la GUI. El audio está en fathom::dsp
 // (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor
@@ -48,6 +48,9 @@ public:
 
     juce::AudioProcessorValueTreeState& getParameters() noexcept { return parameters; }
 
+    // Los ajustes actuales de la banda 1 (lee atómicos: sirve en el hilo de audio y en el de la GUI).
+    fathom::dsp::BandSettings getBand1Settings() const noexcept;
+
     // Hilo de la GUI: las tomas del analizador y la frecuencia de muestreo con la que se escribieron.
     const AnalyzerTap& getInputTap() const noexcept { return inputTap; }
     const AnalyzerTap& getOutputTap() const noexcept { return outputTap; }
@@ -62,6 +65,10 @@ private:
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* bypassParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
+    std::atomic<float>* band1EnabledParam = nullptr;
+    std::atomic<float>* band1FrequencyParam = nullptr;
+    std::atomic<float>* band1GainParam = nullptr;
+    std::atomic<float>* band1QParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     fathom::dsp::Engine engine;

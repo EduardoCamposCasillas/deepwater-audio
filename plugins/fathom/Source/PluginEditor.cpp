@@ -5,7 +5,8 @@
 namespace
 {
 constexpr int editorWidth = 960;
-constexpr int editorHeight = 560;
+constexpr int editorHeight = 620;
+constexpr int bandPanelHeight = 112;
 constexpr int headerHeight = 44;
 constexpr int footerHeight = 26;
 constexpr int controlsWidth = 110;
@@ -14,11 +15,12 @@ constexpr int framesPerSecond = 30;
 } // namespace
 
 FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p), display (p)
+    : AudioProcessorEditor (p), processor (p), display (p), bandPanel (p.getParameters())
 {
     setLookAndFeel (&lookAndFeel);
 
     addAndMakeVisible (display);
+    addAndMakeVisible (bandPanel);
 
     bypassButton.setClickingTogglesState (true);
     bypassButton.setTooltip (juce::String::fromUTF8 ("Escuchar la se\xc3\xb1" "al original. Es el mismo bypass que el de FL "
@@ -73,12 +75,12 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 1: lienzo y analizador"), header, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 2: la campana"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (juce::String::fromUTF8 ("Todav\xc3\xad" "a no hay bandas: la se\xc3\xb1" "al solo pasa por la ganancia de "
-                                        "salida. Fase 2: la primera banda (campana)."),
+    g.drawText (juce::String::fromUTF8 ("Una banda campana. Pasa el mouse por las perillas para ver qu\xc3\xa9 hace cada una. "
+                                        "Fase 3: todas las formas de filtro y 24 bandas."),
                 getLocalBounds().removeFromBottom (footerHeight), juce::Justification::centred);
 }
 
@@ -90,6 +92,8 @@ void FathomAudioProcessorEditor::resized()
     auto content = getLocalBounds().withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0);
     auto controls = content.removeFromRight (controlsWidth);
     content.removeFromRight (padding);
+    bandPanel.setBounds (content.removeFromBottom (bandPanelHeight));
+    content.removeFromBottom (padding);
     display.setBounds (content);
 
     // La salida abajo a la derecha, junto al final de la cadena (como en una consola).
