@@ -92,7 +92,7 @@ incluyen notas de para qué sirven y por qué.
       pluginval. Decidir antes: el nombre y su `PLUGIN_CODE`.
 - [x] Fase 2 — Modo tempo: curva de ducking sincronizada (1/2, 1/4, 1/8, 1/16, 1 compás y tresillos), controles de
       profundidad, duración y suavizado; sin clics en ningún cambio de parámetro.
-- [ ] Fase 3 — Curvas: presets de forma (como las de Kickstart) y editor de curva propio con puntos y tensión.
+- [x] Fase 3 — Curvas: presets de forma (como las de Kickstart) y editor de curva propio con puntos y tensión.
 - [ ] Fase 4 — Modo MIDI trigger: cada nota MIDI recibida dispara la curva (para seguir el patrón real del kick del
       dembow). Explicar cómo rutear MIDI hacia el plugin en FL Studio.
 - [ ] Fase 5 — Modo audio sidechain: entrada sidechain real (bus auxiliar VST3), detección de transitorios con umbral
@@ -106,7 +106,7 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 3 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 3 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - Librería: `deepwater/dsp/BreakpointCurve.h` (nueva, con test en `DeepwaterDspTests`): curva x ∈ [0, 1] → y ∈ [0, 1]
   por puntos (máx. 32, tamaño fijo, trivialmente copiable). Tensión por tramo en [−1, 1]: exponencial normalizada
   `expm1(k·t) / expm1(k)`, k = tensión · 8 (> 0 arranca lenta, < 0 rápida, 0 recta). Evaluación con búsqueda binaria;
@@ -132,7 +132,7 @@ Fase 3 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
   curva que termina abajo se queda abajo hasta el siguiente golpe). Release con 0 warnings; ctest 6/6; pluginval
   strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 3 en FL Studio; después, Fase 4 (modo MIDI trigger).
+Siguiente: Fase 4 (modo MIDI trigger).
 
 ### Fase 2 (completada 2026-10-11, probada en FL)
 - `dsp/TempoCurve.h`: 9 divisiones (1 bar, 1/2, 1/4, 1/8, 1/16 y sus tresillos; "1 bar" = el compás del host). La
