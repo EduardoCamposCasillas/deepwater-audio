@@ -88,7 +88,7 @@ incluyen notas de para qué sirven y por qué.
       añadido al CMake raíz y enlazado a `deepwater::dsp`. Passthrough, lectura del tempo y la posición del host
       (PlayHead: BPM, compás, posición en negras, reproduciendo o no) mostrados en una GUI funcional. Tests y
       pluginval. Decidir antes: el nombre y su `PLUGIN_CODE`.
-- [ ] Fase 2 — Modo tempo: curva de ducking sincronizada (1/2, 1/4, 1/8, 1/16, 1 compás y tresillos), controles de
+- [x] Fase 2 — Modo tempo: curva de ducking sincronizada (1/2, 1/4, 1/8, 1/16, 1 compás y tresillos), controles de
       profundidad, duración y suavizado; sin clics en ningún cambio de parámetro.
 - [ ] Fase 3 — Curvas: presets de forma (como las de Kickstart) y editor de curva propio con puntos y tensión.
 - [ ] Fase 4 — Modo MIDI trigger: cada nota MIDI recibida dispara la curva (para seguir el patrón real del kick del
@@ -104,7 +104,7 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 2 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio.
+Fase 2 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona.
 - `dsp/TempoCurve.h`: 9 divisiones (1 bar, 1/2, 1/4, 1/8, 1/16 y sus tresillos; "1 bar" = el compás del host). La
   cuadrícula arranca en cada inicio de compás (`HostClock::barOrigin`: el del host si es coherente, si no 0), así una
   división que no cabe justa (1/2 T en 3/4) se reinicia en el "1". Margen de 1e-9 negras para el redondeo del host.
@@ -128,4 +128,4 @@ Fase 2 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio.
   reloj libre; profundidad 0 y bypass bit a bit.
 - Release con 0 warnings; ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 2 en FL Studio; después, Fase 3 (formas de curva y editor).
+Siguiente: Fase 3 (formas de curva y editor).
