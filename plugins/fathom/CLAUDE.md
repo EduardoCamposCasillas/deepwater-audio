@@ -124,7 +124,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 1 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 1 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - `dsp/Engine.h`: ganancia de salida (±24 dB, `LinearRamp` de 20 ms: llega exacta, 0 dB = bit a bit) y fundido de
   bypass de 20 ms. Mono y estéreo; un tercer canal se deja intacto.
 - Parámetros (`versionHintPhase1`): `bypass` (también el bypass del host) y `outputGain` (−24–+24 dB, 0).
