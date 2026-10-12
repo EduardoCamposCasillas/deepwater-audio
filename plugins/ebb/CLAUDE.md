@@ -108,13 +108,13 @@ incluyen notas de para qué sirven y por qué.
       mixer de FL Studio.
 - [x] Fase 6 — Ducking por bandas: aplicar la curva solo a graves (crossover ajustable) para que el bajo le deje
       espacio al kick sin "bombear" los agudos; mix dry/wet.
-- [ ] Fase 7 — GUI: visualización de la curva y de la forma de onda en vivo, cursor de reproducción, indicador de
+- [x] Fase 7 — GUI: visualización de la curva y de la forma de onda en vivo, cursor de reproducción, indicador de
       cuándo se dispara.
 - [ ] Fase 8 — Presets con notas educativas (dembow, house, trap, pads bombeando como efecto creativo).
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 7 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 7 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - `dsp/LiveScope.h` (nuevo): osciloscopio de barrido. Ventana de 1, 2 o 4 compases (`setBars`, atómico) en 512
   columnas; con el host corriendo (o el reloj libre) arranca en un inicio de compás (compases 1–2, 3–4... a partir de
   `barOrigin`); parado, el barrido sigue al tempo conocido. Cada columna: pico de entrada (después del lookahead),
@@ -151,7 +151,7 @@ Fase 7 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
   una ventana de 2 = 2.ª mitad; sidechain en su columna; host parado = el barrido avanza. Release con 0 warnings;
   ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 7 en FL Studio; después, Fase 8 (presets).
+Siguiente: Fase 8 (presets).
 
 ### Fase 6 (completada 2026-10-12, probada en FL)
 - `dsp/Bands.h`: `DuckBand` (Todo, Graves, Agudos; índice: solo añadir al final) y `BandDucker`: `LinkwitzRileySplit`
