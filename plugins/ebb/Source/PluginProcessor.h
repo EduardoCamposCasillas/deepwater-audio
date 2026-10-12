@@ -7,7 +7,7 @@
 #include "dsp/HostClock.h"
 #include "TransportSnapshot.h"
 
-// Fase 1: efecto mono/estéreo que por ahora solo pasa la señal y lee el tempo y la posición del host (PlayHead).
+// Efecto mono/estéreo. Fase 2: modo tempo, una curva de ducking sincronizada con la posición del host (PlayHead).
 // El audio está en ebb::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class EbbAudioProcessor final : public juce::AudioProcessor
 {
@@ -49,19 +49,29 @@ public:
     // Hilo de la GUI: el último estado del reloj publicado por el audio. true si es nuevo desde la lectura anterior.
     bool readTransport (TransportSnapshot& out) noexcept { return transportBox.read (out); }
 
+    // Hilo de la GUI: la ganancia más baja que sonó desde la lectura anterior (1 = sin ducking), y la reinicia.
+    // Así el medidor no se pierde un golpe aunque entre dos cuadros de la GUI pasen varios bloques.
+    float takeMinGain() noexcept { return minGainSinceRead.exchange (1.0f); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     ebb::dsp::TransportInfo readHostTransport() noexcept;
+    ebb::dsp::TempoSettings readTempoSettings() const noexcept;
     void publishTransport (int numSamples) noexcept;
 
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* bypassParam = nullptr;
+    std::atomic<float>* divisionParam = nullptr;
+    std::atomic<float>* depthParam = nullptr;
+    std::atomic<float>* durationParam = nullptr;
+    std::atomic<float>* smoothingParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     ebb::dsp::Engine engine;
     ebb::dsp::HostClock clock;
     double currentSampleRate = 44100.0;
     deepwater::dsp::TripleBuffer<TransportSnapshot> transportBox;
+    std::atomic<float> minGainSinceRead { 1.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EbbAudioProcessor)
 };

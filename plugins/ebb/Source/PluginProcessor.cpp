@@ -2,6 +2,21 @@
 #include "PluginEditor.h"
 #include "Parameters.h"
 
+#include "deepwater/dsp/Decibels.h"
+
+namespace
+{
+// Profundidad en % de amplitud y, entre paréntesis, lo mismo en dB: 50 % = la mitad de amplitud = −6 dB.
+juce::String depthToText (float percent, int)
+{
+    const float gain = 1.0f - percent / 100.0f;
+    if (gain >= 1.0f)
+        return "0.0 % (0 dB)";
+    const auto db = gain <= 0.0f ? juce::String::fromUTF8 ("\xe2\x88\x9e") : juce::String (-deepwater::dsp::gainToDb (gain), 1);
+    return juce::String (percent, 1) + juce::String::fromUTF8 (" % (\xe2\x88\x92") + db + " dB)";
+}
+} // namespace
+
 EbbAudioProcessor::EbbAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
@@ -9,6 +24,10 @@ EbbAudioProcessor::EbbAudioProcessor()
       parameters (*this, nullptr, "EbbState", createParameterLayout())
 {
     bypassParam = parameters.getRawParameterValue (ebb::params::bypass);
+    divisionParam = parameters.getRawParameterValue (ebb::params::division);
+    depthParam = parameters.getRawParameterValue (ebb::params::depth);
+    durationParam = parameters.getRawParameterValue (ebb::params::duration);
+    smoothingParam = parameters.getRawParameterValue (ebb::params::smoothing);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (ebb::params::bypass));
     jassert (bypassParameter != nullptr);
 }
@@ -17,15 +36,41 @@ juce::AudioProcessorValueTreeState::ParameterLayout EbbAudioProcessor::createPar
 {
     namespace id = ebb::params;
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
-    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bypass, id::versionHint }, "Bypass", false));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bypass, id::versionHintPhase1 }, "Bypass", false));
+
+    // Fase 2: modo tempo.
+    juce::StringArray divisionNames;
+    for (const auto& division : ebb::dsp::duckDivisions)
+        divisionNames.add (division.name);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::division, id::versionHintPhase2 }, "Division",
+                                                              divisionNames, ebb::dsp::defaultDuckDivision));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::depth, id::versionHintPhase2 }, "Depth", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 70.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (depthToText)));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::duration, id::versionHintPhase2 }, "Duration", juce::NormalisableRange<float> (5.0f, 100.0f, 0.1f), 70.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("%")
+            .withStringFromValueFunction ([] (float percent, int) { return juce::String (percent, 1) + " %"; })));
+
+    // Los primeros milisegundos son los que importan (0.5 ms vs 3 ms se oye; 15 vs 18, no): rango con sesgo, 3 ms al centro.
+    juce::NormalisableRange<float> smoothingRange (0.0f, 20.0f, 0.01f);
+    smoothingRange.setSkewForCentre (3.0f);
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::smoothing, id::versionHintPhase2 }, "Smoothing", smoothingRange, 2.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("ms")
+            .withStringFromValueFunction ([] (float ms, int) { return juce::String (ms, ms < 10.0f ? 2 : 1) + " ms"; })));
     return layout;
 }
 
 void EbbAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
 {
-    // Fase 1 no tiene buffers propios: el motor procesa en el sitio y el reloj es de tamaño fijo.
+    // Sin buffers propios: el motor procesa en el sitio y el reloj y la curva son de tamaño fijo.
     currentSampleRate = sampleRate;
-    engine.prepare (sampleRate, bypassParam->load() >= 0.5f);
+    engine.prepare (sampleRate, bypassParam->load() >= 0.5f, readTempoSettings());
     clock.prepare (sampleRate);
     setLatencySamples (0);
 }
@@ -39,6 +84,16 @@ bool EbbAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) cons
     if (output != juce::AudioChannelSet::mono() && output != juce::AudioChannelSet::stereo())
         return false;
     return layouts.getMainInputChannelSet() == output;
+}
+
+ebb::dsp::TempoSettings EbbAudioProcessor::readTempoSettings() const noexcept
+{
+    ebb::dsp::TempoSettings settings;
+    settings.division = static_cast<int> (divisionParam->load());
+    settings.depth = depthParam->load() / 100.0f;
+    settings.duration = durationParam->load() / 100.0f;
+    settings.smoothingMs = smoothingParam->load();
+    return settings;
 }
 
 ebb::dsp::TransportInfo EbbAudioProcessor::readHostTransport() noexcept
@@ -77,8 +132,14 @@ void EbbAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     clock.beginBlock (readHostTransport(), numSamples);
     engine.setBypassed (bypassParam->load() >= 0.5f);
-    engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples);
+    engine.setSettings (readTempoSettings());
+    engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples, clock);
     publishTransport (numSamples);
+
+    // Mínimo acumulado hasta que la GUI lo lea. Si la GUI lo reinicia justo entre la lectura y la escritura se pierde a
+    // lo sumo un bloque del medidor: no vale la pena un bucle compare-exchange en el hilo de audio.
+    if (const float blockMin = engine.blockMinGain(); blockMin < minGainSinceRead.load (std::memory_order_relaxed))
+        minGainSinceRead.store (blockMin, std::memory_order_relaxed);
 }
 
 void EbbAudioProcessor::publishTransport (int numSamples) noexcept

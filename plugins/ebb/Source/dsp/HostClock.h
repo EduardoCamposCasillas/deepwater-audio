@@ -175,6 +175,16 @@ public:
     [[nodiscard]] double getBeatsPerSample() const noexcept { return beatsPerSample; }
     [[nodiscard]] TimeSignature timeSignature() const noexcept { return signature; }
     [[nodiscard]] std::optional<double> lastBarStart() const noexcept { return barStart; }
+
+    // Dónde empieza la cuadrícula de compases en este bloque: el inicio de compás del host si es coherente con la
+    // posición (respeta los cambios de compás); si no, el 0, asumiendo el mismo compás desde el principio.
+    [[nodiscard]] double barOrigin() const noexcept
+    {
+        constexpr double epsilon = 1.0e-6;
+        if (barStart && *barStart <= startPpq + epsilon && startPpq - *barStart < signature.quartersPerBar() + epsilon)
+            return *barStart;
+        return 0.0;
+    }
     [[nodiscard]] ClockSource getSource() const noexcept { return source; }
     [[nodiscard]] bool isRunning() const noexcept { return source != ClockSource::stopped; }
     [[nodiscard]] bool isLooping() const noexcept { return looping; }

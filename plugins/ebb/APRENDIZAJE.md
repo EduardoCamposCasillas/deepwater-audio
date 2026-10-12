@@ -130,3 +130,106 @@ Inténtalo y después pide pistas.
 ### Retos completados
 
 (Ninguno todavía.)
+
+## Fase 2 — Modo tempo: la curva de ducking
+
+Ahora Ebb sí toca el sonido: en cada golpe de la división elegida **baja el volumen y lo deja volver** siguiendo una
+curva. Eso es el *ducking* ("agacharse"): la señal se agacha para dejarle sitio a otra. En el modo tempo el golpe no lo
+da un kick real sino el reloj de la Fase 1: Ebb sabe que en 1.1.1, 1.2.1, 1.3.1… toca bajar.
+
+### Conceptos aprendidos
+
+- **Curva de ganancia.** El plugin multiplica cada muestra por un número entre 0 y 1 que cambia en el tiempo: 1 = pasa
+  entera, 0.5 = la mitad de amplitud (−6 dB), 0 = silencio. Ese número, dibujado en el tiempo, es la curva que ves en la
+  pantalla. Es lo mismo que hace un compresor con sidechain, pero dibujado a mano en lugar de calculado a partir del kick.
+- **La curva sale de la posición, no de un contador.** En cada muestra Ebb calcula "¿cuánto llevo desde el último
+  golpe?" a partir de la posición de FL. Por eso un loop, un salto o un cambio de tempo no la desfasan nunca.
+- **Profundidad en % y en dB.** El % es de amplitud: 50 % deja la mitad de la onda = −6 dB; 30 % ≈ −3 dB; 75 % =
+  −12 dB; 100 % = silencio (−∞). Por eso los primeros % "suenan" poco y los últimos mucho: el oído escucha en dB.
+- **Duración.** Qué parte del ciclo tarda el volumen en volver. Con 1/4 a 95 BPM (632 ms por negra), duración 50 % =
+  vuelve en 316 ms y el resto del tiempo suena entero.
+- **Forma de la subida.** Por ahora fija: un *smoothstep* (arranca plana, sube rápido por el medio y llega plana). La
+  parte plana del principio es la que deja pasar el kick; la llegada plana evita una "esquina" en el volumen. En la
+  Fase 3 llegan más formas y un editor.
+- **Por qué un cambio brusco de volumen hace clic.** Si la ganancia salta de 1 a 0.2 de una muestra a la siguiente, la
+  forma de onda también salta: un salto vertical contiene todas las frecuencias a la vez y se oye como un "tic". En
+  un bajo (onda lenta y redonda) se oye clarísimo; en un hi-hat, casi nada.
+- **Suavizado.** Un filtro de 1 polo sobre la ganancia: en cada muestra recorre un porcentaje fijo de lo que le falta.
+  "2 ms" = en 2 ms ya hizo el 95 % del cambio. Redondea la caída del golpe sin quitarle el carácter.
+- **Glide (cambios sin clic).** Si cambias la división sonando, la curva nueva podría estar en otro sitio (a medio
+  subir contra abajo del todo). Ebb mide esa diferencia en el instante del cambio y la desvanece en 30 ms.
+  Profundidad y duración van con rampas de 20 y 50 ms. Al **parar** FL el volumen vuelve al 100 % con el mismo glide
+  (parado no hay ducking: si no, el bajo quedaría atenuado al previsualizar notas).
+
+### Qué hace cada control
+
+- **DIVISIÓN**: cada cuánto hay golpe. 1/4 = en cada tiempo (el kick "four on the floor" y el dembow clásico). 1/8 y
+  1/16 = bombeo rápido, tipo trémolo rítmico. 1/2 y 1 bar = respiraciones largas (pads). T = tresillo: 3 golpes donde
+  caben 2 (1/4 T = 6 golpes por compás). La cuadrícula se reinicia en cada compás.
+- **PROFUNDIDAD**: cuánto se hunde la curva (la caída en la pantalla y en el medidor de la derecha, en dB).
+- **DURACIÓN**: lo ancho que es el "valle" (la pantalla dice en cuántos ms vuelve).
+- **SUAVIZADO**: lo redondeada que es la caída. En la pantalla, a 0 ms la caída es vertical; súbelo a 20 ms y verás la
+  rampa.
+- **Medidor** (barra vertical): cuántos dB está bajando Ebb ahora mismo (0 arriba, −24 abajo). Cae al instante y vuelve
+  a 30 dB/s para que se vea cada golpe.
+
+### Ejercicio guiado: oír el ducking (con el volumen igualado)
+
+1. Proyecto a **95 BPM**. Un kick en los pasos 1, 5, 9 y 13 y un **808 o bajo sostenido** (una nota larga, por ejemplo
+   un F3 de FL = 87 Hz que dure 2 compases), cada uno en su insert del Mixer. Ebb en el insert del bajo.
+2. Escucha **la mezcla (kick + bajo), no el bajo solo**: el ducking existe para que el kick se oiga mejor.
+3. **Sutil:** 1/4, profundidad 25 % (−2.5 dB), duración 40 %, suavizado 2 ms. Alterna BYPASS: el bajo casi no cambia,
+   pero el golpe del kick se vuelve más nítido y los picos del Master bajan. Como el nivel apenas cambia, no hace
+   falta compensar.
+4. **Exagerado:** profundidad 80 %, duración 90 %. Ahora el bajo "bombea" y suena más bajo en promedio: para comparar
+   en serio con BYPASS, sube el fader del bajo hasta que con Ebb se sienta igual de fuerte que sin él (unos 3–5 dB). Si
+   no lo igualas, el oído elige "el más fuerte" y no el mejor.
+5. **El clic:** profundidad 100 %, suavizado **0 ms**, el bajo en solo. Cada golpe hace "tic". Sube a 0.5, 1, 3 y
+   10 ms: el tic desaparece hacia 1–2 ms, y con 10 ms el golpe pierde fuerza (la caída llega tarde, el kick ya pasó).
+6. Con la canción sonando, cambia la **DIVISIÓN** de 1/4 a 1/8 T y mueve **DURACIÓN** rápido: no debe haber ningún
+   clic. Haz loop de 1 compás en la Playlist: el golpe del "1" siempre cae con el kick.
+
+### Receta: dembow con el bajo limpio
+
+Kick dembow clásico (pasos 1, 5, 9 y 13) y un 808 largo que ocupa los mismos 40–120 Hz.
+- Ebb en el 808: **1/4, profundidad 30–40 % (−3 a −4.4 dB), duración 35 %, suavizado 2 ms.**
+- Por qué: el kick dura unos 100–200 ms; con el 35 % de 632 ms el 808 vuelve en ~220 ms, justo cuando el kick se
+  apaga. 3–4 dB bastan para que el kick "salga" sin que se oiga el bombeo, y el pico de la suma kick + 808 baja (más
+  margen para el limitador del Master).
+- Si en tu dembow el kick NO cae en los cuatro tiempos, este modo bajará el volumen donde no hay kick: para eso serán
+  los modos MIDI (Fase 4) y audio (Fase 5).
+
+Variación creativa (house francés, pads que respiran): Ebb en un pad, 1/4, **profundidad 85 %, duración 95 %,
+suavizado 4 ms**. El pad desaparece en cada tiempo y vuelve justo antes del siguiente: el pumping de Daft Punk.
+
+### Reto sin receta
+
+Sobre el dembow (kick en cada tiempo, caja en 4, 7, 12 y 15) pon Ebb en un **pad o acorde largo** y encuentra una
+división y una duración con las que el pad respire **con la caja** y no con el kick. ¿Hay alguna división fija que
+caiga en los cuatro golpes de la caja? ¿Cuál se acerca más, y en cuáles falla?
+
+Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Ducking**: bajar una señal para dejarle sitio a otra. *En música:* la música de fondo que baja cuando habla el
+  locutor de radio.
+- **Pumping (bombeo)**: el ducking exagerado convertido en efecto. *En música:* "One More Time" de Daft Punk.
+- **Gain reduction (reducción de ganancia)**: cuántos dB se está bajando en un momento dado; lo que marca el medidor.
+- **Clic / discontinuidad**: un salto brusco en la forma de onda. *En música:* el "tic" al cortar un sample sin fundido.
+- **Polirritmia (3 contra 2)**: un ducking en 1/4 T contra un kick en 1/4 son 3 golpes contra 2. *En música:* el
+  tresillo contra el pulso binario está en todo el afrobeat y en muchos breaks de trap.
+- **Four on the floor**: kick en los cuatro tiempos. *En música:* el house y el reggaetón clásico comparten ese kick.
+
+### Errores comunes y cuándo NO usarlo
+
+- **Juzgarlo en solo.** Un bajo con ducking en solo suena "raro" a propósito; lo que importa es cómo suena con el kick.
+- **Demasiada profundidad para limpiar.** Si se oye el bombeo cuando no querías efecto, baja a 15–30 %.
+- **Duración demasiado larga en mezcla.** Con duración 100 % el bajo nunca está entero: pierdes graves y peso.
+- **Suavizado alto "para que no haga clic".** Más de ~5 ms ya no quita clics: retrasa la caída y el kick pasa antes de
+  que el bajo se aparte. Sube el suavizado desde 0 hasta que desaparezca el clic, y no mucho más.
+- **Ducking en secciones sin kick.** El modo tempo baja el volumen aunque no haya kick (un break, una intro): ahí
+  automatiza el BYPASS o espera a los modos MIDI y audio.
+- **Cuándo NO usarlo:** si el bajo y el kick no se pisan (un 808 que *es* el kick, o un bajo que empieza en 150 Hz); en
+  el Master entero con profundidad alta (bombea todo, voces incluidas); y con patrones de kick irregulares, donde el
+  modo tempo baja el volumen en los sitios equivocados.

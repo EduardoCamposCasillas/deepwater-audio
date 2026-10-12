@@ -62,8 +62,9 @@ plugins/ebb/
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     TransportSnapshot.h      # lo que el audio publica para la GUI en cada bloque (TripleBuffer)
     dsp/HostClock.h          # reloj musical: posición del host por muestra, saltos, reloj libre; compás.tiempo.semicorchea
-    dsp/Engine.h             # cadena de audio completa, sin JUCE
-    gui/                     # tema, LookAndFeel, visor del transporte
+    dsp/TempoCurve.h         # modo tempo: divisiones, posición en el ciclo y forma de la curva (funciones puras)
+    dsp/Engine.h             # cadena de audio completa, sin JUCE: curva, rampas, glide, suavizado y bypass
+    gui/                     # tema, LookAndFeel (perillas), visor del transporte, vista de la curva y medidor
   tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE)
 ```
 
@@ -103,30 +104,28 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 1 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona.
-- Nombre decidido con el usuario: Ebb (`Ebb1`), categoría VST3 `Fx Dynamics`. Layouts mono → mono y estéreo → estéreo
-  (el bus sidechain llega en la Fase 5; `NEEDS_MIDI_INPUT` pasa a TRUE en la Fase 4). Latencia 0.
-- `dsp/HostClock.h` (sin JUCE): `TransportInfo` (lo que dice el PlayHead, todo opcional), `HostClock` y
-  `musicalPosition`. El reloj se resincroniza con el host al principio de CADA bloque y extrapola dentro del bloque
-  (`ppqAt (offset)` = inicio + offset · bpm / (60 · fs)). Fuentes: `host` (reproduciendo), `stopped` (la posición queda
-  quieta donde la deja el host) y `freeRunning` (sin host o sin posición: cuenta desde 0, o desde donde iba el host, al
-  último tempo conocido o 120). Saltos = reproduciendo y la posición difiere de la esperada en más de 1/64 de negra
-  (la automatización de tempo se desvía milésimas; un loop, compases). Arrancar no es un salto (`startedThisBlock`).
-  Tempo inválido se ignora y se limita a 20–999 BPM; compás inválido (denominador no potencia de 2) se ignora.
-  `musicalPosition` usa el inicio de compás del host si es coherente (respeta cambios de compás) y si no asume el
-  mismo compás desde el inicio; margen de 1e-6 negras para el redondeo del host.
-- `dsp/Engine.h`: passthrough con fundido de bypass de 20 ms (`EffectSwitch`); la salida es la entrada bit a bit.
-- Librería (nuevo): `TripleBuffer.h` = buzón del último valor (3 copias + un byte atómico con índice y bit de "nuevo";
-  escritor y lector nunca esperan). El procesador publica un `TransportSnapshot` por bloque; la GUI lo lee a 30 fps.
-- Parámetros (versionHint 1): `bypass` (devuelto por `getBypassParameter()`).
-- GUI 580 × 270: estado (▶ / ■ / ○ en ámbar), compás.tiempo.semicorchea en grande, luces por tiempo del compás, y
-  FL (B:S) (compás:paso, como el contador Bar:Step de FL), Tempo, Compás, Posición en negras, Loop, Saltos, Audio (Hz
-  y tamaño del bloque). BYPASS en la cabecera. Revisada con captura del Standalone (sin audio en este entorno).
-- Tests: `DeepwaterDspTests` (+1: TripleBuffer en un hilo y con dos hilos, 2 millones de escrituras, nunca un valor
-  mezclado ni hacia atrás) y `EbbTests` (posición musical en 4/4, 3/4, 6/8, 7/8, inicio de compás del host, redondeo y
-  pre-roll; reloj libre continuo; sigue al host con bloques de 1–4096 y cambios de tempo sin saltos falsos, 4 sample
-  rates; saltos de loop y adelante, arranque, parado, host que desaparece; tempo/compás inválidos; paso de FL; passthrough y
-  bypass bit a bit en mono/estéreo).
+Fase 2 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio.
+- `dsp/TempoCurve.h`: 9 divisiones (1 bar, 1/2, 1/4, 1/8, 1/16 y sus tresillos; "1 bar" = el compás del host). La
+  cuadrícula arranca en cada inicio de compás (`HostClock::barOrigin`: el del host si es coherente, si no 0), así una
+  división que no cabe justa (1/2 T en 3/4) se reinicia en el "1". Margen de 1e-9 negras para el redondeo del host.
+  Forma fija: smoothstep, `1 − x²(3 − 2x)` con x = tiempo desde el golpe / (duración · ciclo).
+- `dsp/Engine.h`: ganancia = 1 − profundidad · forma, calculada en cada muestra desde `clock.ppqAt (i)` (exacta a la
+  muestra con cualquier bloque). Profundidad con rampa de 20 ms, duración de 50 ms. Cambio de división/compás o parada
+  del host: "glide" (diferencia curva vieja − nueva en la 1.ª muestra del bloque, desvanecida en 30 ms). Arrancar NO
+  hace glide (el primer golpe suena entero). Parado = sin ducking; reloj libre (Standalone) = ducking a 120 BPM.
+  Suavizado final: 1 polo sobre la ganancia, `coef = 1 − exp(−3 / (ms · fs))` (≈95 % en esos ms; 0 = sin suavizar);
+  copia el objetivo a < 1e-6, así profundidad 0 es bit a bit. Los golpes y los saltos del host solo pasan por el
+  suavizado (un redisparo baja desde la ganancia actual).
+- Parámetros nuevos (versionHint 2): `division` (elección, 1/4), `depth` (0–100 %, 70; texto con dB), `duration`
+  (5–100 %, 70), `smoothing` (0–20 ms con sesgo, 3 ms al centro; 2). `versionHint` → `versionHintPhase1`/`Phase2`.
+- Medidor: el procesador acumula la ganancia mínima en un `std::atomic<float>` y la GUI la toma con `exchange (1)`.
+- GUI 640 × 530: transporte (170 px), `CurveView` (dos ciclos con los ajustes y el suavizado simulado a escala real,
+  ms del ciclo y de la vuelta, medidor de reducción 0–24 dB que vuelve a 30 dB/s) y fila de DIVISIÓN + 3 perillas
+  (estilo Riptide) con tooltips. Revisada con captura del Standalone.
+- Tests `EbbTests` (+5): curva pura; golpes en la muestra exacta a 4 sample rates, iguales con bloques de 1–7 y de
+  4096, tresillos y "1 bar" en 7/8; cambios de división/duración/profundidad sonando sin saltos > 0.01 (sin glide el
+  de división salta 0.28–0.61: comprobado quitándolo); loop a mitad de curva; parar sin clic y quedar en 1 exacto;
+  reloj libre; profundidad 0 y bypass bit a bit.
 - Release con 0 warnings; ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 2 (modo tempo).
+Siguiente: que el usuario pruebe la Fase 2 en FL Studio; después, Fase 3 (formas de curva y editor).
