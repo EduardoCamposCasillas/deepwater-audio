@@ -12,6 +12,7 @@
 // Fase 3: la forma de esa curva es una curva por puntos editable, guardada en el estado del proyecto.
 // Fase 4: modo MIDI, cada nota recibida dispara la curva en su muestra exacta.
 // Fase 5: modo audio, una entrada sidechain (2.º bus de entrada) cuyos golpes disparan la curva, y lookahead.
+// Fase 6: la curva se aplica a toda la señal o a una banda (graves / agudos), y mix dry/wet.
 // El audio está en ebb::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class EbbAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
@@ -113,6 +114,9 @@ private:
     std::atomic<float>* thresholdParam = nullptr;
     std::atomic<float>* holdParam = nullptr;
     std::atomic<float>* lookaheadParam = nullptr;
+    std::atomic<float>* bandParam = nullptr;
+    std::atomic<float>* crossoverParam = nullptr;
+    std::atomic<float>* mixParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     ebb::dsp::Engine engine;

@@ -23,9 +23,15 @@ inline constexpr const char* threshold = "threshold"; // dB: nivel del sidechain
 inline constexpr const char* hold = "hold";           // ms: retención, tiempo mínimo entre dos golpes
 inline constexpr const char* lookahead = "lookahead"; // ms: cuánto se adelanta la curva (latencia informada al host)
 
+// Fase 6: ducking por bandas y mezcla.
+inline constexpr const char* band = "band";           // qué parte del espectro baja (índice de duckBandNames)
+inline constexpr const char* crossover = "crossover"; // Hz: dónde se parten graves y agudos
+inline constexpr const char* mix = "mix";             // %: cuánto del efecto se oye
+
 // Versión en la que apareció cada parámetro (la usa el VST3 para ordenar y reconocer parámetros nuevos).
 inline constexpr int versionHintPhase1 = 1;
 inline constexpr int versionHintPhase2 = 2;
 inline constexpr int versionHintPhase4 = 4;
 inline constexpr int versionHintPhase5 = 5;
+inline constexpr int versionHintPhase6 = 6;
 } // namespace ebb::params

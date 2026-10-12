@@ -15,6 +15,17 @@ juce::String depthToText (float percent, int)
     const auto db = gain <= 0.0f ? juce::String::fromUTF8 ("\xe2\x88\x9e") : juce::String (-deepwater::dsp::gainToDb (gain), 1);
     return juce::String (percent, 1) + juce::String::fromUTF8 (" % (\xe2\x88\x92") + db + " dB)";
 }
+
+juce::String frequencyToText (float hz, int)
+{
+    return hz < 999.5f ? juce::String (juce::roundToInt (hz)) + " Hz" : juce::String (hz / 1000.0f, 2) + " kHz";
+}
+
+float textToFrequency (const juce::String& text)
+{
+    const float value = text.getFloatValue();
+    return text.containsIgnoreCase ("k") ? value * 1000.0f : value;
+}
 } // namespace
 
 EbbAudioProcessor::EbbAudioProcessor()
@@ -36,6 +47,9 @@ EbbAudioProcessor::EbbAudioProcessor()
     thresholdParam = parameters.getRawParameterValue (ebb::params::threshold);
     holdParam = parameters.getRawParameterValue (ebb::params::hold);
     lookaheadParam = parameters.getRawParameterValue (ebb::params::lookahead);
+    bandParam = parameters.getRawParameterValue (ebb::params::band);
+    crossoverParam = parameters.getRawParameterValue (ebb::params::crossover);
+    mixParam = parameters.getRawParameterValue (ebb::params::mix);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (ebb::params::bypass));
     jassert (bypassParameter != nullptr);
     setCurve (ebb::dsp::defaultCurve());
@@ -112,6 +126,30 @@ juce::AudioProcessorValueTreeState::ParameterLayout EbbAudioProcessor::createPar
             .withLabel ("ms")
             .withAutomatable (false)
             .withStringFromValueFunction ([] (float ms, int) { return juce::String (ms, 1) + " ms"; })));
+
+    // Fase 6: bandas y mezcla. Por defecto "Todo" y mix 100 %: los proyectos anteriores suenan igual (bit a bit).
+    juce::StringArray bandNames;
+    for (const auto* name : ebb::dsp::duckBandNames)
+        bandNames.add (name);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::band, id::versionHintPhase6 }, "Band", bandNames, 0));
+
+    // Logarítmica: cada octava ocupa lo mismo en el recorrido de la perilla (el oído escucha en octavas).
+    juce::NormalisableRange<float> crossoverRange (
+        ebb::dsp::crossoverMinHz, ebb::dsp::crossoverMaxHz,
+        [] (float start, float end, float proportion) { return start * std::pow (end / start, proportion); },
+        [] (float start, float end, float hz) { return std::log (hz / start) / std::log (end / start); });
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::crossover, id::versionHintPhase6 }, "Crossover", crossoverRange, ebb::dsp::defaultCrossoverHz,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("Hz")
+            .withStringFromValueFunction (frequencyToText)
+            .withValueFromStringFunction (textToFrequency)));
+
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::mix, id::versionHintPhase6 }, "Mix", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("%")
+            .withStringFromValueFunction ([] (float percent, int) { return juce::String (percent, 1) + " %"; })));
     return layout;
 }
 
@@ -169,6 +207,9 @@ ebb::dsp::TempoSettings EbbAudioProcessor::readTempoSettings() const noexcept
     settings.smoothingMs = smoothingParam->load();
     settings.mode = ebb::dsp::triggerModeFromIndex (static_cast<int> (modeParam->load()));
     settings.velocitySensitive = velocityParam->load() >= 0.5f;
+    settings.band = ebb::dsp::duckBandFromIndex (static_cast<int> (bandParam->load()));
+    settings.crossoverHz = crossoverParam->load();
+    settings.mix = mixParam->load() / 100.0f;
     return settings;
 }
 

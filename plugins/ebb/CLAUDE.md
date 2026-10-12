@@ -67,10 +67,13 @@ plugins/ebb/
     dsp/Triggers.h           # modos de disparo (tempo, MIDI, audio), el disparo dentro del bloque, filtro y nombres de
                              # nota (FL), detección de golpes en el sidechain (detectAudioTriggers)
     dsp/Lookahead.h          # retardo del lookahead con fundido cruzado al cambiarlo
-    dsp/Engine.h             # cadena de audio completa, sin JUCE: lookahead, curva, rampas, glide, suavizado y bypass
+    dsp/Bands.h              # ducking por bandas: Todo / Graves / Agudos con cruce LR4 suavizado y fundido al cambiar
+    dsp/Engine.h             # cadena de audio completa, sin JUCE: lookahead, curva, rampas, glide, suavizado, mix,
+                             # bandas y bypass
     gui/                     # tema, LookAndFeel (perillas), visor del transporte, vista de la curva y medidor,
                              # editor de la curva (CurveEditor.h), luz de actividad MIDI (MidiActivityView.h),
-                             # medidor del sidechain con el umbral arrastrable (SidechainMeterView.h)
+                             # medidor del sidechain con el umbral arrastrable (SidechainMeterView.h),
+                             # respuesta en frecuencia de las bandas (BandView.h)
   tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE)
 ```
 
@@ -110,40 +113,50 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 5 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
-- Librería: `deepwater/dsp/TransientDetector.h` (nuevo, con test en `DeepwaterDspTests`): envolvente de
-  `EnvelopeFollower` (ataque 0, relajación 50 ms) → golpe al cruzar el umbral hacia arriba (exacto a la muestra); se
-  rearma al bajar 6 dB por debajo del umbral (histéresis), y durante la retención no dispara ni se rearma. Limitación
-  documentada: una cola que no baja del rearme se come el golpe siguiente (subir el umbral).
-- `dsp/Triggers.h`: `TriggerMode::audio` (índice 2, al final), `isHitMode` (MIDI y audio: cada golpe reinicia la curva) y
-  `detectAudioTriggers` (mayor |x| de los canales del sidechain → disparos ordenados; sin canales = silencio; si no
-  caben, gana el último; devuelve la envolvente máxima para el medidor).
-- `dsp/Lookahead.h` (nuevo): `LookaheadDelay`, `DelayLine` por canal; cambiar el retraso hace un fundido cruzado de
-  20 ms entre la lectura vieja y la nueva (si llega otro cambio, espera). Retraso 0 = bit a bit.
-- `dsp/Engine.h`: el lookahead va antes de todo (también el dry del bypass: la latencia no cambia con el bypass ni con
-  el modo). Máximo 10 ms (`maxLookaheadSamples`); `prepare` ya no es noexcept (reserva el retardo). El modo audio usa
-  el mismo camino que MIDI (golpe, largo, terminado, glide al cambiar de modo).
-- Parámetros nuevos (versionHint 5): `threshold` (−60–0 dB, −24), `hold` (0–250 ms con sesgo, 40 al centro; 30),
-  `lookahead` (0–10 ms, 0; NO automatizable: cambia la latencia).
-- Procesador: bus de entrada "Sidechain" estéreo (activo por defecto; se acepta mono, estéreo o desactivado). El
-  detector corre siempre (medidor y luz en cualquier modo); solo en modo audio sus golpes van al motor (en los demás
-  modos van las notas MIDI). Atómicos: envolvente máxima desde la lectura (exchange), golpes detectados y disparados.
-  Latencia: `setLatencySamples` toma un lock dentro de JUCE (`updateHostDisplay`), así que NO se llama desde el audio:
-  un `juce::Timer` del procesador (10 Hz, hilo de mensajes) la informa y después publica `reportedLookahead`, que es el
-  retraso que usa el audio (retraso real = latencia informada). `prepareToPlay` fija los dos.
-- GUI 960 × 750: panel SIDECHAIN abajo con el medidor (−60–0 dB, umbral ámbar arrastrable con gesto, rearme punteado,
-  luz verde agua = disparó / ámbar = detectado sin disparar) y las perillas UMBRAL, RETENCIÓN (atenuadas fuera del modo
-  Audio) y LOOKAHEAD. LARGO y la vista previa de un golpe también en modo Audio. Pie con el ruteo de FL por modo.
-  Captura del Standalone revisada.
-- Tests: `DeepwaterDspTests` (+1): kick sintético de dembow a 4 sample rates = un golpe en cada inicio exacto; un sub de
-  30 Hz sostenido = un golpe; por debajo del umbral, ninguno; retención y histéresis con clics. `EbbTests` (+2): modo
-  audio exacto a la muestra (dembow desplazado, 4 sample rates, bloques de 1–7 = 4096 idénticos), sidechain
-  desconectado y kick solo en un canal; lookahead = retraso exacto bit a bit (también en bypass), con lookahead la
-  ganancia ya está abajo cuando llega la señal alineada con el kick, cambio 0 → 5 ms sonando sin clic (sin el fundido
-  falla: comprobado) y luego retraso exacto. Release con 0 warnings; ctest 6/6; pluginval strictness 10 ampliado:
-  SUCCESS (lista el bus sidechain).
+Fase 6 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
+- `dsp/Bands.h` (nuevo): `DuckBand` (Todo, Graves, Agudos; el parámetro guarda el índice: solo añadir al final) y
+  `BandDucker`: un `LinkwitzRileySplit` (libs/dsp, LR4 24 dB/oct) por canal que corre SIEMPRE (también en Todo, para
+  que al cambiar de banda los filtros ya estén en régimen). Graves = low·g + high; Agudos = low + high·g; Todo = x·g
+  (sin pasar por el divisor: bit a bit como en la Fase 5). Cruce suavizado en octavas (rampa de 20 ms; tan() solo
+  mientras se mueve). Cambiar de banda = fundido cruzado de 20 ms entre la salida vieja y la nueva (si llega otro
+  cambio, espera). `lowBandMagnitude` (1 / (1 + r⁴)) para la GUI.
+- `dsp/Engine.h`: `TempoSettings` + `band`, `crossoverHz`, `mix`. Mix = escalar la reducción después del suavizado,
+  `1 − mix·(1 − g)` (equivale a la mezcla en paralelo con la original en fase; sin peine en modo bandas); rampa de
+  20 ms; con mix 1 la ganancia pasa tal cual (bit a bit). El medidor mide la ganancia con mix (en bandas, la de la banda).
+- Parámetros nuevos (versionHint 6): `band` (Todo por defecto), `crossover` (20 Hz–5 kHz logarítmico, 120 Hz; texto
+  "120 Hz" / "1.50 kHz", acepta "k"), `mix` (0–100 %, 100). Proyectos anteriores: suenan igual.
+- GUI sigue en 960 × 750: el editor de la curva se acorta y a su derecha va el panel BANDAS (330 px): `BandView`
+  (respuesta 20 Hz–20 kHz, 0 a −24 dB: gris = sin ducking, acento = en lo más hondo del golpe con profundidad × mix,
+  relleno = lo que se quita, blanca = en vivo, ámbar punteada = cruce), BANDA, CRUCE (atenuada en Todo) y MIX. La vista
+  previa de la curva usa profundidad × mix. Captura del Standalone revisada.
+- PENDIENTE (Fase 7): la pantalla del usuario es de 1280 × 720 lógicos (1920 × 1080 al 150 %, área útil 672 px de
+  alto): la ventana de 750 px ya no cabía entera desde la Fase 5 (el panel SIDECHAIN queda tapado). Hacer la GUI
+  escalable / redimensionable o más baja.
+- Tests `EbbTests` (+3): Graves/Agudos a 4 sample rates (un 40 Hz baja < 0.05 en el golpe y un 5 kHz queda > 0.97, al
+  revés en Agudos; lejos del golpe los dos pasan enteros), profundidad 0 en Graves = el allpass LR4 de referencia
+  (error < 1e-5), bypass bit a bit en bandas, bloques de 7 = 4096 idénticos; mix 50 % = profundidad a la mitad (Todo y
+  Graves, error < 1e-5), mix 0 = bit a bit, bajar el mix sonando sin saltos; Todo → Graves → Agudos → Todo sonando
+  sobre un 80 Hz con el volumen abajo sin pasos mayores que sin cambios (sin el fundido salta 0.24: comprobado) y
+  barrido del cruce 30 Hz–2 kHz finito y acotado. Release con 0 warnings; ctest 6/6; pluginval strictness 10
+  ampliado: SUCCESS.
 
-Siguiente: Fase 6 (ducking por bandas).
+Siguiente: que el usuario pruebe la Fase 6 en FL Studio; después, Fase 7 (GUI).
+
+### Fase 5 (completada 2026-10-12, probada en FL)
+- Librería: `deepwater/dsp/TransientDetector.h` (con test): envolvente de `EnvelopeFollower` (ataque 0, relajación
+  50 ms) → golpe al cruzar el umbral hacia arriba (exacto a la muestra); rearme 6 dB por debajo (histéresis); retención.
+  Limitación documentada: una cola que no baja del rearme se come el golpe siguiente (subir el umbral).
+- `dsp/Triggers.h`: `TriggerMode::audio` (índice 2), `isHitMode`, `detectAudioTriggers` (mayor |x| de los canales del
+  sidechain → disparos ordenados; sin canales = silencio; devuelve la envolvente máxima para el medidor).
+- `dsp/Lookahead.h`: `LookaheadDelay`, fundido cruzado de 20 ms al cambiar el retraso; 0 = bit a bit. En el motor va
+  antes de todo (también el dry del bypass). Máximo 10 ms; `Engine::prepare` reserva (no es noexcept).
+- Parámetros (versionHint 5): `threshold` (−60–0 dB, −24), `hold` (0–250 ms, 30), `lookahead` (0–10 ms, 0; NO
+  automatizable).
+- Procesador: bus "Sidechain" (mono, estéreo o desactivado). El detector corre siempre; solo en modo audio dispara.
+  `setLatencySamples` toma un lock en JUCE: lo llama un `juce::Timer` (10 Hz) y luego publica `reportedLookahead`, el
+  retraso que usa el audio.
+- GUI: panel SIDECHAIN (medidor −60–0 dB, umbral arrastrable, rearme punteado, luz de disparo), UMBRAL, RETENCIÓN y
+  LOOKAHEAD.
 
 ### Fase 4 (completada 2026-10-12, probada en FL)
 - `dsp/Triggers.h`: `TriggerMode`, `Trigger` (muestra dentro del bloque + velocidad 0–1), filtro de nota (0 = todas,

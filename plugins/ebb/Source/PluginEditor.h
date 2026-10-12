@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "gui/BandView.h"
 #include "gui/CurveEditor.h"
 #include "gui/CurveView.h"
 #include "gui/EbbLookAndFeel.h"
@@ -14,7 +15,8 @@ class EbbAudioProcessor;
 // GUI funcional. Fase 1: el visor del reloj del host y el bypass en la cabecera. Fase 2: la curva del modo tempo con
 // sus controles y un medidor de cuánto baja el volumen. Fase 3: el menú de formas y el editor de la curva. Fase 4: el
 // modo (tempo / MIDI), el filtro de nota, la velocidad y la luz de actividad MIDI. Fase 5: el panel del sidechain
-// (medidor con el umbral, retención y lookahead). Un temporizador a 30 cuadros por segundo recoge lo que publicó el audio.
+// (medidor con el umbral, retención y lookahead). Fase 6: el panel de bandas (banda, cruce, mix y su respuesta).
+// Un temporizador a 30 cuadros por segundo recoge lo que publicó el audio.
 class EbbAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -41,12 +43,14 @@ private:
     [[nodiscard]] juce::Rectangle<int> controlsArea() const;
     [[nodiscard]] juce::Rectangle<int> editorPanelArea() const;
     [[nodiscard]] juce::Rectangle<int> sidechainArea() const;
+    [[nodiscard]] juce::Rectangle<int> bandsArea() const;
     void showCurve();
     void setUpComboLabel (juce::Label& label, const juce::String& text);
     void setUpCombo (juce::ComboBox& box, const char* parameterId, const juce::String& tooltip,
                      std::unique_ptr<ComboBoxAttachment>& attachment);
     void useLastMidiNote();
     void updateModeControls (ebb::dsp::TriggerMode mode);
+    void updateBandControls (ebb::dsp::DuckBand band);
 
     EbbAudioProcessor& processor;
     ebb::gui::EbbLookAndFeel lookAndFeel;
@@ -82,6 +86,13 @@ private:
     juce::Label sidechainLabel;
     ebb::gui::SidechainMeterView sidechainMeter;
     Knob thresholdKnob, holdKnob, lookaheadKnob;
+
+    juce::Label bandLabel;
+    juce::ComboBox bandBox;
+    std::unique_ptr<ComboBoxAttachment> bandAttachment;
+    ebb::gui::BandView bandView;
+    Knob crossoverKnob, mixKnob;
+    ebb::dsp::DuckBand shownBand = ebb::dsp::DuckBand::full;
 
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<ButtonAttachment> bypassAttachment;

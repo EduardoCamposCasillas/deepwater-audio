@@ -12,6 +12,7 @@ constexpr int transportWidth = 500; // cabe "123 . 4 . 4" y los detalles
 constexpr int curveEditorHeight = 210;
 constexpr int controlsHeight = 160;
 constexpr int sidechainHeight = 124;
+constexpr int bandsWidth = 330; // panel BANDAS, a la derecha del editor de la curva
 constexpr int footerHeight = 26;
 constexpr int gap = 8;
 constexpr int padding = 12;
@@ -130,6 +131,26 @@ EbbAudioProcessorEditor::EbbAudioProcessorEditor (EbbAudioProcessor& p) : AudioP
                      "pistas lo mismo (compensaci\xc3\xb3n de latencia). As\xc3\xad el volumen ya est\xc3\xa1 abajo cuando "
                      "llega el ataque del kick. Sirve en los tres modos. 0 = sin latencia. No se automatiza."));
 
+    // Fase 6: bandas y mezcla.
+    setUpComboLabel (bandLabel, "BANDA");
+    setUpCombo (bandBox, id::band,
+                utf8 ("Todo: baja la se\xc3\xb1" "al entera (bombeo cl\xc3\xa1sico). Graves: solo lo que est\xc3\xa1 por debajo "
+                      "del CRUCE; el kick gana su hueco en el sub y los arm\xc3\xb3nicos del bajo siguen sonando (no se oye "
+                      "bombear). Agudos: solo lo de arriba (platillos, la cola de una reverb) sin tocar el sub."),
+                bandAttachment);
+    bandView.setTooltip (utf8 ("Respuesta en frecuencia. Gris: sin ducking. Acento: en lo m\xc3\xa1s hondo del golpe "
+                               "(PROFUNDIDAD \xc3\x97 MIX); lo relleno es lo que quita el ducking. Blanca: en vivo. "
+                               "\xc3\x81mbar punteada: el cruce."));
+    addAndMakeVisible (bandView);
+    setUpKnob (crossoverKnob, id::crossover, "CRUCE",
+               utf8 ("D\xc3\xb3nde se parten graves y agudos (Linkwitz-Riley, 24 dB/oct: sin ducking la suma es plana). "
+                     "Kick contra bajo: 80\xe2\x80\x93" "150 Hz (el sub y el cuerpo del kick). M\xc3\xa1s alto = el ducking "
+                     "se come tambi\xc3\xa9n el gru\xc3\xb1ido del bajo; m\xc3\xa1s bajo = solo el sub."));
+    setUpKnob (mixKnob, id::mix, "MIX",
+               utf8 ("Cu\xc3\xa1nto del efecto se oye: mezcla la se\xc3\xb1" "al con ducking con la original (en fase). En un "
+                     "efecto de volumen equivale a escalar la PROFUNDIDAD: 50 % = la mitad de la ca\xc3\xad" "da. \xc3\x9atil "
+                     "para automatizar la entrada del efecto sin tocar la curva."));
+
     bypassButton.setClickingTogglesState (true);
     bypassButton.setTooltip (utf8 ("Escuchar la se\xc3\xb1" "al original. Es el mismo bypass que el de FL y entra con un "
                                    "fundido de 20 ms (sin clics)."));
@@ -137,6 +158,7 @@ EbbAudioProcessorEditor::EbbAudioProcessorEditor (EbbAudioProcessor& p) : AudioP
     bypassAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), id::bypass, bypassButton);
 
     updateModeControls (shownMode);
+    updateBandControls (shownBand);
     setSize (editorWidth, editorHeight);
     timerCallback(); // sin esperar al primer cuadro
     startTimerHz (framesPerSecond);
@@ -199,6 +221,15 @@ void EbbAudioProcessorEditor::updateModeControls (ebb::dsp::TriggerMode mode)
     repaint();
 }
 
+// En "Todo" no hay cruce: la perilla se atenúa (sigue guardando su valor).
+void EbbAudioProcessorEditor::updateBandControls (ebb::dsp::DuckBand band)
+{
+    shownBand = band;
+    const bool split = band != ebb::dsp::DuckBand::full;
+    crossoverKnob.slider.setEnabled (split);
+    crossoverKnob.label.setEnabled (split);
+}
+
 void EbbAudioProcessorEditor::setUpKnob (Knob& knob, const char* parameterId, const juce::String& name, const juce::String& tooltip)
 {
     knob.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 120, 18);
@@ -251,19 +282,29 @@ void EbbAudioProcessorEditor::timerCallback()
     settings.depth = parameters.getRawParameterValue (ebb::params::depth)->load() / 100.0f;
     settings.duration = parameters.getRawParameterValue (ebb::params::duration)->load() / 100.0f;
     settings.smoothingMs = parameters.getRawParameterValue (ebb::params::smoothing)->load();
+    const float mix = parameters.getRawParameterValue (ebb::params::mix)->load() / 100.0f;
+    const auto band = ebb::dsp::duckBandFromIndex (static_cast<int> (parameters.getRawParameterValue (ebb::params::band)->load()));
+    if (band != shownBand)
+        updateBandControls (band);
     const auto sidechain = processor.takeSidechainActivity();
     sidechainMeter.update (sidechain.peakEnvelope, sidechain.detected, sidechain.triggers,
                            parameters.getRawParameterValue (ebb::params::threshold)->load());
+    const float minGain = processor.takeMinGain();
+    bandView.update (band, parameters.getRawParameterValue (ebb::params::crossover)->load(), 1.0f - settings.depth * mix, minGain);
+    // La vista previa muestra lo que suena: con mix, la caída es profundidad × mix.
+    settings.depth *= mix;
     curveView.setCurve (settings, processor.getCurve(), lastSnapshot.bpm, lastSnapshot.timeSignature);
-    curveView.setMinGain (processor.takeMinGain());
+    curveView.setMinGain (minGain);
 }
 
+// La fila del editor de la curva se comparte con el panel BANDAS (a la derecha): así la ventana no crece.
 juce::Rectangle<int> EbbAudioProcessorEditor::editorPanelArea() const
 {
     return getLocalBounds()
         .withTrimmedTop (headerHeight + topRowHeight + gap)
         .withHeight (curveEditorHeight)
-        .reduced (padding, 0);
+        .reduced (padding, 0)
+        .withTrimmedRight (bandsWidth + gap);
 }
 
 juce::Rectangle<int> EbbAudioProcessorEditor::controlsArea() const
@@ -282,6 +323,12 @@ juce::Rectangle<int> EbbAudioProcessorEditor::sidechainArea() const
         .reduced (padding, 0);
 }
 
+juce::Rectangle<int> EbbAudioProcessorEditor::bandsArea() const
+{
+    const auto row = getLocalBounds().withTrimmedTop (headerHeight + topRowHeight + gap).withHeight (curveEditorHeight).reduced (padding, 0);
+    return row.withTrimmedLeft (row.getWidth() - bandsWidth);
+}
+
 void EbbAudioProcessorEditor::paint (juce::Graphics& g)
 {
     using namespace ebb::gui;
@@ -293,9 +340,9 @@ void EbbAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("EBB", header.removeFromLeft (60), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("ducker  -  Fase 5: modo audio sidechain", header, juce::Justification::centredLeft);
+    g.drawText ("ducker  -  Fase 6: ducking por bandas", header, juce::Justification::centredLeft);
 
-    for (const auto& panelArea : { editorPanelArea(), controlsArea(), sidechainArea() })
+    for (const auto& panelArea : { editorPanelArea(), controlsArea(), sidechainArea(), bandsArea() })
     {
         const auto panel = panelArea.toFloat();
         g.setColour (theme::panel);
@@ -310,9 +357,17 @@ void EbbAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FORMA DE LA CURVA", caption, juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (utf8 ("arrastra los puntos (May\xc3\xbas = cuadr\xc3\xad" "cula)  \xc2\xb7  doble clic: a\xc3\xb1" "adir / quitar punto  "
-                      "\xc2\xb7  c\xc3\xad" "rculo hueco: tensi\xc3\xb3n del tramo"),
+    g.drawText (utf8 ("arrastra (May\xc3\xbas = cuadr\xc3\xad" "cula)  \xc2\xb7  doble clic: a\xc3\xb1" "adir / quitar  "
+                      "\xc2\xb7  hueco: tensi\xc3\xb3n"),
                 caption, juce::Justification::centredRight);
+
+    auto bandsCaption = bandsArea().reduced (12, 0).removeFromTop (28);
+    g.setColour (theme::text);
+    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    g.drawText ("BANDAS", bandsCaption, juce::Justification::centredLeft);
+    g.setColour (theme::dimText);
+    g.setFont (juce::FontOptions (11.0f));
+    g.drawText (utf8 ("qu\xc3\xa9 parte baja con el golpe"), bandsCaption, juce::Justification::centredRight);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
@@ -387,6 +442,21 @@ void EbbAudioProcessorEditor::resized()
     for (auto* knob : { &thresholdKnob, &holdKnob, &lookaheadKnob })
     {
         auto column = sidechain.removeFromLeft (knobWidth);
+        knob->label.setBounds (column.removeFromTop (18));
+        knob->slider.setBounds (column);
+    }
+
+    // Bandas: la respuesta arriba y, debajo, el menú BANDA y las perillas CRUCE y MIX.
+    auto bands = bandsArea().withTrimmedTop (28).reduced (6, 0).withTrimmedBottom (6);
+    bandView.setBounds (bands.removeFromTop (72));
+    bands.removeFromTop (4);
+    const int bandColumnWidth = bands.getWidth() / 3;
+    auto bandColumn = bands.removeFromLeft (bandColumnWidth).reduced (4, 0);
+    bandLabel.setBounds (bandColumn.removeFromTop (20));
+    bandBox.setBounds (bandColumn.removeFromTop (28));
+    for (auto* knob : { &crossoverKnob, &mixKnob })
+    {
+        auto column = bands.removeFromLeft (bandColumnWidth);
         knob->label.setBounds (column.removeFromTop (18));
         knob->slider.setBounds (column);
     }

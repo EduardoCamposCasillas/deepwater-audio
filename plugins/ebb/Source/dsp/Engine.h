@@ -5,6 +5,7 @@
 #include <span>
 
 #include "deepwater/dsp/Smoothing.h"
+#include "dsp/Bands.h"
 #include "dsp/CurveShapes.h"
 #include "dsp/HostClock.h"
 #include "dsp/Lookahead.h"
@@ -24,21 +25,28 @@ struct TempoSettings
     float depth = 0.7f;        // 0–1: cuánto baja el volumen en el golpe (1 = silencio)
     float duration = 0.7f;     // 0–1: fracción del ciclo que tarda en volver
     float smoothingMs = 2.0f;  // tiempo en que la ganancia hace ~95 % de un cambio (0 = sin suavizar)
+    DuckBand band = DuckBand::full;          // Fase 6: qué parte del espectro baja
+    float crossoverHz = defaultCrossoverHz;  // Fase 6: dónde se parten graves y agudos
+    float mix = 1.0f;                        // Fase 6: 0–1, cuánto del efecto se oye (0 = señal sin ducking)
 };
 
 // Cadena de audio completa del ducker, sin JUCE (se prueba en tests/EngineTests.cpp):
 //
-//   reloj del host ── curva de tempo ── profundidad ── suavizado ── ganancia
-//   o disparos (MIDI / sidechain)                                     │
-//   entrada ── lookahead ──┬──────────────────────────────── × ganancia ──┐
-//                          │                                              ├─ fundido de bypass ── salida
-//                          └──────────── señal original (dry) ────────────┘
+//   reloj del host ── curva de tempo ── profundidad ── suavizado ── mix ── ganancia
+//   o disparos (MIDI / sidechain)                                              │
+//   entrada ── lookahead ──┬──── banda (todo / graves / agudos) × ganancia ───────┐
+//                          │                                                      ├─ fundido de bypass ── salida
+//                          └──────────────── señal original (dry) ────────────────┘
 //
 // Modo tempo: la curva se calcula en cada muestra desde la POSICIÓN del host (no con un contador propio), así que un loop,
 // un salto o un cambio de tempo la dejan cayendo en su sitio. Modo MIDI: cada nota reinicia la curva en su muestra
 // exacta y desde ahí cuenta negras al tempo del host (también con el host parado: se puede probar tocando notas). Modo
 // audio: igual, pero los disparos los detecta el procesador en el sidechain. El lookahead retrasa la entrada (también la
-// del bypass, para que la latencia no cambie), así la curva empieza antes de que llegue el golpe.
+// del bypass, para que la latencia no cambie), así la curva empieza antes de que llegue el golpe. La ganancia se aplica
+// a toda la señal o a una sola banda (Bands.h, Fase 6).
+// Mix dry/wet: en un efecto que solo cambia el volumen, mezclar en paralelo la señal original (en fase) con la procesada
+// da (1 − mix)·x + mix·g·x = (1 − mix·(1 − g))·x: lo mismo que escalar la reducción. Así se implementa, sin una segunda
+// copia de la señal (y en modo bandas, sin riesgo de que la original y la procesada lleguen con fases distintas).
 // Para que la ganancia nunca salte hay tres capas:
 //   1. Profundidad y duración pasan por rampas lineales (un giro de perilla o una automatización por bloques).
 //   2. Cambiar de división, de forma de curva, de modo o de sensibilidad a la velocidad (o parar el host) cambia la
@@ -55,6 +63,7 @@ public:
     static constexpr double durationRampSeconds = 0.05;
     static constexpr double glideSeconds = 0.03;
     static constexpr double maxLookaheadSeconds = 0.01;
+    static constexpr double mixRampSeconds = 0.02;
 
     // Fuera del hilo de audio (reserva el lookahead).
     void prepare (double newSampleRate, bool bypassed, const TempoSettings& settings, int lookaheadSamples = 0)
@@ -74,6 +83,9 @@ public:
         velocitySensitive = settings.velocitySensitive;
         smoothingMs = -1.0f;
         updateSmoothing (settings.smoothingMs);
+        mixRamp.setTime (mixRampSeconds, sampleRate);
+        mixRamp.snap (std::clamp (settings.mix, 0.0f, 1.0f));
+        bands.prepare (sampleRate, settings.band, settings.crossoverHz);
 
         glideSamples = std::max (1, static_cast<int> (std::lround (glideSeconds * sampleRate)));
         glideOffset = 0.0f;
@@ -112,6 +124,9 @@ public:
         mode = settings.mode;
         velocitySensitive = settings.velocitySensitive;
         updateSmoothing (settings.smoothingMs);
+        mixRamp.setTarget (std::clamp (settings.mix, 0.0f, 1.0f));
+        bands.setBand (settings.band);
+        bands.setCrossover (settings.crossoverHz);
     }
 
     // Procesa en el sitio. El reloj ya tiene que haber recibido el bloque (HostClock::beginBlock). Con más de
@@ -130,16 +145,17 @@ public:
             for (; nextTrigger < triggers.size() && triggers[nextTrigger].offset <= i; ++nextTrigger)
                 startHit (triggers[nextTrigger].velocity);
 
-            const float duckGain = nextGain (clock.ppqAt (i));
+            const float duckGain = applyMix (nextGain (clock.ppqAt (i)));
             const float wet = bypassFade.next (processing); // 1 = procesado, 0 = original
             minGain = std::min (minGain, 1.0f - wet * (1.0f - duckGain));
 
             lookahead.advance();
+            bands.advance();
             for (int ch = 0; ch < numChannels; ++ch)
             {
                 float& sample = channels[ch][i];
                 const float dry = lookahead.process (ch, sample);
-                const float processed = dry * duckGain;
+                const float processed = bands.process (ch, dry, duckGain);
 
                 // Fuera del fundido se copia la señal tal cual: con el bypass puesto (o profundidad 0), bit a bit.
                 sample = wet == 1.0f ? processed : wet == 0.0f ? dry : dry + (processed - dry) * wet;
@@ -147,7 +163,8 @@ public:
         }
     }
 
-    // Ganancia más baja que sonó en el último bloque (1 = sin ducking), para el medidor de la GUI.
+    // Ganancia más baja que sonó en el último bloque (1 = sin ducking), para el medidor de la GUI. En modo bandas es la de
+    // la banda que baja.
     [[nodiscard]] float blockMinGain() const noexcept { return minGain; }
 
 private:
@@ -279,6 +296,13 @@ private:
         return gain;
     }
 
+    // Con mix 100 % la ganancia pasa tal cual (bit a bit igual que antes de la Fase 6).
+    float applyMix (float duckGain) noexcept
+    {
+        const float mix = mixRamp.next();
+        return mix >= 1.0f ? duckGain : 1.0f - mix * (1.0f - duckGain);
+    }
+
     void updateSmoothing (float newMs) noexcept
     {
         newMs = std::max (0.0f, newMs);
@@ -295,7 +319,8 @@ private:
     bool processing = true;
     LookaheadDelay lookahead;
 
-    deepwater::dsp::LinearRamp depthRamp, durationRamp;
+    deepwater::dsp::LinearRamp depthRamp, durationRamp, mixRamp;
+    BandDucker bands;
     int division = defaultDuckDivision;
     TriggerMode mode = TriggerMode::tempo;
     bool velocitySensitive = false;

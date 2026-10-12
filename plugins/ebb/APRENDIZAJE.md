@@ -611,3 +611,104 @@ Inténtalo y después pide pistas.
 - **Lookahead de más.** No suena mejor y suma latencia a todo el proyecto. Si grabas o tocas en vivo, déjalo en 0.
 - **Cuándo NO usarlo:** si tienes las notas del kick y el patrón no tiene swing humano, el modo MIDI es más exacto (no
   depende de un umbral). Si el kick es "four on the floor" fijo, el modo tempo no necesita ningún ruteo.
+
+## Fase 6 — Ducking por bandas: apartar solo el sub
+
+Hasta ahora Ebb bajaba el volumen de **todo** el bajo. Pero el kick y el bajo solo se pelean en los graves (40–120 Hz):
+el resto del bajo (el "gruñido" de un 808 saturado, el ataque de un bajo de dedo, los armónicos de un reese) no le
+estorba al kick, y al bajarlo junto con el sub es cuando se **oye** el bombeo. Con el ducking por bandas Ebb parte la
+señal en dos (graves y agudos), aplica la curva solo a una y las vuelve a juntar: el kick gana su hueco en el sub y el
+bajo sigue sonando presente arriba.
+
+### Conceptos aprendidos
+
+- **Crossover (cruce).** Un par de filtros que parte la señal en dos bandas: un *pasa bajos* (lo de abajo del cruce) y
+  un *pasa altos* (lo de arriba). La perilla CRUCE es la frecuencia donde se parten.
+- **Linkwitz-Riley (LR4, 24 dB/oct).** Un crossover cualquiera tiene un problema: alrededor del cruce las dos bandas
+  salen con **fases** distintas, y al sumarlas aparece un pozo o una joroba (el sonido cambia aunque no hagas nada).
+  Linkwitz-Riley es el tipo de crossover cuyas bandas suman **exactamente plano**: con el ducking quieto, graves +
+  agudos = la señal original, solo con un pequeño giro de fase alrededor del cruce (que no se oye como color). Es el
+  mismo que usa el multibanda de Riptide (está en la librería compartida).
+- **24 dB por octava.** Lo empinado del corte: una octava por debajo del cruce, la banda de agudos ya está 24 dB más
+  baja (casi nada). Entre el cruce y una octava a cada lado las dos bandas se solapan: un cruce a 120 Hz afecta un
+  poco de 60 a 240 Hz.
+- **Mix dry/wet (mezcla en paralelo).** Mezclar la señal procesada con la original. En un efecto que solo cambia el
+  volumen, mezclar al 50 % es **lo mismo** que bajar la profundidad a la mitad: (1 − mix)·x + mix·g·x = (1 − mix·(1 − g))·x.
+  Ebb lo hace así por dentro, y además la original queda siempre en fase con la procesada (si se mezclara la original
+  sin pasar por el cruce, en modo bandas habría un filtro de peine). Para qué sirve si equivale a la profundidad:
+  para **automatizarlo** (meter o sacar el efecto en una sección) sin tocar la curva ni la profundidad que ya ajustaste.
+
+### Qué hace cada control
+
+- **BANDA**: *Todo* = como hasta la Fase 5 (la señal entera baja; con mix 100 % suena idéntico, bit a bit). *Graves* =
+  solo lo de abajo del CRUCE: el uso normal (bajo o 808 contra kick). *Agudos* = solo lo de arriba: para que respiren
+  los platillos, un pad brillante o la cola de una reverb sin tocar su sub. Cambiarla sonando hace un fundido de 20 ms
+  (sin clic).
+- **CRUCE**: 20 Hz a 5 kHz (120 Hz por defecto). Atenuada en *Todo*. Se mueve en octavas, sin chirridos al girarla.
+- **MIX**: 0–100 % (100 por defecto). 0 % = sin ducking.
+- **Vista BANDAS** (arriba del panel): la respuesta en frecuencia. La línea gris de arriba es la señal sin ducking
+  (plana: las bandas suman 1); la de color es la respuesta en lo más hondo del golpe (PROFUNDIDAD × MIX), y lo relleno
+  entre las dos es **lo que el ducking quita**. La línea blanca fina se mueve con cada golpe (en vivo). La punteada
+  ámbar es el cruce. En *Todo* baja todo el espectro por igual; en *Graves* solo la parte izquierda.
+- La vista previa de la curva y el medidor de reducción ya cuentan el MIX (muestran lo que suena).
+
+### Ejercicio guiado: todo contra graves sobre un 808 con gruñido (con el volumen igualado)
+
+1. **95 BPM**, el dembow de siempre, Ebb en el **808** con el modo que ya te funciona (MIDI o Audio). Ponle al 808 algo
+   de saturación **antes** de Ebb (Riptide, modo bulbo, drive medio) para que tenga armónicos arriba. Profundidad 80 %,
+   LARGO 1/4, duración 50 %, suavizado 2 ms. BANDA *Todo*.
+2. Escucha el 808 **solo** (solo en el mixer) y luego con el kick: bombea de forma evidente, también el gruñido.
+3. Cambia a **Graves** con CRUCE en 120 Hz. Mira la vista: ahora solo baja la parte de la izquierda. Escucha: el sub
+   se sigue apartando del kick, pero el gruñido queda quieto. El 808 ya no "bombea", solo deja pasar al kick.
+4. **Mueve el CRUCE** sonando: a 50 Hz el ducking solo toca el sub profundo (el kick vuelve a chocar con el cuerpo del
+   808, hacia 80–100 Hz); a 400 Hz se come también parte del gruñido y vuelve el bombeo. Busca el punto más bajo en
+   el que el kick suena limpio: suele estar entre 90 y 150 Hz.
+5. **Iguala el volumen** antes de comparar *Todo* contra *Graves*: con *Todo* el 808 pierde más energía en total y
+   suena más bajo; si no lo compensas con el fader, *Graves* "gana" solo por sonar más fuerte.
+6. **El MIX:** deja *Graves* y baja el MIX a 50 %: la caída del sub es la mitad (mira la vista: el relleno se reduce).
+   Automatiza el MIX en FL (clic derecho → *Create automation clip*) de 0 % en la intro a 100 % cuando entra el kick.
+
+### Receta: 808 de dembow con gruñido, limpio sin que se note
+
+Ebb en el 808 (después de la saturación): **Modo MIDI o Audio, BANDA Graves, CRUCE 100–130 Hz, profundidad 70–90 %,
+LARGO 1/4, duración 35–50 %, suavizado 2–3 ms, MIX 100 %.**
+- Por qué tanta profundidad: solo afecta al sub, que es justo lo que choca con el kick; los armónicos (lo que hace que
+  el 808 se oiga en un celular) no se tocan, así que el efecto no se nota como bombeo.
+- Por qué el cruce cerca de 120 Hz: el sub y el cuerpo del kick de reggaetón viven por debajo; el gruñido del 808 está
+  por encima.
+- Por qué la saturación va **antes** de Ebb: si va después, el saturador volvería a generar armónicos con el sub
+  "agachado" y el gruñido bombearía igual.
+
+### Reto sin receta
+
+Tienes un **pad** con mucho cuerpo (200–500 Hz) y un brillo arriba. Quieres que **solo el brillo** "respire" con el
+kick como efecto rítmico, sin que el cuerpo del pad se mueva, y que el efecto **entre poco a poco** durante el
+pre-coro y esté completo en el coro. ¿Qué BANDA, qué CRUCE y qué haces con el MIX? Pista para el cruce: mira dónde
+termina el cuerpo del pad con el analizador de Riptide (o el Wave Candy de FL) antes de girar la perilla.
+
+Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Crossover / frecuencia de cruce**: el punto donde se parte el espectro en bandas. *En música:* los altavoces de dos
+  vías tienen uno (el woofer recibe los graves, el tweeter los agudos).
+- **Multibanda**: procesar cada banda de frecuencias por separado. *En música:* los compresores multibanda de
+  mastering (el "pumping" solo en los graves en el EDM de festival) y el modo multibanda de Riptide.
+- **Linkwitz-Riley**: el tipo de crossover cuyas bandas suman plano. *En música:* el estándar en los crossovers de los
+  sistemas de PA de conciertos.
+- **dB por octava (pendiente)**: lo rápido que corta un filtro. 24 dB/oct es un corte firme; 6 dB/oct, uno muy suave.
+- **Dry / wet (mix)**: señal original / procesada. *En música:* el knob "mix" de casi cualquier reverb o delay; en
+  compresión se llama *compresión en paralelo* (la "New York compression" de las baterías).
+
+### Errores comunes y cuándo NO usarlo
+
+- **Cruce demasiado alto.** A 400 Hz o más, la banda de graves se lleva la "voz" del bajo y vuelve el bombeo que
+  querías evitar. Empieza en 120 Hz.
+- **Cruce demasiado bajo.** A 40–50 Hz solo se aparta el sub profundo; el cuerpo del kick (80–100 Hz) sigue chocando.
+- **Esperar que el cruce "corte en seco".** Con 24 dB/oct, un cruce a 120 Hz también toca un poco 60–240 Hz. Es normal
+  y suena natural.
+- **Mix y profundidad a la vez sin saber que son lo mismo.** Si bajas los dos, el efecto se reduce dos veces (80 % ×
+  50 % = 40 %). Ajusta con la profundidad y usa el mix para automatizar.
+- **Cuándo NO usarlo:** en un bombeo creativo de un pad o un bus entero (house francés), *Todo* es el efecto que
+  buscas: el bombeo **es** la gracia. Y si el bajo es casi solo sub (un 808 limpio, una senoide), *Graves* y *Todo*
+  suenan casi igual: no hay nada arriba que salvar.

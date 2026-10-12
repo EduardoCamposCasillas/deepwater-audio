@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "deepwater/dsp/TransientDetector.h"
+#include "dsp/Bands.h"
 #include "dsp/CurveShapes.h"
 #include "dsp/Engine.h"
 #include "dsp/HostClock.h"
@@ -996,6 +997,200 @@ void testLookahead()
     CHECK (settled);
 }
 
+
+// Fase 6: procesa una señal mono (tempo, 120 BPM, reproduciendo desde 0) con bloques de tamaño variable.
+// 'beforeBlock (muestra, settings)' puede cambiar los ajustes antes de cada bloque.
+template <typename BeforeBlock>
+std::vector<float> renderSignal (double sampleRate, TempoSettings settings, std::vector<float> signal, int maxBlock,
+                                 BeforeBlock beforeBlock, bool bypassed = false)
+{
+    HostClock clock;
+    clock.prepare (sampleRate);
+    Engine engine;
+    engine.prepare (sampleRate, bypassed, settings);
+    BlockSizes sizes;
+    const double perSample = 120.0 / (60.0 * sampleRate);
+    for (int done = 0; done < static_cast<int> (signal.size());)
+    {
+        const int numSamples = std::min (sizes.next (maxBlock), static_cast<int> (signal.size()) - done);
+        beforeBlock (done, settings);
+        clock.beginBlock (playingAt (done * perSample, 120.0), numSamples);
+        engine.setSettings (settings);
+        float* channel = signal.data() + done;
+        engine.process (&channel, 1, numSamples, clock);
+        done += numSamples;
+    }
+    return signal;
+}
+
+std::vector<float> renderSignal (double sampleRate, TempoSettings settings, std::vector<float> signal, int maxBlock)
+{
+    return renderSignal (sampleRate, settings, std::move (signal), maxBlock, [] (int, TempoSettings&) {});
+}
+
+std::vector<float> sineWave (double sampleRate, double hz, int totalSamples, float amplitude = 1.0f)
+{
+    std::vector<float> out (static_cast<size_t> (totalSamples));
+    for (size_t i = 0; i < out.size(); ++i)
+        out[i] = amplitude * static_cast<float> (std::sin (2.0 * 3.141592653589793 * hz * static_cast<double> (i) / sampleRate));
+    return out;
+}
+
+std::vector<float> noiseSignal (int totalSamples)
+{
+    std::vector<float> out (static_cast<size_t> (totalSamples));
+    std::uint32_t state = 7;
+    for (auto& sample : out)
+    {
+        state = state * 1664525u + 1013904223u;
+        sample = static_cast<float> (static_cast<double> (state >> 8) / 8388608.0 - 1.0) * 0.5f;
+    }
+    return out;
+}
+
+float peakIn (const std::vector<float>& signal, size_t from, size_t to)
+{
+    float peak = 0.0f;
+    for (size_t i = from; i < std::min (to, signal.size()); ++i)
+        peak = std::max (peak, std::abs (signal[i]));
+    return peak;
+}
+
+void testBands()
+{
+    std::printf ("Bandas: Graves / Agudos atenuan solo su banda, sin ducking la suma es plana, bypass bit a bit\n");
+
+    for (const double sampleRate : sampleRates)
+    {
+        const int beat = static_cast<int> (sampleRate / 2.0);          // 120 BPM
+        const auto hit = static_cast<size_t> (beat);                   // golpe de la negra 1
+        const auto window = static_cast<size_t> (0.0125 * sampleRate); // 12.5 ms: medio ciclo de 40 Hz, la curva sigue abajo
+        const auto before = hit - static_cast<size_t> (beat / 4);
+        const int total = 2 * beat;
+
+        // Graves con cruce a 120 Hz: un sub de 40 Hz casi desaparece en el golpe y un 5 kHz ni se entera. Agudos: al revés.
+        // Antes del golpe (la curva ya volvió) los dos pasan enteros: graves + agudos suman 1.
+        for (const auto band : { DuckBand::low, DuckBand::high })
+        {
+            TempoSettings settings = rawCurve (2, 0.5f);
+            settings.band = band;
+            const auto sub = renderSignal (sampleRate, settings, sineWave (sampleRate, 40.0, total), 512);
+            const auto air = renderSignal (sampleRate, settings, sineWave (sampleRate, 5000.0, total), 512);
+            const auto& ducked = band == DuckBand::low ? sub : air;
+            const auto& kept = band == DuckBand::low ? air : sub;
+            CHECK (peakIn (ducked, hit, hit + window) < 0.05f);
+            CHECK (peakIn (kept, hit, hit + window) > 0.97f);
+            CHECK (peakIn (sub, before, hit) > 0.97f);
+            CHECK (peakIn (air, before, hit) > 0.97f);
+        }
+
+        // Sin ducking (profundidad 0) en modo Graves, la salida es la entrada por el allpass del cruce: plana, solo con la
+        // fase girada.
+        TempoSettings flat = rawCurve();
+        flat.depth = 0.0f;
+        flat.band = DuckBand::low;
+        const auto noise = noiseSignal (total);
+        const auto out = renderSignal (sampleRate, flat, noise, 300);
+        deepwater::dsp::LinkwitzRileyAllPass reference;
+        const auto coefficients = deepwater::dsp::LinkwitzRiley::forFrequency (defaultCrossoverHz, sampleRate);
+        float error = 0.0f;
+        for (size_t i = 0; i < noise.size(); ++i)
+            error = std::max (error, std::abs (out[i] - reference.process (noise[i], coefficients)));
+        CHECK (error < 1.0e-5f);
+
+        // Con bypass, la salida es la entrada bit a bit también en modo bandas.
+        TempoSettings deep = rawCurve();
+        deep.band = DuckBand::low;
+        CHECK (renderSignal (sampleRate, deep, noise, 300, [] (int, TempoSettings&) {}, true) == noise);
+
+        // Igual con cualquier tamaño de bloque (el cruce y las bandas avanzan por muestra).
+        deep.crossoverHz = 300.0f;
+        CHECK (renderSignal (sampleRate, deep, noise, 7) == renderSignal (sampleRate, deep, noise, 4096));
+    }
+}
+
+void testMix()
+{
+    std::printf ("Mix: equivale a escalar la profundidad (en Todo y en Graves); 0 = sin ducking; sin saltos\n");
+
+    constexpr double sampleRate = 48000.0;
+    const auto noise = noiseSignal (48000);
+    for (const auto band : { DuckBand::full, DuckBand::low })
+    {
+        TempoSettings halfMix = rawCurve (3, 0.8f);
+        halfMix.band = band;
+        halfMix.depth = 0.8f;
+        halfMix.mix = 0.5f;
+        halfMix.smoothingMs = 2.0f;
+        TempoSettings halfDepth = halfMix;
+        halfDepth.depth = 0.4f;
+        halfDepth.mix = 1.0f;
+        const auto a = renderSignal (sampleRate, halfMix, noise, 512);
+        const auto b = renderSignal (sampleRate, halfDepth, noise, 512);
+        float error = 0.0f;
+        for (size_t i = 0; i < a.size(); ++i)
+            error = std::max (error, std::abs (a[i] - b[i]));
+        CHECK (error < 1.0e-5f);
+    }
+
+    // Mix 0: sin ducking (en Todo, la entrada bit a bit).
+    TempoSettings dry = rawCurve();
+    dry.mix = 0.0f;
+    CHECK (renderSignal (sampleRate, dry, noise, 512) == noise);
+
+    // Bajar el mix sonando no hace saltar la ganancia (rampa de 20 ms).
+    const auto gain = renderGain (sampleRate, 120.0, rawCurve (2, 1.0f), 24000, 64, [] (int sample, TempoSettings& s, TransportInfo&) {
+        if (sample >= 2000)
+            s.mix = 0.0f;
+    });
+    CHECK (maxStep (gain, 1500, gain.size()) < 0.01f);
+}
+
+void testBandChangesWhilePlaying()
+{
+    std::printf ("Bandas: cambiar de banda o mover el cruce sonando, sin clics\n");
+
+    constexpr double sampleRate = 48000.0;
+    constexpr int beat = 24000;
+    // Un bajo de 80 Hz (cerca del cruce: ahí la fase de la suma gira más) con el volumen muy abajo durante casi todo el
+    // ciclo: el peor caso para pasar de una banda a otra.
+    TempoSettings settings = rawCurve (2, 1.0f);
+    settings.depth = 0.9f;
+    settings.smoothingMs = 2.0f;
+    const auto bass = sineWave (sampleRate, 80.0, 2 * beat, 0.5f);
+    const auto steady = renderSignal (sampleRate, settings, bass, 256);
+    const float reference = maxStep (steady, 1, steady.size());
+
+    // Todo → Graves → Agudos → Todo, cada cambio a mitad de la curva.
+    const auto switched = renderSignal (sampleRate, settings, bass, 256, [] (int sample, TempoSettings& s) {
+        s.band = sample < 3000 ? DuckBand::full : sample < 8000 ? DuckBand::low : sample < 14000 ? DuckBand::high : DuckBand::full;
+    });
+    const float switchStep = maxStep (switched, 1, switched.size());
+    if (switchStep > 1.5f * reference)
+        std::printf ("  cambio de banda: paso de %.4f (sin cambios: %.4f)\n", static_cast<double> (switchStep), static_cast<double> (reference));
+    CHECK (switchStep <= 1.5f * reference);
+
+    // Barrer el cruce entre 30 Hz y 2 kHz en modo Graves con ruido: la salida sigue acotada y finita.
+    TempoSettings sweep = settings;
+    sweep.band = DuckBand::low;
+    const auto noise = noiseSignal (2 * beat);
+    const auto swept = renderSignal (sampleRate, sweep, noise, 128, [] (int sample, TempoSettings& s) {
+        s.crossoverHz = 30.0f * std::pow (2000.0f / 30.0f, std::abs (std::sin (static_cast<float> (sample) * 1.0e-4f)));
+    });
+    bool bounded = true;
+    for (const float sample : swept)
+        bounded = bounded && std::isfinite (sample) && std::abs (sample) < 2.0f;
+    CHECK (bounded);
+
+    // El cruce llega a su objetivo (rampa en octavas de 20 ms).
+    BandDucker ducker;
+    ducker.prepare (sampleRate, DuckBand::low, 100.0f);
+    ducker.setCrossover (1600.0f);
+    for (int i = 0; i < 2000; ++i)
+        ducker.advance();
+    CHECK (std::abs (ducker.getCrossoverHz() - 1600.0f) < 0.1f);
+}
+
 } // namespace
 
 int main()
@@ -1019,6 +1214,9 @@ int main()
     testMidiHoldAndTransport();
     testAudioHits();
     testLookahead();
+    testBands();
+    testMix();
+    testBandChangesWhilePlaying();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de Ebb pasaron.\n");
