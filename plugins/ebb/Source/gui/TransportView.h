@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cmath>
 #include <optional>
+#include <tuple>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -24,10 +26,13 @@ public:
                                             "saltos en la l\xc3\xadnea de tiempo; la curva sigue cayendo en su sitio."));
     }
 
+    // Fase 9: solo se repinta si cambia algo de lo que se ve (con FL parado, nada: no gasta CPU).
     void setSnapshot (const TransportSnapshot& newSnapshot)
     {
+        const auto before = shownState();
         snapshot = newSnapshot;
-        repaint();
+        if (shownState() != before)
+            repaint();
     }
 
     void paint (juce::Graphics& g) override
@@ -94,6 +99,15 @@ private:
     {
         const auto barStart = snapshot.hasLastBarStart ? std::optional<double> (snapshot.lastBarStart) : std::nullopt;
         return dsp::musicalPosition (snapshot.ppq, snapshot.timeSignature, barStart);
+    }
+
+    // Todo lo que paint() escribe o enciende, tal como se ve (el tempo con 2 decimales).
+    [[nodiscard]] auto shownState() const noexcept
+    {
+        const auto pos = position();
+        return std::make_tuple (snapshot.source, pos.bar, pos.beat, pos.sixteenth, pos.step, std::lround (snapshot.bpm * 100.0),
+                                snapshot.timeSignature.numerator, snapshot.timeSignature.denominator, snapshot.looping,
+                                snapshot.jumps, std::lround (snapshot.sampleRate / 100.0), snapshot.blockSize);
     }
 
     [[nodiscard]] std::pair<juce::String, juce::Colour> statusText() const

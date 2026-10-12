@@ -295,6 +295,7 @@ private:
         origin = clock.barOrigin();
         quartersPerBar = signature.quartersPerBar();
         beatsPerSample = clock.getBeatsPerSample();
+        maxBeatsPerSample = clock.maxBeatsPerSample();
 
         CurveState next;
         next.mode = mode;
@@ -346,7 +347,7 @@ private:
         float shape = shapeFromBeats (beats, state, duration);
         // Inicio de ciclo: la posición cae en la primera muestra del ciclo y viene de más atrás (o de no sonar). Un loop
         // o un salto a mitad de ciclo no cuenta: ahí la curva no empieza.
-        if (! isHitMode (state.mode) && beats >= 0.0 && beats < beatsPerSample + 1.0e-9
+        if (! isHitMode (state.mode) && beats >= 0.0 && beats < maxBeatsPerSample + 1.0e-9
             && (lastCurveBeats < 0.0 || beats < lastCurveBeats))
         {
             hitHere = true;
@@ -410,6 +411,7 @@ private:
     double origin = 0.0;
     double quartersPerBar = 4.0;
     double beatsPerSample = 0.0;
+    double maxBeatsPerSample = 0.0; // lo más que avanza la posición por muestra (el reloj puede ir un 10 % más rápido)
 
     float glideOffset = 0.0f;
     int glideRemaining = 0;

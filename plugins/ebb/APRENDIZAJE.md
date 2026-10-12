@@ -941,3 +941,103 @@ Inténtalo y después pide pistas.
 - **Cuándo NO usar un preset:** cuando ya sabes qué quieres (montarlo desde Init es igual de rápido y aprendes más), o
   cuando el problema no es de ducking (un bajo que choca con el kick en TODO momento, no solo en el golpe, se arregla
   con EQ o con el arreglo, no con Ebb).
+
+## Fase 9 — Pulido: CPU, tempos y cambios de tempo en vivo
+
+Esta fase no agrega controles: revisa que Ebb aguante cualquier tempo, la automatización de tempo de FL y cualquier
+tamaño de buffer, y mide cuánto procesador gasta. Encontró y arregló un fallo real: con el tempo **bajando** (un
+ritardando automatizado) y buffers grandes, un golpe del modo Tempo podía sonar **dos veces**, con un clic en medio.
+
+### Conceptos aprendidos
+
+- **El audio de Ebb casi no gasta nada.** Medido en este portátil (`EbbTests --cpu`): 0.24 % de un núcleo con Init y
+  0.38 % en el peor caso (Audio + lookahead + Graves con el cruce moviéndose + mix + curva de 32 puntos + GUI abierta).
+  Cabrían cientos de Ebb antes de que FL lo note. Por cada muestra hace pocas cuentas: la posición en el compás, la
+  curva, dos filtros de cruce por canal y el detector del sidechain.
+- **Lo que sí gasta es la GUI.** Dibujar el visor en vivo 30 veces por segundo costaba mucho más que todo el audio: con
+  la ventana de Ebb abierta, 7 % de un núcleo con la canción PARADA y 12 % sonando. Ahora la GUI solo se repinta si algo
+  cambió, y solo la parte que cambió: parada, 0.8 %. Sonando sigue en unos 11 %: casi todo es el coste fijo de dibujar
+  un cuadro en Windows (Direct2D), que se paga aunque cambie un solo píxel. Cerrar la ventana de Ebb lo deja en cero.
+- **El medidor de CPU de FL mide el hilo de audio**, no la GUI. Si la PC va lenta con muchas ventanas de plugins
+  abiertas, el culpable suele ser el dibujo (otro hilo), no el procesamiento. Ciérralas cuando no las uses.
+- **Cómo sabe Ebb dónde está en la canción**: FL le dice, al principio de cada buffer, la posición y el tempo; dentro
+  del buffer Ebb extrapola con ese tempo. Si el tempo está automatizado y cambia DENTRO del buffer, la posición real se
+  aleja un poquito de la extrapolada (más cuanto más grande el buffer y más empinada la rampa).
+- **El arreglo: recuperar poco a poco en vez de saltar.** Antes, al buffer siguiente Ebb saltaba a la posición real de
+  FL. Si el tempo subía, la curva saltaba un poco hacia adelante (un clic pequeño); si bajaba, ¡la posición retrocedía!
+  Y si justo antes había cruzado un golpe, lo volvía a cruzar: el golpe sonaba dos veces. Ahora Ebb sigue desde donde
+  iba y alcanza a FL avanzando hasta un 10 % más rápido o más lento durante unas muestras, como un músico que se
+  adelantó un poco y frena sin pararse. La posición nunca retrocede ni salta; con el tempo fijo no cambia nada
+  (comprobado: el sonido es idéntico bit a bit en 336 escenarios).
+- **Cuánto se puede desviar un golpe con el tempo automatizado** (medido): con una rampa de 90 a 180 BPM en 8 compases,
+  0.3 ms como mucho, incluso con buffers de 4096; con una rampa brutal (200 → 60 BPM en 1 segundo) y buffers de 4096 a
+  44.1 kHz, 4.5 ms; con buffers de 1024 o menos, medio milisegundo. Inaudible en la práctica (un flam se empieza a
+  notar hacia los 10 ms).
+- **Los modos MIDI y Audio no dependen de la posición**: el golpe lo marca la nota o el kick. El tempo solo decide el
+  LARGO de la curva: a 70 BPM dura el doble de milisegundos que a 140.
+
+### Qué hace cada control
+
+No hay controles nuevos. Lo que cambia es cómo se comporta lo que ya había:
+- **Modo Tempo con el tempo automatizado**: los huecos siguen cayendo en la cuadrícula mientras el tempo sube o baja
+  (un "speed up" antes del drop, un ritardando al final), sin golpes dobles ni clics.
+- **DIVISIÓN y DURACIÓN** se miden en tiempos musicales: si el tempo cambia, la curva se estira o se encoge con él (a
+  la mitad de tempo, el hueco dura el doble de milisegundos).
+- **El visor y el reloj de la cabecera** quedan quietos con la canción parada (antes se repintaban sin parar).
+
+### Ejercicio guiado: Ebb con el tempo automatizado (con el volumen igualado)
+
+1. Proyecto a **95 BPM**, el dembow de siempre, Ebb en el 808 con **Dembow Bajo Limpio** (Tempo) y el visor en 1
+   compás.
+2. Automatiza el tempo: clic derecho sobre el tempo de la barra de transporte → *Create automation clip*. Dibuja una
+   rampa de **95 a 140 BPM en 4 compases** (un speed up) y después vuelve de golpe a 95.
+3. Dale play y mira el visor: los cuatro huecos por compás se quedan sobre las líneas de los tiempos durante toda la
+   rampa, y el reloj de la cabecera sigue a FL. Escucha el 808: el hueco se hace más corto (en ms) a medida que sube el
+   tempo, porque la curva dura una fracción del tiempo musical.
+4. Ahora un ritardando: rampa de **140 a 70 BPM en 2 compases**, y sube el buffer de FL al máximo (Options → Audio
+   settings → Buffer length). Antes de esta fase, aquí podía aparecer un golpe doble con un clic; ahora no.
+5. Repite con **Dembow MIDI Kick Irregular**: los golpes siguen a las notas (que FL también mueve con el tempo) y el
+   largo de la curva sigue al tempo.
+
+### Receta: drop a medio tempo con el mismo ducking
+
+Un recurso del reggaetón y del trap: después del build, la sección siguiente va a medio tempo (de 140 a 70) o el
+patrón pasa a "halftime".
+- **Tempo cambiado de verdad** (automatización de 140 a 70): Ebb en modo Tempo sigue cayendo en cada negra, pero cada
+  negra dura el doble: el bombeo se vuelve lento y pesado sin tocar nada. Si quieres el mismo ritmo de antes en
+  segundos, pasa la DIVISIÓN de 1/4 a 1/8 en esa sección con una automatización.
+- **Halftime sin cambiar el tempo** (el kick toca la mitad de veces): usa MIDI o Audio y el ducking sigue al kick nuevo
+  sin automatizar nada; con Tempo tendrías que pasar de 1/4 a 1/2.
+- Por qué: en Tempo, Ebb piensa en tiempos musicales; en MIDI y Audio, en golpes. Elegir el modo según qué cambia (el
+  tempo o el patrón) te ahorra automatizaciones.
+
+### Reto sin receta
+
+Un tema a 100 BPM baja a 75 en el puente con una rampa de 2 compases, y el 808 tiene Ebb en modo Tempo con DIVISIÓN 1/4
+y DURACIÓN 80 %. Durante la rampa y en el puente el 808 suena "hundido": casi nunca recupera su volumen entre golpe y
+golpe. ¿Por qué pasa al bajar el tempo y no a 100? ¿Qué dos controles podrías automatizar (o qué modo usar) para que
+el 808 respire igual que antes? Pista para empezar: calcula cuántos milisegundos dura la curva a 100 y a 75 BPM.
+
+Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Automatización de tempo**: que el tempo del proyecto cambie a lo largo de la canción. *En música:* los "speed ups"
+  antes de un drop de EDM, o el tempo que se frena al final de muchas baladas.
+- **Accelerando / ritardando**: acelerar / frenar el tempo poco a poco (términos clásicos). *En música:* el ritardando
+  final de casi cualquier bolero; el accelerando de "Hava Nagila".
+- **Halftime (medio tiempo)**: el patrón a la mitad de velocidad sobre el mismo tempo (o el tempo a la mitad). *En
+  música:* los drops halftime del dubstep y del trap, y los puentes lentos del reggaetón moderno.
+- **Buffer (tamaño de bloque)**: cuántas muestras procesa el plugin de una vez. Más grande = menos CPU y más latencia al
+  tocar en vivo. *En FL:* Options → Audio settings → Buffer length.
+- **Carga de CPU**: qué fracción del tiempo disponible usa el procesador para calcular el audio. Si llega al 100 % hay
+  cortes ("underruns"). *En FL:* el medidor de CPU de la barra superior.
+
+### Errores comunes
+
+- **Culpar al audio cuando es la GUI.** Diez ventanas de plugins con visores animados pueden poner lenta la PC aunque el
+  medidor de CPU de FL esté bajo. Cierra las que no estés mirando.
+- **Automatizar el tempo y olvidar que el ducking también cambia de duración.** En Tempo, la curva se mide en tiempos:
+  a la mitad de tempo, el hueco dura el doble de milisegundos.
+- **Dejar el buffer alto para grabar.** Para tocar y grabar MIDI, buffer bajo (poca latencia); para mezclar un
+  proyecto pesado, alto. Ebb funciona igual con cualquiera.

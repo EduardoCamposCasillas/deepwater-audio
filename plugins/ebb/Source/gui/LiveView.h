@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <tuple>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -51,29 +52,64 @@ public:
     {
         bars = dsp::LiveScope::validBars (newBars);
         barsButton.setButtonText (juce::String (bars) + (bars == 1 ? juce::String::fromUTF8 (" comp\xc3\xa1s") : " compases"));
+        repaint();
     }
 
-    // Una vez por cuadro de la GUI.
+    // Una vez por cuadro de la GUI. Fase 9: solo se repinta lo que cambió. Con el audio detenido el visor queda quieto (no
+    // gasta CPU); sonando, se repintan las franjas que el audio reescribió, la del cursor y su hueco, y los golpes (que se
+    // van apagando). Todo el visor solo si cambia la escala, la cuadrícula o el aviso de "sin datos".
     void update (const dsp::LiveScope& scope, const TransportSnapshot& newTransport, std::uint32_t hits)
     {
+        constexpr int count = dsp::LiveScope::numColumns;
+        std::array<bool, count> dirty {};
+        const float newCursor = scope.getCursor();
         float inputPeak = 0.0f, sidechainPeak = 0.0f;
+        const bool hadData = hasData;
         hasData = false;
-        for (int c = 0; c < dsp::LiveScope::numColumns; ++c)
+        for (int c = 0; c < count; ++c)
         {
             const auto column = scope.column (c);
-            columns[static_cast<size_t> (c)] = column;
+            auto& previous = columns[static_cast<size_t> (c)];
+            dirty[static_cast<size_t> (c)] = column.input != previous.input || column.output != previous.output
+                                             || column.sidechain != previous.sidechain || column.gain != previous.gain
+                                             || column.hit != previous.hit
+                                             || (column.hit && hitFade (c, newCursor) != hitFade (c, cursor)); // se apaga
+            previous = column;
             inputPeak = std::max ({ inputPeak, column.input, column.output });
             sidechainPeak = std::max (sidechainPeak, column.sidechain);
             hasData = hasData || column.input > 0.0f || column.sidechain > 0.0f || column.hit;
         }
-        cursor = scope.getCursor();
+
+        // El cursor y su hueco: desde donde estaba hasta donde está ahora, más el hueco (con la vuelta al principio).
+        if (newCursor != cursor)
+        {
+            const float travel = newCursor - cursor - std::floor (newCursor - cursor) + cursorGap;
+            const int first = static_cast<int> (std::floor (cursor * count));
+            const int span = std::min (count, static_cast<int> (std::ceil (travel * count)) + 2);
+            for (int i = 0; i < span; ++i)
+                dirty[static_cast<size_t> ((first + i) % count)] = true;
+        }
+        cursor = newCursor;
+
+        const auto gridBefore = gridState();
         transport = newTransport;
-        holdPeaks();
+        bool full = ! primed || gridState() != gridBefore || hasData != hadData;
 
         // Escala: sube al instante y baja despacio (≈ 2 s), para que el dibujo no "respire" con cada golpe.
+        // Se dibuja con la escala de la última vez que se repintó todo; se cambia (y se repinta todo) cuando se aleja más de
+        // un 3 %: con cada columna nueva el pico de la ventana se mueve un poco y, si no, el visor entero se repintaría
+        // en cada cuadro.
         inputScale = follow (inputScale, std::max (inputPeak, minScale));
         sidechainScale = follow (sidechainScale, std::max (sidechainPeak, minScale));
+        const auto drift = [] (float wanted, float drawn) { return std::abs (wanted - drawn) > 0.03f * drawn; };
+        full = full || drift (inputScale, drawnInputScale) || drift (sidechainScale, drawnSidechainScale);
+        if (full)
+        {
+            drawnInputScale = inputScale;
+            drawnSidechainScale = sidechainScale;
+        }
 
+        const float previousGlow = glow;
         if (! primed)
             primed = true; // abrir la GUI no es un golpe
         else if (hits != shownHits)
@@ -81,7 +117,16 @@ public:
         else
             glow = std::max (0.0f, glow - 0.2f);
         shownHits = hits;
-        repaint();
+
+        holdPeaks();
+        if (full)
+        {
+            repaint();
+            return;
+        }
+        if (glow != previousGlow)
+            repaint (captionArea());
+        repaintColumns (dirty);
     }
 
     void paint (juce::Graphics& g) override
@@ -92,7 +137,9 @@ public:
         g.setColour (theme::panelOutline);
         g.drawRoundedRectangle (bounds.reduced (0.5f), 8.0f, 1.0f);
 
-        paintCaption (g, captionArea());
+        // Con Direct2D (JUCE 8+ en Windows) lo que cae fuera de la zona a repintar también cuesta: el texto, solo si hace falta.
+        if (g.clipRegionIntersects (captionArea()))
+            paintCaption (g, captionArea());
         const auto plot = plotArea();
         g.setColour (theme::display);
         g.fillRoundedRectangle (plot.expanded (2.0f), 4.0f);
@@ -115,16 +162,22 @@ public:
     }
 
 private:
-    static constexpr float minScale = 0.01f; // −40 dBFS: por debajo, el ruido no se agranda a pantalla completa
+    static constexpr float minScale = 0.01f;  // −40 dBFS: por debajo, el ruido no se agranda a pantalla completa
+    static constexpr float cursorGap = 0.02f; // hueco borrado delante del cursor (fracción de la ventana)
 
     // Cada columna dura unos ms (1 compás a 95 BPM = 5 ms): un trozo tan corto puede no contener el pico de un bajo de
     // 40 Hz (25 ms por ciclo) y el dibujo saldría a rayas. Se muestra el mayor pico de las columnas vecinas en ±12.5 ms
     // (un ciclo de 40 Hz en total). La ganancia y los golpes no se tocan.
-    void holdPeaks() noexcept
+    [[nodiscard]] int peakReach() const noexcept
     {
         const auto signature = transport.timeSignature.isValid() ? transport.timeSignature : dsp::TimeSignature {};
         const double columnSeconds = signature.quartersPerBar() * bars * 60.0 / std::max (transport.bpm, 1.0) / dsp::LiveScope::numColumns;
-        const int reach = std::clamp (static_cast<int> (std::lround (0.0125 / columnSeconds)), 0, 8);
+        return std::clamp (static_cast<int> (std::lround (0.0125 / columnSeconds)), 0, 8);
+    }
+
+    void holdPeaks() noexcept
+    {
+        const int reach = peakReach();
         constexpr int count = dsp::LiveScope::numColumns;
         for (int c = 0; c < count; ++c)
         {
@@ -140,9 +193,86 @@ private:
         }
     }
 
+    // Repinta la zona de las columnas marcadas, ensanchadas lo que alcanza la retención de picos (holdPeaks) y una columna
+    // más por lado (las líneas unen el centro de cada columna con el de su vecina; el triángulo de un golpe es más ancho).
+    void repaintColumns (const std::array<bool, dsp::LiveScope::numColumns>& dirty)
+    {
+        constexpr int count = dsp::LiveScope::numColumns;
+        const int reach = peakReach() + 2;
+        std::array<bool, count> grown {};
+        for (int c = 0; c < count; ++c)
+            if (dirty[static_cast<size_t> (c)])
+                for (int d = -reach; d <= reach; ++d)
+                    grown[static_cast<size_t> ((c + d + count) % count)] = true;
+
+        // Una sola zona, de la primera a la última columna marcada (casi siempre, solo la franja del cursor): Direct2D
+        // recorta mucho más rápido con un rectángulo que con una lista de franjas.
+        int first = -1, last = -1;
+        for (int c = 0; c < count; ++c)
+            if (grown[static_cast<size_t> (c)])
+            {
+                first = first < 0 ? c : first;
+                last = c;
+            }
+        if (first < 0)
+            return;
+        const auto plot = plotArea();
+        const float width = plot.getWidth() / static_cast<float> (count);
+        const float left = plot.getX() + static_cast<float> (first) * width;
+        const float right = plot.getX() + static_cast<float> (last + 1) * width;
+        repaint (juce::Rectangle<float> (left, plot.getY(), right - left, plot.getHeight()).expanded (6.0f, 3.0f).getSmallestIntegerContainer());
+    }
+
+    // Qué tan nueva es una columna con el cursor en 'at': justo detrás del cursor = recién escrita (≈ 1); justo delante =
+    // de la vuelta anterior, a punto de reescribirse (≈ 0). Dentro del hueco no se dibuja (−1).
+    [[nodiscard]] static float columnFreshness (int c, float at) noexcept
+    {
+        float ahead = static_cast<float> (c) / dsp::LiveScope::numColumns - at;
+        ahead -= std::floor (ahead);
+        return ahead < cursorGap ? -1.0f : ahead;
+    }
+
+    // Opacidad de la marca de un golpe (−1 = en el hueco). Va en 4 escalones y no continua: así una marca solo se repinta
+    // cuando cambia de escalón, no en cada cuadro (con varios golpes por compás, el visor entero).
+    [[nodiscard]] static float hitFade (int c, float at) noexcept
+    {
+        const float fresh = columnFreshness (c, at);
+        return fresh < 0.0f ? -1.0f : 0.35f + 0.65f * std::ceil (fresh * 4.0f) / 4.0f;
+    }
+
+    // Columnas que hay que dibujar para cubrir 'clip' (con margen: las líneas y los triángulos se salen de su columna).
+    [[nodiscard]] std::pair<int, int> columnsIn (juce::Rectangle<int> clip, juce::Rectangle<float> plot) const noexcept
+    {
+        constexpr int count = dsp::LiveScope::numColumns;
+        const float width = plot.getWidth() / static_cast<float> (count);
+        const int first = static_cast<int> (std::floor ((static_cast<float> (clip.getX()) - plot.getX()) / width)) - 2;
+        const int last = static_cast<int> (std::ceil ((static_cast<float> (clip.getRight()) - plot.getX()) / width)) + 2;
+        return { std::clamp (first, 0, count), std::clamp (last, 0, count) };
+    }
+
+    // Muy cerca del objetivo se copia: si no, la escala se movería milésimas en cada cuadro y el visor no quedaría quieto.
     static float follow (float current, float target) noexcept
     {
-        return target > current ? target : current + (target - current) * 0.02f;
+        if (target >= current || current - target < 1.0e-3f * target)
+            return target;
+        return current + (target - current) * 0.02f;
+    }
+
+    // Lo que decide la cuadrícula y sus números (paintGrid).
+    [[nodiscard]] auto gridState() const noexcept
+    {
+        return std::make_tuple (transport.timeSignature.numerator, transport.timeSignature.denominator, firstBar(), bars);
+    }
+
+    // El primer compás de la ventana: el actual redondeado a la ventana (compases 1–2, 3–4...). Parado, el 1.
+    [[nodiscard]] int firstBar() const noexcept
+    {
+        if (transport.source == dsp::ClockSource::stopped)
+            return 1;
+        const auto signature = transport.timeSignature.isValid() ? transport.timeSignature : dsp::TimeSignature {};
+        const auto barStart = transport.hasLastBarStart ? std::optional<double> (transport.lastBarStart) : std::nullopt;
+        const int currentBar = dsp::musicalPosition (transport.ppq, signature, barStart).bar;
+        return ((std::max (currentBar, 1) - 1) / bars) * bars + 1;
     }
 
     [[nodiscard]] juce::Rectangle<int> captionArea() const { return getLocalBounds().reduced (12, 0).withTrimmedTop (6).withHeight (22); }
@@ -215,10 +345,7 @@ private:
                 g.drawVerticalLine (juce::roundToInt (xOf (b)), plot.getBottom() - 5.0f, plot.getBottom());
         }
 
-        // El primer compás de la ventana: el actual redondeado a la ventana (compases 1–2, 3–4...).
-        const auto barStart = transport.hasLastBarStart ? std::optional<double> (transport.lastBarStart) : std::nullopt;
-        const int currentBar = dsp::musicalPosition (transport.ppq, signature, barStart).bar;
-        const int firstBar = transport.source == dsp::ClockSource::stopped ? 1 : ((std::max (currentBar, 1) - 1) / bars) * bars + 1;
+        const int first = firstBar();
 
         g.setFont (juce::FontOptions (10.0f));
         for (int bar = 0; bar < bars; ++bar)
@@ -234,9 +361,12 @@ private:
                         g.drawVerticalLine (juce::roundToInt (x) + 1, plot.getY(), plot.getBottom());
                     continue;
                 }
+                const juce::Rectangle<float> labelArea (x + 3.0f, plot.getY() + 1.0f, 40.0f, 11.0f);
+                if (! g.clipRegionIntersects (labelArea.getSmallestIntegerContainer()))
+                    continue;
                 g.setColour (theme::text.withAlpha (barLine ? 0.85f : 0.5f));
-                const auto label = barLine ? juce::String (firstBar + bar) : juce::String (firstBar + bar) + "." + juce::String (beat + 1);
-                g.drawText (label, juce::Rectangle<float> (x + 3.0f, plot.getY() + 1.0f, 40.0f, 11.0f), juce::Justification::centredLeft);
+                const auto label = barLine ? juce::String (first + bar) : juce::String (first + bar) + "." + juce::String (beat + 1);
+                g.drawText (label, labelArea, juce::Justification::centredLeft);
             }
     }
 
@@ -245,15 +375,10 @@ private:
         constexpr int count = dsp::LiveScope::numColumns;
         const float width = plot.getWidth() / static_cast<float> (count);
         const float height = plot.getHeight();
-        constexpr float gap = 0.02f; // hueco borrado delante del cursor
+        // Solo las columnas que caen en la zona a repintar (update() suele pedir franjas estrechas).
+        const auto [firstColumn, endColumn] = columnsIn (g.getClipBounds(), plot);
 
-        // Qué tan nueva es una columna: justo detrás del cursor = recién escrita (≈ 1); justo delante = de la vuelta
-        // anterior, a punto de reescribirse (≈ 0). Dentro del hueco no se dibuja (−1).
-        const auto freshness = [this] (int c) {
-            float ahead = static_cast<float> (c) / count - cursor;
-            ahead -= std::floor (ahead);
-            return ahead < gap ? -1.0f : ahead;
-        };
+        const auto freshness = [this] (int c) { return columnFreshness (c, cursor); };
         const auto xOf = [&] (int c) { return plot.getX() + static_cast<float> (c) * width; };
 
         // Señal: entrada (gris) y salida (verde agua), de abajo arriba. Cada una es un solo polígono escalonado por tramo
@@ -270,7 +395,7 @@ private:
                 path.closeSubPath();
                 open = false;
             };
-            for (int c = 0; c < count; ++c)
+            for (int c = firstColumn; c < endColumn; ++c)
             {
                 if (freshness (c) < 0.0f)
                 {
@@ -278,7 +403,7 @@ private:
                     continue;
                 }
                 const float x = xOf (c);
-                const float y = plot.getBottom() - std::min (1.0f, level (shown[static_cast<size_t> (c)]) / inputScale) * height;
+                const float y = plot.getBottom() - std::min (1.0f, level (shown[static_cast<size_t> (c)]) / drawnInputScale) * height;
                 if (! open)
                 {
                     path.startNewSubPath (x, plot.getBottom());
@@ -307,7 +432,7 @@ private:
                 path.startNewSubPath (point);
             open = true;
         };
-        for (int c = 0; c < count; ++c)
+        for (int c = firstColumn; c < endColumn; ++c)
         {
             if (freshness (c) < 0.0f)
             {
@@ -317,7 +442,7 @@ private:
             const auto& column = shown[static_cast<size_t> (c)];
             const float x = xOf (c) + 0.5f * width;
             if (column.sidechain > 0.0f)
-                addPoint (sidechainLine, sidechainOpen, { x, plot.getBottom() - std::min (1.0f, column.sidechain / sidechainScale) * height });
+                addPoint (sidechainLine, sidechainOpen, { x, plot.getBottom() - std::min (1.0f, column.sidechain / drawnSidechainScale) * height });
             else
                 sidechainOpen = false;
             addPoint (gainLine, gainOpen, { x, plot.getY() + (1.0f - column.gain) * height });
@@ -328,12 +453,11 @@ private:
         g.strokePath (gainLine, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
         // Golpes, encima de todo: una línea fina y un triángulo arriba.
-        for (int c = 0; c < count; ++c)
+        for (int c = firstColumn; c < endColumn; ++c)
         {
-            const float fresh = freshness (c);
-            if (fresh < 0.0f || ! shown[static_cast<size_t> (c)].hit)
+            const float fade = hitFade (c, cursor);
+            if (fade < 0.0f || ! shown[static_cast<size_t> (c)].hit)
                 continue;
-            const float fade = 0.35f + 0.65f * fresh;
             const float x = xOf (c);
             g.setColour (theme::accent.withAlpha (0.5f * fade));
             g.fillRect (x, plot.getY(), 1.0f, height);
@@ -354,7 +478,8 @@ private:
     std::array<dsp::LiveScope::Column, dsp::LiveScope::numColumns> shown {};   // con los picos retenidos (holdPeaks)
     float cursor = 0.0f;
     TransportSnapshot transport;
-    float inputScale = minScale, sidechainScale = minScale;
+    float inputScale = minScale, sidechainScale = minScale;           // siguen al pico de la ventana
+    float drawnInputScale = minScale, drawnSidechainScale = minScale; // las que se usan al dibujar
     bool hasData = false;
     bool primed = false;
     std::uint32_t shownHits = 0;

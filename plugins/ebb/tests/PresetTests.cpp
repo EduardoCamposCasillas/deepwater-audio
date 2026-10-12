@@ -34,12 +34,15 @@
 // (La misma técnica que UndertowPresetTests y RiptidePresetTests.)
 namespace allocation
 {
-std::atomic<bool> counting { false };
+// Solo cuenta el hilo que llama a processBlock (thread_local). Fase 9: con un contador global, el hilo de los
+// temporizadores de JUCE (el del lookahead del procesador, que avisa al hilo de mensajes) reservaba memoria de vez en
+// cuando justo mientras se medía, y el test fallaba sin que processBlock tuviera la culpa.
+thread_local bool counting = false;
 std::atomic<int> count { 0 };
 
 void note (void* p) noexcept
 {
-    if (p != nullptr && counting.load (std::memory_order_relaxed))
+    if (p != nullptr && counting)
         count.fetch_add (1, std::memory_order_relaxed);
 }
 
@@ -232,6 +235,42 @@ Dembow makeDembow (double sampleRate, double seconds)
     }
     return d;
 }
+
+// --- Fase 9: un host con el tempo automatizado ------------------------------------------------------------------------
+//
+// El PlayHead que ve el procesador: el tempo va en línea recta de 'from' a 'to' en 'rampSeconds' (después, constante) y
+// la posición es la integral exacta del tempo, como en FL. Cada bloque informa el tempo y la posición de su primera
+// muestra (el procesador extrapola el resto). Compás 4/4.
+class AutomatedTempoHead final : public juce::AudioPlayHead
+{
+public:
+    AutomatedTempoHead (double fromBpm, double toBpm, double seconds) : from (fromBpm), to (toBpm), rampSeconds (seconds) {}
+
+    double sampleRate = 48000.0;
+    int sample = 0; // primera muestra del bloque que viene
+
+    [[nodiscard]] double bpmAt (double t) const noexcept { return t >= rampSeconds ? to : from + (to - from) * t / rampSeconds; }
+    [[nodiscard]] double beatsAt (double t) const noexcept
+    {
+        const double inRamp = std::min (t, rampSeconds);
+        return ((from + 0.5 * (bpmAt (inRamp) - from)) * inRamp + to * std::max (0.0, t - rampSeconds)) / 60.0;
+    }
+
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        const double t = sample / sampleRate;
+        PositionInfo info;
+        info.setIsPlaying (true);
+        info.setBpm (bpmAt (t));
+        info.setTimeSignature (TimeSignature { 4, 4 });
+        info.setPpqPosition (beatsAt (t));
+        info.setPpqPositionOfLastBarStart (std::floor (beatsAt (t) / 4.0) * 4.0);
+        return info;
+    }
+
+private:
+    double from, to, rampSeconds;
+};
 
 // --- Render ----------------------------------------------------------------------------------------------------------
 
@@ -641,6 +680,70 @@ int main (int argc, char* argv[])
                         check (stats.allocations == 0, tag + ": reservas de memoria: " + juce::String (stats.allocations));
                     }
         }
+    });
+
+    runTest ("Tempo automatizado (90 -> 160 y 170 -> 80 BPM) con cada preset: golpes de la cuadricula exactos, sin saltos ni reservas", [] {
+        constexpr double sampleRate = 48000.0;
+        TemporaryFolder temp;
+        std::vector<Preset> presets;
+        {
+            auto processor = makeProcessor (temp.folder);
+            presets = processor->getPresetManager().getPresets();
+        }
+        struct Ramp
+        {
+            double from, to, seconds;
+        };
+        for (const auto ramp : { Ramp { 90.0, 160.0, 5.0 }, Ramp { 170.0, 80.0, 3.0 } })
+            for (const int blockSize : { 512, 4096 })
+            {
+                AutomatedTempoHead head (ramp.from, ramp.to, ramp.seconds);
+                head.sampleRate = sampleRate;
+                // Termina 1/12 de negra después de una negra entera: lejos de cualquier golpe de la cuadrícula (la más fina,
+                // 1/16 T, golpea cada 1/6), así la cuenta de golpes no depende de una muestra.
+                const double endBeats = std::floor (head.beatsAt (6.0)) + 1.0 / 12.0;
+                double seconds = 6.0;
+                while (head.beatsAt (seconds) > endBeats)
+                    seconds -= 1.0e-5;
+
+                // Seno de 110 Hz a −12 dBFS (cualquier salto es un clic); el dembow sigue en el MIDI y el sidechain.
+                auto dembow = makeDembow (sampleRate, seconds);
+                for (int i = 0; i < dembow.main.getNumSamples(); ++i)
+                    for (int ch = 0; ch < 2; ++ch)
+                        dembow.main.setSample (ch, i, 0.25f * static_cast<float> (std::sin (twoPi * 110.0 * i / sampleRate)));
+
+                for (const auto& preset : presets)
+                {
+                    auto processor = makeProcessor (temp.folder);
+                    processor->getPresetManager().load (preset);
+                    processor->setPlayHead (&head);
+                    RenderOptions options;
+                    options.blockSize = blockSize;
+                    options.beforeBlock = [&] (int block) { head.sample = block * blockSize; };
+                    const auto stats = render (*processor, dembow, sampleRate, options);
+                    const auto tag = preset.name + " (" + juce::String (ramp.from, 0) + " -> " + juce::String (ramp.to, 0)
+                                     + " BPM, bloques de " + juce::String (blockSize) + ")";
+                    check (stats.finite, tag + ": NaN");
+                    check (stats.allocations == 0, tag + ": reservas de memoria: " + juce::String (stats.allocations));
+
+                    float largestStep = 0.0f;
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 1; i < stats.output.getNumSamples(); ++i)
+                            largestStep = std::max (largestStep, std::abs (stats.output.getSample (ch, i) - stats.output.getSample (ch, i - 1)));
+                    check (largestStep < 0.02f, tag + ": salto entre muestras de " + juce::String (largestStep, 4));
+
+                    // Modo Tempo: una curva por cada división que pasó (más la del 0), ni una más ni una menos.
+                    const auto mode = ebb::dsp::triggerModeFromIndex (static_cast<int> (valueOf (*processor, id::mode)));
+                    if (mode == ebb::dsp::TriggerMode::tempo)
+                    {
+                        const double period = ebb::dsp::divisionBeats (static_cast<int> (valueOf (*processor, id::division)), {});
+                        const auto expected = static_cast<std::uint32_t> (std::floor (endBeats / period + 1.0e-9)) + 1;
+                        check (processor->getCurveHits() == expected, tag + ": " + juce::String (processor->getCurveHits())
+                                                                          + " golpes, se esperaban " + juce::String (expected));
+                    }
+                    processor->setPlayHead (nullptr);
+                }
+            }
     });
 
     runTest ("Cambiar de preset con audio sonando (cada 150 ms, toda la biblioteca): sin NaN, sin saltos ni reservas", [] {

@@ -48,6 +48,8 @@ Desde la raíz del repositorio (ver también los comandos generales en el `CLAUD
 ```
 cmake --build build --config Release --target Ebb_VST3      # solo el plugin
 build/plugins/ebb/Release/EbbTests.exe                      # tests del reloj y del motor (sin JUCE)
+build/plugins/ebb/Release/EbbTests.exe --cpu                # tabla de CPU (Fase 9; mejor de 5, este equipo)
+build/plugins/ebb/Release/EbbTests.exe --fingerprint <txt>  # huella del sonido de 336 escenarios (antes/después de un cambio)
 build/plugins/ebb/EbbPresetTests_artefacts/Release/EbbPresetTests.exe   # presets (--verbose: tabla; --notes: notas)
 ```
 - VST3: `build/plugins/ebb/Ebb_artefacts/Release/VST3/Ebb.vst3`.
@@ -78,7 +80,7 @@ plugins/ebb/
                              # respuesta en frecuencia de las bandas (BandView.h), visor en vivo (LiveView.h)
     presets/EbbPresets.h/.cpp  # formato propio (categorías, .ebpreset, bypass excluido, BinaryData) y curva ↔ <Curve>
   Presets/Factory/         # .ebpreset de fábrica por categoría (compilados dentro del plugin)
-  tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE)
+  tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE); ProcessorRig = processBlock sin JUCE (CPU y huellas)
   tests/PresetTests.cpp    # tests de presets (con JUCE: compila el procesador; dembow sintético por MIDI y sidechain)
 ```
 
@@ -118,41 +120,73 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 8 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona. El audio no cambia (el motor no se tocó).
-- Librería `libs/presets` (cambio compartido; Undertow y Riptide no lo usan y sus tests pasan): "estado extra" opcional
-  en `PresetFormat` (`extraStateTag`, `captureExtraState`, `applyExtraState` → avisos) y `Preset::extraState`
-  (`juce::ValueTree`), para lo que es parte del sonido pero no es un parámetro. Se escribe como un elemento hijo del
-  preset, se aplica al cargar (inválido = el de Init), se guarda con los presets del usuario y entra en el "*"
-  (comparado con lo capturado al cargar, `isEquivalentTo`).
-- `presets/EbbPresets.h/.cpp`: `<EbbPreset>`, `.ebpreset`, `Documentos\Ebb\Presets`, categorías Init, Dembow, Trap,
-  House, Mezcla, Creativo, Otros; bypass EXCLUIDO. La curva es el estado extra `<Curve>`: puntos
-  (`<Point x y tension/>`, el mismo formato del estado del proyecto) o una forma de fábrica por nombre
-  (`<Curve shape="Retención"/>`, así los presets se leen como recetas). `curveToTree` / `curveFromTree` (sin `<Curve>` =
-  Clásica sin aviso; forma desconocida o < 2 puntos = Clásica con aviso) los usa también el procesador.
-- Procesador: `curve` arranca en la forma por defecto ANTES del `PresetManager` (último miembro: una instancia nueva es
-  "Init" sin "*"); `getStateInformation` escribe el nombre del preset y el "*"; `setStateInformation` llama a
-  `stateRestored` después de cargar la curva. Proyecto de la Fase 7 → "Sin nombre".
-- GUI: barra de presets (400 px) en la cabecera entre EBB y el reloj (al reloj le caben estado, posición, luces, BPM y
-  compás); el navegador y el panel de guardar tapan las tres filas; los mensajes de los presets, 6 s en el pie, en
-  ámbar. `theme::presetPalette()` (usuario en ámbar). Revisado con captura del Standalone (el navegador, abierto con un
-  parche temporal: el clic simulado no llega a JUCE).
-- 19 presets de fábrica (Init + 6 Dembow, 3 Trap, 2 House, 2 Mezcla, 5 Creativo) con notas: qué hace cada ajuste y por
-  qué, qué ruteo necesita, cómo probarlo, cuándo NO usarlo y de qué fase viene. Las recetas de las fases 2–7 y presets
-  nuevos; no resuelven los retos pendientes (no hay preset de Agudos: es el reto de la Fase 6). "Rebote" es el único con
-  una curva escrita punto a punto.
-- Tests `EbbPresetTests` (en ctest): cada preset de fábrica se lee y se carga sin avisos (también su curva),
-  categorías, notas, sin bypass; curva por nombre / por puntos / sin `<Curve>` / rara; cargar (unidades, nombres de
-  opciones, defectos, bypass intacto, Init devuelve la curva); "*" con parámetros y con la curva; guardar con la curva
-  (ida y vuelta exacta), reemplazar, borrar; estado del proyecto (nombre, "*" de la curva, proyecto antiguo); cada
-  preset sobre un dembow desplazado a 120 BPM (kick por MIDI y por sidechain): sin NaN ni reservas, el pico no sube más
-  de 1 dB, baja en el kick (5–30 ms después) y en MIDI/Audio suelta lejos de él; bloques 1–4096 × mono/estéreo ×
-  con/sin sidechain × 4 sample rates; cambiar de preset cada 150 ms con un seno (mayor salto entre muestras 0.010).
-  Encontrado al escribirlos: con un kick de cola larga (caída de 180 ms) el del paso 15 no deja rearmar el detector antes
-  del "1" con UMBRAL −20 dB (la limitación de la Fase 5). El test usa un kick de dembow seco (70 ms) y las notas de los
-  presets de Audio dicen que el kick tiene que bajar de la línea punteada entre golpe y golpe.
+Fase 9 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio. Con el tempo fijo el audio no cambia: idéntico bit a
+bit a la Fase 8 (336 escenarios, ver abajo).
+- Tempo automatizado (fallo encontrado por los tests nuevos): el host informa el tempo del principio del bloque y, si el
+  tempo cambia dentro del bloque, su posición real se aleja de la extrapolada. `HostClock` saltaba a la del host en el
+  bloque siguiente: con el tempo SUBIENDO la curva saltaba hacia adelante (0.03 de ganancia con 4096 muestras) y la GUI
+  perdía golpes; BAJANDO la posición retrocedía y, si había cruzado un golpe, lo volvía a cruzar: golpe doble con un
+  salto de 0.99 (200 → 60 BPM en 1 s, bloques de 4096). Ahora una diferencia menor que `jumpToleranceBeats` se guarda
+  como `offset` (nuestro reloj − el del host) y se recupera a `catchUpRate` = 10 % del tempo por muestra
+  (`ppqAt`); `expectedNextPpq` = dónde estará nuestro reloj. La posición nunca retrocede ni salta; con offset 0 la cuenta
+  es la de antes. `Engine`: la ventana del inicio de ciclo usa `clock.maxBeatsPerSample()` (el reloj puede avanzar un
+  10 % más por muestra mientras recupera).
+- Error de tiempo que queda (física del dato del host, medido): rampa de 8 compases (90 ↔ 180) ≤ 0.3 ms con bloques de
+  4096; 200 → 60 BPM en 1 s: 4.5 ms con 4096 a 44.1 kHz, ≤ 0.5 ms con 1024, ≤ 0.02 ms con 64. Extrapolar con la
+  pendiente del tempo se descartó: un salto de tempo se leería como rampa y el error de un bloque superaría la
+  tolerancia (se tomaría por un salto, con clic).
+- CPU del audio (`EbbTests --cpu`, 48 kHz, bloques de 256, mejor de 5; ProcessorRig = lo que hace processBlock): Init
+  0.24 % de un núcleo; mono 0.20; host parado 0.13; Graves 0.25 (el LR4 corre siempre); cruce moviéndose 0.35 (coeficientes
+  por muestra); MIDI 0.22; Audio 0.21; GUI abierta (visor) 0.30; peor caso 0.38 % (96 kHz: 0.76). Medido por partes
+  (~50 ns por muestra estéreo): curva 14 ns (valueAt 9: expm1), LR4 estéreo 11, lookahead 4, detector 6. Se probaron
+  cachear expm1(k) por tramo en `BreakpointCurve` (valueAt −25 %) y calcular los picos solo con visor: idénticos bit a
+  bit pero dentro del ruido de medida (±10–15 % en este portátil): descartados para no tocar la librería sin beneficio.
+- CPU de la GUI (Standalone, ventana al 100 %, proceso entero en este portátil con Iris Xe; JUCE 9 dibuja con
+  Direct2D): antes 7 % de un núcleo con el audio quieto y 12 % sonando. `TransportView` solo se repinta si cambia algo de
+  lo que muestra (tupla de lo visible). `LiveView`: compara las columnas con las del cuadro anterior y repinta UNA zona
+  (de la primera a la última columna que cambió, más el cursor y su hueco, ensanchada lo que alcanza `holdPeaks`); todo
+  el visor solo si cambia la cuadrícula, el aviso de "sin datos" o la escala dibujada (`drawnInputScale`, se rehace al
+  alejarse > 3 % de la que sigue al pico); la marca de cada golpe se apaga en 4 escalones (`hitFade`) y no continua (si
+  no, con 4–8 golpes por compás el visor entero cambiaba en cada cuadro); título y números de compás solo si caen en la
+  zona; `paintColumns` recorre solo las columnas de la zona. `CurveEditor`: el cursor repinta solo su franja vieja y la
+  nueva. Resultado: 0.8 % con el audio quieto; sonando ~11 %: el coste fijo de Direct2D por cuadro domina (un repintado
+  de 1 píxel por cuadro ya cuesta ~4 %; con el renderizador por software el total bajaba a 6.7 %, no se cambió: es la
+  decisión por defecto de JUCE y aprovecha la GPU). Medido con un parche temporal (no incluido) que llamaba a processBlock
+  desde el temporizador: en este entorno el Standalone no tiene audio. Revisado con capturas: sin restos al repintar.
+- Tests `EbbTests` (+4 y dos modos): reloj que recupera una diferencia (sigue desde donde iba, pasos entre 0.9 y 1.1 del
+  tempo, alcanza al host en 960 muestras; > tolerancia = salto); 10 tempos de 60 a 300 BPM (con decimales) × 4 sample
+  rates: cada golpe en la muestra exacta y la vuelta dura 30/BPM s (también el LARGO del modo MIDI); tempo automatizado
+  (4 rampas, bloques de hasta 64/1024/4096, 4 sample rates): tantos golpes como corcheas (ni perdidos ni dobles, también
+  para la GUI), error dentro de lo medido, salto < 0.02 fuera de los golpes; salto de tempo 140 ↔ 70 sonando, en Tempo y
+  en MIDI: sin saltos > 0.01 y los golpes siguen en las negras. `--cpu` y `--fingerprint`: ProcessorRig (reloj → ajustes
+  → MIDI → detector siempre → visor → motor → sidechain al visor), 7 variantes (tempo, MIDI, audio con lookahead y
+  visor, graves con curva de 32 puntos, y tres de "cambios" que tocan algo cada 50 ms: división, forma, profundidad,
+  banda, cruce, mix, bypass, suavizado, duración, tempo, salto de loop, parar/arrancar, lookahead, modo, velocidad,
+  compás) × 4 sample rates × bloques 1/7/64/256/333/4096 × mono/estéreo; FNV-1a de la salida, de lo que lee la GUI en
+  cada bloque y de las columnas del visor. HEAD y Fase 9: los 336 hashes idénticos.
+- `EbbPresetTests` (+1): cada preset con un PlayHead de tempo automatizado (90 → 160 en 5 s y 170 → 80 en 3 s, bloques
+  de 512 y 4096, seno de 110 Hz): sin NaN ni reservas, salto < 0.02 y, en modo Tempo, exactamente una curva por división
+  (con el reloj de HEAD, "Trap Pad en Tresillos" perdía un golpe). El contador de reservas pasó a `thread_local`: el
+  global contaba reservas del hilo de temporizadores de JUCE (el `Timer` del lookahead) y fallaba de vez en cuando sin
+  culpa de processBlock.
 - Release con 0 warnings; ctest 7/7; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 9 (pulido).
+Siguiente: que el usuario pruebe la Fase 9 en FL Studio (tempo automatizado, buffer grande, CPU con la GUI abierta y
+cerrada). Con eso Ebb queda terminado; después, plugin 4 (EQ paramétrico, ver el `CLAUDE.md` raíz).
+
+### Fase 8 (completada 2026-10-12, probada en FL)
+- Librería `libs/presets`: "estado extra" opcional en `PresetFormat` (`extraStateTag`, `captureExtraState`,
+  `applyExtraState`) y `Preset::extraState` (`juce::ValueTree`): un elemento hijo del preset que cuenta para el "*".
+- `presets/EbbPresets.h/.cpp`: `<EbbPreset>`, `.ebpreset`, `Documentos\Ebb\Presets`, categorías Init, Dembow, Trap,
+  House, Mezcla, Creativo, Otros; bypass EXCLUIDO. La curva es el estado extra `<Curve>`: puntos o una forma de fábrica
+  por nombre (`<Curve shape="Retención"/>`); `curveToTree` / `curveFromTree` también para el estado del proyecto.
+- Procesador: `curve` arranca en la forma por defecto ANTES del `PresetManager` (una instancia nueva es "Init" sin "*");
+  el nombre del preset y el "*" viajan con el proyecto. GUI: barra de presets en la cabecera; navegador y panel de
+  guardar sobre las tres filas; mensajes en el pie.
+- 19 presets de fábrica con notas. `EbbPresetTests`: lectura, carga, "*", guardar, estado del proyecto, cada preset
+  sobre un dembow desplazado (MIDI y sidechain), bloques 1–4096, cambio de preset sin clics. Limitación encontrada: un
+  kick de cola larga no deja rearmar el detector antes del "1" (la de la Fase 5): las notas de los presets de Audio lo
+  explican.
 
 ### Fase 7 (completada 2026-10-12, probada en FL)
 - `dsp/LiveScope.h`: osciloscopio de barrido de 1, 2 o 4 compases en 512 columnas, anclado a un inicio de compás; por

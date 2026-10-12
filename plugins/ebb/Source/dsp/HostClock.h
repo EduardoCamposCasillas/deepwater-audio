@@ -90,6 +90,14 @@ struct MusicalPosition
 //
 // También detecta los SALTOS: si el host sigue reproduciendo pero la posición no es la que esperábamos (la anterior +
 // lo que avanzó el bloque), hubo un loop o un salto. En la Fase 2 eso servirá para no arrastrar una curva a medias.
+//
+// Fase 9, tempo automatizado: el host informa el tempo del PRINCIPIO del bloque, pero si el tempo sube o baja dentro del
+// bloque, su posición real avanza un poco más o un poco menos que la extrapolada. Al bloque siguiente la diferencia es
+// pequeña (milésimas de negra; crece con el cuadrado del tamaño del bloque) pero corregirla de golpe hacía saltar la
+// curva (un clic) y, si el tempo bajaba y la posición tenía que volver atrás justo después de un golpe, ¡el golpe sonaba
+// dos veces! Ahora una diferencia menor que un salto no se corrige de golpe: el reloj sigue desde donde iba y la
+// recupera avanzando un poco más rápido o más lento (hasta un 10 %) durante unas pocas muestras. La posición nunca
+// retrocede ni salta; con tempo constante la diferencia es 0 y todo queda igual que antes.
 class HostClock
 {
 public:
@@ -99,6 +107,9 @@ public:
     // Diferencia mínima para considerar que hubo un salto. Con automatización de tempo el host integra el tempo dentro
     // del bloque y nuestra predicción (tempo constante) se desvía milésimas de negra; un loop salta compases enteros.
     static constexpr double jumpToleranceBeats = 1.0 / 64.0;
+    // Fase 9: a qué velocidad se recupera la diferencia con el host (fracción del tempo): 0.1 = el reloj avanza entre el
+    // 90 % y el 110 % del tempo hasta alcanzarlo. Un cambio de velocidad tan corto y tan pequeño no se oye.
+    static constexpr double catchUpRate = 0.1;
 
     void prepare (double newSampleRate) noexcept
     {
@@ -109,6 +120,7 @@ public:
         startPpq = 0.0;
         freeRunPpq = 0.0;
         expectedNextPpq.reset();
+        offset = 0.0;
         barStart.reset();
         looping = false;
         jumped = false;
@@ -130,6 +142,7 @@ public:
         jumped = false;
         started = false;
         looping = info.hasHost && info.isLooping;
+        offset = 0.0;
         const double blockBeats = numSamples * beatsPerSample;
 
         if (info.hasHost && info.ppqPosition && std::isfinite (*info.ppqPosition))
@@ -140,12 +153,21 @@ public:
             {
                 source = ClockSource::host;
                 started = ! wasPlaying;
-                if (wasPlaying && expectedNextPpq && std::abs (startPpq - *expectedNextPpq) > jumpToleranceBeats)
+                // expectedNextPpq = dónde iba a estar nuestro reloj (con la diferencia que aún arrastraba).
+                if (wasPlaying && expectedNextPpq)
                 {
-                    jumped = true;
-                    ++jumps;
+                    const double behindUs = *expectedNextPpq - startPpq;
+                    if (std::abs (behindUs) > jumpToleranceBeats)
+                    {
+                        jumped = true;
+                        ++jumps;
+                    }
+                    else
+                    {
+                        offset = behindUs; // se sigue desde donde íbamos y se recupera poco a poco
+                    }
                 }
-                expectedNextPpq = startPpq + blockBeats;
+                expectedNextPpq = ppqAt (numSamples);
             }
             else
             {
@@ -164,11 +186,21 @@ public:
         expectedNextPpq.reset();
     }
 
-    // Posición en negras de la muestra 'offset' del bloque actual. Parado, todas las muestras están en el mismo sitio.
-    [[nodiscard]] double ppqAt (int offset) const noexcept
+    // Posición en negras de la muestra 'sample' del bloque actual. Parado, todas las muestras están en el mismo sitio.
+    // Con una diferencia pendiente con el host (tempo automatizado), esta se achica catchUpRate · tempo por muestra.
+    [[nodiscard]] double ppqAt (int sample) const noexcept
     {
-        return source == ClockSource::stopped ? startPpq : startPpq + offset * beatsPerSample;
+        if (source == ClockSource::stopped)
+            return startPpq;
+        const double position = startPpq + sample * beatsPerSample;
+        if (offset == 0.0)
+            return position;
+        const double recovered = catchUpRate * beatsPerSample * sample;
+        return position + (offset > 0.0 ? std::max (0.0, offset - recovered) : std::min (0.0, offset + recovered));
     }
+
+    // Lo más que puede avanzar la posición de una muestra a la siguiente (recuperando una diferencia con el host).
+    [[nodiscard]] double maxBeatsPerSample() const noexcept { return beatsPerSample * (1.0 + catchUpRate); }
 
     [[nodiscard]] double blockStartPpq() const noexcept { return startPpq; }
     [[nodiscard]] double bpm() const noexcept { return currentBpm; }
@@ -194,9 +226,9 @@ public:
     [[nodiscard]] bool jumpedThisBlock() const noexcept { return jumped; }
     [[nodiscard]] std::uint32_t jumpCount() const noexcept { return jumps; }
 
-    [[nodiscard]] MusicalPosition positionAt (int offset) const noexcept
+    [[nodiscard]] MusicalPosition positionAt (int sample) const noexcept
     {
-        return musicalPosition (ppqAt (offset), signature, barStart);
+        return musicalPosition (ppqAt (sample), signature, barStart);
     }
 
 private:
@@ -210,6 +242,7 @@ private:
     double startPpq = 0.0;
     double freeRunPpq = 0.0;
     std::optional<double> expectedNextPpq;
+    double offset = 0.0; // nuestro reloj − el del host al principio del bloque (Fase 9: tempo automatizado)
     std::optional<double> barStart;
     bool looping = false;
     bool jumped = false;

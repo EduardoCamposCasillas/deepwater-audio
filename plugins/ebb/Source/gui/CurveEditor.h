@@ -41,8 +41,10 @@ public:
     {
         if (position == playhead)
             return;
+        // Fase 9: solo la franja del cursor viejo y la del nuevo (el resto del editor no cambió).
+        repaint (playheadBounds());
         playhead = position;
-        repaint();
+        repaint (playheadBounds());
     }
 
     void paint (juce::Graphics& g) override
@@ -249,6 +251,16 @@ private:
     };
 
     [[nodiscard]] juce::Rectangle<float> plotArea() const { return getLocalBounds().reduced (margin).toFloat(); }
+
+    // Lo que ocupa el cursor de reproducción (la línea y el punto), con margen para el borde suavizado. Vacío sin cursor.
+    [[nodiscard]] juce::Rectangle<int> playheadBounds() const
+    {
+        if (playhead < 0.0f)
+            return {};
+        const auto area = plotArea();
+        const float x = toScreen (playhead, 0.0f).x;
+        return juce::Rectangle<float> (x - 6.0f, area.getY() - 6.0f, 12.0f, area.getHeight() + 12.0f).getSmallestIntegerContainer();
+    }
 
     [[nodiscard]] juce::Point<float> toScreen (float x, float y) const
     {

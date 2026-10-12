@@ -3,10 +3,18 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <functional>
+#include <memory>
+#include <string>
 #include <vector>
+
+#include <xmmintrin.h>
 
 #include "deepwater/dsp/TransientDetector.h"
 #include "dsp/Bands.h"
@@ -208,6 +216,43 @@ void testDetectsJumps()
     clock.beginBlock ({}, block);
     CHECK (clock.getSource() == ClockSource::freeRunning);
     CHECK (near (clock.blockStartPpq(), expected, 1.0e-9));
+}
+
+void testClockCatchUp()
+{
+    std::printf ("Reloj: una diferencia pequena con el host (tempo automatizado) se recupera sin retroceder ni saltar\n");
+
+    constexpr double sampleRate = 48000.0;
+    constexpr int block = 1024;
+    const double perSample = 120.0 / (60.0 * sampleRate);
+    for (const double difference : { 0.004, -0.004 }) // el host llega 0.004 negras detrás (tempo que baja) o delante
+    {
+        HostClock clock;
+        clock.prepare (sampleRate);
+        clock.beginBlock (playingAt (8.0, 120.0), block);
+        const double ours = clock.ppqAt (block);
+        clock.beginBlock (playingAt (ours - difference, 120.0), block);
+        CHECK (! clock.jumpedThisBlock());
+        CHECK (near (clock.ppqAt (0), ours)); // sigue desde donde iba
+
+        bool smooth = true;
+        for (int i = 1; i <= block; ++i)
+        {
+            const double step = clock.ppqAt (i) - clock.ppqAt (i - 1);
+            smooth = smooth && step >= perSample * 0.9 - 1.0e-12 && step <= perSample * 1.1 + 1.0e-12;
+        }
+        CHECK (smooth);
+        // Recuperada en 0.004 / (0.1 · negras por muestra) muestras = 960: desde ahí, la posición del host.
+        CHECK (near (clock.ppqAt (970), ours - difference + 970 * perSample, 1.0e-12));
+    }
+
+    // Más que la tolerancia: es un salto (loop) y se va directo a la posición del host.
+    HostClock clock;
+    clock.prepare (sampleRate);
+    clock.beginBlock (playingAt (8.0, 120.0), block);
+    clock.beginBlock (playingAt (clock.ppqAt (block) - 0.1, 120.0), block);
+    CHECK (clock.jumpedThisBlock());
+    CHECK (near (clock.ppqAt (0), 8.0 + block * perSample - 0.1));
 }
 
 void testTempoAndSignatureValidation()
@@ -1348,14 +1393,738 @@ void testLiveView()
     }
 }
 
+// --- Fase 9: el plugin entero sin JUCE (CPU y huella del sonido) --------------------------------------------------------
+//
+// ProcessorRig hace lo mismo que EbbAudioProcessor::processBlock, en el mismo orden: reloj → ajustes → disparos MIDI →
+// detector del sidechain (siempre) → visor (si la GUI está abierta) → motor → sidechain al visor. Sirve para medir la CPU
+// de lo que corre de verdad en el hilo de audio y para sacar una "huella" (un hash) del sonido de muchos escenarios, que
+// tiene que ser idéntica antes y después de optimizar.
+
+// Ruido blanco repetible en [−amplitude, amplitude].
+std::vector<float> noise (size_t count, float amplitude, std::uint32_t seed)
+{
+    std::vector<float> out (count);
+    for (auto& sample : out)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        sample = amplitude * (static_cast<float> (seed >> 8) / 8388608.0f - 1.0f);
+    }
+    return out;
+}
+
+// Un dembow con el kick desplazado a 120 BPM, en semicorcheas del compás: 1, 4, 5, 8, 9, 12, 13 y 15 (sirve de notas MIDI
+// y de onsets del kick del sidechain). Muestras absolutas hasta 'totalSamples'.
+std::vector<int> dembowOnsets (double sampleRate, int totalSamples)
+{
+    constexpr std::array<int, 8> steps { 0, 3, 4, 7, 8, 11, 12, 14 };
+    const double sixteenth = sampleRate * 0.125; // 120 BPM
+    std::vector<int> onsets;
+    for (int bar = 0;; ++bar)
+        for (const int step : steps)
+        {
+            const auto sample = static_cast<int> (std::lround ((bar * 16 + step) * sixteenth));
+            if (sample >= totalSamples)
+                return onsets;
+            onsets.push_back (sample);
+        }
+}
+
+// Kick seco (55 Hz, caída de 25 ms): baja del rearme del detector antes del siguiente golpe del dembow.
+std::vector<float> dryKicks (double sampleRate, int totalSamples, const std::vector<int>& onsets)
+{
+    std::vector<float> track (static_cast<size_t> (totalSamples), 0.0f);
+    const int length = static_cast<int> (0.12 * sampleRate);
+    for (const int onset : onsets)
+        for (int i = onset; i < std::min (totalSamples, onset + length); ++i)
+        {
+            const double t = static_cast<double> (i - onset) / sampleRate;
+            track[static_cast<size_t> (i)] += static_cast<float> (0.8 * std::sin (2.0 * 3.141592653589793 * 55.0 * t) * std::exp (-t / 0.025));
+        }
+    return track;
+}
+
+// Curva propia con el máximo de puntos (32), en zigzag con tensiones: la búsqueda del segmento más larga.
+BreakpointCurve zigzagCurve()
+{
+    std::array<deepwater::dsp::CurvePoint, BreakpointCurve::maxPoints> points {};
+    for (int i = 0; i < BreakpointCurve::maxPoints; ++i)
+    {
+        const float x = static_cast<float> (i) / static_cast<float> (BreakpointCurve::maxPoints - 1);
+        points[static_cast<size_t> (i)] = { x, (i % 2 == 0 ? x : x * 0.5f), (i % 3 - 1) * 0.5f };
+    }
+    return BreakpointCurve (points.data(), static_cast<int> (points.size()));
+}
+
+// El host simulado: tempo, compás, posición y si reproduce.
+struct HostSim
+{
+    double sampleRate = 48000.0;
+    double bpm = 120.0;
+    double ppq = 0.0;
+    bool playing = true;
+    TimeSignature signature;
+
+    TransportInfo info() const
+    {
+        TransportInfo t = playingAt (ppq, bpm, signature);
+        t.isPlaying = playing;
+        return t;
+    }
+    void advance (int numSamples) noexcept
+    {
+        if (playing)
+            ppq += numSamples * bpm / (60.0 * sampleRate);
+    }
+};
+
+class ProcessorRig
+{
+    double sampleRate;
+    bool scopeOn;
+    HostClock clock;
+    Engine engine;
+    deepwater::dsp::TransientDetector detector;
+    LiveScope scope;
+    std::array<Trigger, 256> audioTriggers {};
+
+public:
+    ProcessorRig (double rate, const TempoSettings& initial, int lookaheadSamples, bool liveView)
+        : sampleRate (rate), scopeOn (liveView), settings (initial), lookahead (lookaheadSamples)
+    {
+        clock.prepare (sampleRate);
+        engine.prepare (sampleRate, false, settings, lookahead);
+        detector.prepare (sampleRate);
+        scope.reset();
+    }
+
+    TempoSettings settings;
+    bool bypassed = false;
+    int lookahead = 0;
+    float thresholdDb = -24.0f;
+
+    void setCurve (const BreakpointCurve& curve) noexcept { engine.setCurve (curve); }
+    void setLookaheadMs (float ms) noexcept
+    {
+        lookahead = std::clamp (static_cast<int> (std::lround (ms * 0.001 * sampleRate)), 0, Engine::maxLookaheadSamples (sampleRate));
+    }
+
+    // Un bloque, como processBlock. 'sidechain' = nullptr: bus desconectado. 'notes' = notas MIDI del bloque (ya con su
+    // muestra dentro de él); solo disparan en modo MIDI.
+    void process (float* const* channels, int numChannels, const float* sidechain, int numSamples, const TransportInfo& info,
+                  std::span<const Trigger> notes)
+    {
+        clock.beginBlock (info, numSamples);
+        engine.setBypassed (bypassed);
+        engine.setSettings (settings);
+        engine.setLookahead (lookahead);
+
+        detector.setThresholdDb (thresholdDb);
+        detector.setHoldSeconds (0.03);
+        const bool audioMode = settings.mode == TriggerMode::audio;
+        const auto detection = detectAudioTriggers (detector, &sidechain, sidechain != nullptr ? 1 : 0, numSamples,
+                                                    audioMode ? std::span (audioTriggers) : std::span<Trigger>());
+        const auto midi = settings.mode == TriggerMode::midi ? notes : std::span<const Trigger>();
+
+        if (scopeOn)
+            scope.beginBlock (clock, numSamples);
+        engine.setScope (scopeOn ? &scope : nullptr);
+        engine.process (channels, numChannels, numSamples, clock,
+                        audioMode ? std::span<const Trigger> (audioTriggers.data(), static_cast<size_t> (detection.stored)) : midi);
+        if (scopeOn && sidechain != nullptr)
+            for (int i = 0; i < numSamples; ++i)
+                scope.addSidechain (i, std::abs (sidechain[i]));
+    }
+
+    const Engine& getEngine() const noexcept { return engine; }
+    const LiveScope& getScope() const noexcept { return scope; }
+};
+
+// Toda la señal de un escenario: estéreo de ruido, el kick del sidechain y sus notas MIDI.
+struct ScenarioSignals
+{
+    std::vector<float> left, right, sidechain;
+    std::vector<Note> notes;
+
+    ScenarioSignals (double sampleRate, int totalSamples)
+        : left (noise (static_cast<size_t> (totalSamples), 0.35f, 21u)), right (noise (static_cast<size_t> (totalSamples), 0.35f, 22u))
+    {
+        const auto onsets = dembowOnsets (sampleRate, totalSamples);
+        sidechain = dryKicks (sampleRate, totalSamples, onsets);
+        for (size_t i = 0; i < onsets.size(); ++i)
+            notes.push_back ({ onsets[i], 0.5f + 0.5f * static_cast<float> (i % 3) / 2.0f });
+    }
+};
+
+// Las notas que caen en [from, from + numSamples), con su muestra relativa al bloque.
+std::span<const Trigger> notesInBlock (const std::vector<Note>& notes, int from, int numSamples, std::vector<Trigger>& out)
+{
+    out.clear();
+    for (const auto& note : notes)
+        if (note.sample >= from && note.sample < from + numSamples)
+            out.push_back ({ note.sample - from, note.velocity });
+    return out;
+}
+
+// --- Fase 9: distintos tempos y cambios de tempo en vivo ---------------------------------------------------------------
+
+// Un host cuyo tempo cambia con el tiempo, como la automatización de tempo de FL: el tempo va en línea recta de 'from' a
+// 'to' entre 'rampStart' y 'rampEnd' segundos (antes y después, constante). La posición es la integral exacta del tempo
+// (lo que hace un host de verdad): al principio de cada bloque informa la posición y el tempo de ese instante, y Ebb
+// extrapola dentro del bloque con ese tempo. Un salto de tempo es una rampa de duración 0.
+struct TempoRamp
+{
+    double from = 120.0, to = 120.0;
+    double rampStart = 0.0, rampEnd = 0.0;
+
+    [[nodiscard]] double bpmAt (double seconds) const noexcept
+    {
+        if (seconds <= rampStart)
+            return from;
+        if (seconds >= rampEnd)
+            return to;
+        return from + (to - from) * (seconds - rampStart) / (rampEnd - rampStart);
+    }
+
+    // Negras desde 0 hasta 'seconds' (área bajo el tempo / 60).
+    [[nodiscard]] double beatsAt (double seconds) const noexcept
+    {
+        const double before = std::min (seconds, rampStart);
+        double beats = from * before;
+        if (seconds > rampStart)
+        {
+            const double inRamp = std::min (seconds, rampEnd) - rampStart;
+            beats += (from + 0.5 * (bpmAt (rampStart + inRamp) - from)) * inRamp;
+        }
+        if (seconds > rampEnd)
+            beats += to * (seconds - rampEnd);
+        return beats / 60.0;
+    }
+
+    // Primer instante (en muestras, fraccionario) en que la posición llega a 'beats' (búsqueda binaria: es creciente).
+    [[nodiscard]] double sampleOf (double beats, double sampleRate) const noexcept
+    {
+        double low = 0.0, high = 1.0;
+        while (beatsAt (high) < beats)
+            high *= 2.0;
+        for (int i = 0; i < 200; ++i)
+        {
+            const double mid = 0.5 * (low + high);
+            (beatsAt (mid) < beats ? low : high) = mid;
+        }
+        return high * sampleRate;
+    }
+};
+
+struct TempoRender
+{
+    std::vector<float> gain;
+    std::uint32_t hits = 0; // curvas que empezaron, según el motor (lo que cuenta la GUI)
+};
+
+// Modo tempo (o MIDI con 'notes') con el host de 'ramp', bloques al azar de 1 a maxBlock. Señal constante 1: la salida
+// es la ganancia.
+TempoRender renderRamp (double sampleRate, const TempoRamp& ramp, TempoSettings settings, int totalSamples, int maxBlock,
+                        const std::vector<Note>& notes = {})
+{
+    HostClock clock;
+    clock.prepare (sampleRate);
+    Engine engine;
+    engine.prepare (sampleRate, false, settings);
+
+    TempoRender out;
+    out.gain.assign (static_cast<size_t> (totalSamples), 1.0f);
+    std::vector<Trigger> triggers;
+    BlockSizes sizes;
+    for (int done = 0; done < totalSamples;)
+    {
+        const int numSamples = std::min (sizes.next (maxBlock), totalSamples - done);
+        const double seconds = done / sampleRate;
+        clock.beginBlock (playingAt (ramp.beatsAt (seconds), ramp.bpmAt (seconds)), numSamples);
+        engine.setSettings (settings);
+        float* channel = out.gain.data() + done;
+        engine.process (&channel, 1, numSamples, clock, notesInBlock (notes, done, numSamples, triggers));
+        out.hits = engine.hitCount();
+        done += numSamples;
+    }
+    return out;
+}
+
+// Mayor salto de ganancia entre muestras seguidas, sin contar las muestras de 'skip' (los golpes: ahí la caída es a
+// propósito) ni las 'guard' siguientes.
+float maxStepExcept (const std::vector<float>& gain, const std::vector<size_t>& skip, size_t guard)
+{
+    float largest = 0.0f;
+    for (size_t i = 1; i < gain.size(); ++i)
+    {
+        const bool nearHit = std::any_of (skip.begin(), skip.end(), [&] (size_t s) { return i >= s && i <= s + guard; });
+        if (! nearHit)
+            largest = std::max (largest, std::abs (gain[i] - gain[i - 1]));
+    }
+    return largest;
+}
+
+// Las muestras donde empieza cada golpe del modo tempo: la ganancia cae de golpe (profundidad 100 %, sin suavizado).
+std::vector<size_t> dropsIn (const std::vector<float>& gain)
+{
+    std::vector<size_t> drops;
+    for (size_t i = 1; i < gain.size(); ++i)
+        if (gain[i - 1] - gain[i] > 0.5f)
+            drops.push_back (i);
+    return drops;
+}
+
+void testManyTempos()
+{
+    std::printf ("Tempos: de 60 a 300 BPM (y decimales), los golpes caen en la muestra exacta y la curva dura lo que debe\n");
+
+    constexpr std::array<double, 10> tempos { 60.0, 70.0, 85.5, 93.0, 100.0, 128.0, 140.0, 174.0, 200.0, 300.0 };
+    for (const double sampleRate : sampleRates)
+        for (const double bpm : tempos)
+        {
+            // 1/4 con duración 50 %: golpe en cada negra, de vuelta a 1 a mitad de la negra.
+            const TempoRamp steady { bpm, bpm };
+            const int totalSamples = static_cast<int> (std::ceil (steady.sampleOf (8.0, sampleRate))) + 10; // 8 negras
+            const auto render = renderRamp (sampleRate, steady, rawCurve (2, 0.5f), totalSamples, 4096);
+            const auto drops = dropsIn (render.gain);
+
+            bool onGrid = drops.size() == 8; // la del 0 no es una caída (empieza abajo)
+            for (int beat = 1; beat <= 8 && onGrid; ++beat)
+            {
+                // La primera muestra cuya posición llega a la negra (con el margen de 1e-9 del redondeo del host).
+                const auto expected = static_cast<size_t> (std::ceil (steady.sampleOf (static_cast<double> (beat) - 1.0e-9, sampleRate) - 1.0e-6));
+                const auto drop = drops[static_cast<size_t> (beat - 1)];
+                onGrid = drop == expected && render.gain[drop - 1] == 1.0f && render.gain[drop] < 0.02f;
+            }
+            if (! onGrid)
+                std::printf ("  %.0f Hz, %.1f BPM: %zu caidas\n", sampleRate, bpm, drops.size());
+            CHECK (onGrid);
+            CHECK (render.hits == 9); // 0 y las 8 negras
+
+            // En segundos, la vuelta dura 0.5 negras al tempo del host: a 60 BPM, 0.5 s; a 300 BPM, 0.1 s.
+            const size_t firstDrop = drops.empty() ? 0 : drops.front();
+            size_t back = firstDrop;
+            while (back < render.gain.size() && render.gain[back] < 1.0f)
+                ++back;
+            const double backSeconds = static_cast<double> (back - firstDrop) / sampleRate;
+            CHECK (std::abs (backSeconds - 30.0 / bpm) <= 2.0 / sampleRate);
+        }
+
+    // MIDI: el LARGO también va al tempo (1/4 con duración 50 % = media negra), a 70 y a 174 BPM.
+    for (const double bpm : { 70.0, 174.0 })
+    {
+        constexpr double sampleRate = 48000.0;
+        const int note = 1000;
+        const auto render = renderRamp (sampleRate, { bpm, bpm }, midiCurve (2, 0.5f), 96000, 512, { { note } });
+        size_t back = static_cast<size_t> (note);
+        while (render.gain[back] < 1.0f)
+            ++back;
+        CHECK (render.gain[static_cast<size_t> (note)] < 0.02f);
+        CHECK (std::abs (static_cast<double> (back - static_cast<size_t> (note)) / sampleRate - 30.0 / bpm) <= 2.0 / sampleRate);
+    }
+}
+
+void testTempoAutomation()
+{
+    std::printf ("Tempo automatizado (rampas 90 -> 180 y 180 -> 70 BPM): golpes a tiempo, ni perdidos ni dobles, sin clics\n");
+
+    // Rampas largas (un "speed up" de 8 compases) y cortas (en 1 s), subiendo y bajando, con bloques grandes: es lo peor
+    // para Ebb, que dentro del bloque extrapola con el tempo del principio.
+    const TempoRamp ramps[] {
+        { 90.0, 180.0, 0.5, 14.5 },
+        { 180.0, 70.0, 0.5, 14.5 },
+        { 100.0, 200.0, 1.0, 2.0 },
+        { 200.0, 60.0, 1.0, 2.0 },
+    };
+    for (const double sampleRate : sampleRates)
+        for (const auto& ramp : ramps)
+            for (const int maxBlock : { 64, 1024, 4096 })
+            {
+                const int totalSamples = static_cast<int> (16.0 * sampleRate);
+                const auto settings = rawCurve (3, 0.6f); // 1/8: muchos golpes durante la rampa
+                const auto render = renderRamp (sampleRate, ramp, settings, totalSamples, maxBlock);
+                const auto drops = dropsIn (render.gain);
+
+                // Cuántas corcheas pasan en total: los golpes de la curva tienen que ser exactamente esos (más el del 0).
+                const double totalBeats = ramp.beatsAt (static_cast<double> (totalSamples - 1) / sampleRate);
+                const auto eighths = static_cast<size_t> (std::floor (totalBeats / 0.5));
+                const bool countOk = drops.size() == eighths && render.hits == eighths + 1;
+
+                // Cada golpe, cerca del instante exacto de su corchea. Ebb solo sabe el tempo del principio de cada bloque:
+                // con una rampa, la posición que extrapola se aleja de la real hasta el bloque siguiente. El error crece
+                // con el cuadrado del bloque y con lo empinado de la rampa: con la de 8 compases, 0.3 ms como mucho; con
+                // 200 -> 60 BPM en 1 s y bloques de 4096 a 44.1 kHz, 4.5 ms (medido). Con bloques de 64, 0.02 ms.
+                double worstMs = 0.0;
+                for (size_t k = 0; k < std::min (drops.size(), eighths); ++k)
+                {
+                    const double exact = ramp.sampleOf (0.5 * static_cast<double> (k + 1), sampleRate);
+                    worstMs = std::max (worstMs, std::abs (static_cast<double> (drops[k]) - exact) / sampleRate * 1000.0);
+                }
+                const float step = maxStepExcept (render.gain, drops, 0);
+                const double allowedMs = maxBlock <= 64 ? 0.05 : maxBlock <= 1024 ? 1.0 : 6.0;
+                if (! countOk || worstMs > allowedMs || step >= 0.02f)
+                    std::printf ("  %.0f Hz, %.0f -> %.0f BPM, bloques <= %d: %zu caidas, %u golpes, %zu corcheas; error %.3f ms; "
+                                 "salto %.4f\n",
+                                 sampleRate, ramp.from, ramp.to, maxBlock, drops.size(), static_cast<unsigned> (render.hits), eighths,
+                                 worstMs, static_cast<double> (step));
+                CHECK (countOk);
+                CHECK (worstMs <= allowedMs);
+                CHECK (step < 0.02f);
+            }
+}
+
+void testTempoJumpsLive()
+{
+    std::printf ("Cambio de tempo de golpe sonando (140 -> 70 y 70 -> 140): la curva sigue en su sitio, sin clics\n");
+
+    constexpr double sampleRate = 48000.0;
+    for (const auto& [from, to] : { std::pair { 140.0, 70.0 }, std::pair { 70.0, 140.0 } })
+        for (const auto mode : { TriggerMode::tempo, TriggerMode::midi })
+        {
+            // El cambio llega a mitad de una curva (0.3 negras después del golpe de la negra 2).
+            const TempoRamp jump { from, from, 0.0, 0.0 };
+            const double changeSeconds = jump.sampleOf (2.3, sampleRate) / sampleRate;
+            const TempoRamp ramp { from, to, changeSeconds, changeSeconds };
+            auto settings = mode == TriggerMode::tempo ? rawCurve (2, 0.9f) : midiCurve (2, 0.9f);
+
+            std::vector<Note> notes;
+            for (int beat = 0; beat < 8; ++beat)
+                notes.push_back ({ static_cast<int> (std::ceil (ramp.sampleOf (static_cast<double> (beat), sampleRate))) });
+            const auto render = renderRamp (sampleRate, ramp, settings, static_cast<int> (8.0 * sampleRate), 256,
+                                            mode == TriggerMode::midi ? notes : std::vector<Note> {});
+            const auto drops = dropsIn (render.gain);
+            const float step = maxStepExcept (render.gain, drops, 0);
+            if (step >= 0.01f)
+                std::printf ("  %s %.0f -> %.0f BPM: salto %.4f\n", mode == TriggerMode::tempo ? "tempo" : "MIDI", from, to,
+                             static_cast<double> (step));
+            CHECK (step < 0.01f);
+            // Después del cambio, los golpes siguen cayendo en las negras (al tempo nuevo).
+            const auto expected = static_cast<size_t> (std::ceil (ramp.sampleOf (4.0 - 1.0e-9, sampleRate) - 1.0e-6));
+            CHECK (std::find (drops.begin(), drops.end(), expected) != drops.end());
+        }
+}
+
+// --- Huella del sonido (EbbTests --fingerprint <archivo>) -------------------------------------------------------------
+//
+// 7 variantes × 4 sample rates × 6 tamaños de bloque × mono/estéreo = 336 escenarios de 1.2 s. Las variantes de "cambios"
+// tocan algo cada 50 ms: división, forma, profundidad, banda, cruce, mix, bypass, suavizado, duración, tempo, un salto de
+// loop, parar y arrancar, lookahead, modo, velocidad, compás. De cada escenario se guarda un hash (FNV-1a de 64 bits) de
+// los bytes de la salida, de lo que lee la GUI en cada bloque (ganancia mínima, golpes, posición de la curva) y, con el
+// visor, de sus columnas. Dos versiones del motor suenan igual si los dos archivos son idénticos.
+
+class Fnv1a
+{
+public:
+    void add (const void* data, size_t size) noexcept
+    {
+        const auto* bytes = static_cast<const unsigned char*> (data);
+        for (size_t i = 0; i < size; ++i)
+            hash = (hash ^ bytes[i]) * 1099511628211ull;
+    }
+    template <typename T>
+    void add (const T& value) noexcept { add (&value, sizeof (T)); }
+    [[nodiscard]] std::uint64_t value() const noexcept { return hash; }
+
+private:
+    std::uint64_t hash = 14695981039346656037ull;
+};
+
+enum class Variant
+{
+    steadyTempo,
+    steadyMidi,
+    steadyAudio,
+    lowBandCustom,
+    changesTempo,
+    changesMidi,
+    changesAudio
+};
+
+constexpr std::array<const char*, 7> variantNames { "tempo", "midi", "audio", "graves", "cambios-tempo", "cambios-midi", "cambios-audio" };
+
+// El cambio número 'k' de las variantes de "cambios" (se repiten en ciclo).
+void applyChange (int k, ProcessorRig& rig, HostSim& host)
+{
+    auto& s = rig.settings;
+    const auto nextMode = [&] { s.mode = triggerModeFromIndex ((static_cast<int> (s.mode) + 1) % 3); };
+    switch (k % 24)
+    {
+        case 0:  s.division = 3; break;
+        case 1:  rig.setCurve (curveShapes[4].curve); break;
+        case 2:  s.depth = 0.4f; break;
+        case 3:  s.band = DuckBand::low; break;
+        case 4:  s.crossoverHz = 300.0f; break;
+        case 5:  s.mix = 0.6f; break;
+        case 6:  rig.bypassed = true; break;
+        case 7:  rig.bypassed = false; break;
+        case 8:  s.smoothingMs = 0.0f; break;
+        case 9:  s.duration = 0.3f; break;
+        case 10: host.bpm = 140.0; break;
+        case 11: host.ppq = std::max (0.0, host.ppq - 1.5); break;
+        case 12: host.playing = false; break;
+        case 13: host.playing = true; break;
+        case 14: s.band = DuckBand::high; break;
+        case 15: rig.setLookaheadMs (5.0f); break;
+        case 16: nextMode(); break;
+        case 17: s.velocitySensitive = true; break;
+        case 18: rig.setCurve (zigzagCurve()); break;
+        case 19: s.division = 8; break;
+        case 20: host.signature = { 7, 8 }; break;
+        case 21: host.bpm = 93.7; s.crossoverHz = 2000.0f; break;
+        case 22: nextMode(); break;
+        default: rig.setLookaheadMs (0.0f); s.band = DuckBand::full; s.mix = 1.0f; s.depth = 0.9f; break;
+    }
+}
+
+std::uint64_t fingerprint (Variant variant, double sampleRate, int blockSize, int numChannels)
+{
+    const int totalSamples = static_cast<int> (1.2 * sampleRate);
+    const ScenarioSignals signals (sampleRate, totalSamples);
+    auto left = signals.left, right = signals.right;
+
+    TempoSettings settings; // los valores por defecto del plugin
+    int lookahead = 0;
+    bool liveView = false;
+    switch (variant)
+    {
+        case Variant::steadyMidi:
+        case Variant::changesMidi:   settings.mode = TriggerMode::midi; break;
+        case Variant::steadyAudio:
+            lookahead = static_cast<int> (std::lround (0.003 * sampleRate));
+            liveView = true;
+            [[fallthrough]];
+        case Variant::changesAudio:  settings.mode = TriggerMode::audio; break;
+        case Variant::lowBandCustom:
+            settings.band = DuckBand::low;
+            settings.mix = 0.7f;
+            settings.smoothingMs = 5.0f;
+            break;
+        case Variant::changesTempo:  liveView = true; break;
+        case Variant::steadyTempo:   break;
+    }
+    const bool changes = variant == Variant::changesTempo || variant == Variant::changesMidi || variant == Variant::changesAudio;
+
+    auto rig = std::make_unique<ProcessorRig> (sampleRate, settings, lookahead, liveView);
+    if (variant == Variant::lowBandCustom)
+        rig->setCurve (zigzagCurve());
+    HostSim host;
+    host.sampleRate = sampleRate;
+
+    Fnv1a hash;
+    std::vector<Trigger> notes;
+    const int changeEvery = static_cast<int> (0.05 * sampleRate);
+    int nextChange = changeEvery, changeCount = 0;
+    for (int done = 0; done < totalSamples;)
+    {
+        const int numSamples = std::min (blockSize, totalSamples - done);
+        if (changes)
+            for (; done >= nextChange; nextChange += changeEvery)
+                applyChange (changeCount++, *rig, host);
+
+        float* channels[] { left.data() + done, right.data() + done };
+        rig->process (channels, numChannels, signals.sidechain.data() + done, numSamples, host.info(),
+                      notesInBlock (signals.notes, done, numSamples, notes));
+        hash.add (rig->getEngine().blockMinGain());
+        hash.add (rig->getEngine().hitCount());
+        hash.add (rig->getEngine().curvePosition());
+        host.advance (numSamples);
+        done += numSamples;
+    }
+    hash.add (left.data(), left.size() * sizeof (float));
+    if (numChannels == 2)
+        hash.add (right.data(), right.size() * sizeof (float));
+    if (liveView)
+        for (int c = 0; c < LiveScope::numColumns; ++c)
+        {
+            const auto column = rig->getScope().column (c);
+            hash.add (column.input);
+            hash.add (column.output);
+            hash.add (column.sidechain);
+            hash.add (column.gain);
+            hash.add (column.hit);
+        }
+    return hash.value();
+}
+
+int writeFingerprints (const char* path)
+{
+    std::ofstream file (path);
+    if (! file)
+    {
+        std::printf ("No se pudo escribir %s\n", path);
+        return 1;
+    }
+    constexpr std::array<int, 6> blockSizes { 1, 7, 64, 256, 333, 4096 };
+    int count = 0;
+    for (size_t v = 0; v < variantNames.size(); ++v)
+        for (const double sampleRate : sampleRates)
+            for (const int blockSize : blockSizes)
+                for (const int numChannels : { 1, 2 })
+                {
+                    const auto value = fingerprint (static_cast<Variant> (v), sampleRate, blockSize, numChannels);
+                    char line[128];
+                    std::snprintf (line, sizeof (line), "%-14s %6.0f Hz  bloque %4d  %d canal(es)  %016llx\n", variantNames[v],
+                                   sampleRate, blockSize, numChannels, static_cast<unsigned long long> (value));
+                    file << line;
+                    ++count;
+                }
+    std::printf ("%d huellas escritas en %s\n", count, path);
+    return 0;
+}
+
+// --- Tabla de CPU (EbbTests --cpu) --------------------------------------------------------------------------------------
+//
+// Cada escenario procesa 2 s (bloques de 256) con el plugin ya "caliente" y se mide 5 veces: se queda la más rápida (los
+// demás programas del equipo solo pueden hacer una medida más LENTA). Resultado en "% de un núcleo": cuánto de un núcleo
+// hace falta para procesar en tiempo real. Depende del equipo: sirve para comparar antes/después en la misma máquina.
+
+// Como juce::ScopedNoDenormals en processBlock: FTZ + DAZ (los números diminutos se vuelven 0).
+class ScopedFlushToZero
+{
+public:
+    ScopedFlushToZero() : previous (_mm_getcsr()) { _mm_setcsr (previous | 0x8040); }
+    ~ScopedFlushToZero() { _mm_setcsr (previous); }
+    ScopedFlushToZero (const ScopedFlushToZero&) = delete;
+    ScopedFlushToZero& operator= (const ScopedFlushToZero&) = delete;
+
+private:
+    unsigned int previous;
+};
+
+struct CpuScenario
+{
+    TempoSettings settings;
+    int numChannels = 2;
+    float lookaheadMs = 0.0f;
+    bool liveView = false;
+    bool bypassed = false;
+    bool customCurve = false;
+    bool movingCrossover = false; // el cruce cambia en cada bloque (automatización o una mano en la perilla)
+    bool stopped = false;         // host parado
+    bool sidechain = true;        // bus del sidechain conectado
+};
+
+double scenarioCpu (double sampleRate, const CpuScenario& scenario)
+{
+    const ScopedFlushToZero noDenormals;
+    constexpr double seconds = 2.0;
+    constexpr int blockSize = 256;
+    const int totalSamples = static_cast<int> (seconds * sampleRate);
+    const ScenarioSignals signals (sampleRate, totalSamples);
+
+    auto rig = std::make_unique<ProcessorRig> (sampleRate, scenario.settings, 0, scenario.liveView);
+    rig->setLookaheadMs (scenario.lookaheadMs);
+    rig->bypassed = scenario.bypassed;
+    if (scenario.customCurve)
+        rig->setCurve (zigzagCurve());
+
+    std::vector<Trigger> notes;
+    notes.reserve (64);
+    const auto runOnce = [&] {
+        auto left = signals.left, right = signals.right;
+        HostSim host;
+        host.sampleRate = sampleRate;
+        host.playing = ! scenario.stopped;
+        const auto start = std::chrono::steady_clock::now();
+        for (int done = 0, blockIndex = 0; done < totalSamples; ++blockIndex)
+        {
+            const int numSamples = std::min (blockSize, totalSamples - done);
+            if (scenario.movingCrossover)
+                rig->settings.crossoverHz = blockIndex % 2 == 0 ? 100.0f : 160.0f;
+            float* channels[] { left.data() + done, right.data() + done };
+            rig->process (channels, scenario.numChannels, scenario.sidechain ? signals.sidechain.data() + done : nullptr, numSamples,
+                          host.info(), notesInBlock (signals.notes, done, numSamples, notes));
+            host.advance (numSamples);
+            done += numSamples;
+        }
+        return std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count() / seconds;
+    };
+    runOnce(); // calentar
+    double best = 1.0e9;
+    for (int run = 0; run < 5; ++run)
+        best = std::min (best, runOnce());
+    return best;
+}
+
+void printCpuTable()
+{
+    std::printf ("Tabla de CPU de Ebb (ruido a -9 dBFS, kick de dembow en el sidechain, bloques de 256; mejor de 5)\n");
+    const auto row = [] (const char* label, double sampleRate, const CpuScenario& scenario) {
+        std::printf ("  %-72s %4.1f kHz %6.3f %%\n", label, sampleRate / 1000.0, 100.0 * scenarioCpu (sampleRate, scenario));
+    };
+
+    const CpuScenario init;
+    row ("Init (tempo 1/4, Clasica, Todo; estereo)", 48000.0, init);
+    auto mono = init;
+    mono.numChannels = 1;
+    row ("Init en mono", 48000.0, mono);
+    auto stopped = init;
+    stopped.stopped = true;
+    row ("Init con el host parado", 48000.0, stopped);
+    auto unplugged = init;
+    unplugged.sidechain = false;
+    row ("Init sin sidechain conectado", 48000.0, unplugged);
+    auto fast = init;
+    fast.settings.division = 8;
+    row ("Tempo 1/16 T", 48000.0, fast);
+    auto custom = init;
+    custom.customCurve = true;
+    row ("Curva propia de 32 puntos", 48000.0, custom);
+    auto low = init;
+    low.settings.band = DuckBand::low;
+    row ("Graves (cruce 120 Hz)", 48000.0, low);
+    auto moving = low;
+    moving.movingCrossover = true;
+    row ("Graves con el cruce en movimiento", 48000.0, moving);
+    auto mix = init;
+    mix.settings.mix = 0.6f;
+    row ("Mix 60 %", 48000.0, mix);
+    auto midi = init;
+    midi.settings.mode = TriggerMode::midi;
+    row ("MIDI (dembow)", 48000.0, midi);
+    auto audio = init;
+    audio.settings.mode = TriggerMode::audio;
+    row ("Audio (dembow en el sidechain)", 48000.0, audio);
+    auto lookahead = audio;
+    lookahead.lookaheadMs = 10.0f;
+    row ("Audio + lookahead 10 ms", 48000.0, lookahead);
+    auto view = init;
+    view.liveView = true;
+    row ("Init con la GUI abierta (visor en vivo)", 48000.0, view);
+    auto depthZero = init;
+    depthZero.settings.depth = 0.0f;
+    row ("Profundidad 0", 48000.0, depthZero);
+
+    auto worst = lookahead;
+    worst.settings.band = DuckBand::low;
+    worst.movingCrossover = true;
+    worst.settings.mix = 0.6f;
+    worst.customCurve = true;
+    worst.liveView = true;
+    row ("Peor caso: audio + lookahead + graves moviendose + mix + 32 puntos + GUI", 48000.0, worst);
+    row ("Peor caso a 96 kHz", 96000.0, worst);
+    auto bypassed = worst;
+    bypassed.bypassed = true;
+    row ("Peor caso con BYPASS (el motor sigue calculando)", 48000.0, bypassed);
+}
+
+
 } // namespace
 
-int main()
+int main (int argc, char** argv)
 {
+    if (argc > 1 && std::strcmp (argv[1], "--cpu") == 0)
+    {
+        printCpuTable();
+        return 0;
+    }
+    if (argc > 2 && std::strcmp (argv[1], "--fingerprint") == 0)
+        return writeFingerprints (argv[2]);
+
     testMusicalPosition();
     testFreeRunningClock();
     testFollowsHost();
     testDetectsJumps();
+    testClockCatchUp();
     testTempoAndSignatureValidation();
     testTempoCurve();
     testCurveShapes();
@@ -1375,6 +2144,9 @@ int main()
     testMix();
     testBandChangesWhilePlaying();
     testLiveView();
+    testManyTempos();
+    testTempoAutomation();
+    testTempoJumpsLive();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de Ebb pasaron.\n");
