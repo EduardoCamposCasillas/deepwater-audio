@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -23,9 +24,10 @@ namespace fathom::gui
 //  - DOS escalas verticales sobre las mismas líneas: a la derecha la del EQ (cuánto sube o baja la curva, ±12 dB por
 //    defecto; el botón la cambia) y a la izquierda la del analizador (0 a −96 dBFS). Son independientes: una banda de
 //    +3 dB tiene que verse bien aunque el espectro ocupe 90 dB.
-//  - La curva (blanca) es la respuesta TOTAL del EQ: la banda más la ganancia de salida. Se calcula con los mismos
-//    coeficientes que usa el audio (EqCoefficients::response), así que es lo que suena, no un dibujo aproximado. La zona
-//    que la banda sube o baja va rellena, y su nodo marca el centro (Fase 4: se podrá arrastrar).
+//  - La curva (blanca) es la respuesta TOTAL del EQ: las 24 bandas en serie (sus dB se suman) más la ganancia de
+//    salida. Se calcula con los mismos coeficientes que usa el audio (EqCascade::response), así que es lo que suena, no
+//    un dibujo aproximado. Lo que cada banda encendida sube o baja va relleno con su color, y su nodo numerado marca su
+//    frecuencia; un clic en un nodo elige esa banda en el panel (Fase 4: se podrán arrastrar).
 //  - Analizador: ENTRADA (línea gris) y SALIDA (relleno azul), medidos igual (un seno de 0 dBFS marca 0 dB). Cada punto
 //    sube casi al instante y baja a 40 dB/s, para que la música se pueda leer sin que tiemble.
 //  - Al pasar el mouse, arriba se lee la frecuencia, la nota (nombres de FL) y los dos niveles en ese punto.
@@ -81,15 +83,22 @@ public:
         // Solo se repinta si algo cambió de forma visible: sin audio, las curvas terminan de caer al piso y el visor
         // queda quieto (no gasta CPU).
         const float gainDb = outputGain->load();
-        const auto band = processor.getBand1Settings();
-        bool changed = gainDb != paintedGainDb || ! sameSettings (band, paintedBand) || sampleRate != curveSampleRate;
-        if (changed)
+        bool changed = gainDb != paintedGainDb || sampleRate != curveSampleRate;
+        const bool allBands = sampleRate != curveSampleRate;
+        paintedGainDb = gainDb;
+        curveSampleRate = sampleRate;
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
         {
-            paintedGainDb = gainDb;
-            paintedBand = band;
-            curveSampleRate = sampleRate;
-            updateCurve();
+            const auto settings = processor.getBandSettings (b);
+            if (allBands || ! sameSettings (settings, paintedBands[static_cast<size_t> (b)]))
+            {
+                paintedBands[static_cast<size_t> (b)] = settings;
+                updateBandCurve (b);
+                changed = true;
+            }
         }
+        if (changed)
+            updateTotalCurve();
         changed = updateTrace (input, processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
         changed = updateTrace (output, processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
         if (changed)
@@ -117,7 +126,12 @@ public:
         for (auto* trace : { &input, &output })
             trace->shown.assign (points, analyzerBottomDb - 10.0f);
         curveDb.assign (points, 0.0f);
-        updateCurve();
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+        {
+            bandCurveDb[static_cast<size_t> (b)].assign (points, 0.0f);
+            updateBandCurve (b);
+        }
+        updateTotalCurve();
     }
 
     void paint (juce::Graphics& g) override
@@ -173,6 +187,7 @@ public:
     void mouseMove (const juce::MouseEvent& event) override
     {
         mouse = event.position;
+        setMouseCursor (nodeAt (mouse) >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::CrosshairCursor);
         repaintReadoutAndZones();
     }
 
@@ -181,6 +196,22 @@ public:
         mouse = { -1.0f, -1.0f };
         repaintReadoutAndZones();
     }
+
+    // Un clic sobre un nodo elige esa banda (el más cercano, si hay varios encima).
+    void mouseDown (const juce::MouseEvent& event) override
+    {
+        if (const int b = nodeAt (event.position); b >= 0 && onBandClicked)
+            onBandClicked (b);
+    }
+
+    // La banda que muestra el panel: su nodo y su relleno se resaltan (y se ve aunque esté apagada).
+    void setSelectedBand (int band)
+    {
+        selectedBand = band;
+        repaint();
+    }
+
+    std::function<void (int)> onBandClicked;
 
 private:
     struct Trace
@@ -394,74 +425,151 @@ private:
 
     static bool sameSettings (const dsp::BandSettings& a, const dsp::BandSettings& b) noexcept
     {
-        return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q;
+        return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.shape == b.shape
+               && a.slopeIndex == b.slopeIndex;
     }
 
-    // La respuesta total en dB en una frecuencia: la banda (con sus coeficientes reales) más la ganancia de salida.
+    // La respuesta total en dB en una frecuencia: las bandas (con sus coeficientes reales) más la ganancia de salida.
     float totalDb (float hz) const noexcept
     {
-        return static_cast<float> (bandCoefficients.magnitudeDb (hz, curveSampleRate)) + paintedGainDb;
+        double total = static_cast<double> (paintedGainDb);
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (paintedBands[static_cast<size_t> (b)].enabled)
+                total += bandCascades[static_cast<size_t> (b)].magnitudeDb (hz, curveSampleRate);
+        return static_cast<float> (total);
     }
 
-    // Recalcula la curva (un valor por punto, como el analizador). Solo cuando cambia un ajuste o el tamaño.
-    void updateCurve()
+    // Frecuencia de cada punto de las curvas (uno cada 2 píxeles, como el analizador).
+    double pointHz (size_t i, size_t points) const noexcept
     {
-        bandCoefficients = dsp::Band::coefficientsFor (paintedBand, curveSampleRate);
-        const auto points = curveDb.size();
+        return minHz * std::pow (static_cast<double> (maxHz / minHz), static_cast<double> (i) / static_cast<double> (points - 1));
+    }
+
+    // La curva propia de una banda (en dB, sin la salida). Solo cuando cambian sus ajustes o el tamaño.
+    void updateBandCurve (int b)
+    {
+        if (curveSampleRate <= 0.0) // antes del primer update() no se sabe la frecuencia de muestreo
+            return;
+        const auto index = static_cast<size_t> (b);
+        const auto& settings = paintedBands[index];
+        bandCascades[index] = dsp::Band::coefficientsFor (settings, curveSampleRate);
+        // El nodo: sobre la curva de la banda en su frecuencia si la forma tiene ganancia (la campana en su pico, el
+        // shelf en su punto medio, los tilts en su eje); los cortes, el notch, el pasa banda y el all-pass, en 0 dB.
+        nodeDb[index] = settings.enabled && dsp::usesGain (settings.shape)
+                            ? static_cast<float> (bandCascades[index].magnitudeDb (settings.frequency, curveSampleRate))
+                            : 0.0f;
+        auto& curve = bandCurveDb[index];
+        const auto points = curve.size();
         if (points < 2)
             return;
-        const double ratio = std::pow (static_cast<double> (maxHz / minHz), 1.0 / static_cast<double> (points - 1));
         for (size_t i = 0; i < points; ++i)
-            curveDb[i] = totalDb (static_cast<float> (minHz * std::pow (ratio, static_cast<double> (i))));
+            curve[i] = settings.enabled ? static_cast<float> (bandCascades[index].magnitudeDb (pointHz (i, points), curveSampleRate)) : 0.0f;
     }
 
-    // La curva del EQ: la respuesta total. Lo que la banda sube o baja (respecto de la línea de la salida) va relleno;
-    // si la curva se sale de la escala, se dibuja pegada al borde. Encima, el nodo de la banda.
-    void paintCurve (juce::Graphics& g) const
+    void updateTotalCurve()
     {
         const auto points = curveDb.size();
-        if (points < 2)
-            return;
+        for (size_t i = 0; i < points; ++i)
+        {
+            float total = paintedGainDb;
+            for (const auto& curve : bandCurveDb)
+                total += curve[i];
+            curveDb[i] = total;
+        }
+    }
+
+    juce::Path curvePath (const std::vector<float>& db, float offsetDb) const
+    {
+        juce::Path path;
+        const auto points = db.size();
         const float step = plot.getWidth() / static_cast<float> (points - 1);
         const float top = plot.getY() + 1.0f, bottom = plot.getBottom() - 1.0f;
-        juce::Path curve;
         for (size_t i = 0; i < points; ++i)
         {
             const float x = plot.getX() + step * static_cast<float> (i);
-            const float y = juce::jlimit (top, bottom, eqDbToY (curveDb[i]));
+            const float y = juce::jlimit (top, bottom, eqDbToY (db[i] + offsetDb));
             if (i == 0)
-                curve.startNewSubPath (x, y);
+                path.startNewSubPath (x, y);
             else
-                curve.lineTo (x, y);
+                path.lineTo (x, y);
         }
+        return path;
+    }
 
-        if (paintedBand.enabled && paintedBand.gainDb != 0.0f)
+    juce::Point<float> nodePosition (int b) const noexcept
+    {
+        const auto& settings = paintedBands[static_cast<size_t> (b)];
+        const float hz = juce::jlimit (minHz, maxHz, settings.frequency);
+        const float y = eqDbToY (paintedGainDb + nodeDb[static_cast<size_t> (b)]);
+        return { hzToX (hz), juce::jlimit (plot.getY() + 7.0f, plot.getBottom() - 7.0f, y) };
+    }
+
+    bool nodeVisible (int b) const noexcept { return paintedBands[static_cast<size_t> (b)].enabled || b == selectedBand; }
+
+    // La banda cuyo nodo está bajo 'position' (o −1).
+    int nodeAt (juce::Point<float> position) const noexcept
+    {
+        int best = -1;
+        float bestDistance = nodeRadius + 3.0f;
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (nodeVisible (b))
+                if (const float distance = nodePosition (b).getDistanceFrom (position); distance < bestDistance)
+                {
+                    best = b;
+                    bestDistance = distance;
+                }
+        return best;
+    }
+
+    // Las curvas del EQ: lo que cada banda encendida sube o baja (relleno con su color, respecto de la línea de la
+    // salida; la elegida, más marcada), la respuesta total (blanca; pegada al borde si se sale de la escala) y encima los
+    // nodos de las bandas encendidas y de la elegida (hueco si está apagada).
+    void paintCurve (juce::Graphics& g) const
+    {
+        if (curveDb.size() < 2)
+            return;
+        const float baseY = juce::jlimit (plot.getY() + 1.0f, plot.getBottom() - 1.0f, eqDbToY (paintedGainDb));
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
         {
-            const float baseY = juce::jlimit (top, bottom, eqDbToY (paintedGainDb));
-            juce::Path area (curve);
-            area.lineTo (plot.getRight(), baseY);
-            area.lineTo (plot.getX(), baseY);
-            area.closeSubPath();
-            g.setColour (theme::accent.withAlpha (0.16f));
-            g.fillPath (area);
+            if (! paintedBands[static_cast<size_t> (b)].enabled)
+                continue;
+            const bool selected = b == selectedBand;
+            auto path = curvePath (bandCurveDb[static_cast<size_t> (b)], paintedGainDb);
+            const auto colour = theme::bandColour (b);
+            if (selected)
+            {
+                g.setColour (colour.withAlpha (0.6f));
+                g.strokePath (path, juce::PathStrokeType (1.0f));
+            }
+            path.lineTo (plot.getRight(), baseY);
+            path.lineTo (plot.getX(), baseY);
+            path.closeSubPath();
+            g.setColour (colour.withAlpha (selected ? 0.22f : 0.10f));
+            g.fillPath (path);
         }
         g.setColour (theme::text.withAlpha (0.9f));
-        g.strokePath (curve, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.strokePath (curvePath (curveDb, 0.0f), juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-        // El nodo: en la frecuencia de la banda y sobre la curva (apagada: hueco, sobre la línea de la salida).
-        const float hz = juce::jlimit (minHz, maxHz, paintedBand.frequency);
-        const float nodeDb = paintedGainDb + (paintedBand.enabled ? paintedBand.gainDb : 0.0f);
-        const auto centre = juce::Point<float> (hzToX (hz), juce::jlimit (plot.getY() + 6.0f, plot.getBottom() - 6.0f, eqDbToY (nodeDb)));
-        const auto node = juce::Rectangle<float> (14.0f, 14.0f).withCentre (centre);
-        if (paintedBand.enabled)
-        {
-            g.setColour (theme::accent);
-            g.fillEllipse (node);
-        }
-        g.setColour (paintedBand.enabled ? theme::text : theme::dimText);
-        g.drawEllipse (node, 1.5f);
         g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
-        g.drawText ("1", node, juce::Justification::centred);
+        // La elegida al final: queda encima si se superpone con otra.
+        for (int pass = 0; pass < 2; ++pass)
+            for (int b = 0; b < dsp::Engine::numBands; ++b)
+            {
+                if (! nodeVisible (b) || (b == selectedBand) != (pass == 1))
+                    continue;
+                const bool enabled = paintedBands[static_cast<size_t> (b)].enabled;
+                const auto colour = theme::bandColour (b);
+                const auto node = juce::Rectangle<float> (2.0f * nodeRadius, 2.0f * nodeRadius).withCentre (nodePosition (b));
+                if (enabled)
+                {
+                    g.setColour (colour);
+                    g.fillEllipse (node);
+                }
+                g.setColour (b == selectedBand ? theme::text : enabled ? colour.darker (0.6f) : theme::dimText);
+                g.drawEllipse (node, b == selectedBand ? 2.0f : 1.2f);
+                g.setColour (enabled ? juce::Colours::black.withAlpha (0.8f) : theme::dimText);
+                g.drawText (juce::String (b + 1), node, juce::Justification::centred);
+            }
     }
 
     // Arriba, al pasar el mouse por el visor: frecuencia · nota · escala del EQ · escala del analizador.
@@ -488,9 +596,13 @@ private:
     Trace input, output;
     std::vector<float> scratch;
     float paintedGainDb = 0.0f;
-    dsp::BandSettings paintedBand;
-    deepwater::dsp::EqCoefficients bandCoefficients;
-    double curveSampleRate = 44100.0;
+    static constexpr float nodeRadius = 8.0f;
+    std::array<dsp::BandSettings, dsp::Engine::numBands> paintedBands {};
+    std::array<deepwater::dsp::EqCascade, dsp::Engine::numBands> bandCascades {};
+    std::array<std::vector<float>, dsp::Engine::numBands> bandCurveDb; // la curva propia de cada banda, en dB
+    std::array<float, dsp::Engine::numBands> nodeDb {};
+    int selectedBand = 0;
+    double curveSampleRate = 0.0; // 0 = todavía sin calcular
     std::vector<float> curveDb; // la respuesta total en dB, un valor por punto
     juce::Rectangle<float> plot, titleArea, zoneArea;
     juce::Point<float> mouse { -1.0f, -1.0f };

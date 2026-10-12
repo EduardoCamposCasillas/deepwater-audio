@@ -15,7 +15,7 @@ que usa y un cuaderno (`APRENDIZAJE.md`) con ejercicios de escucha, recetas y vo
 | 1 | [Undertow](plugins/undertow) | Sintetizador wavetable: FM, warp, unison, matriz de modulación, efectos, cuerda pulsada (Karplus-Strong) y 49 presets con notas | Serum 2, Vital | ✅ Terminado |
 | 2 | [Riptide](plugins/riptide) | Saturador: 6 modos (cinta, bulbo, transistor, clip, rectificador, wavefold), tono PRE/POST, paralelo con auto gain, hasta 4 bandas, envolvente y LFO, 26 presets con notas | Decapitator, Saturn 2 | ✅ Terminado |
 | 3 | [Ebb](plugins/ebb) | Ducker / modulador de volumen para sidechain: curvas sincronizadas al tempo, disparo por MIDI o por audio (para patrones irregulares como el dembow), editor de curvas y ducking solo en graves | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | ✅ Terminado |
-| 4 | [Fathom](plugins/fathom) | EQ paramétrico de 24 bandas con analizador: todas las formas y pendientes, edición sobre el espectro, estéreo L/R/Mid/Side, EQ dinámico, fase lineal, dinámica espectral e igualación | FabFilter Pro-Q 4 | En curso (Fase 2) |
+| 4 | [Fathom](plugins/fathom) | EQ paramétrico de 24 bandas con analizador: todas las formas y pendientes, edición sobre el espectro, estéreo L/R/Mid/Side, EQ dinámico, fase lineal, dinámica espectral e igualación | FabFilter Pro-Q 4 | En curso (Fase 3) |
 | 5 | Compresor | Estilos limpio y FET/1176 | FabFilter Pro-C 2, 1176 | Pendiente |
 | 6 | Delay | Sync, ping-pong, filtros y modulación en el feedback | Valhalla Delay | Pendiente |
 | 7 | Reverb | Algorítmica (FDN, difusión, modulación); modos vintage y espacial | Valhalla VintageVerb, Supermassive | Pendiente |

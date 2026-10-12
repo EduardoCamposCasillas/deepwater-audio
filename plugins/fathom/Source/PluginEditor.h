@@ -8,8 +8,9 @@
 
 class FathomAudioProcessor;
 
-// El visor (lienzo del EQ con el analizador y la curva), debajo el panel de la banda, el bypass en la cabecera y la
-// perilla de salida. Un temporizador a 30 cuadros por segundo actualiza el analizador y la curva.
+// El visor (lienzo del EQ con el analizador, la curva y los nodos de las bandas), debajo el panel de la banda elegida,
+// el bypass en la cabecera y la perilla de salida. Un temporizador a 30 cuadros por segundo actualiza el analizador, la
+// curva y el panel.
 class FathomAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -24,6 +25,7 @@ private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
 
     void timerCallback() override;
+    void selectBand (int band);
 
     FathomAudioProcessor& processor;
     fathom::gui::FathomLookAndFeel lookAndFeel;

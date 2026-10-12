@@ -188,3 +188,134 @@ solo; si los acordes se oyen "lejanos", te pasaste.
 - **El aplastamiento cerca de 20 kHz.** A 44.1 o 48 kHz, una campana en 15 kHz sale un poco más angosta del lado de
   arriba que la de un EQ analógico (es un límite de la forma de digitalizarla). La curva lo muestra tal cual es. En la
   Fase 7 se corrige; mientras, a 88.2/96 kHz casi no pasa.
+
+## Fase 3 — Todas las formas y 24 bandas
+
+Ya no es "una campana": cada una de las **24 bandas** puede tomar diez formas, y las bandas van **en serie** (lo que
+una cambia, la siguiente lo recibe; en la curva, sus dB se suman). La campana sirve para una zona; las demás formas
+resuelven lo que la campana no puede: quitar todo lo que está debajo de algo, dar "aire" a todo lo de arriba,
+inclinar el sonido completo o eliminar un solo tono.
+
+### Conceptos aprendidos
+
+- **Shelf (estante).** Sube o baja *todo* lo que está debajo (shelf de graves) o encima (shelf de agudos) de la
+  frecuencia, y se queda plano: son las perillas BASS y TREBLE de un equipo de sonido. La frecuencia marca el **punto
+  medio** de la subida: un shelf de agudos de +6 dB en 8 kHz vale +3 dB justo en 8 kHz y casi +6 dB arriba de 15 kHz.
+  Con **Q 0.71** sube lo más suave posible; con Q más alto aparece un pequeño "contragolpe" (baja un poco antes de
+  subir), que algunos EQ de consola tienen a propósito porque suena más definido.
+- **Tilt shelf.** Un balancín: alrededor de la frecuencia, lo que los agudos suben lo bajan los graves (GANANCIA +6 =
+  graves −3, agudos +3). Cambia el color sin cambiar mucho el volumen total.
+- **Flat tilt.** Una **pendiente pareja** de 20 Hz a 20 kHz, sin ninguna zona marcada (10 dB de GANANCIA = 1 dB por
+  octava). Pone la mezcla un poco más "oscura" o más "brillante" de forma natural. Por dentro son 16 shelves diminutos,
+  uno por octava, cuyos escalones se funden en una rampa (el mismo truco que convierte ruido blanco en rosa).
+- **Cortes (low cut / high cut) y pendiente.** Un corte de graves quita todo lo que está debajo de la frecuencia (el
+  famoso *high-pass* o *low cut*); el de agudos, lo de arriba. La **PENDIENTE** dice qué tan rápido cae: con 6 dB/oct,
+  una octava más abajo suena a la mitad (suave, casi no se nota que hay filtro); 12 y 24 dB/oct son los más usados;
+  48–96 dB/oct, una pared. En la frecuencia del corte vale −3 dB.
+- **Butterworth y resonancia.** Los cortes de Fathom son *Butterworth* (lo más plano posible antes del corte). Con **Q
+  0.71** es Butterworth puro; con Q más alto aparece un **pico justo antes del corte** (el "golpe" de un filtro de
+  sintetizador). En un corte de graves de un bajo, Q 1–1.5 refuerza la nota más grave que queda; Q 0.5 hace la caída
+  más redonda.
+- **Notch.** Quita **una sola frecuencia por completo** (−100 dB y más): un zumbido de la corriente, una resonancia
+  que silba siempre en el mismo tono. El Q dice lo angosto del hueco. A diferencia de una campana de −30 dB, el notch
+  no tiene "fondo": en el centro, nada.
+- **Pasa banda.** Deja solo la zona alrededor de la frecuencia (en el centro, 0 dB; lejos, nada). Es el efecto
+  "teléfono" o "radio vieja" (pasa banda en 1–2 kHz con Q 1).
+- **All-pass.** No cambia el **volumen** de ninguna frecuencia (la curva queda plana) sino la **fase**: retrasa unas
+  frecuencias respecto de otras. Solo, casi no se oye; sumado con otra señal (dos micros, un kick en capas, una señal
+  en paralelo) cambia cómo se suman. Es la primera pista de que un EQ hace algo más que subir y bajar volumen (la
+  fase vuelve en la Fase 10).
+- **Cambiar de forma sin clic.** No se puede "convertir" un corte en un shelf: Fathom funde la banda a cero en 20 ms,
+  cambia la forma y la vuelve a subir. Una banda apagada no gasta CPU.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **Selector de banda** (Banda 1 … 24, las encendidas con ●): qué banda muestra el panel. Un **clic sobre un nodo** del
+  visor hace lo mismo. Cada banda tiene su color y empieza en su propia frecuencia (de 30 Hz a 16 kHz), así al
+  encender varias no quedan una encima de otra.
+- **ON**: enciende la banda (aparece su nodo de color y su relleno).
+- **FORMA**: una de las diez. Las perillas que esa forma no usa se atenúan (GANANCIA en los cortes, Q en el flat tilt).
+- **PENDIENTE**: solo en los cortes (de 6 a 96 dB/oct). Mira cómo la pared se vuelve vertical.
+- **FRECUENCIA / GANANCIA / Q**: lo mismo de la Fase 2, con el significado de cada forma; el texto de la izquierda lo
+  traduce (punto medio del shelf, corte a −3 dB, dB/oct del flat tilt…).
+- **Visor**: la línea blanca es el resultado **total**; cada banda encendida rellena con su color lo que ella sola sube o
+  baja (la elegida, más marcada). Los nodos de cortes, notch, pasa banda y all-pass van en la línea de 0 dB; los de las
+  formas con ganancia, sobre su curva (en un shelf, en el punto medio).
+
+### Ejercicio de escucha guiado en FL Studio
+
+1. **Pendientes.** Ruido blanco (3xOsc con la forma de ruido) en un canal con Fathom. Banda 1: corte de graves en 500
+   Hz. Pasa por 6, 12, 24, 48 y 96 dB/oct mirando la SALIDA azul: con 6 casi no se siente "filtro"; con 96 parece que
+   el sonido se acaba en una pared. Ahora lo mismo sobre un loop de dembow con el corte en 100 Hz.
+2. **El corte de graves en la voz.** La voz sola, corte de graves de 24 dB/oct. Súbelo desde 20 Hz despacio: hasta
+   ~80–120 Hz (voz masculina) casi no cambia el timbre, pero desaparecen golpes del micro y ruido grave. Sigue
+   subiendo: en algún punto la voz se vuelve "delgada". Quédate un poco antes de ese punto y compara dentro del beat
+   con ON/OFF.
+3. **Shelf vs. campana para el "aire".** En la voz: shelf de agudos +3 dB en 10 kHz (Q 0.71) contra una campana de +3
+   dB en 10 kHz (Q 1). La campana suena a "un brillo en un lugar"; el shelf, a "más abierto". Iguala el volumen con
+   SALIDA antes de decidir (el shelf sube más energía: bájale ~0.5 dB).
+4. **Resonancia del corte.** En el 808: corte de graves en 30 Hz, 24 dB/oct. Q 0.71 contra Q 2: con Q 2 la nota más
+   grave que sobrevive "empuja" más (el pico antes del corte se ve en la curva). Más peso, pero también más riesgo de
+   retumbar.
+5. **Notch vs. campana.** Un tono fijo (3xOsc, seno en A5 = 440 Hz): campana de −30 dB, Q 10 en 440 Hz → todavía se
+   oye un poco. Cambia a NOTCH: desaparece. Sube el Q del notch a 40: sigue desapareciendo, y lo demás casi no se toca.
+6. **El all-pass "no hace nada"… hasta que sí.** El mismo kick en dos canales del mixer y Fathom en uno solo, con
+   all-pass en 80 Hz, Q 0.7. Cada canal solo suena igual que antes; los dos juntos pierden golpe grave: la fase
+   desalineada hace que se resten. Por eso la fase importa con capas.
+
+### Receta: limpiar el dembow con cortes y shelves
+
+1. **Hi-hats y percusión aguda:** corte de graves de 12–24 dB/oct en 250–500 Hz. En solo no suenan distinto, pero
+   dejan de sumar barro y sub que no aportan nada.
+2. **Voz:** corte de graves de 24 dB/oct en 80–120 Hz (masculina) o 120–180 Hz (femenina), y shelf de agudos +2 dB en
+   10–12 kHz (Q 0.71) para el aire. El autotune agrega artefactos agudos: el shelf los sube menos que una campana
+   angosta y alta.
+3. **808:** corte de graves de 24 dB/oct en 25–30 Hz (Q 0.71–1): lo que hay debajo casi ningún sistema lo reproduce y
+   le roba headroom al master.
+4. **Kick:** si se pelea con el 808, *no* cortes los dos en el mismo sitio. Elige quién manda en el sub: el kick con un
+   shelf de graves −2 dB en 60 Hz y el 808 intacto, o al revés.
+5. **Bus de acordes / pads:** corte de graves de 12 dB/oct en 150–250 Hz para que no tapen al 808; si suenan lejanos,
+   un tilt shelf +2 dB en 2 kHz en vez de tres campanas.
+
+Por qué funciona: cada instrumento ocupa más espectro del que necesita. Los cortes quitan lo que **no aporta pero
+suma** (energía que se acumula en el bus y en el master), y los shelves cambian el carácter de una zona entera sin
+crear picos que resuenen.
+
+### Reto sin receta
+
+En el master de un beat tuyo, haz que suene "más caro" usando **solo un flat tilt y un corte**, sin campanas. Pistas
+(si no sale): una mezcla equilibrada cae suave hacia los agudos (pon una referencia comercial con Fathom en su canal y
+mira la inclinación del analizador); ¿tu beat necesita más o menos inclinación que la referencia?; con el flat tilt
+basta ±0.3–0.6 dB/oct (GANANCIA ±3–6); el corte va muy abajo (20–25 Hz, 12 dB/oct); compara con el volumen igualado.
+
+### Vocabulario
+
+- **Shelf / estante (low shelf, high shelf)**: sube o baja una zona entera hasta el extremo. "Un shelf de aire" =
+  shelf de agudos suave en 10–12 kHz.
+- **Tilt**: inclinar todo el espectro alrededor de un punto (la perilla TILT de Riptide hace esto).
+- **Low cut / high-pass (HPF)**: corte de graves. **High cut / low-pass (LPF)**: corte de agudos. "High-pass" dice qué
+  *pasa*; "low cut", qué *quita*: son lo mismo.
+- **Pendiente (slope)**: dB por octava de la caída. "Un HPF de 24" = corte de graves de 24 dB/oct.
+- **Butterworth**: el corte más plano antes de la frecuencia de corte; el "estándar".
+- **Resonancia**: el pico justo antes del corte; en sintetizadores, el "squelch" del filtro del acid.
+- **Notch**: un hueco total y angosto. "Notchear 60 Hz" = quitar el zumbido de la corriente.
+- **Pasa banda (band-pass, BPF)**: solo la zona del medio; el "efecto teléfono" de los intros.
+- **Fase**: en qué momento llega cada frecuencia. Un all-pass la cambia sin tocar el volumen.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Cortar graves "por costumbre" en todo.** Un low cut en cada canal a 100 Hz deja la mezcla delgada, y sumados los
+  cortes acumulan giros de fase en los graves. Corta lo que *sobra*, pista por pista, escuchando en contexto.
+- **96 dB/oct para todo.** Las pendientes extremas suenan más a "filtro", giran más la fase cerca del corte y pueden
+  "anillar" con Q alto. Úsalas cuando de verdad necesitas una pared (quitar el sub de una voz pegada a un 808); para lo
+  demás, 12–24 dB/oct.
+- **Resonancia alta en el corte de graves del 808.** El pico suma volumen justo en la nota más grave: el limitador del
+  master trabaja de más y en el club retumba. Q 0.71–1, salvo que busques ese golpe a propósito.
+- **Shelf de agudos con Q alto para "aire".** El contragolpe crea un pico antes de la subida que puede sonar áspero;
+  para aire, Q 0.5–0.71.
+- **Notch para resonancias que cambian.** Si el tono que molesta cambia con las notas (un 808 con glide), un notch fijo
+  falla la mitad del tiempo: eso es dinámica espectral (Fase 11).
+- **Flat tilt grande.** Con ±2–3 dB/oct ya es un cambio enorme (20–30 dB de un extremo al otro). En mezcla y master,
+  pequeño.
+- **Comparar sin igualar el volumen** (siempre): un shelf de agudos casi siempre "gana" la comparación porque suena más
+  fuerte.

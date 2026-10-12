@@ -15,12 +15,15 @@ constexpr int framesPerSecond = 30;
 } // namespace
 
 FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p), display (p), bandPanel (p.getParameters())
+    : AudioProcessorEditor (p), processor (p), display (p), bandPanel (p)
 {
     setLookAndFeel (&lookAndFeel);
 
     addAndMakeVisible (display);
     addAndMakeVisible (bandPanel);
+    // Elegir una banda (en el selector del panel o con un clic en su nodo) la muestra en los dos.
+    display.onBandClicked = [this] (int band) { selectBand (band); };
+    bandPanel.onBandChosen = [this] (int band) { selectBand (band); };
 
     bypassButton.setClickingTogglesState (true);
     bypassButton.setTooltip (juce::String::fromUTF8 ("Escuchar la se\xc3\xb1" "al original. Es el mismo bypass que el de FL "
@@ -62,6 +65,13 @@ void FathomAudioProcessorEditor::timerCallback()
     const double elapsed = juce::jlimit (0.0, 0.2, now - lastFrameSeconds);
     lastFrameSeconds = now;
     display.update (elapsed);
+    bandPanel.refresh();
+}
+
+void FathomAudioProcessorEditor::selectBand (int band)
+{
+    bandPanel.showBand (band);
+    display.setSelectedBand (band);
 }
 
 void FathomAudioProcessorEditor::paint (juce::Graphics& g)
@@ -75,12 +85,13 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 2: la campana"), header, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 3: todas las formas y 24 bandas"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (juce::String::fromUTF8 ("Una banda campana. Pasa el mouse por las perillas para ver qu\xc3\xa9 hace cada una. "
-                                        "Fase 3: todas las formas de filtro y 24 bandas."),
+    g.drawText (juce::String::fromUTF8 ("Elige una banda en el panel (o con un clic en su nodo), enci\xc3\xa9ndela y "
+                                        "prueba sus formas. Pasa el mouse por los controles para ver qu\xc3\xa9 hace cada uno. "
+                                        "Fase 4: editar sobre el visor."),
                 getLocalBounds().removeFromBottom (footerHeight), juce::Justification::centred);
 }
 

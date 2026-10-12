@@ -785,6 +785,234 @@ void testEqBellIsStableWhenModulated()
     }
 }
 
+// Pasa un seno por una cascada y mide cuánto lo cambió (en dB), después de que el filtro se asienta.
+double measureCascadeDb (const dw::EqCascade& cascade, double hz, double sr, size_t settle = 32768)
+{
+    const auto input = sineSignal (hz, sr, settle + 16384);
+    std::vector<float> output (input.size());
+    dw::EqCascadeFilter filter;
+    for (size_t i = 0; i < input.size(); ++i)
+        output[i] = filter.process (input[i], cascade);
+    return toDb (toneAmplitude (output, hz, sr, settle));
+}
+
+void testEqShelves()
+{
+    std::printf ("EQ shelves y tilt: mesetas = ganancia pedida, mitad en la frecuencia, 0 dB bit a bit, +x/-x = identidad\n");
+
+    double worstPlateau = 0.0, worstMiddle = 0.0, worstInverse = 0.0;
+    for (const double sr : sampleRates)
+        for (const double gainDb : { -18.0, -3.0, 6.0, 24.0 })
+            for (const double q : { 0.5, 0.7071, 1.0 })
+            {
+                const auto low = dw::EqCoefficients::lowShelf (300.0, q, gainDb, sr);
+                const auto high = dw::EqCoefficients::highShelf (3000.0, q, gainDb, sr);
+                const auto tilt = dw::EqCoefficients::tiltShelf (1000.0, q, gainDb, sr);
+                // Mesetas: el grave del de graves (y del tilt) y Nyquist (s → ∞) del de agudos.
+                worstPlateau = std::max ({ worstPlateau, std::abs (low.magnitudeDb (1.0, sr) - gainDb),
+                                           std::abs (low.magnitudeDb (0.5 * sr, sr)), std::abs (high.magnitudeDb (1.0, sr)),
+                                           std::abs (high.magnitudeDb (0.5 * sr, sr) - gainDb),
+                                           std::abs (tilt.magnitudeDb (1.0, sr) + gainDb / 2.0),
+                                           std::abs (tilt.magnitudeDb (0.5 * sr, sr) - gainDb / 2.0) });
+                // En la frecuencia pedida: la mitad de la ganancia (y 0 dB el tilt), con cualquier Q.
+                worstMiddle = std::max ({ worstMiddle, std::abs (low.magnitudeDb (300.0, sr) - gainDb / 2.0),
+                                          std::abs (high.magnitudeDb (3000.0, sr) - gainDb / 2.0), std::abs (tilt.magnitudeDb (1000.0, sr)) });
+                // +x y −x se anulan.
+                for (const double hz : { 40.0, 300.0, 2000.0, 12000.0 })
+                    worstInverse = std::max ({ worstInverse,
+                                               std::abs (low.magnitudeDb (hz, sr) + dw::EqCoefficients::lowShelf (300.0, q, -gainDb, sr).magnitudeDb (hz, sr)),
+                                               std::abs (high.magnitudeDb (hz, sr) + dw::EqCoefficients::highShelf (3000.0, q, -gainDb, sr).magnitudeDb (hz, sr)) });
+            }
+    std::printf ("  peor diferencia: mesetas %.4f dB, punto medio %.5f dB, +x/-x %.5f dB\n", worstPlateau, worstMiddle, worstInverse);
+    CHECK (worstPlateau < 0.01);
+    CHECK (worstMiddle < 0.001);
+    CHECK (worstInverse < 0.001);
+
+    // Q 0.71 = la subida más suave posible, sin rebote: nunca pasa de la ganancia pedida ni baja de 0.
+    const auto smooth = dw::EqCoefficients::lowShelf (200.0, 0.7071, 12.0, 48000.0);
+    bool monotonic = true;
+    for (double hz = 10.0; hz < 20000.0; hz *= 1.05)
+        monotonic = monotonic && smooth.magnitudeDb (hz, 48000.0) <= 12.0001 && smooth.magnitudeDb (hz, 48000.0) >= -0.0001;
+    CHECK (monotonic);
+
+    // 0 dB: la entrada intacta, bit a bit.
+    const auto input = sineSignal (440.0, 48000.0, 4096);
+    for (const auto& flat : { dw::EqCoefficients::lowShelf (300.0, 1.0, 0.0, 48000.0), dw::EqCoefficients::highShelf (3000.0, 1.0, 0.0, 48000.0),
+                              dw::EqCoefficients::tiltShelf (1000.0, 1.0, 0.0, 48000.0) })
+    {
+        dw::EqFilter filter;
+        bool exact = true;
+        for (const float x : input)
+            exact = exact && filter.process (x, flat) == x;
+        CHECK (exact);
+    }
+}
+
+void testEqNotchBandPassAllPass()
+{
+    std::printf ("EQ notch / band-pass / all-pass: hueco total, 0 dB en el centro, all-pass plano en volumen\n");
+
+    for (const double sr : sampleRates)
+    {
+        const auto notch = dw::EqCoefficients::notch (1000.0, 2.0, sr);
+        CHECK (notch.magnitudeDb (1000.0, sr) < -100.0);
+        CHECK (std::abs (notch.magnitudeDb (20.0, sr)) < 0.01 && std::abs (notch.magnitudeDb (0.45 * sr, sr)) < 0.1);
+        // El ancho del hueco: a −3 dB, 1/Q de "ancho" en la escala del SVF (Q 2: de 0.78 a 1.28 veces el centro).
+        const double edge = (std::sqrt (1.0 + 1.0 / 16.0) - 0.25); // raíz positiva de x² + x/Q − 1 = 0 con Q = 2
+        CHECK (std::abs (notch.magnitudeDb (1000.0 * edge, sr) + 3.0103) < 0.05);
+
+        const auto bandPass = dw::EqCoefficients::bandPassFilter (1000.0, 2.0, sr);
+        CHECK (std::abs (bandPass.magnitudeDb (1000.0, sr)) < 0.001);
+        CHECK (bandPass.magnitudeDb (100.0, sr) < -25.0 && bandPass.magnitudeDb (10000.0, sr) < -25.0);
+
+        double worstAllPass = 0.0;
+        const auto allPass = dw::EqCoefficients::allPass (1000.0, 0.7, sr);
+        for (double hz = 20.0; hz < 0.49 * sr; hz *= 1.1)
+            worstAllPass = std::max (worstAllPass, std::abs (allPass.magnitudeDb (hz, sr)));
+        CHECK (worstAllPass < 1.0e-5);
+        // En el centro gira la fase 180°: la señal sale invertida.
+        CHECK (std::abs (allPass.response (1000.0, sr).real() + 1.0) < 1.0e-5);
+        // Y el audio también es plano: cada seno sale con su volumen.
+        for (const double hz : { 200.0, 1000.0, 5000.0 })
+            CHECK (std::abs (measureCascadeDb (dw::EqCascade::single (allPass), hz, sr)) < 0.01);
+    }
+}
+
+void testButterworthCuts()
+{
+    std::printf ("Cortes Butterworth de 1 a 16 polos: -3 dB en el corte, |H|^2 = 1/(1 + (wc/w)^2n), resonancia\n");
+
+    // Con la bilineal, la respuesta digital es la analógica sobre el eje deformado Ω = tan(π·f/fs): la teoría exacta
+    // del Butterworth digital es |H|² = 1/(1 + (Ωc/Ω)^(2n)) para el high-pass y 1/(1 + (Ω/Ωc)^(2n)) para el low-pass.
+    double worstTheory = 0.0, worstMeasured = 0.0;
+    for (const double sr : sampleRates)
+        for (int order = 1; order <= dw::EqCascade::maxOrder; ++order)
+        {
+            const auto highPass = dw::EqCascade::butterworthHighPass (200.0, order, std::sqrt (0.5), sr);
+            const auto lowPass = dw::EqCascade::butterworthLowPass (5000.0, order, std::sqrt (0.5), sr);
+            CHECK (highPass.numStages == (order + 1) / 2);
+            for (const double hz : { 20.0, 100.0, 200.0, 400.0, 2000.0, 5000.0, 10000.0, 18000.0 })
+            {
+                const double w = std::tan (pi * hz / sr);
+                const double ratioHigh = std::tan (pi * 200.0 / sr) / w, ratioLow = w / std::tan (pi * 5000.0 / sr);
+                const double theoryHigh = -10.0 * std::log10 (1.0 + std::pow (ratioHigh, 2.0 * order));
+                const double theoryLow = -10.0 * std::log10 (1.0 + std::pow (ratioLow, 2.0 * order));
+                // Hasta −120 dB (más abajo manda la precisión de los coeficientes en float).
+                if (theoryHigh > -120.0)
+                    worstTheory = std::max (worstTheory, std::abs (highPass.magnitudeDb (hz, sr) - theoryHigh));
+                if (theoryLow > -120.0)
+                    worstTheory = std::max (worstTheory, std::abs (lowPass.magnitudeDb (hz, sr) - theoryLow));
+            }
+            // El audio = la curva (donde el seno todavía se mide bien).
+            if (sr == 48000.0 && (order == 1 || order == 4 || order == 9 || order == 16))
+                for (const double hz : { 150.0, 200.0, 400.0, 3000.0 })
+                    worstMeasured = std::max (worstMeasured, std::abs (measureCascadeDb (highPass, hz, sr) - highPass.magnitudeDb (hz, sr)));
+        }
+    std::printf ("  peor diferencia: teoría %.5f dB, medida %.5f dB\n", worstTheory, worstMeasured);
+    CHECK (worstTheory < 0.01);
+    CHECK (worstMeasured < 0.01);
+
+    // Resonancia: q más alto que 0.71 = un pico antes del corte; Butterworth puro nunca pasa de 0 dB.
+    for (const int order : { 2, 4, 8 })
+    {
+        double peakFlat = -100.0, peakResonant = -100.0;
+        const auto flat = dw::EqCascade::butterworthHighPass (100.0, order, std::sqrt (0.5), 48000.0);
+        const auto resonant = dw::EqCascade::butterworthHighPass (100.0, order, 4.0, 48000.0);
+        for (double hz = 20.0; hz < 2000.0; hz *= 1.01)
+        {
+            peakFlat = std::max (peakFlat, flat.magnitudeDb (hz, 48000.0));
+            peakResonant = std::max (peakResonant, resonant.magnitudeDb (hz, 48000.0));
+        }
+        CHECK (peakFlat < 0.0001);
+        CHECK (peakResonant > 6.0);
+    }
+}
+
+void testFlatTilt()
+{
+    std::printf ("Flat tilt: pendiente constante en dB/oct, 0 dB en el pivote, 0 dB/oct = bit a bit\n");
+
+    double worstLow = 0.0, worstHigh = 0.0, worstPivot = 0.0, worstMeasured = 0.0;
+    for (const double sr : sampleRates)
+    {
+        dw::FlatTiltDesign design;
+        design.prepare (sr);
+        for (const double slope : { -3.0, -0.6, 1.0, 3.0 })
+            for (const double pivot : { 100.0, 1000.0, 10000.0 })
+            {
+                const auto tilt = design.make (pivot, slope);
+                worstPivot = std::max (worstPivot, std::abs (tilt.magnitudeDb (pivot, sr)));
+                // La forma: una recta en dB contra octavas. Se mide contra la recta que pasa por la curva en 1 kHz (con
+                // el pivote en 10 kHz, la curvatura de arriba desplaza la recta entera; eso ya lo mide worstHigh).
+                const double at1k = tilt.magnitudeDb (1000.0, sr);
+                for (double hz = 20.0; hz <= 20000.0; hz *= 1.05)
+                {
+                    const double error = std::abs (tilt.magnitudeDb (hz, sr) - at1k - slope * std::log2 (hz / 1000.0)) / std::abs (slope);
+                    (hz <= 1000.0 ? worstLow : worstHigh) = std::max (hz <= 1000.0 ? worstLow : worstHigh, error);
+                }
+                if (sr == 44100.0 && pivot == 1000.0)
+                    for (const double hz : { 50.0, 1000.0, 8000.0 })
+                        worstMeasured = std::max (worstMeasured, std::abs (measureCascadeDb (tilt, hz, sr) - tilt.magnitudeDb (hz, sr)));
+            }
+    }
+    std::printf ("  error por cada dB/oct: hasta 1 kHz %.4f dB, hasta 20 kHz %.4f dB; pivote %.6f dB; medida %.5f dB\n", worstLow,
+                 worstHigh, worstPivot, worstMeasured);
+    CHECK (worstLow < 0.02);
+    CHECK (worstHigh < 0.25);
+    CHECK (worstPivot < 1.0e-4);
+    CHECK (worstMeasured < 0.01);
+
+    // Sin pendiente: cada etapa es la entrada intacta.
+    dw::FlatTiltDesign design;
+    design.prepare (48000.0);
+    const auto flat = design.make (1000.0, 0.0);
+    dw::EqCascadeFilter filter;
+    bool exact = true;
+    for (const float x : sineSignal (440.0, 48000.0, 4096))
+        exact = exact && filter.process (x, flat) == x;
+    CHECK (exact);
+}
+
+void testEqShapesAreStableWhenModulated()
+{
+    std::printf ("EQ: todas las formas estables con todo saltando en cada muestra (96 dB/oct, Q 40, +-30 dB, Nyquist)\n");
+
+    for (const double sr : sampleRates)
+    {
+        dw::FlatTiltDesign design;
+        design.prepare (sr);
+        dw::EqCascadeFilter filter;
+        unsigned seed = 31337;
+        auto random = [&seed] {
+            seed = seed * 1664525u + 1013904223u;
+            return static_cast<double> (seed >> 8) / 16777216.0;
+        };
+        float peak = 0.0f;
+        for (int i = 0; i < 100000; ++i)
+        {
+            const double hz = 10.0 * std::pow (3000.0, random());
+            const double q = 0.025 * std::pow (1600.0, random());
+            const double gainDb = -30.0 + 60.0 * random();
+            dw::EqCascade cascade;
+            switch ((i / 500) % 8) // la forma cambia cada 500 muestras; los ajustes, en cada una
+            {
+                case 0: cascade = dw::EqCascade::single (dw::EqCoefficients::lowShelf (hz, q, gainDb, sr)); break;
+                case 1: cascade = dw::EqCascade::single (dw::EqCoefficients::highShelf (hz, q, gainDb, sr)); break;
+                case 2: cascade = dw::EqCascade::single (dw::EqCoefficients::tiltShelf (hz, q, gainDb, sr)); break;
+                case 3: cascade = dw::EqCascade::single (dw::EqCoefficients::notch (hz, q, sr)); break;
+                case 4: cascade = dw::EqCascade::single (dw::EqCoefficients::allPass (hz, q, sr)); break;
+                case 5: cascade = dw::EqCascade::butterworthHighPass (hz, 16, q, sr); break;
+                case 6: cascade = dw::EqCascade::butterworthLowPass (hz, 1 + (i % 16), q, sr); break;
+                default: cascade = design.make (hz, gainDb / 10.0); break;
+            }
+            const float x = (i / 37) % 2 == 0 ? 0.5f : -0.5f;
+            peak = std::max (peak, std::abs (filter.process (x, cascade)));
+        }
+        CHECK (std::isfinite (peak));
+        CHECK (peak < 1.0e5f);
+    }
+}
+
 // --- Suavizado ------------------------------------------------------------------------------------------------------
 
 void testSmoothedParameter()
@@ -1507,6 +1735,11 @@ int main()
     testEqBellMatchesTheory();
     testEqBellIdentityAndInverse();
     testEqBellIsStableWhenModulated();
+    testEqShelves();
+    testEqNotchBandPassAllPass();
+    testButterworthCuts();
+    testFlatTilt();
+    testEqShapesAreStableWhenModulated();
     testLinkwitzRileySplit();
     testMultibandSplitterSumsFlat();
     testSmoothedParameter();

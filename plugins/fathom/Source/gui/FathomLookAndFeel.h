@@ -93,6 +93,10 @@ public:
         return label;
     }
 
+    // Las listas (banda, forma, pendiente) con la misma letra que el resto del panel.
+    juce::Font getComboBoxFont (juce::ComboBox&) override { return juce::FontOptions (13.0f); }
+    juce::Font getPopupMenuFont() override { return juce::FontOptions (13.0f); }
+
     // Etiquetas sin recuadro (salvo mientras se escribe un valor en ellas).
     void drawLabel (juce::Graphics& g, juce::Label& label) override
     {

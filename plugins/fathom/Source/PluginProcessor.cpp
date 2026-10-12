@@ -36,10 +36,16 @@ FathomAudioProcessor::FathomAudioProcessor()
     namespace id = fathom::params;
     bypassParam = parameters.getRawParameterValue (id::bypass);
     outputGainParam = parameters.getRawParameterValue (id::outputGain);
-    band1EnabledParam = parameters.getRawParameterValue (id::band1Enabled);
-    band1FrequencyParam = parameters.getRawParameterValue (id::band1Frequency);
-    band1GainParam = parameters.getRawParameterValue (id::band1Gain);
-    band1QParam = parameters.getRawParameterValue (id::band1Q);
+    for (int b = 0; b < id::numBands; ++b)
+    {
+        auto& band = bandParams[static_cast<size_t> (b)];
+        band.enabled = parameters.getRawParameterValue (id::band (b, id::enabled));
+        band.frequency = parameters.getRawParameterValue (id::band (b, id::frequency));
+        band.gain = parameters.getRawParameterValue (id::band (b, id::gain));
+        band.q = parameters.getRawParameterValue (id::band (b, id::q));
+        band.shape = parameters.getRawParameterValue (id::band (b, id::shape));
+        band.slope = parameters.getRawParameterValue (id::band (b, id::slope));
+    }
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
 }
@@ -59,38 +65,76 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
             .withStringFromValueFunction (gainToText)
             .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
 
-    // Fase 2: la banda 1 (campana). Rangos como los de un EQ profesional: 10 Hz–30 kHz (encima de Nyquist se limita),
-    // ±30 dB y Q de 0.025 (casi 9 octavas de ancho) a 40 (un 1/36 de octava: para cazar una resonancia).
+    // Las 24 bandas, apagadas. Rangos como los de un EQ profesional: 10 Hz-30 kHz (encima de Nyquist se limita),
+    // ±30 dB y Q de 0.025 (casi 9 octavas de ancho) a 40 (un 1/36 de octava: para cazar una resonancia). Cada banda
+    // empieza en su propia frecuencia (repartidas cada ~0.4 octavas de 30 Hz a 16 kHz): al encender varias desde el
+    // panel no quedan una encima de otra.
     using Band = fathom::dsp::BandSettings;
-    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::band1Enabled, id::versionHintPhase2 }, "Band 1 On", true));
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { id::band1Frequency, id::versionHintPhase2 }, "Band 1 Freq", logRange (Band::minFrequency, Band::maxFrequency),
-        1000.0f,
-        juce::AudioParameterFloatAttributes().withLabel ("Hz").withStringFromValueFunction (hzToText).withValueFromStringFunction (textToHz)));
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { id::band1Gain, id::versionHintPhase2 }, "Band 1 Gain",
-        juce::NormalisableRange<float> (Band::minGainDb, Band::maxGainDb, 0.01f), 0.0f,
-        juce::AudioParameterFloatAttributes()
-            .withLabel ("dB")
-            .withStringFromValueFunction (gainToText)
-            .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { id::band1Q, id::versionHintPhase2 }, "Band 1 Q", logRange (Band::minQ, Band::maxQ), 1.0f,
-        juce::AudioParameterFloatAttributes()
-            .withStringFromValueFunction (qToText)
-            .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
+    static constexpr std::array<float, id::numBands> defaultFrequencies { 30.0f,   40.0f,   50.0f,   65.0f,   85.0f,   115.0f,
+                                                                          150.0f,  200.0f,  260.0f,  350.0f,  460.0f,  600.0f,
+                                                                          800.0f,  1000.0f, 1400.0f, 1800.0f, 2400.0f, 3200.0f,
+                                                                          4200.0f, 5500.0f, 7300.0f, 9600.0f, 12500.0f, 16000.0f };
+    // El orden de las listas es el de fathom::dsp::Shape y fathom::dsp::slopes (se guarda el índice: no reordenar).
+    const juce::StringArray shapes { "Bell",     "Low Shelf", "High Shelf", "Tilt Shelf", "Flat Tilt",
+                                     "Low Cut",  "High Cut",  "Notch",      "Band Pass",  "All Pass" };
+    jassert (shapes.size() == fathom::dsp::numShapes);
+    juce::StringArray slopes;
+    for (const int slope : fathom::dsp::slopes)
+        slopes.add (juce::String (slope) + " dB/oct");
+
+    for (int b = 0; b < id::numBands; ++b)
+    {
+        // La banda 1 conserva la versión de la Fase 2 en los ajustes que ya tenía.
+        const int hint = b == 0 ? id::versionHintPhase2 : id::versionHintPhase3;
+        const auto name = "Band " + juce::String (b + 1) + " ";
+        layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::band (b, id::enabled), hint }, name + "On", false));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { id::band (b, id::frequency), hint }, name + "Freq", logRange (Band::minFrequency, Band::maxFrequency),
+            defaultFrequencies[static_cast<size_t> (b)],
+            juce::AudioParameterFloatAttributes().withLabel ("Hz").withStringFromValueFunction (hzToText).withValueFromStringFunction (textToHz)));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { id::band (b, id::gain), hint }, name + "Gain",
+            juce::NormalisableRange<float> (Band::minGainDb, Band::maxGainDb, 0.01f), 0.0f,
+            juce::AudioParameterFloatAttributes()
+                .withLabel ("dB")
+                .withStringFromValueFunction (gainToText)
+                .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { id::band (b, id::q), hint }, name + "Q", logRange (Band::minQ, Band::maxQ), 1.0f,
+            juce::AudioParameterFloatAttributes()
+                .withStringFromValueFunction (qToText)
+                .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::band (b, id::shape), id::versionHintPhase3 },
+                                                                  name + "Shape", shapes, 0));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::band (b, id::slope), id::versionHintPhase3 },
+                                                                  name + "Slope", slopes, 1));
+    }
     return layout;
 }
 
-fathom::dsp::BandSettings FathomAudioProcessor::getBand1Settings() const noexcept
+fathom::dsp::BandSettings FathomAudioProcessor::getBandSettings (int band) const noexcept
 {
-    return { band1EnabledParam->load() >= 0.5f, band1FrequencyParam->load(), band1GainParam->load(), band1QParam->load() };
+    const auto& p = bandParams[static_cast<size_t> (band)];
+    return { p.enabled->load() >= 0.5f,
+             p.frequency->load(),
+             p.gain->load(),
+             p.q->load(),
+             static_cast<fathom::dsp::Shape> (juce::jlimit (0, fathom::dsp::numShapes - 1, juce::roundToInt (p.shape->load()))),
+             juce::jlimit (0, static_cast<int> (fathom::dsp::slopes.size()) - 1, juce::roundToInt (p.slope->load())) };
+}
+
+fathom::dsp::Engine::BandArray FathomAudioProcessor::getAllBandSettings() const noexcept
+{
+    fathom::dsp::Engine::BandArray bands;
+    for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
+        bands[static_cast<size_t> (b)] = getBandSettings (b);
+    return bands;
 }
 
 void FathomAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
 {
     // Sin buffers propios: el motor procesa en el sitio y las tomas del analizador son de tamaño fijo.
-    engine.prepare (sampleRate, bypassParam->load() >= 0.5f, outputGainParam->load(), getBand1Settings());
+    engine.prepare (sampleRate, bypassParam->load() >= 0.5f, outputGainParam->load(), getAllBandSettings());
     analyzerSampleRate.store (sampleRate);
     setLatencySamples (0);
 }
@@ -124,7 +168,8 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     engine.setBypassed (bypassParam->load() >= 0.5f);
     engine.setOutputDb (outputGainParam->load());
-    engine.setBand (getBand1Settings());
+    for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
+        engine.setBand (b, getBandSettings (b));
     engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples);
 
     if (feedAnalyzer)

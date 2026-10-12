@@ -5,7 +5,7 @@
 #include "deepwater/dsp/AnalyzerTap.h"
 #include "dsp/Engine.h"
 
-// Efecto mono/estéreo: una banda campana y la ganancia de salida (Fase 2). El audio deja una copia de lo que entra
+// Efecto mono/estéreo: 24 bandas de EQ con todas las formas y la ganancia de salida (Fase 3). El audio deja una copia de lo que entra
 // y de lo que sale en dos tomas lock-free (AnalyzerTap) para el analizador de la GUI. El audio está en fathom::dsp
 // (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor
@@ -48,8 +48,9 @@ public:
 
     juce::AudioProcessorValueTreeState& getParameters() noexcept { return parameters; }
 
-    // Los ajustes actuales de la banda 1 (lee atómicos: sirve en el hilo de audio y en el de la GUI).
-    fathom::dsp::BandSettings getBand1Settings() const noexcept;
+    // Los ajustes actuales de una banda (0-23) o de todas (leen atómicos: sirven en el hilo de audio y en el de la GUI).
+    fathom::dsp::BandSettings getBandSettings (int band) const noexcept;
+    fathom::dsp::Engine::BandArray getAllBandSettings() const noexcept;
 
     // Hilo de la GUI: las tomas del analizador y la frecuencia de muestreo con la que se escribieron.
     const AnalyzerTap& getInputTap() const noexcept { return inputTap; }
@@ -65,10 +66,16 @@ private:
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* bypassParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
-    std::atomic<float>* band1EnabledParam = nullptr;
-    std::atomic<float>* band1FrequencyParam = nullptr;
-    std::atomic<float>* band1GainParam = nullptr;
-    std::atomic<float>* band1QParam = nullptr;
+    struct BandParameters
+    {
+        std::atomic<float>* enabled = nullptr;
+        std::atomic<float>* frequency = nullptr;
+        std::atomic<float>* gain = nullptr;
+        std::atomic<float>* q = nullptr;
+        std::atomic<float>* shape = nullptr;
+        std::atomic<float>* slope = nullptr;
+    };
+    std::array<BandParameters, fathom::dsp::Engine::numBands> bandParams;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     fathom::dsp::Engine engine;

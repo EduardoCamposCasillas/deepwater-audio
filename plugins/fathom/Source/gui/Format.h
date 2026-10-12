@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -24,6 +25,17 @@ inline juce::String db (float value)
 {
     const float rounded = std::round (value * 10.0f) / 10.0f;
     return (rounded > 0.0f ? "+" : "") + juce::String (rounded == 0.0f ? 0.0f : rounded, 1) + " dB";
+}
+
+// El nombre de cada forma en la GUI, en el orden de fathom::dsp::Shape.
+inline constexpr std::array<const char*, 10> shapeNames { "Campana",      "Shelf graves", "Shelf agudos", "Tilt shelf", "Flat tilt",
+                                                          "Corte graves", "Corte agudos", "Notch",        "Pasa banda", "All-pass" };
+
+// Ancho en octavas de un Q (definición del Cookbook): el de la campana a la mitad de su ganancia en dB, y también el
+// del notch y el pasa banda a −3 dB.
+inline double octavesForQ (double q)
+{
+    return 2.0 / std::log (2.0) * std::asinh (1.0 / (2.0 * std::max (0.001, q)));
 }
 
 // La nota más cercana a una frecuencia, con los nombres del Piano Roll de FL Studio (C5 = nota MIDI 60, A5 = 440 Hz:

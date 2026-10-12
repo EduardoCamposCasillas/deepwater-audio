@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <juce_graphics/juce_graphics.h>
 
 // Colores de toda la interfaz en un solo sitio. La base es la de la suite (Undertow, Riptide, Ebb); el acento es un azul
@@ -20,4 +22,14 @@ inline const juce::Colour bypassOn { 0xffef5350 };
 // El visor: entrada = gris (referencia); salida = el acento, con relleno.
 inline const juce::Colour spectrumIn { 0xff9aa7b4 };
 inline const juce::Colour grid { 0xff1c232b };
+
+// Cada banda tiene su color (el nodo, su relleno y las perillas cuando está elegida). Ocho tonos que se repiten: con
+// 24 bandas, la 1, la 9 y la 17 comparten color, pero rara vez se usan todas.
+inline juce::Colour bandColour (int band)
+{
+    static const std::array<juce::Colour, 8> colours { juce::Colour (0xff4f9dff), juce::Colour (0xff26c6da), juce::Colour (0xff66bb6a),
+                                                       juce::Colour (0xffd4e157), juce::Colour (0xffffb74d), juce::Colour (0xffef6c6c),
+                                                       juce::Colour (0xffec6fb0), juce::Colour (0xffb388ff) };
+    return colours[static_cast<size_t> (band) % colours.size()];
+}
 } // namespace fathom::gui::theme
