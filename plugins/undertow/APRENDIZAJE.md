@@ -2636,3 +2636,99 @@ nivel de "nota" contra "aire" te da el Decay? Inténtalo primero; las pistas ven
 
 ### Retos completados
 - [ ] Reto Fase 16 — violonchelo fantasma
+
+## Fase 17 — Fase inicial: Phase, Rand y Free
+
+Nació de una duda: "la sierra del Init suena áspera en acordes graves, ¿está mal afinada?". No lo estaba (medido:
+C2–C4 de FL a menos de 0.004 cents a 4 sample rates; el oído nota 3–5 cents). Pero Serum 2 tiene algo que a Undertow le
+faltaba: elegir **dónde empieza la onda** al tocar una nota. Eso es esta fase. Está en la pestaña **Warp y FM**, columna
+**Fase** de cada oscilador.
+
+### Conceptos aprendidos
+**Fase de arranque.** Un oscilador lee su ciclo con un acumulador de fase (0 = principio del ciclo, 1 = final). Al
+empezar una nota desde silencio hay que elegir el punto de partida. Hasta ahora Undertow, con una sola copia, siempre
+arrancaba en 0: todas las notas de un acorde empiezan **alineadas**, con el mismo golpe. **Phase** elige ese punto
+(0–360°); **Rand** le suma un desplazamiento al azar distinto en cada nota (fase = Phase + Rand × u, con u entre 0 y 1).
+Con Rand 100 % el arranque es completamente aleatorio.
+
+**El timbre sostenido no cambia; el ataque y las mezclas, sí.** El espectro de una onda no depende de su fase: una sierra
+que arranca en 90° es la misma sierra. Lo que cambia es (1) **el transitorio**: un seno que arranca en 90° empieza en su
+pico, y con un Attack corto eso es un **clic** (o un "thump" en un bajo); (2) **cómo se suman dos fuentes**: Osc A y Osc B
+con la misma onda a 180° se **cancelan**; a 0°, se suman. Con Rand esa suma cambia en cada nota: unas suenan más llenas,
+otras más huecas (más "vivo", menos repetible).
+
+**Free (oscilador libre).** En un sinte analógico polifónico cada tarjeta de voz tiene su VCO, que nunca se detiene: al
+tocar una nota, la onda está donde esté. **Free** imita eso: cada voz sigue la fase donde se quedó su oscilador en la
+nota anterior (Phase y Rand no cuentan y se ven atenuadas). Se parece a Rand 100 %, pero sin azar: depende de lo que
+tocaste antes.
+
+**Con unison no cambia nada.** Con 2 o más copias, cada una ya arranca en una fase al azar (Fase 6): si salieran juntas,
+cada nota empezaría con un pico y un barrido de flanger (el "laser zap" del manual de Serum). Por eso Phase y Rand se
+atenúan con Unison > 1. Diferencia con Serum: ahí Rand 0 con unison sí da el laser zap; aquí se eligió conservar el
+sonido de todos los presets y proyectos existentes (Phase 0°, Rand 0 %, Reset = exactamente el arranque de antes;
+comprobado con null test bit a bit).
+
+**Por qué un acorde grave de sierras suena áspero (y no es un error).** En C2 + E2 de FL, el 5.º armónico de C2
+(163.5 Hz) y el 4.º de E2 (164.8 Hz) casi coinciden y **laten** a 1.3 Hz; más arriba hay decenas de parejas así latiendo
+a 10–40 Hz, y el oído oye ese batido rápido como **aspereza**, casi distorsión. Es el **límite grave de los intervalos**:
+las terceras por debajo de ~C3 de FL suenan a barro con cualquier sinte (Serum incluido), y la sierra, que tiene todos
+los armónicos, es la que más lo muestra. En la afinación temperada las terceras mayores están 14 cents por encima de las
+"puras", lo que acelera esos batidos.
+
+### Qué hace cada control al sonido
+| Control | Qué oyes | En el osciloscopio y el analizador |
+|---|---|---|
+| **Fase: Reset** (por defecto) | Cada nota arranca en Phase (+ Rand). Con Rand 0, todas iguales: ataque repetible, "de máquina". | Wave Candy: todas las notas empiezan con la misma forma. |
+| **Fase: Free** | Cada nota empieza donde la dejó la anterior de esa voz: ataques un poco distintos, sensación analógica. | La onda arranca en un punto distinto cada vez. |
+| **Phase** (0–360°) | Con un seno y Attack corto: 0° suave, 90° clic. Con dos osciladores iguales: 0° suman, 180° se cancelan, en medio cambia el color. Una sola sierra sostenida: no cambia nada. | El punto donde empieza la onda; el espectro sostenido, igual. |
+| **Rand** (0–100 %) | Cuánto se reparte al azar el arranque: 0 = idéntico siempre; 100 % = cada nota distinta. En acordes, las notas dejan de "golpear" a la vez. | Notas que arrancan en puntos distintos. |
+
+### Ejercicio de escucha guiado
+Canal con Wave Candy (osciloscopio) y Fruity Parametric EQ 2. *Init*. Env 1: **Attack 0 ms** (lo más corto), Sustain
+100 %, Release 50 ms. Pestaña Warp y FM.
+1. **El clic de la fase.** Osc A en seno (Position 0 %). Toca notas cortas en C5 de FL. Phase 0°: arranque limpio. Phase
+   **90°**: cada nota hace "tic" (empieza en el pico del seno). Sube el Attack de Env 1 a 5 ms: el clic desaparece. La
+   fase importa en el **ataque**.
+2. **Dos osciladores que se cancelan.** Osc B On, misma tabla y Position (seno), Level 100 %. Phase de B en 0°: más
+   fuerte (+6 dB). Phase de B en **180°**: silencio casi total. Prueba valores entre 0 y 180° tocando notas nuevas: cambia
+   el volumen y, con sierras, el color. Así se ajustan las capas de un bajo.
+3. **Rand en acordes.** Una sola sierra (Osc B off, Position 66 %), Attack 0. Toca un acorde en C4 de FL una y otra vez.
+   Rand 0: todos los golpes idénticos. Rand 100 %: cada golpe un poco distinto. Escucha el ataque, no el sostenido.
+4. **Free contra Reset.** Una nota repetida en C3 de FL con Attack 0: Reset (Rand 0) = metralleta idéntica; Free = cada
+   nota cambia un poco, como un sinte analógico.
+5. **La aspereza no es la fase.** Acorde C2–E2–G2 de FL con la sierra: áspero. Pon Rand 100 % o Free: el ataque cambia,
+   la aspereza sigue. Ahora toca C2 + G2 + E3 (la tercera una octava arriba): mucho más limpio. Era la armonía.
+
+### Recetas
+**1. Bajo sub con golpe repetible.** Init. Osc A seno (Position 0 %), **Phase 0°, Rand 0 %**, Level 80 %. Sub On (Sine,
+−1 oct, 60 %). Env 1: Attack 1 ms, Decay 400 ms, Sustain 70 %, Release 80 ms. Filtro LP 24 dB, cutoff 300 Hz. Voices 1.
+*Por qué:* en un bajo el golpe tiene que ser el mismo en cada nota para que la mezcla con el kick sea predecible; con Rand
+unas notas pegarían más que otras y el compresor del bus reaccionaría distinto a cada una. Un seno que arranca en 0°
+empieza en el cruce por cero: sin clic. Variante "con knock": Phase 90° y Attack 0 ms, y el clic del arranque hace de
+transitorio (como el golpe inicial de un 808).
+
+**2. Pad de sierras más vivo.** Init. Osc A sierra (66 %), Unison 1, **Rand 100 %**; Osc B On, sierra, Fine +7 ct,
+**Rand 100 %**. Filtro LP 24 dB 3 kHz. Env 1: Attack 300 ms, Release 1.5 s. Chorus Mix 25 %. *Por qué:* con Rand cada nota
+del acorde arranca A y B con una relación de fase distinta, así que la suma A + B (y el batido de 7 cents) empieza en
+otro punto en cada nota: el pad no suena a un loop idéntico. Con Unison > 1 esto ya pasa solo.
+
+### Reto sin receta
+**Capas de bajo que no se pelean.** Un bajo de dos capas para un drop (una sierra filtrada en Osc A una octava arriba y
+un seno en Osc B en la nota), tocado en C2–C3 de FL, que suene **igual de fuerte en todas las notas** y con el golpe
+alineado con un kick. Pista para empezar: ¿qué pasa con la suma de las dos capas si cada nota arranca en una fase
+distinta? Inténtalo primero; las pistas vendrán después.
+
+### Vocabulario
+- **Fase (de arranque).** El punto del ciclo donde empieza la onda al tocar la nota. *Ejemplo:* el "tic" de un bajo sub
+  que arranca a mitad de ciclo.
+- **Cancelación de fase.** Dos señales iguales desfasadas 180° se restan hasta el silencio. *Ejemplo:* dos micrófonos de
+  una batería con la polaridad invertida: el bombo desaparece.
+- **Oscilador libre (free running).** Un oscilador que nunca se reinicia. *Ejemplo:* un Juno-106 o un Prophet-5: cada nota
+  arranca distinta, parte de su sonido "vivo".
+- **Batido (beating).** Dos frecuencias muy cercanas suenan como una sola que sube y baja de volumen a la velocidad de su
+  diferencia. *Ejemplo:* afinar una guitarra de oído: el "wow-wow" que se frena hasta parar cuando dos cuerdas coinciden.
+- **Límite grave de los intervalos.** La nota más grave en la que un intervalo suena claro; por debajo, barro.
+  *Ejemplo:* los bajistas tocan raíz y quinta, y los pianistas abren la mano izquierda en octavas, no en terceras.
+
+### Retos completados
+- [ ] Reto Fase 17 — capas de bajo que no se pelean

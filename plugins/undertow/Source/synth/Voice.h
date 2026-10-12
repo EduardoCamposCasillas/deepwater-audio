@@ -207,7 +207,8 @@ public:
 
         if (! envelope.isActive())
         {
-            // Voz en silencio: cada nota arranca igual (fase 0 sin unison; fases al azar con unison), y el
+            // Voz en silencio: cada nota arranca en su fase (Phase + Rand sin unison, al azar con unison, o donde
+            // se quedó la nota anterior con Free; ver PhaseStart), y el
             // filtro empieza vacío y con el cutoff de ESTA nota (sin barrer desde el de la nota anterior).
             // Niveles y afinación saltan directo a sus valores: no hay nada sonando que pueda hacer clic.
             // Los modos de warp y FM también se aplican directamente (sin el fundido de updateDuck).
@@ -222,7 +223,7 @@ public:
             for (size_t o = 0; o < oscillators.size(); ++o)
             {
                 const auto& osc = sourceSettings.oscillators[o];
-                oscillators[o].reset (seed ^ (0xA5A5A5A5u + static_cast<std::uint32_t> (o)));
+                oscillators[o].reset (seed ^ (0xA5A5A5A5u + static_cast<std::uint32_t> (o)), osc.phaseStart());
                 oscillatorLevels[o].snap (osc.enabled, osc.level);
                 tuning[o] = osc.tuningSemitones();
                 oscillators[o].setPitchOffset (tuning[o]);

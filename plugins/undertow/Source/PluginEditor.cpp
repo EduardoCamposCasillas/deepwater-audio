@@ -198,6 +198,19 @@ UndertowAudioProcessorEditor::UndertowAudioProcessorEditor (UndertowAudioProcess
 
         warp.warpModeParam = apvts.getRawParameterValue (ids.warpMode);
         warp.warpAmountParam = apvts.getRawParameterValue (ids.warpAmount);
+
+        const auto& phaseIds = id::oscillatorPhases[o];
+        warp.phaseLabel.setText ("Fase", juce::dontSendNotification);
+        styleCaption (warp.phaseLabel);
+        warpPage.addAndMakeVisible (warp.phaseLabel);
+        setUpComboBox (warp.phaseModeBox, warpPage, phaseIds.mode, warp.phaseModeAttachment);
+        warp.phaseModeBox.setTooltip (juce::String::fromUTF8 (
+            "Reset: cada nota empieza en Phase (m\xc3\xa1s Rand al azar). Free: sigue donde se qued\xc3\xb3 la nota anterior, "
+            "como un sinte anal\xc3\xb3gico."));
+        setUpKnob (warp.phaseKnob, warpPage, phaseIds.phase, "Phase", knobWidth);
+        setUpKnob (warp.randomKnob, warpPage, phaseIds.random, "Rand", knobWidth);
+        warp.phaseModeParam = apvts.getRawParameterValue (phaseIds.mode);
+        warp.unisonParam = apvts.getRawParameterValue (id::oscillators[o].unison);
     }
 
     // ================= Página "Filtro y Amp": filtro, Env 1 y voz =================
@@ -597,6 +610,18 @@ void UndertowAudioProcessorEditor::timerCallback()
     delayDivisionBox.setVisible (delaySynced);
     delayDivisionLabel.setVisible (delaySynced);
 
+    // Fase 17: Phase y Rand solo actúan en Reset y con una sola copia (con unison las copias ya arrancan al azar).
+    for (auto& warp : warps)
+    {
+        const bool free = static_cast<int> (warp.phaseModeParam->load()) == static_cast<int> (undertow::synth::PhaseMode::free);
+        const float alpha = free || warp.unisonParam->load() >= 1.5f ? 0.4f : 1.0f;
+        for (auto* knob : { &warp.phaseKnob, &warp.randomKnob })
+        {
+            knob->slider.setAlpha (alpha);
+            knob->label.setAlpha (alpha);
+        }
+    }
+
     // Pick Tone no hace nada con White Noise: se atenúa (sigue aceptando modulación, por si se cambia de excitación).
     const auto excitation = static_cast<undertow::dsp::StringExcitation> (static_cast<int> (excitationParam->load()));
     const bool toneUsed = excitation != undertow::dsp::StringExcitation::whiteNoise;
@@ -772,15 +797,23 @@ void UndertowAudioProcessorEditor::layoutContent()
             inner.removeFromBottom (groupPadding);
             warp.view.setBounds (inner);
 
-            const int columnWidth = controls.getWidth() / 2;
+            // Cuatro columnas: Warp | FM/RM | Fase (selector + Phase) | Rand (bajo el selector de Fase).
+            const int columnWidth = controls.getWidth() / 4;
             const auto layoutColumn = [] (juce::Rectangle<int> column, juce::Label& label, juce::ComboBox& box, Knob& knob) {
                 label.setBounds (column.removeFromTop (20));
-                box.setBounds (column.removeFromTop (28).reduced (8, 0));
+                box.setBounds (column.removeFromTop (28).reduced (4, 0));
                 column.removeFromTop (6);
                 layoutKnob (knob, column.withSizeKeepingCentre (knobWidth, column.getHeight()));
             };
             layoutColumn (controls.removeFromLeft (columnWidth), warp.warpLabel, warp.warpBox, warp.warpKnob);
-            layoutColumn (controls, warp.fmLabel, warp.fmBox, warp.fmKnob);
+            layoutColumn (controls.removeFromLeft (columnWidth), warp.fmLabel, warp.fmBox, warp.fmKnob);
+            auto phaseColumns = controls;
+            auto phaseKnobs = phaseColumns.withTrimmedTop (20 + 28 + 6);
+            warp.phaseLabel.setBounds (phaseColumns.removeFromTop (20));
+            warp.phaseModeBox.setBounds (phaseColumns.removeFromTop (28).reduced (4, 0));
+            const int phaseColumnWidth = phaseKnobs.getWidth() / 2;
+            layoutKnob (warp.phaseKnob, phaseKnobs.removeFromLeft (phaseColumnWidth).withSizeKeepingCentre (knobWidth, phaseKnobs.getHeight()));
+            layoutKnob (warp.randomKnob, phaseKnobs.withSizeKeepingCentre (knobWidth, phaseKnobs.getHeight()));
         }
     }
 

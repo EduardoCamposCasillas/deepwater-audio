@@ -119,6 +119,19 @@ inline constexpr std::array<OscillatorWarpIds, 2> oscillatorWarps { {
     { "oscBWarpMode", "oscBWarpAmount", "oscBFmMode", "oscBFmAmount" },
 } };
 
+// Fase 17: fase inicial de cada oscilador (Phase en grados, Rand y modo Reset/Free).
+struct OscillatorPhaseIds
+{
+    const char* phase;
+    const char* random;
+    const char* mode;
+};
+
+inline constexpr std::array<OscillatorPhaseIds, 2> oscillatorPhases { {
+    { "oscAPhase", "oscAPhaseRand", "oscAPhaseMode" },
+    { "oscBPhase", "oscBPhaseRand", "oscBPhaseMode" },
+} };
+
 // Fase 8: efectos globales (distorsión → chorus → delay → reverb).
 inline constexpr const char* distortionOn = "fxDistOn";
 inline constexpr const char* distortionMode = "fxDistMode";
@@ -181,4 +194,5 @@ inline constexpr int versionHintString = 8;
 inline constexpr int versionHintPluck = 9;
 inline constexpr int versionHintStiffness = 10;
 inline constexpr int versionHintResonator = 11;
+inline constexpr int versionHintPhase = 12;
 } // namespace undertow::params

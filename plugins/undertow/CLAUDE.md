@@ -87,6 +87,10 @@ warp/FM), un solo juego de parámetros, y apagada no se calcula.
 - [x] Fase 15 (opcional) — Stiffness / inharmonicidad (all-pass de dispersión en el lazo).
 - [x] Fase 16 (opcional) — La cuerda como resonador: excitación = las fuentes de la voz (opción al final de la lista).
 
+Ampliación: fase inicial de los osciladores (como PHASE / RAND / Phase Memory de Serum 2, según su manual; sin código
+ajeno). Compatible: por defecto el arranque de siempre.
+- [x] Fase 17 — Phase (0–360°), Rand y modo Reset/Free por oscilador (A y B), en la pestaña "Warp y FM".
+
 ## Estado actual
 Fase 1 COMPLETADA (2026-09-24): CMake + JUCE 9.0.2, VST3 + Standalone, seno monofónico (prioridad a la última
 nota) con MIDI sample-accurate y rampa anti-clic de 5 ms. Release con 0 warnings (/W4, MSVC 19.44, VS 2022 17.14),
@@ -650,3 +654,34 @@ Cambio desde Riptide Fase 9 (2026-10-11). El sonido no cambia (huellas de los 49
   `format()`) y `presets/PresetFormat.cpp` (lee BinaryData). El formato `.uwpreset` y el comportamiento no cambian.
   Arreglado de paso: el aviso de "versión más nueva" llevaba tildes sin `fromUTF8` (aserción de JUCE en Debug).
 - `UndertowPresetTests`, pluginval strictness 10 ampliado: SUCCESS. Revisado con capturas del Standalone.
+
+Fase 17 COMPLETADA (2026-10-11). Pendiente de probar en FL Studio. Lo existente suena igual: null test de los 6 presets
+de referencia (`out/render-fase16` vs `out/render-fase17`): idéntico bit a bit; huellas de los 49 presets: iguales.
+- Origen: el usuario oía "distorsionada" la sierra del Init en acordes graves (C2–C4 de FL). Medido con el motor real
+  (programa aparte, scratch): afinación C2–C4 a 4 sample rates, peor 0.004 cents; alias < 16 kHz −92…−97 dB; armónicos
+  = 1/h. No había error: es la aspereza de los batidos entre armónicos de terceras graves (explicado en APRENDIZAJE.md).
+  Como mejora "a lo Serum 2" se añadió la fase inicial (su manual describe PHASE, RAND y Phase Memory; los valores de su
+  Init no están publicados y el usuario no tiene Serum).
+- `dsp/WavetableOscillator.h`: `PhaseStart` (phase 0..1, random 0..1, freeRunning) y `reset (seed, start)`. Una copia:
+  fase = Phase + Rand·u (u = `randomPhase (seed, 0)`, envuelta); Phase 0 y Rand 0 dan 0.0 exacto (el arranque de
+  siempre). Con unison las copias siguen al azar como en la Fase 6 (Phase/Rand no cuentan; elegido por compatibilidad:
+  sin "laser zap" con Rand 0, a diferencia de Serum). Free: las fases no se tocan (cada ranura de voz sigue donde se quedó
+  su oscilador, como las tarjetas de voz de un analógico); la primera nota de un oscilador nuevo arranca como Reset
+  (`phasesInitialised`). El sub no tiene fase propia (sigue en 0).
+- `synth/SourceSettings.h`: `PhaseMode` (orden guardado: Reset, Free) y en `OscillatorSettings` phase, phaseRandom,
+  phaseMode y `phaseStart()`. `Voice::start` pasa `osc.phaseStart()` al reiniciar desde silencio (un redisparo con la
+  voz sonando no reinicia nada, como antes).
+- Parámetros nuevos (versionHint 12, al final; `params::oscillatorPhases[]`): oscXPhase (0–360°, def. 0), oscXPhaseRand
+  (0–100 %, def. 0), oscXPhaseMode (Reset/Free, def. Reset). No son destinos de la matriz (solo se leen al empezar la nota).
+- GUI: pestaña "Warp y FM", columna "Fase" de cada oscilador: selector Reset/Free (con tooltip) + perillas Phase y Rand,
+  atenuadas con Free o con Unison > 1. Revisado con captura del Standalone. OJO: los escapes UTF-8 escritos desde un
+  script de Python quedaron doble codificados ("0Â°"); en el fuente deben quedar como `\xc2\xb0` dentro de `fromUTF8`.
+- Tests (`UndertowTests --fase17`): Phase = sin (2π·fase) en la primera muestra (error 1.2e-8) y 360° = 0°; Rand 25 %
+  queda en el primer cuarto; Rand 100 % uniforme (media −0.003, media del cuadrado 0.505, 4000 notas distintas); Rand 0
+  igual con cualquier semilla; con unison Phase/Rand no cambian nada (bit a bit); Free = oscilador que nunca se
+  reinicia (1 y 5 copias, bit a bit) y la primera nota en Phase; en la voz Phase 180° invierte Osc A y Osc B (4.5e-8) y
+  dos notas desde silencio son idénticas con Rand 0 y distintas con Rand 100 % o Free.
+- Release con 0 warnings; ctest 6/6; pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096,
+  `--repeat 3 --randomise`): SUCCESS.
+- Ideas para más adelante: línea de la fase de arranque en el visor 2D (como Serum), Phase como destino de la matriz
+  (por nota), modo "Per Voice" de Serum, fase del sub.

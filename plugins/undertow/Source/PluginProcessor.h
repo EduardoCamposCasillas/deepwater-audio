@@ -151,6 +151,13 @@ private:
         std::atomic<float>* fmAmount = nullptr;
     };
     std::array<OscillatorWarpParams, undertow::synth::numOscillators> oscillatorWarpParams {};
+    struct OscillatorPhaseParams
+    {
+        std::atomic<float>* phase = nullptr; // grados
+        std::atomic<float>* random = nullptr;
+        std::atomic<float>* mode = nullptr;
+    };
+    std::array<OscillatorPhaseParams, undertow::synth::numOscillators> oscillatorPhaseParams {};
     std::atomic<float>* subOnParam = nullptr;
     std::atomic<float>* subShapeParam = nullptr;
     std::atomic<float>* subOctaveParam = nullptr;

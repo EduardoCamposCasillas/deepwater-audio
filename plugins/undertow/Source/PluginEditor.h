@@ -164,6 +164,14 @@ private:
         Knob warpKnob, fmKnob;
         std::atomic<float>* warpModeParam = nullptr;
         std::atomic<float>* warpAmountParam = nullptr;
+
+        // Fase 17: fase inicial (modo Reset/Free, Phase y Rand).
+        juce::Label phaseLabel;
+        juce::ComboBox phaseModeBox;
+        std::unique_ptr<ComboBoxAttachment> phaseModeAttachment;
+        Knob phaseKnob, randomKnob;
+        std::atomic<float>* phaseModeParam = nullptr;
+        std::atomic<float>* unisonParam = nullptr;
     };
     std::array<WarpControls, undertow::synth::numOscillators> warps;
 

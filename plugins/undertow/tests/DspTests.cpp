@@ -5183,6 +5183,186 @@ void testResonatorCpuCost()
     CHECK (modulated < 0.20);
 }
 
+
+// --- Fase 17: fase inicial de los osciladores (Phase, Rand, Free) ------------------------------------------------------
+
+using undertow::dsp::PhaseStart;
+using undertow::synth::PhaseMode;
+
+// Oscilador con el seno de prueba, reiniciado como al empezar una nota desde silencio con 'start'.
+WavetableOscillator phaseTestOscillator (const PhaseStart& start, std::uint32_t seed = 1, int unison = 1)
+{
+    WavetableOscillator osc;
+    osc.setSampleRate (48000.0);
+    osc.setWavetable (&sineTable());
+    osc.setFrequency (220.0);
+    osc.setUnison (unison, 0.25f, 0.0f, 0.0f);
+    osc.reset (seed, start);
+    return osc;
+}
+
+void testPhaseKnobSetsTheStart()
+{
+    std::printf ("Phase: la primera muestra es el seno en la fase pedida (0..360°)\n");
+
+    double worst = 0.0;
+    for (const double phase : { 0.0, 0.125, 0.25, 0.4, 0.5, 0.75, 0.9999 })
+    {
+        auto osc = phaseTestOscillator ({ phase, 0.0, false });
+        const double expected = std::sin (2.0 * pi * phase);
+        worst = std::max (worst, std::abs (static_cast<double> (osc.processSample()) - expected));
+    }
+    // 360° = 0°: la fase 1.0 da la vuelta.
+    auto full = phaseTestOscillator ({ 1.0, 0.0, false });
+    auto zero = phaseTestOscillator ({});
+    CHECK (full.processSample() == zero.processSample());
+
+    std::printf ("  peor diferencia con sin (2π·fase): %.2e\n", worst);
+    CHECK (worst < 1.0e-4);
+}
+
+void testPhaseRandomSpreadsTheStart()
+{
+    std::printf ("Rand: la fase inicial cae al azar en [Phase, Phase + Rand) y cambia con cada nota\n");
+
+    // Rand 25 % desde 0°: la fase queda en el primer cuarto de ciclo, donde el seno sube de 0 a 1.
+    bool insideQuarter = true;
+    for (std::uint32_t seed = 0; seed < 500; ++seed)
+    {
+        auto osc = phaseTestOscillator ({ 0.0, 0.25, false }, seed);
+        const float first = osc.processSample();
+        insideQuarter = insideQuarter && first >= -1.0e-6f && first <= 1.0f + 1.0e-6f;
+    }
+    CHECK (insideQuarter);
+
+    // Rand 100 %: fase uniforme en todo el ciclo → media del seno ≈ 0 y media del cuadrado ≈ 1/2.
+    constexpr int notes = 4000;
+    double sum = 0.0, sumSquares = 0.0;
+    int distinct = 0;
+    float previous = 2.0f;
+    for (std::uint32_t seed = 0; seed < static_cast<std::uint32_t> (notes); ++seed)
+    {
+        auto osc = phaseTestOscillator ({ 0.3, 1.0, false }, seed);
+        const float first = osc.processSample();
+        sum += first;
+        sumSquares += static_cast<double> (first) * first;
+        distinct += first != previous ? 1 : 0;
+        previous = first;
+    }
+    const double mean = sum / notes, meanSquare = sumSquares / notes;
+    std::printf ("  Rand 100 %%: media %.4f (ideal 0), media del cuadrado %.4f (ideal 0.5), %d de %d notas distintas a la anterior\n",
+                 mean, meanSquare, distinct, notes);
+    CHECK (std::abs (mean) < 0.05);
+    CHECK (std::abs (meanSquare - 0.5) < 0.05);
+    CHECK (distinct == notes);
+
+    // Rand 0: todas las notas arrancan igual, con cualquier semilla.
+    auto a = phaseTestOscillator ({ 0.3, 0.0, false }, 7);
+    auto b = phaseTestOscillator ({ 0.3, 0.0, false }, 12345);
+    CHECK (a.processSample() == b.processSample());
+}
+
+void testPhaseIgnoredWithUnison()
+{
+    std::printf ("Con unison, Phase y Rand no cambian nada (las copias ya arrancan al azar, como antes)\n");
+
+    auto reference = phaseTestOscillator ({}, 99, 5);
+    auto moved = phaseTestOscillator ({ 0.37, 0.8, false }, 99, 5);
+    bool identical = true;
+    for (int i = 0; i < 2000; ++i)
+    {
+        float l1 = 0.0f, r1 = 0.0f, l2 = 0.0f, r2 = 0.0f;
+        reference.processStereo (l1, r1);
+        moved.processStereo (l2, r2);
+        identical = identical && l1 == l2 && r1 == r2;
+    }
+    CHECK (identical);
+}
+
+void testFreeRunningContinuesThePhase()
+{
+    std::printf ("Free: una nota nueva sigue la fase donde se quedó la anterior (1 y 5 copias)\n");
+
+    for (const int unison : { 1, 5 })
+    {
+        // 'continuous' nunca se reinicia; 'free' se reinicia con Free a mitad de camino: deben sonar igual.
+        auto continuous = phaseTestOscillator ({}, 3, unison);
+        auto free = phaseTestOscillator ({}, 3, unison);
+        bool identical = true;
+        for (int i = 0; i < 4000; ++i)
+        {
+            if (i == 1234)
+                free.reset (777, { 0.6, 1.0, true }); // Phase y Rand no cuentan en Free
+            float l1 = 0.0f, r1 = 0.0f, l2 = 0.0f, r2 = 0.0f;
+            continuous.processStereo (l1, r1);
+            free.processStereo (l2, r2);
+            identical = identical && l1 == l2 && r1 == r2;
+        }
+        CHECK (identical);
+    }
+
+    // La primera nota de un oscilador recién creado no tiene "nota anterior": arranca como Reset, en Phase.
+    auto fresh = phaseTestOscillator ({ 0.25, 0.0, true });
+    CHECK (std::abs (fresh.processSample() - 1.0f) < 1.0e-4f);
+}
+
+// Render mono de una nota de la voz completa con estas fuentes.
+std::vector<float> renderPhaseNote (const SourceSettings& sources, int numSamples)
+{
+    auto manager = std::make_unique<VoiceManager>();
+    prepareWithSources (*manager, 48000.0, sources);
+    manager->noteOn (57, 1.0f);
+    std::vector<float> out (static_cast<size_t> (numSamples));
+    manager->render (out.data(), numSamples);
+    return out;
+}
+
+void testPhaseReachesTheVoice()
+{
+    std::printf ("Voz: Phase 180° invierte el seno de Osc A y de Osc B; Rand y Free cambian la nota siguiente\n");
+
+    for (size_t o = 0; o < 2; ++o)
+    {
+        auto sources = sineSources();
+        sources.oscillators[0].enabled = o == 0;
+        sources.oscillators[1].enabled = o == 1;
+        const auto straight = renderPhaseNote (sources, 4800);
+        sources.oscillators[o].phase = 0.5f;
+        const auto inverted = renderPhaseNote (sources, 4800);
+
+        double peak = 0.0, worstSum = 0.0;
+        for (size_t i = 0; i < straight.size(); ++i)
+        {
+            peak = std::max (peak, static_cast<double> (std::abs (straight[i])));
+            worstSum = std::max (worstSum, static_cast<double> (std::abs (straight[i] + inverted[i])));
+        }
+        std::printf ("  Osc %c: pico %.3f, |normal + 180°| como mucho %.2e\n", o == 0 ? 'A' : 'B', peak, worstSum);
+        CHECK (peak > 0.1);
+        CHECK (worstSum < 1.0e-5 * peak);
+    }
+
+    // Dos notas seguidas, cada una desde silencio: con Rand 0 son idénticas; con Rand 100 % o Free, no.
+    const auto notesMatch = [] (float random, PhaseMode mode) {
+        auto sources = sineSources();
+        sources.oscillators[0].phaseRandom = random;
+        sources.oscillators[0].phaseMode = mode;
+        auto manager = std::make_unique<VoiceManager>();
+        prepareWithSources (*manager, 48000.0, sources);
+        manager->setPolyphony (1);
+        std::vector<float> first (2400), second (2400), gap (48000);
+        manager->noteOn (57, 1.0f);
+        manager->render (first.data(), 2400);
+        manager->noteOff (57);
+        manager->render (gap.data(), 48000); // el release (0.1 s) termina: la voz vuelve al silencio
+        manager->noteOn (57, 1.0f);
+        manager->render (second.data(), 2400);
+        return first == second;
+    };
+    CHECK (notesMatch (0.0f, PhaseMode::reset));
+    CHECK (! notesMatch (1.0f, PhaseMode::reset));
+    CHECK (! notesMatch (0.0f, PhaseMode::free));
+}
+
 } // namespace
 
 
@@ -5190,10 +5370,10 @@ int main (int argc, char** argv)
 {
     std::setvbuf (stdout, nullptr, _IONBF, 0); // sin buffer: si el programa se cae, se ve en qué test fue
     // Opciones: --verbose (detalle de las mediciones); --fase7 / --fase8 / --fase9 / --fase12 / --fase13 / --fase15 /
-    // --fase16
+    // --fase16 / --fase17
     // (solo los tests de esa fase); --cpu (solo la tabla de CPU de la Fase 11, sin tests).
     bool onlyPhase7 = false, onlyPhase8 = false, onlyPhase9 = false, onlyPhase12 = false, onlyPhase13 = false,
-         onlyPhase15 = false, onlyPhase16 = false;
+         onlyPhase15 = false, onlyPhase16 = false, onlyPhase17 = false;
     for (int i = 1; i < argc; ++i)
     {
         if (std::string_view (argv[i]) == "--cpu")
@@ -5209,9 +5389,10 @@ int main (int argc, char** argv)
         onlyPhase13 = onlyPhase13 || std::string_view (argv[i]) == "--fase13";
         onlyPhase15 = onlyPhase15 || std::string_view (argv[i]) == "--fase15";
         onlyPhase16 = onlyPhase16 || std::string_view (argv[i]) == "--fase16";
+        onlyPhase17 = onlyPhase17 || std::string_view (argv[i]) == "--fase17";
     }
     const bool all = ! onlyPhase7 && ! onlyPhase8 && ! onlyPhase9 && ! onlyPhase12 && ! onlyPhase13 && ! onlyPhase15
-                     && ! onlyPhase16;
+                     && ! onlyPhase16 && ! onlyPhase17;
     if (all)
     {
         testSegmentTimesAreExactAtEverySampleRate();
@@ -5356,6 +5537,15 @@ int main (int argc, char** argv)
         testResonatorChangesAreClickFree();
         testResonatorExtremesAreSafe();
         testResonatorCpuCost();
+    }
+
+    if (all || onlyPhase17)
+    {
+        testPhaseKnobSetsTheStart();
+        testPhaseRandomSpreadsTheStart();
+        testPhaseIgnoredWithUnison();
+        testFreeRunningContinuesThePhase();
+        testPhaseReachesTheVoice();
     }
 
     if (failures == 0)

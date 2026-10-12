@@ -139,6 +139,12 @@ UndertowAudioProcessor::UndertowAudioProcessor()
         oscillatorWarpParams[o] = { parameters.getRawParameterValue (ids.warpMode), parameters.getRawParameterValue (ids.warpAmount),
                                     parameters.getRawParameterValue (ids.fmMode), parameters.getRawParameterValue (ids.fmAmount) };
     }
+    for (size_t o = 0; o < oscillatorPhaseParams.size(); ++o)
+    {
+        const auto& ids = id::oscillatorPhases[o];
+        oscillatorPhaseParams[o] = { parameters.getRawParameterValue (ids.phase), parameters.getRawParameterValue (ids.random),
+                                     parameters.getRawParameterValue (ids.mode) };
+    }
     subOnParam = parameters.getRawParameterValue (id::subOn);
     subShapeParam = parameters.getRawParameterValue (id::subShape);
     subOctaveParam = parameters.getRawParameterValue (id::subOctave);
@@ -565,6 +571,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout UndertowAudioProcessor::crea
             return "+" + juce::String (v, 1) + " dB";
         })));
 
+    // --- Fase 17: fase inicial de los osciladores. Por defecto Reset, 0° y Rand 0 %: un proyecto de la Fase 16 suena
+    // igual. El orden de las opciones de Phase Mode se guarda: solo añadir al final.
+    for (size_t o = 0; o < id::oscillatorPhases.size(); ++o)
+    {
+        const auto& ids = id::oscillatorPhases[o];
+        const auto& d = sourceDefaults.oscillators[o];
+        const juce::String name = juce::String ("Osc ") + (o == 0 ? "A " : "B ");
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { ids.phase, id::versionHintPhase }, name + "Phase", juce::NormalisableRange<float> (0.0f, 360.0f),
+            360.0f * d.phase,
+            juce::AudioParameterFloatAttributes().withLabel (juce::String::fromUTF8 ("\xc2\xb0")).withStringFromValueFunction (
+                [] (float v, int) { return juce::String (juce::roundToInt (v)) + juce::String::fromUTF8 ("\xc2\xb0"); })));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { ids.random, id::versionHintPhase },
+                                                                 name + "Phase Rand", juce::NormalisableRange<float> (0.0f, 1.0f),
+                                                                 d.phaseRandom, percentAttributes()));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { ids.mode, id::versionHintPhase },
+                                                                  name + "Phase Mode", toStringArray (synth::phaseModeNames),
+                                                                  static_cast<int> (d.phaseMode)));
+    }
+
     return layout;
 }
 
@@ -638,6 +665,11 @@ undertow::synth::SourceSettings UndertowAudioProcessor::readSourceSettings() con
         osc.warpAmount = w.warpAmount->load();
         osc.fmMode = choiceToEnum<synth::FmMode> (w.fmMode);
         osc.fmAmount = w.fmAmount->load();
+
+        const auto& ph = oscillatorPhaseParams[o];
+        osc.phase = ph.phase->load() / 360.0f;
+        osc.phaseRandom = ph.random->load();
+        osc.phaseMode = choiceToEnum<synth::PhaseMode> (ph.mode);
     }
 
     settings.sub = { subOnParam->load() >= 0.5f, choiceToEnum<synth::SubShape> (subShapeParam),

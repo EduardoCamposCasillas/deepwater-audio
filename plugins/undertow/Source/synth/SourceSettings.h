@@ -5,6 +5,7 @@
 #include "dsp/PluckedString.h"
 #include "dsp/Warp.h"
 #include "dsp/Wavetable.h"
+#include "dsp/WavetableOscillator.h" // dsp::PhaseStart
 
 namespace undertow::synth
 {
@@ -23,6 +24,12 @@ inline constexpr std::array<const char*, 7> fmModeNamesA { "Off", "FM: Osc B", "
                                                           "RM: Osc B", "RM: Sub", "RM: Noise" };
 inline constexpr std::array<const char*, 7> fmModeNamesB { "Off", "FM: Osc A", "FM: Sub", "FM: Noise",
                                                           "RM: Osc A", "RM: Sub", "RM: Noise" };
+
+// Fase 17: qué hace la fase del oscilador al empezar una nota desde silencio.
+// Reset = arranca en Phase (+ Rand al azar); Free = sigue donde se quedó en la nota anterior de la voz.
+// El orden es parte del estado guardado: solo añadir al final.
+enum class PhaseMode { reset, free };
+inline constexpr std::array<const char*, 2> phaseModeNames { "Reset", "Free" };
 
 [[nodiscard]] inline bool isFrequencyModulation (FmMode mode) noexcept
 {
@@ -71,6 +78,15 @@ struct OscillatorSettings
     float warpAmount = 0.0f; // 0..1
     FmMode fmMode = FmMode::off;
     float fmAmount = 0.0f;   // 0..1
+    // Fase 17. Por defecto Reset en fase 0 sin azar: el arranque de la Fase 16.
+    float phase = 0.0f;        // 0..1 del ciclo (la perilla va de 0 a 360°)
+    float phaseRandom = 0.0f;  // 0..1; solo con una copia (con unison las copias ya arrancan al azar)
+    PhaseMode phaseMode = PhaseMode::reset;
+
+    [[nodiscard]] dsp::PhaseStart phaseStart() const noexcept
+    {
+        return { phase, phaseRandom, phaseMode == PhaseMode::free };
+    }
 
     [[nodiscard]] float tuningSemitones() const noexcept
     {

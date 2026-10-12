@@ -15,6 +15,14 @@ namespace undertow::dsp
 
 namespace simd = deepwater::dsp::simd;
 
+// Fase 17: dónde empieza a leer el oscilador cuando una nota arranca desde silencio (Phase, Rand y Free de la GUI).
+struct PhaseStart
+{
+    double phase = 0.0;       // fracción del ciclo, 0..1 (la perilla Phase: 0..360°)
+    double random = 0.0;      // 0..1: cuánto se suma al azar, Phase + random · u con u en [0, 1) distinto por nota
+    bool freeRunning = false; // Free: no reiniciar, seguir con la fase de la nota anterior de la voz
+};
+
 // Oscilador wavetable sin aliasing audible, con unison. Sin dependencias de JUCE para poder probarlo aislado.
 //
 // Cuatro ideas:
@@ -166,13 +174,17 @@ public:
     // Para una nota que empieza desde silencio: sin arrastrar transiciones (morph, fundido de tabla, cambios
     // de ganancia del unison) que se quedaron a medias en la nota anterior.
     //
-    // Fases: con una sola copia, fase 0 (cada nota arranca igual, con el mismo "golpe"). Con varias, cada una
-    // empieza en una fase al azar: si todas salieran juntas, el principio de la nota sonaría a un pico fuerte
-    // seguido de un barrido de "flanger" mientras se separan. 'seed' hace que cada nota tenga su reparto.
-    void reset (std::uint32_t seed = 0) noexcept
+    // Fases: con una sola copia, la de 'start' (por defecto 0: cada nota arranca igual, con el mismo "golpe"). Con
+    // varias, cada una empieza en una fase al azar: si todas salieran juntas, el principio de la nota sonaría a un
+    // pico fuerte seguido de un barrido de "flanger" mientras se separan. 'seed' hace que cada nota tenga su reparto.
+    // Con 'start.freeRunning' las fases no se tocan: siguen donde se quedaron en la nota anterior de esta voz.
+    void reset (std::uint32_t seed = 0, const PhaseStart& start = {}) noexcept
     {
-        for (size_t k = 0; k < phases.size(); ++k)
-            phases[k] = numVoices == 1 && k == 0 ? 0.0 : randomPhase (seed, static_cast<std::uint32_t> (k));
+        if (! start.freeRunning || ! phasesInitialised)
+            for (size_t k = 0; k < phases.size(); ++k)
+                phases[k] = numVoices == 1 && k == 0 ? startPhase (seed, start)
+                                                     : randomPhase (seed, static_cast<std::uint32_t> (k));
+        phasesInitialised = true;
 
         position = targetPosition;
         previousTable = nullptr;
@@ -1088,6 +1100,14 @@ private:
             increments[k] = static_cast<int> (k) < activeCount ? phaseIncrement * ratios[k] : 0.0;
     }
 
+    // Fase inicial de una sola copia. Con Phase 0 y Rand 0 es 0.0 exacto (0 + 0 · u): el arranque de siempre.
+    [[nodiscard]] static double startPhase (std::uint32_t seed, const PhaseStart& start) noexcept
+    {
+        double phase = start.phase + start.random * randomPhase (seed, 0);
+        phase -= std::floor (phase);
+        return phase < 1.0 ? phase : 0.0; // un valor justo por debajo de 0 queda en 1.0 tras floor
+    }
+
     // Fase inicial al azar (0..1) a partir de (semilla, copia): repetible y sin estado.
     [[nodiscard]] static double randomPhase (std::uint32_t seed, std::uint32_t k) noexcept
     {
@@ -1228,6 +1248,7 @@ private:
     bool stereoTarget = false;
     bool gainsSettled = true;
     std::array<double, maxUnison> phases {};  // double: con float la fase acumula error audible en notas graves
+    bool phasesInitialised = false; // Free necesita una nota anterior; la primera arranca como Reset
     std::array<double, maxUnison> ratios = [] {
         std::array<double, maxUnison> r {};
         r.fill (1.0);
