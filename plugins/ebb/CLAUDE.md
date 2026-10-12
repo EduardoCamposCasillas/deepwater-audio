@@ -114,11 +114,11 @@ incluyen notas de para qué sirven y por qué.
       espacio al kick sin "bombear" los agudos; mix dry/wet.
 - [x] Fase 7 — GUI: visualización de la curva y de la forma de onda en vivo, cursor de reproducción, indicador de
       cuándo se dispara.
-- [ ] Fase 8 — Presets con notas educativas (dembow, house, trap, pads bombeando como efecto creativo).
+- [x] Fase 8 — Presets con notas educativas (dembow, house, trap, pads bombeando como efecto creativo).
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 8 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio. El audio no cambia (el motor no se tocó).
+Fase 8 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona. El audio no cambia (el motor no se tocó).
 - Librería `libs/presets` (cambio compartido; Undertow y Riptide no lo usan y sus tests pasan): "estado extra" opcional
   en `PresetFormat` (`extraStateTag`, `captureExtraState`, `applyExtraState` → avisos) y `Preset::extraState`
   (`juce::ValueTree`), para lo que es parte del sonido pero no es un parámetro. Se escribe como un elemento hijo del
@@ -152,7 +152,7 @@ Fase 8 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio. El audio no 
   presets de Audio dicen que el kick tiene que bajar de la línea punteada entre golpe y golpe.
 - Release con 0 warnings; ctest 7/7; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 8 en FL Studio; después, Fase 9 (pulido).
+Siguiente: Fase 9 (pulido).
 
 ### Fase 7 (completada 2026-10-12, probada en FL)
 - `dsp/LiveScope.h`: osciloscopio de barrido de 1, 2 o 4 compases en 512 columnas, anclado a un inicio de compás; por
