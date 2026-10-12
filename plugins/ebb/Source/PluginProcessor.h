@@ -8,6 +8,7 @@
 #include "TransportSnapshot.h"
 
 // Efecto mono/estéreo. Fase 2: modo tempo, una curva de ducking sincronizada con la posición del host (PlayHead).
+// Fase 3: la forma de esa curva es una curva por puntos editable, guardada en el estado del proyecto.
 // El audio está en ebb::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class EbbAudioProcessor final : public juce::AudioProcessor
 {
@@ -53,11 +54,19 @@ public:
     // Así el medidor no se pierde un golpe aunque entre dos cuadros de la GUI pasen varios bloques.
     float takeMinGain() noexcept { return minGainSinceRead.exchange (1.0f); }
 
+    // Hilo de mensajes: la forma de la curva. No es un parámetro (tiene un número variable de puntos y no se puede
+    // automatizar): se guarda como hijo "Curve" del estado, y al audio llega por un buzón lock-free. La versión sube
+    // en cada cambio, para que la GUI sepa cuándo redibujar (p. ej. al cargar un proyecto).
+    const deepwater::dsp::BreakpointCurve& getCurve() const noexcept { return curve; }
+    void setCurve (const deepwater::dsp::BreakpointCurve& newCurve);
+    int getCurveVersion() const noexcept { return curveVersion.load(); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     ebb::dsp::TransportInfo readHostTransport() noexcept;
     ebb::dsp::TempoSettings readTempoSettings() const noexcept;
     void publishTransport (int numSamples) noexcept;
+    void loadCurveFromState();
 
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* bypassParam = nullptr;
@@ -72,6 +81,11 @@ private:
     double currentSampleRate = 44100.0;
     deepwater::dsp::TripleBuffer<TransportSnapshot> transportBox;
     std::atomic<float> minGainSinceRead { 1.0f };
+
+    deepwater::dsp::BreakpointCurve curve;                       // hilo de mensajes
+    deepwater::dsp::TripleBuffer<deepwater::dsp::BreakpointCurve> curveBox; // mensajes → audio
+    deepwater::dsp::BreakpointCurve audioCurve;                  // hilo de audio: la última leída del buzón
+    std::atomic<int> curveVersion { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EbbAudioProcessor)
 };

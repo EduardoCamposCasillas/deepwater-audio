@@ -233,3 +233,113 @@ Inténtalo y después pide pistas.
 - **Cuándo NO usarlo:** si el bajo y el kick no se pisan (un 808 que *es* el kick, o un bajo que empieza en 150 Hz); en
   el Master entero con profundidad alta (bombea todo, voces incluidas); y con patrones de kick irregulares, donde el
   modo tempo baja el volumen en los sitios equivocados.
+
+## Fase 3 — Formas de curva y editor
+
+Hasta ahora la caída y la vuelta del volumen tenían una sola forma. Ahora la forma se **dibuja**: es una curva por
+puntos que puedes elegir de un menú (8 formas de fábrica) o editar con el ratón. La forma decide el *carácter* del
+ducking: con la misma profundidad y la misma duración, una curva "Rápida" casi no se oye y una "Lenta" bombea muchísimo.
+
+### Conceptos aprendidos
+
+- **Curva por puntos (breakpoints).** Una lista de puntos (x, y) unidos por tramos. Es lo mismo que una envolvente
+  ADSR o la automatización de FL, pero libre: tantos puntos como quieras (hasta 32). En Ebb, x va del golpe (0) al
+  final de la DURACIÓN (1), e y es el volumen (arriba entero, abajo la profundidad completa). Así la misma forma vale
+  para cualquier profundidad y duración.
+- **Tensión.** Cada tramo puede ser recto o curvarse. La curva es una exponencial normalizada, `(e^(k·t) − 1) / (e^k − 1)`:
+  siempre une sus dos puntos, y según el signo de k arranca lenta y termina rápida o al revés. Es la forma en que se
+  carga un condensador, y por eso suena "natural" en volumen: el oído escucha en dB (de forma logarítmica), y una
+  subida exponencial se percibe más pareja que una recta.
+- **Por qué la forma importa tanto.** Lo que el oído percibe como "cuánto bombea" es el área bajo la curva: cuánto
+  tiempo pasa el sonido atenuado. "Lenta" se queda abajo casi todo el ciclo (mucha energía quitada: bombeo); "Rápida"
+  vuelve enseguida (casi nada quitado: limpia el golpe del kick y ya).
+- **Escalón vertical.** Dos puntos en la misma x hacen un salto instantáneo ("Puerta"). Un salto de volumen es un clic,
+  así que en esas formas el SUAVIZADO vuelve a ser importante.
+- **La forma no se automatiza.** Las perillas son parámetros (FL puede automatizarlas); la curva no, porque tiene un
+  número variable de puntos. Se guarda con el proyecto igual, como parte del estado del plugin.
+- **Cambiar de forma sonando no hace clic.** Ebb usa el mismo truco que con la división: mide la diferencia entre la
+  forma vieja y la nueva en ese instante y la desvanece en 30 ms. Puedes arrastrar puntos con la canción sonando.
+- **"Clásica" = la forma de la Fase 2.** Aquella era una fórmula (smoothstep); ahora es una curva de 5 puntos con
+  tensiones ajustadas para imitarla (se desvía como mucho 0.03 dB). Tus proyectos de la Fase 2 suenan igual.
+
+### Qué hace cada control
+
+- **FORMA** (menú): carga una forma de fábrica en el editor. Si después la editas, el menú dice "Personalizada".
+  - *Clásica*: arranca plana, sube por el medio, llega plana. Todoterreno.
+  - *Lineal*: sube a ritmo constante. Sirve de referencia para comparar.
+  - *Rápida*: vuelve enseguida. Ducking de mezcla que casi no se oye.
+  - *Lenta*: se queda abajo y sube al final. El "pumping" del house.
+  - *Retención*: abajo y quieta un tercio de la duración, luego sube. Para kicks largos (un 808 que suena 200 ms).
+  - *Entrada suave*: baja en el primer 10 % en vez de al instante. Sin clic aunque el suavizado esté en 0.
+  - *Eco*: un segundo golpe más débil a la mitad. Ritmo extra con un solo disparo.
+  - *Puerta*: silencio hasta la mitad y vuelve de golpe. Efecto "stutter" / trance gate.
+- **Editor** (el panel grande): arrastra los puntos (los de los extremos solo suben y bajan). **Mayús** mientras
+  arrastras = se pega a la cuadrícula (octavos de la duración, cuartos de volumen). **Doble clic** en un hueco añade un
+  punto; doble clic (o clic derecho) en un punto lo quita. El **círculo hueco** a mitad de cada tramo es su tensión:
+  arrástralo hacia arriba o abajo para curvar el tramo hacia ese lado; doble clic lo vuelve recto.
+- La **vista previa** (arriba a la derecha) muestra el resultado real: tu forma × profundidad, estirada por la
+  duración y con el suavizado. Mírala mientras editas.
+
+### Ejercicio guiado: oír las formas (con el volumen igualado)
+
+1. El montaje de la Fase 2: **95 BPM**, kick en 1, 5, 9 y 13, un **808 largo** (F3 de FL = 87 Hz) y Ebb en el 808.
+   División 1/4, profundidad 60 %, duración 70 %, suavizado 2 ms.
+2. Cambia la FORMA entre **Rápida, Clásica y Lenta** con la canción sonando (no hay clic). Fíjate en el medidor: el
+   pico de reducción es el mismo (60 % = −8 dB), pero el 808 suena cada vez más bajo **en promedio**.
+3. **Iguala el volumen**: con *Lenta*, sube el fader del 808 hasta que se sienta igual de fuerte que con *Rápida*
+   (suele hacer falta 3–5 dB). Ahora compara: con *Rápida* el kick asoma y el 808 casi no se mueve; con *Lenta* el 808
+   "respira" con el tempo. Sin igualar, habrías elegido la más fuerte, no la mejor.
+4. **El clic y la Entrada suave**: profundidad 100 %, suavizado **0 ms**, 808 en solo. Con *Clásica* cada golpe hace
+   "tic". Cambia a *Entrada suave*: el tic desaparece sin tocar el suavizado, porque la caída dura unos milisegundos.
+   El precio: el 808 baja un poco después de que entra el kick.
+5. **Dibuja la tuya**: elige *Lineal*, añade un punto con doble clic a mitad de la pantalla y arrástralo abajo a la
+   izquierda (x ≈ 25 %, y ≈ 10 %). Acabas de hacer una "Retención" corta. Curva el tramo de subida con el círculo hueco
+   y escucha cómo cambia la vuelta.
+
+### Receta: dembow con kick largo (808 de cola larga)
+
+Cuando el kick es un 808 con cola (200–300 ms), "Clásica" empieza a subir mientras el kick todavía suena y el bajo lo
+tapa. Ebb en el bajo: **FORMA Retención, 1/4, profundidad 45 % (−5 dB), duración 55 %, suavizado 2 ms.**
+- Por qué: a 95 BPM una negra son 632 ms; el 55 % son 348 ms, y la Retención se queda abajo el primer 35 % de eso
+  (≈ 120 ms): justo el cuerpo del kick. Luego sube en S y llega entera antes del siguiente golpe.
+- Si la cola del kick es más larga, sube la DURACIÓN, no la profundidad: el problema es *cuándo* vuelve el bajo, no
+  *cuánto* baja.
+
+Variación creativa (trance gate en un pad): FORMA *Puerta*, división **1/16**, profundidad 100 %, duración 100 %,
+suavizado 1.5 ms. El pad se corta en semicorcheas como un "chop". Mueve el punto del escalón (a la izquierda = notas
+más cortas, como un staccato).
+
+### Reto sin receta
+
+En el reto de la Fase 2 viste que ninguna división fija cae en los cuatro golpes de la caja del dembow (pasos 4, 7, 12
+y 15). Con el editor sí se puede: usa la división **1 bar** y **duración 100 %**, así la curva ocupa el compás entero.
+Dibuja una curva que baje **solo en los pasos de la caja**. ¿En qué x tiene que caer cada bajada? (Para empezar: cada
+paso es 1/16 del compás.) ¿Qué pasa si en otra sección el patrón cambia?
+
+Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Envolvente / breakpoint envelope**: una forma que cambia algo en el tiempo, definida por puntos. *En música:* la
+  envolvente de volumen de un pad (ataque lento) o la automatización de un filtro en un build-up de EDM.
+- **Tensión / curvatura**: cuánto se dobla un tramo. *En música:* un fade-out exponencial suena más natural que uno
+  lineal; casi todos los finales en fade de la radio de los 70 y 80 se hacían así con el fader.
+- **Hold (retención)**: mantener un valor quieto un tiempo antes de seguir. *En música:* el hold de la envolvente de un
+  sampler de batería, o de un noise gate.
+- **Trance gate / stutter**: cortar un sonido sostenido en ritmo. *En música:* los pads cortados en semicorcheas del
+  trance de finales de los 90 y los "chops" vocales del future bass.
+- **Área bajo la curva**: cuánta energía se quita; lo que el oído percibe como intensidad del bombeo.
+
+### Errores comunes y cuándo NO usarlo
+
+- **Comparar formas sin igualar el volumen.** Las formas que se quedan abajo más tiempo bajan el nivel promedio; si no
+  compensas, te engaña la diferencia de volumen y no la forma.
+- **Escalones sin suavizado.** *Puerta* o un punto arrastrado en vertical sin suavizado = clics. Sube el SUAVIZADO a
+  1–2 ms o usa una pendiente corta en vez de un escalón.
+- **Terminar la curva abajo sin querer.** Si el último punto no está arriba, pasada la duración el volumen se queda
+  bajo hasta el siguiente golpe: el bajo pierde nivel todo el tiempo. A veces es lo que quieres (un ducking que nunca
+  suelta del todo); casi siempre, no.
+- **Formas complicadas para limpiar una mezcla.** Para que el kick pase limpio basta con *Rápida* o *Clásica* y poca
+  profundidad. Las formas con varias bajadas son efectos, no limpieza.
+- **Dibujar el patrón del kick en el editor como solución general.** Funciona en un loop fijo (el reto), pero si el
+  kick cambia de sección a sección tendrías que redibujar: para eso llegan los modos MIDI (Fase 4) y audio (Fase 5).

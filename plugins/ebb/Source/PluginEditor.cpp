@@ -4,15 +4,17 @@
 
 namespace
 {
-constexpr int editorWidth = 640;
-constexpr int editorHeight = 530;
+constexpr int editorWidth = 960;
+constexpr int editorHeight = 600;
 constexpr int headerHeight = 44;
-constexpr int transportHeight = 170;
-constexpr int curveHeight = 150;
+constexpr int topRowHeight = 170;   // transporte + vista previa de la curva
+constexpr int transportWidth = 500; // cabe "123 . 4 . 4" y los detalles
+constexpr int curveEditorHeight = 230;
 constexpr int footerHeight = 26;
 constexpr int gap = 8;
 constexpr int padding = 12;
 constexpr int framesPerSecond = 30;
+constexpr int customShapeId = 1000; // id del menú para "Personalizada" (las formas de fábrica van de 1 en adelante)
 
 juce::String utf8 (const char* text) { return juce::String::fromUTF8 (text); }
 } // namespace
@@ -24,12 +26,13 @@ EbbAudioProcessorEditor::EbbAudioProcessorEditor (EbbAudioProcessor& p) : AudioP
 
     addAndMakeVisible (transportView);
     addAndMakeVisible (curveView);
+    addAndMakeVisible (curveEditor);
+    curveEditor.onChange = [this] (const deepwater::dsp::BreakpointCurve& curve) {
+        processor.setCurve (curve);
+        showCurve();
+    };
 
-    divisionLabel.setText (utf8 ("DIVISI\xc3\x93N"), juce::dontSendNotification);
-    divisionLabel.setJustificationType (juce::Justification::centred);
-    divisionLabel.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-    divisionLabel.setColour (juce::Label::textColourId, ebb::gui::theme::dimText);
-    addAndMakeVisible (divisionLabel);
+    setUpComboLabel (divisionLabel, utf8 ("DIVISI\xc3\x93N"));
     divisionBox.addItemList (processor.getParameters().getParameter (id::division)->getAllValueStrings(), 1);
     divisionBox.setTooltip (utf8 ("Cada cu\xc3\xa1nto baja el volumen, en figuras musicales al tempo de FL. 1/4 = un golpe por "
                                   "tiempo (el kick del dembow cl\xc3\xa1sico). T = tresillo: tres golpes en el espacio de dos. "
@@ -37,14 +40,35 @@ EbbAudioProcessorEditor::EbbAudioProcessorEditor (EbbAudioProcessor& p) : AudioP
     addAndMakeVisible (divisionBox);
     divisionAttachment = std::make_unique<ComboBoxAttachment> (processor.getParameters(), id::division, divisionBox);
 
+    // Formas de fábrica: elegir una la copia al editor (y se puede seguir editando: entonces pasa a "Personalizada").
+    setUpComboLabel (shapeLabel, "FORMA");
+    for (size_t i = 0; i < ebb::dsp::curveShapes.size(); ++i)
+        shapeBox.addItem (utf8 (ebb::dsp::curveShapes[i].name), static_cast<int> (i) + 1);
+    shapeBox.addSeparator();
+    shapeBox.addItem ("Personalizada", customShapeId);
+    shapeBox.setItemEnabled (customShapeId, false); // se llega editando, no eligiéndola
+    shapeBox.setTooltip (utf8 ("Formas de ca\xc3\xad" "da y vuelta del volumen. Cl\xc3\xa1sica: la de la Fase 2. R\xc3\xa1pida: se "
+                               "nota poco (mezcla). Lenta: bombeo marcado. Retenci\xc3\xb3n: deja pasar un kick largo. Entrada "
+                               "suave: sin clic. Eco y Puerta: efectos r\xc3\xadtmicos. Al editar los puntos pasa a "
+                               "\"Personalizada\"."));
+    shapeBox.onChange = [this] {
+        const int index = shapeBox.getSelectedId() - 1;
+        if (index >= 0 && index < static_cast<int> (ebb::dsp::curveShapes.size()))
+        {
+            processor.setCurve (ebb::dsp::curveShapes[static_cast<size_t> (index)].curve);
+            showCurve();
+        }
+    };
+    addAndMakeVisible (shapeBox);
+
     setUpKnob (depthKnob, id::depth, "PROFUNDIDAD",
                utf8 ("Cu\xc3\xa1nto baja el volumen en el golpe. 100 % = silencio. Entre par\xc3\xa9ntesis, lo mismo en dB: "
                      "para limpiar graves en la mezcla bastan 15\xe2\x80\x93" "30 % (1.5\xe2\x80\x93" "3 dB); el bombeo "
                      "como efecto empieza hacia el 60 %."));
     setUpKnob (durationKnob, id::duration, utf8 ("DURACI\xc3\x93N"),
-               utf8 ("Qu\xc3\xa9 parte del ciclo tarda el volumen en volver. 100 % = vuelve justo cuando llega el "
-                     "siguiente golpe (bombeo continuo); valores bajos = una ca\xc3\xad" "da corta y el resto del ciclo a "
-                     "volumen completo."));
+               utf8 ("Qu\xc3\xa9 parte del ciclo dura la curva del editor. 100 % = la curva ocupa el ciclo entero (bombeo "
+                     "continuo); valores bajos = una ca\xc3\xad" "da corta y el resto del ciclo en el valor del \xc3\xbaltimo "
+                     "punto (normalmente, volumen completo)."));
     setUpKnob (smoothingKnob, id::smoothing, "SUAVIZADO",
                utf8 ("Redondea los cambios bruscos de volumen (sobre todo la ca\xc3\xad" "da del golpe). 0 ms = ca\xc3\xad" "da "
                      "instant\xc3\xa1nea: en un bajo se oye un clic. 1\xe2\x80\x93" "5 ms = sin clic y con golpe. "
@@ -66,6 +90,15 @@ EbbAudioProcessorEditor::~EbbAudioProcessorEditor()
     setLookAndFeel (nullptr);
 }
 
+void EbbAudioProcessorEditor::setUpComboLabel (juce::Label& label, const juce::String& text)
+{
+    label.setText (text, juce::dontSendNotification);
+    label.setJustificationType (juce::Justification::centred);
+    label.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+    label.setColour (juce::Label::textColourId, ebb::gui::theme::dimText);
+    addAndMakeVisible (label);
+}
+
 void EbbAudioProcessorEditor::setUpKnob (Knob& knob, const char* parameterId, const juce::String& name, const juce::String& tooltip)
 {
     knob.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 120, 18);
@@ -83,10 +116,24 @@ void EbbAudioProcessorEditor::setUpKnob (Knob& knob, const char* parameterId, co
     addAndMakeVisible (knob.label);
 }
 
+// Lleva la curva del procesador al editor y al menú (que muestra la forma de fábrica si coincide exacta).
+void EbbAudioProcessorEditor::showCurve()
+{
+    shownCurveVersion = processor.getCurveVersion();
+    const auto& curve = processor.getCurve();
+    curveEditor.setCurve (curve);
+    const int shape = ebb::dsp::findCurveShape (curve);
+    shapeBox.setSelectedId (shape >= 0 ? shape + 1 : customShapeId, juce::dontSendNotification);
+}
+
 void EbbAudioProcessorEditor::timerCallback()
 {
     if (processor.readTransport (lastSnapshot))
         transportView.setSnapshot (lastSnapshot);
+
+    // La curva cambia también desde fuera del editor (un proyecto o un preset cargado).
+    if (processor.getCurveVersion() != shownCurveVersion)
+        showCurve();
 
     auto& parameters = processor.getParameters();
     ebb::dsp::TempoSettings settings;
@@ -94,14 +141,22 @@ void EbbAudioProcessorEditor::timerCallback()
     settings.depth = parameters.getRawParameterValue (ebb::params::depth)->load() / 100.0f;
     settings.duration = parameters.getRawParameterValue (ebb::params::duration)->load() / 100.0f;
     settings.smoothingMs = parameters.getRawParameterValue (ebb::params::smoothing)->load();
-    curveView.setCurve (settings, lastSnapshot.bpm, lastSnapshot.timeSignature);
+    curveView.setCurve (settings, processor.getCurve(), lastSnapshot.bpm, lastSnapshot.timeSignature);
     curveView.setMinGain (processor.takeMinGain());
+}
+
+juce::Rectangle<int> EbbAudioProcessorEditor::editorPanelArea() const
+{
+    return getLocalBounds()
+        .withTrimmedTop (headerHeight + topRowHeight + gap)
+        .withHeight (curveEditorHeight)
+        .reduced (padding, 0);
 }
 
 juce::Rectangle<int> EbbAudioProcessorEditor::controlsArea() const
 {
     return getLocalBounds()
-        .withTrimmedTop (headerHeight + transportHeight + curveHeight + 2 * gap)
+        .withTrimmedTop (headerHeight + topRowHeight + curveEditorHeight + 2 * gap)
         .withTrimmedBottom (footerHeight)
         .reduced (padding, 0);
 }
@@ -117,17 +172,30 @@ void EbbAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("EBB", header.removeFromLeft (60), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("ducker  -  Fase 2: modo tempo", header, juce::Justification::centredLeft);
+    g.drawText ("ducker  -  Fase 3: formas de curva y editor", header, juce::Justification::centredLeft);
 
-    const auto controls = controlsArea().toFloat();
-    g.setColour (theme::panel);
-    g.fillRoundedRectangle (controls, 8.0f);
-    g.setColour (theme::panelOutline);
-    g.drawRoundedRectangle (controls.reduced (0.5f), 8.0f, 1.0f);
+    for (const auto& panelArea : { editorPanelArea(), controlsArea() })
+    {
+        const auto panel = panelArea.toFloat();
+        g.setColour (theme::panel);
+        g.fillRoundedRectangle (panel, 8.0f);
+        g.setColour (theme::panelOutline);
+        g.drawRoundedRectangle (panel.reduced (0.5f), 8.0f, 1.0f);
+    }
+
+    auto caption = editorPanelArea().reduced (12, 0).removeFromTop (28);
+    g.setColour (theme::text);
+    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    g.drawText ("FORMA DE LA CURVA", caption, juce::Justification::centredLeft);
+    g.setColour (theme::dimText);
+    g.setFont (juce::FontOptions (11.0f));
+    g.drawText (utf8 ("arrastra los puntos (May\xc3\xbas = cuadr\xc3\xad" "cula)  \xc2\xb7  doble clic: a\xc3\xb1" "adir / quitar punto  "
+                      "\xc2\xb7  c\xc3\xad" "rculo hueco: tensi\xc3\xb3n del tramo"),
+                caption, juce::Justification::centredRight);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (utf8 ("Con FL parado no hay ducking. Fase 3: formas de curva y editor propio."),
+    g.drawText (utf8 ("Con FL parado no hay ducking. Fase 4: modo MIDI (seguir el patr\xc3\xb3n real del kick)."),
                 getLocalBounds().removeFromBottom (footerHeight), juce::Justification::centred);
 }
 
@@ -136,16 +204,22 @@ void EbbAudioProcessorEditor::resized()
     auto header = getLocalBounds().removeFromTop (headerHeight).reduced (padding, 8);
     bypassButton.setBounds (header.removeFromRight (90));
 
-    auto area = getLocalBounds().withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0);
-    transportView.setBounds (area.removeFromTop (transportHeight));
-    area.removeFromTop (gap);
-    curveView.setBounds (area.removeFromTop (curveHeight));
+    auto top = getLocalBounds().withTrimmedTop (headerHeight).withHeight (topRowHeight).reduced (padding, 0);
+    transportView.setBounds (top.removeFromLeft (transportWidth));
+    top.removeFromLeft (gap);
+    curveView.setBounds (top);
 
-    // Fila de controles: la división a la izquierda y las tres perillas repartidas en el resto.
+    curveEditor.setBounds (editorPanelArea().withTrimmedTop (28).reduced (6, 0).withTrimmedBottom (6));
+
+    // Fila de controles: división y forma a la izquierda, las tres perillas repartidas en el resto.
     auto controls = controlsArea().reduced (14, 8);
-    auto division = controls.removeFromLeft (150);
-    divisionLabel.setBounds (division.removeFromTop (20));
-    divisionBox.setBounds (division.withSizeKeepingCentre (division.getWidth(), 28));
+    for (const auto& [label, box] : { std::pair { &divisionLabel, &divisionBox }, std::pair { &shapeLabel, &shapeBox } })
+    {
+        auto column = controls.removeFromLeft (170);
+        controls.removeFromLeft (16);
+        label->setBounds (column.removeFromTop (20));
+        box->setBounds (column.withSizeKeepingCentre (column.getWidth(), 28));
+    }
 
     const int knobWidth = controls.getWidth() / 3;
     for (auto* knob : { &depthKnob, &durationKnob, &smoothingKnob })

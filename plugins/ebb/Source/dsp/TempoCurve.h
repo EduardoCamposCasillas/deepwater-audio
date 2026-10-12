@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 
+#include "deepwater/dsp/BreakpointCurve.h"
 #include "dsp/HostClock.h"
 
 namespace ebb::dsp
@@ -56,26 +57,13 @@ inline constexpr int defaultDuckDivision = 2; // 1/4: un golpe por tiempo, como 
     return std::clamp (inCycle, 0.0, period);
 }
 
-// Forma del ducking (fija en la Fase 2; la Fase 3 trae formas y un editor): 1 = el golpe (máxima atenuación), 0 = el
-// volumen ya volvió. 'progress' es el tiempo desde el golpe dividido por la duración de la bajada.
-//
-// La subida es un "smoothstep", 1 − x²·(3 − 2x): arranca plana (el volumen se queda abajo un momento, dejando pasar
-// el kick), sube rápido a la mitad y llega plana al final, sin esquina (una esquina en la ganancia se oye como un
-// pequeño clic en señales graves).
-[[nodiscard]] inline float duckShape (float progress) noexcept
-{
-    if (progress <= 0.0f)
-        return 1.0f;
-    if (progress >= 1.0f)
-        return 0.0f;
-    return 1.0f - progress * progress * (3.0f - 2.0f * progress);
-}
-
-// La curva completa en un punto del ciclo: 'duration' es la fracción del ciclo que tarda en volver (0–1).
-[[nodiscard]] inline float duckAt (double inCycle, double period, float duration) noexcept
+// La curva completa en un punto del ciclo: 1 = el golpe (máxima atenuación), 0 = el volumen ya volvió. La forma la
+// dibuja una curva por puntos (Fase 3, ver CurveShapes.h), estirada a lo largo de 'duration' (fracción del ciclo que
+// tarda en volver, 0–1). Después de la duración se queda en el valor de su último punto hasta el siguiente golpe.
+[[nodiscard]] inline float duckAt (const deepwater::dsp::BreakpointCurve& curve, double inCycle, double period, float duration) noexcept
 {
     const double length = period * static_cast<double> (std::max (duration, 1.0e-3f));
-    return duckShape (static_cast<float> (inCycle / length));
+    return 1.0f - curve.valueAt (static_cast<float> (inCycle / length));
 }
 
 } // namespace ebb::dsp

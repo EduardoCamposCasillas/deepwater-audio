@@ -12,19 +12,21 @@
 namespace ebb::gui
 {
 
-// Fase 2: dos ciclos de la curva de ganancia con los ajustes actuales (arriba = volumen completo, abajo = silencio),
-// con el suavizado incluido, y a la derecha un medidor de cuánto está bajando el volumen ahora mismo. La curva en vivo
+// Fase 2: dos ciclos de la curva de ganancia con los ajustes actuales y la forma del editor (Fase 3) (arriba = volumen
+// completo, abajo = silencio), con el suavizado incluido, y a la derecha un medidor de cuánto está bajando el volumen ahora mismo. La curva en vivo
 // con cursor de reproducción llega en la Fase 7.
 class CurveView final : public juce::Component
 {
 public:
-    void setCurve (const dsp::TempoSettings& newSettings, double newBpm, dsp::TimeSignature newSignature)
+    void setCurve (const dsp::TempoSettings& newSettings, const deepwater::dsp::BreakpointCurve& newShape, double newBpm,
+                   dsp::TimeSignature newSignature)
     {
-        const bool changed = newSettings.division != settings.division || newSettings.depth != settings.depth
+        const bool changed = ! (newShape == shape) || newSettings.division != settings.division || newSettings.depth != settings.depth
                              || newSettings.duration != settings.duration || newSettings.smoothingMs != settings.smoothingMs
                              || newBpm != bpm || newSignature.numerator != signature.numerator
                              || newSignature.denominator != signature.denominator;
         settings = newSettings;
+        shape = newShape;
         bpm = newBpm;
         signature = newSignature;
         if (changed)
@@ -128,7 +130,7 @@ private:
             for (int i = 0; i < points; ++i)
             {
                 const double inCycle = std::fmod (static_cast<double> (i) / points * 2.0, 1.0) * periodBeats();
-                const float target = 1.0f - settings.depth * dsp::duckAt (inCycle, periodBeats(), settings.duration);
+                const float target = 1.0f - settings.depth * dsp::duckAt (shape, inCycle, periodBeats(), settings.duration);
                 gain += (target - gain) * coef;
                 if (pass == 1)
                 {
@@ -176,6 +178,7 @@ private:
     }
 
     dsp::TempoSettings settings;
+    deepwater::dsp::BreakpointCurve shape = dsp::defaultCurve();
     double bpm = dsp::HostClock::defaultBpm;
     dsp::TimeSignature signature;
     float shownReductionDb = 0.0f;

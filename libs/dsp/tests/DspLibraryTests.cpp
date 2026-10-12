@@ -10,12 +10,14 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <numbers>
 #include <string_view>
 #include <thread>
 #include <vector>
 
 #include "deepwater/dsp/AnalyzerTap.h"
+#include "deepwater/dsp/BreakpointCurve.h"
 #include "deepwater/dsp/Crossover.h"
 #include "deepwater/dsp/DcBlocker.h"
 #include "deepwater/dsp/Decibels.h"
@@ -1053,6 +1055,69 @@ void testEnvelopeFollower()
     CHECK (instant.process (0.7) == 0.7 && instant.process (0.2) == 0.2);
 }
 
+void testBreakpointCurve()
+{
+    std::printf ("Curva por puntos: tension, evaluacion, edicion sin desordenar y saneado\n");
+
+    // El segmento doblado une siempre sus extremos; tensión 0 = recta; > 0 arranca lenta; < 0 arranca rápida.
+    bool endpoints = true;
+    for (const float tension : { -1.0f, -0.3f, 0.0f, 0.2f, 1.0f })
+        endpoints = endpoints && std::abs (dw::BreakpointCurve::bend (0.0f, tension)) < 1.0e-6f
+                    && std::abs (dw::BreakpointCurve::bend (1.0f, tension) - 1.0f) < 1.0e-6f;
+    CHECK (endpoints);
+    CHECK (dw::BreakpointCurve::bend (0.3f, 0.0f) == 0.3f);
+    CHECK (dw::BreakpointCurve::bend (0.5f, 0.5f) < 0.5f && dw::BreakpointCurve::bend (0.5f, -0.5f) > 0.5f);
+    CHECK (dw::BreakpointCurve::bend (0.5f, 1.0f) < 0.02f);                         // tensión máxima: 1/(e^4 + 1)
+    CHECK (std::abs (dw::BreakpointCurve::bend (0.5f, 1.0e-6f) - 0.5f) < 1.0e-5f); // casi 0: sin saltos cerca de la recta
+    bool monotonic = true;
+    for (int i = 1; i <= 1000; ++i)
+        monotonic = monotonic && dw::BreakpointCurve::bend (static_cast<float> (i) / 1000.0f, 0.7f)
+                                     >= dw::BreakpointCurve::bend (static_cast<float> (i - 1) / 1000.0f, 0.7f);
+    CHECK (monotonic);
+
+    // Evaluación: pasa por cada punto, interpola entre ellos y fuera de [0, 1] da el extremo.
+    const dw::BreakpointCurve curve { { 0.0f, 0.2f }, { 0.25f, 1.0f, 0.6f }, { 0.75f, 0.0f }, { 1.0f, 0.5f } };
+    CHECK (curve.size() == 4);
+    CHECK (curve.valueAt (0.0f) == 0.2f && curve.valueAt (0.25f) == 1.0f && curve.valueAt (0.75f) == 0.0f && curve.valueAt (1.0f) == 0.5f);
+    CHECK (std::abs (curve.valueAt (0.125f) - 0.6f) < 1.0e-6f); // recta: a mitad, la media
+    CHECK (std::abs (curve.valueAt (0.5f) - (1.0f - dw::BreakpointCurve::bend (0.5f, 0.6f))) < 1.0e-6f);
+    CHECK (curve.valueAt (-3.0f) == 0.2f && curve.valueAt (7.0f) == 0.5f);
+
+    // Escalón vertical (dos puntos en la misma x): a la izquierda el valor de antes, en el punto el de después.
+    const dw::BreakpointCurve step { { 0.0f, 0.0f }, { 0.5f, 0.0f }, { 0.5f, 1.0f }, { 1.0f, 1.0f } };
+    CHECK (step.valueAt (0.4999f) == 0.0f && step.valueAt (0.5f) == 1.0f);
+
+    // Edición: insertar ordena por x; mover no deja pasar a los vecinos; los extremos no se mueven en x ni se quitan.
+    dw::BreakpointCurve edited;
+    CHECK (edited.size() == 2 && edited.valueAt (0.5f) == 0.5f); // por defecto, la recta (0, 0) → (1, 1)
+    CHECK (edited.insert (0.6f, 0.9f) == 1);
+    CHECK (edited.insert (0.3f, 0.1f) == 1);
+    CHECK (edited[1].x == 0.3f && edited[2].x == 0.6f);
+    edited.move (1, 0.9f, 2.0f); // intenta pasar a su vecino de la derecha y salirse por arriba
+    CHECK (edited[1].x == 0.6f && edited[1].y == 1.0f);
+    edited.move (0, 0.5f, 0.4f);
+    CHECK (edited[0].x == 0.0f && edited[0].y == 0.4f);
+    CHECK (! edited.remove (0) && ! edited.remove (edited.size() - 1));
+    CHECK (edited.remove (1) && edited.size() == 3);
+    edited.setTension (0, 5.0f);
+    CHECK (edited[0].tension == 1.0f);
+
+    dw::BreakpointCurve full;
+    int inserted = 0;
+    while (full.insert (0.5f, 0.5f) >= 0)
+        ++inserted;
+    CHECK (inserted == dw::BreakpointCurve::maxPoints - 2 && full.size() == dw::BreakpointCurve::maxPoints);
+
+    // Saneado: desordenada, fuera de rango y con NaN → ordenada, dentro de rango y con extremos en 0 y 1.
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const dw::BreakpointCurve broken { { 0.7f, 2.0f }, { 0.2f, nan, nan }, { 0.4f, -1.0f, 3.0f } };
+    CHECK (broken.size() == 3);
+    CHECK (broken[0].x == 0.0f && broken[1].x == 0.4f && broken[2].x == 1.0f);
+    CHECK (broken[0].y == 0.0f && broken[0].tension == 0.0f && broken[1].y == 0.0f && broken[1].tension == 1.0f && broken[2].y == 1.0f);
+    const dw::BreakpointCurve single { { 0.5f, 0.5f } }; // un solo punto no es una curva: vuelve a la recta
+    CHECK (single == dw::BreakpointCurve());
+}
+
 void testLfoDivisions()
 {
     std::printf ("LFO: divisiones de tempo (1/4 a 120 BPM = 2 Hz) y un ciclo por período\n");
@@ -1253,6 +1318,7 @@ int main()
     testSimdMatchesScalar();
     testMidiNoteToHz();
     testEnvelopeFollower();
+    testBreakpointCurve();
     testLfoDivisions();
     testAnalyzerTap();
     testSpectrumAnalyzer();

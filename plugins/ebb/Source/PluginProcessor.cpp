@@ -30,6 +30,7 @@ EbbAudioProcessor::EbbAudioProcessor()
     smoothingParam = parameters.getRawParameterValue (ebb::params::smoothing);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (ebb::params::bypass));
     jassert (bypassParameter != nullptr);
+    setCurve (ebb::dsp::defaultCurve());
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout EbbAudioProcessor::createParameterLayout()
@@ -130,6 +131,10 @@ void EbbAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     for (int ch = getTotalNumInputChannels(); ch < buffer.getNumChannels(); ++ch)
         buffer.clear (ch, 0, numSamples);
 
+    // ~400 bytes por bloque; solo si llegó una curva nueva se la pasa al motor (que hace el glide).
+    if (curveBox.read (audioCurve))
+        engine.setCurve (audioCurve);
+
     clock.beginBlock (readHostTransport(), numSamples);
     engine.setBypassed (bypassParam->load() >= 0.5f);
     engine.setSettings (readTempoSettings());
@@ -161,6 +166,48 @@ void EbbAudioProcessor::publishTransport (int numSamples) noexcept
     transportBox.write (snapshot);
 }
 
+namespace
+{
+const juce::Identifier curveTag { "Curve" };
+const juce::Identifier pointTag { "Point" };
+const juce::Identifier xId { "x" }, yId { "y" }, tensionId { "tension" };
+} // namespace
+
+void EbbAudioProcessor::setCurve (const deepwater::dsp::BreakpointCurve& newCurve)
+{
+    curve = newCurve;
+    curve.sanitise();
+    curveBox.write (curve);
+    ++curveVersion;
+
+    // En el estado, en unidades de la curva y legible: <Curve><Point x="0.25" y="0.156" tension="0.034"/>...
+    auto& state = parameters.state;
+    juce::ValueTree tree (curveTag);
+    for (int i = 0; i < curve.size(); ++i)
+        tree.appendChild (juce::ValueTree (pointTag, { { xId, curve[i].x }, { yId, curve[i].y }, { tensionId, curve[i].tension } }), nullptr);
+    if (const auto old = state.getChildWithName (curveTag); old.isValid())
+        state.removeChild (old, nullptr);
+    state.appendChild (tree, nullptr);
+}
+
+void EbbAudioProcessor::loadCurveFromState()
+{
+    // Un proyecto de la Fase 2 no tiene curva: queda la forma por defecto (la misma que sonaba entonces).
+    const auto tree = parameters.state.getChildWithName (curveTag);
+    if (! tree.isValid())
+    {
+        setCurve (ebb::dsp::defaultCurve());
+        return;
+    }
+    std::vector<deepwater::dsp::CurvePoint> points;
+    for (const auto& point : tree)
+        if (point.hasType (pointTag))
+            points.push_back ({ static_cast<float> (point[xId]), static_cast<float> (point[yId]), static_cast<float> (point[tensionId]) });
+    // Un estado dañado (menos de dos puntos) vuelve a la forma por defecto; el resto lo sanea la curva.
+    setCurve (points.size() >= 2 ? deepwater::dsp::BreakpointCurve (points.data(), static_cast<int> (points.size()))
+                                 : ebb::dsp::defaultCurve());
+}
+
 void EbbAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // Se ejecuta en el hilo de mensajes (al guardar el proyecto de FL), no en el de audio.
@@ -174,6 +221,7 @@ void EbbAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
         if (xml->hasTagName (parameters.state.getType()))
         {
             parameters.replaceState (juce::ValueTree::fromXml (*xml));
+            loadCurveFromState();
 
             // Lección de Undertow (Fase 11, pluginval --randomise): un parámetro on/off puede tener un valor "crudo"
             // intermedio que puso el host (0.34 = Off). Si el estado restaurado dice lo mismo, replaceState no lo toca

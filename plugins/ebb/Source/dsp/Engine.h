@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "deepwater/dsp/Smoothing.h"
+#include "dsp/CurveShapes.h"
 #include "dsp/HostClock.h"
 #include "dsp/TempoCurve.h"
 
@@ -30,7 +31,7 @@ struct TempoSettings
 // La curva se calcula en cada muestra desde la POSICIÓN del host (no con un contador propio), así que un loop, un salto
 // o un cambio de tempo la dejan cayendo en su sitio. Para que la ganancia nunca salte hay tres capas:
 //   1. Profundidad y duración pasan por rampas lineales (un giro de perilla o una automatización por bloques).
-//   2. Cambiar de división (o parar el host) cambia la curva de golpe: se calcula la diferencia entre la curva vieja y
+//   2. Cambiar de división o de forma de curva (o parar el host) cambia la curva de golpe: se calcula la diferencia entre la curva vieja y
 //      la nueva en ese instante y se desvanece en 30 ms ("glide"). La curva nueva entra ya en su sitio.
 //   3. El suavizado final (perilla) redondea los saltos que quedan: los golpes y los saltos de la línea de tiempo. Un
 //      golpe que llega antes de que la curva termine baja desde la ganancia actual, no desde 1.
@@ -67,6 +68,14 @@ public:
     }
 
     void setBypassed (bool bypassed) noexcept { processing = ! bypassed; }
+
+    // Forma de la curva (Fase 3). Se aplica al principio del siguiente process(), con glide desde la forma anterior.
+    // Copia unos 400 bytes: llamarla solo cuando la curva cambió.
+    void setCurve (const BreakpointCurve& newCurve) noexcept
+    {
+        pendingCurve = newCurve;
+        curvePending = true;
+    }
 
     // Una vez por bloque, antes de process().
     void setSettings (const TempoSettings& settings) noexcept
@@ -113,7 +122,14 @@ private:
     {
         if (! isActive)
             return 0.0f;
-        return duckAt (positionInCycle (ppq, origin, quartersPerBar, cyclePeriod), cyclePeriod, duration);
+        return duckAt (curve, positionInCycle (ppq, origin, quartersPerBar, cyclePeriod), cyclePeriod, duration);
+    }
+
+    void applyPendingCurve() noexcept
+    {
+        if (curvePending)
+            curve = pendingCurve;
+        curvePending = false;
     }
 
     [[nodiscard]] float glideValue() const noexcept
@@ -134,16 +150,18 @@ private:
             primed = true;
             period = newPeriod;
             active = nowActive;
+            applyPendingCurve();
             return;
         }
 
-        // Cambio de división (o de compás, con "1 bar") o el host se paró: la curva saltaría. Se mide el salto en la
-        // primera muestra del bloque y se desvanece. Arrancar NO desvanece: el primer golpe tiene que sonar entero.
-        if (newPeriod != period || (active && ! nowActive))
+        // Cambio de división (o de compás, con "1 bar"), de forma, o el host se paró: la curva saltaría. Se mide el
+        // salto en la primera muestra del bloque y se desvanece. Arrancar NO desvanece: el primer golpe suena entero.
+        if (newPeriod != period || (active && ! nowActive) || curvePending)
         {
             const double ppq = clock.ppqAt (0);
             const float duration = durationRamp.value;
             const float before = std::clamp (shapeAt (ppq, period, active, duration) + glideValue(), 0.0f, 1.0f);
+            applyPendingCurve();
             const float after = shapeAt (ppq, newPeriod, nowActive, duration);
             glideOffset = before - after;
             glideRemaining = glideSamples;
@@ -190,6 +208,9 @@ private:
 
     deepwater::dsp::LinearRamp depthRamp, durationRamp;
     int division = defaultDuckDivision;
+    BreakpointCurve curve = defaultCurve();
+    BreakpointCurve pendingCurve;
+    bool curvePending = false;
     float smoothingMs = 0.0f;
     float smoothingCoef = 1.0f;
 

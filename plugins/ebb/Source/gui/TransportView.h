@@ -117,7 +117,7 @@ private:
             case dsp::ClockSource::host: return { utf8 ("\xe2\x96\xb6  Reproduciendo (sigue a FL)"), theme::accent };
             case dsp::ClockSource::stopped: return { utf8 ("\xe2\x96\xa0  Parado"), theme::dimText };
             case dsp::ClockSource::freeRunning:
-            default: return { utf8 ("\xe2\x97\x8b  Reloj libre (el host no informa posici\xc3\xb3n)"), theme::freeRunning };
+            default: return { utf8 ("\xe2\x97\x8b  Reloj libre (sin posici\xc3\xb3n)"), theme::freeRunning };
         }
     }
 

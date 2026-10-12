@@ -62,9 +62,11 @@ plugins/ebb/
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     TransportSnapshot.h      # lo que el audio publica para la GUI en cada bloque (TripleBuffer)
     dsp/HostClock.h          # reloj musical: posición del host por muestra, saltos, reloj libre; compás.tiempo.semicorchea
-    dsp/TempoCurve.h         # modo tempo: divisiones, posición en el ciclo y forma de la curva (funciones puras)
+    dsp/TempoCurve.h         # modo tempo: divisiones, posición en el ciclo y la curva estirada a la duración (funciones puras)
+    dsp/CurveShapes.h        # formas de fábrica (curvas por puntos) y cuál coincide con una curva dada
     dsp/Engine.h             # cadena de audio completa, sin JUCE: curva, rampas, glide, suavizado y bypass
-    gui/                     # tema, LookAndFeel (perillas), visor del transporte, vista de la curva y medidor
+    gui/                     # tema, LookAndFeel (perillas), visor del transporte, vista de la curva y medidor,
+                             # editor de la curva (CurveEditor.h)
   tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE)
 ```
 
@@ -104,11 +106,39 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 2 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona.
+Fase 3 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
+- Librería: `deepwater/dsp/BreakpointCurve.h` (nueva, con test en `DeepwaterDspTests`): curva x ∈ [0, 1] → y ∈ [0, 1]
+  por puntos (máx. 32, tamaño fijo, trivialmente copiable). Tensión por tramo en [−1, 1]: exponencial normalizada
+  `expm1(k·t) / expm1(k)`, k = tensión · 8 (> 0 arranca lenta, < 0 rápida, 0 recta). Evaluación con búsqueda binaria;
+  escalón vertical si dos puntos comparten x (gana el de la derecha). Edición que nunca desordena (`insert`, `remove`
+  sin tocar extremos, `move` limitado por los vecinos, `setTension`) y `sanitise` (NaN, rango, orden, extremos en 0 y 1).
+- `dsp/CurveShapes.h`: 8 formas de fábrica (Clásica, Lineal, Rápida, Lenta, Retención, Entrada suave, Eco, Puerta).
+  y = nivel de volumen (1 = entero, 0 = la profundidad completa); x = del golpe al final de la DURACIÓN; pasada la
+  duración la curva se queda en el y del último punto. "Clásica" = la smoothstep de la Fase 2 con 5 puntos y tensiones
+  ajustadas (error ≤ 0.006, ≈ 0.03 dB a 70 %): es la de por defecto, así que los proyectos de la Fase 2 suenan igual
+  (no bit a bit).
+- `dsp/Engine.h`: `setCurve` deja la curva pendiente; se aplica en `beginBlock` con el mismo glide de 30 ms que el
+  cambio de división (antes de arrancar, sin glide). Sin el glide, cambiar Lenta → Rápida salta 0.82 (comprobado).
+- La curva NO es un parámetro (número variable de puntos, no automatizable): hijo `<Curve><Point x y tension/>` del
+  estado del APVTS. Hilo de mensajes → audio por un `TripleBuffer<BreakpointCurve>`; `processBlock` la pasa al motor
+  solo si es nueva. `curveVersion` (atómico) avisa a la GUI de cambios de fuera (proyecto cargado). Estado sin curva
+  (Fase 2) o con < 2 puntos → forma por defecto. El menú FORMA no se guarda: muestra la forma de fábrica idéntica a la
+  curva o "Personalizada".
+- GUI 960 × 600: transporte (500 px) + vista previa de dos ciclos arriba; `CurveEditor` a todo lo ancho (arrastrar
+  puntos, Mayús = cuadrícula 1/8 × 1/4, doble clic añade/quita, clic derecho quita, asa hueca de tensión arrastrable
+  y doble clic = recta); fila de DIVISIÓN, FORMA y 3 perillas. Captura del Standalone revisada; la interacción con el
+  ratón no se pudo automatizar (JUCE ignora los mensajes de ratón enviados con PostMessage): la prueba el usuario.
+- Tests: `EbbTests` +2 (formas válidas y reconocibles, Clásica ≈ smoothstep; cambio de forma sonando sin saltos > 0.01,
+  curva que termina abajo se queda abajo hasta el siguiente golpe). Release con 0 warnings; ctest 6/6; pluginval
+  strictness 10 ampliado: SUCCESS.
+
+Siguiente: que el usuario pruebe la Fase 3 en FL Studio; después, Fase 4 (modo MIDI trigger).
+
+### Fase 2 (completada 2026-10-11, probada en FL)
 - `dsp/TempoCurve.h`: 9 divisiones (1 bar, 1/2, 1/4, 1/8, 1/16 y sus tresillos; "1 bar" = el compás del host). La
   cuadrícula arranca en cada inicio de compás (`HostClock::barOrigin`: el del host si es coherente, si no 0), así una
   división que no cabe justa (1/2 T en 3/4) se reinicia en el "1". Margen de 1e-9 negras para el redondeo del host.
-  Forma fija: smoothstep, `1 − x²(3 − 2x)` con x = tiempo desde el golpe / (duración · ciclo).
+  Forma fija (hasta la Fase 3): smoothstep, `1 − x²(3 − 2x)` con x = tiempo desde el golpe / (duración · ciclo).
 - `dsp/Engine.h`: ganancia = 1 − profundidad · forma, calculada en cada muestra desde `clock.ppqAt (i)` (exacta a la
   muestra con cualquier bloque). Profundidad con rampa de 20 ms, duración de 50 ms. Cambio de división/compás o parada
   del host: "glide" (diferencia curva vieja − nueva en la 1.ª muestra del bloque, desvanecida en 30 ms). Arrancar NO
@@ -127,5 +157,3 @@ Fase 2 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona.
   de división salta 0.28–0.61: comprobado quitándolo); loop a mitad de curva; parar sin clic y quedar en 1 exacto;
   reloj libre; profundidad 0 y bypass bit a bit.
 - Release con 0 warnings; ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
-
-Siguiente: Fase 3 (formas de curva y editor).

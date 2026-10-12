@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "dsp/CurveShapes.h"
 #include "dsp/Engine.h"
 #include "dsp/HostClock.h"
 #include "dsp/TempoCurve.h"
@@ -311,12 +312,97 @@ void testTempoCurve()
     // Inicio de compás del host (p. ej. tras un cambio de compás en el 10): se cuenta desde ahí.
     CHECK (near (positionInCycle (10.5, 10.0, 3.0, 1.0), 0.5));
 
-    CHECK (duckShape (0.0f) == 1.0f && duckShape (1.0f) == 0.0f && duckShape (2.0f) == 0.0f);
-    CHECK (std::abs (duckShape (0.5f) - 0.5f) < 1.0e-6f);
-    bool decreasing = true;
-    for (int i = 1; i <= 1000; ++i)
-        decreasing = decreasing && duckShape (static_cast<float> (i) / 1000.0f) <= duckShape (static_cast<float> (i - 1) / 1000.0f);
-    CHECK (decreasing);
+    // La curva se estira a lo largo de la duración: con un ciclo de 1 negra y duración 50 %, la mitad de la bajada
+    // cae en 0.25 negras.
+    const auto& classic = defaultCurve();
+    CHECK (duckAt (classic, 0.0, 1.0, 0.5f) == 1.0f && duckAt (classic, 0.5, 1.0, 0.5f) == 0.0f && duckAt (classic, 0.9, 1.0, 0.5f) == 0.0f);
+    CHECK (std::abs (duckAt (classic, 0.25, 1.0, 0.5f) - 0.5f) < 1.0e-6f);
+}
+
+void testCurveShapes()
+{
+    std::printf ("Formas de curva: validas, la Clasica = la smoothstep de la Fase 2, y se reconocen\n");
+
+    // Todas las formas de fábrica ya vienen saneadas (el constructor las ordena): empiezan en 0, terminan en 1 y
+    // terminan arriba (sin ducking pasada la duración), así que con cualquier ajuste el volumen vuelve entero.
+    bool valid = true;
+    for (size_t i = 0; i < curveShapes.size(); ++i)
+    {
+        const auto& curve = curveShapes[i].curve;
+        valid = valid && curve.size() >= 2 && curve[0].x == 0.0f && curve[curve.size() - 1].x == 1.0f;
+        valid = valid && curve.valueAt (1.0f) == 1.0f;
+        valid = valid && findCurveShape (curve) == static_cast<int> (i); // dos formas iguales confundirían el menú
+    }
+    CHECK (valid);
+    CHECK (findCurveShape (BreakpointCurve { { 0.0f, 0.0f }, { 0.3f, 0.7f }, { 1.0f, 1.0f } }) == -1);
+
+    // La Clásica reproduce la curva fija de la Fase 2 (x²·(3 − 2x)) con un error que no se oye.
+    float error = 0.0f;
+    for (int i = 0; i <= 1000; ++i)
+    {
+        const float x = static_cast<float> (i) / 1000.0f;
+        error = std::max (error, std::abs (defaultCurve().valueAt (x) - x * x * (3.0f - 2.0f * x)));
+    }
+    CHECK (error < 0.006f);
+}
+
+void testCurveChangeAndHold()
+{
+    std::printf ("Formas en el motor: cambiar de forma sonando no salta; una curva que termina abajo se queda abajo\n");
+
+    constexpr double sampleRate = 48000.0;
+    constexpr int beat = 24000; // 120 BPM
+
+    // Cambio de Lenta a Rápida a mitad de la subida (negra 0.3, donde más se separan): sin glide, salto de ~0.5.
+    for (const size_t to : { size_t { 2 }, size_t { 7 } })
+    {
+        HostClock clock;
+        clock.prepare (sampleRate);
+        Engine engine;
+        const TempoSettings settings = rawCurve (2, 0.7f);
+        engine.prepare (sampleRate, false, settings);
+        engine.setCurve (curveShapes[3].curve);
+
+        std::vector<float> gain (static_cast<size_t> (beat - 10), 1.0f);
+        double ppq = 0.0;
+        bool changed = false;
+        for (size_t done = 0; done < gain.size(); done += 64)
+        {
+            const int numSamples = static_cast<int> (std::min<size_t> (64, gain.size() - done));
+            if (! changed && done >= static_cast<size_t> (0.3 * beat))
+            {
+                engine.setCurve (curveShapes[to].curve);
+                changed = true;
+            }
+            clock.beginBlock (playingAt (ppq, 120.0), numSamples);
+            ppq += numSamples / static_cast<double> (beat);
+            float* channel = gain.data() + done;
+            engine.process (&channel, 1, numSamples, clock);
+        }
+        // Puerta (7) sube de golpe en x = 0.5 (negra 0.35): ese escalón es la forma, no un clic del cambio.
+        const size_t until = to == 7 ? static_cast<size_t> (0.34 * beat) : gain.size();
+        const float step = maxStep (gain, static_cast<size_t> (0.25 * beat), until);
+        if (step >= 0.01f)
+            std::printf ("  Lenta -> %s: salto de %.4f\n", curveShapes[to].name, static_cast<double> (step));
+        CHECK (step < 0.01f);
+    }
+
+    // Una curva propia que termina en 0.4: pasada la duración la ganancia se queda en 1 − profundidad · 0.6.
+    HostClock clock;
+    clock.prepare (sampleRate);
+    Engine engine;
+    TempoSettings settings = rawCurve (2, 0.5f);
+    settings.depth = 0.5f;
+    engine.prepare (sampleRate, false, settings);
+    engine.setCurve (BreakpointCurve { { 0.0f, 0.0f }, { 1.0f, 0.4f } });
+    std::vector<float> gain (static_cast<size_t> (beat + 1), 1.0f);
+    clock.beginBlock (playingAt (0.0, 120.0), static_cast<int> (gain.size()));
+    float* channel = gain.data();
+    engine.process (&channel, 1, static_cast<int> (gain.size()), clock);
+    CHECK (gain[0] == 0.5f);                                          // golpe, y sin glide al arrancar
+    CHECK (std::abs (gain[static_cast<size_t> (0.75 * beat)] - 0.7f) < 1.0e-6f);
+    CHECK (std::abs (gain[static_cast<size_t> (beat - 1)] - 0.7f) < 1.0e-6f);
+    CHECK (gain[static_cast<size_t> (beat)] == 0.5f);                 // siguiente golpe: salta (lo redondea el suavizado)
 }
 
 void testHitsOnTheGrid()
@@ -515,9 +601,11 @@ int main()
     testDetectsJumps();
     testTempoAndSignatureValidation();
     testTempoCurve();
+    testCurveShapes();
     testHitsOnTheGrid();
     testNoClicksOnChanges();
     testRetriggerAndJumps();
+    testCurveChangeAndHold();
     testStoppedAndFreeRunning();
     testEnginePassthrough();
 
