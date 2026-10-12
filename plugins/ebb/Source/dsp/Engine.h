@@ -2,18 +2,23 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 
 #include "deepwater/dsp/Smoothing.h"
 #include "dsp/CurveShapes.h"
 #include "dsp/HostClock.h"
 #include "dsp/TempoCurve.h"
+#include "dsp/Triggers.h"
 
 namespace ebb::dsp
 {
 
-// Ajustes del modo tempo (Fase 2), en unidades reales. El procesador los lee de los parámetros una vez por bloque.
+// Ajustes de la curva, en unidades reales. El procesador los lee de los parámetros una vez por bloque. En modo MIDI
+// (Fase 4) la división no marca cada cuánto hay golpe sino el LARGO de la curva, al tempo del host.
 struct TempoSettings
 {
+    TriggerMode mode = TriggerMode::tempo;
+    bool velocitySensitive = false; // modo MIDI: la velocidad de la nota escala la profundidad
     int division = defaultDuckDivision;
     float depth = 0.7f;        // 0–1: cuánto baja el volumen en el golpe (1 = silencio)
     float duration = 0.7f;     // 0–1: fracción del ciclo que tarda en volver
@@ -28,11 +33,14 @@ struct TempoSettings
 //             │                                                          ├─ fundido de bypass ── salida
 //             └──────────────── señal original (dry) ────────────────────┘
 //
-// La curva se calcula en cada muestra desde la POSICIÓN del host (no con un contador propio), así que un loop, un salto
-// o un cambio de tempo la dejan cayendo en su sitio. Para que la ganancia nunca salte hay tres capas:
+// Modo tempo: la curva se calcula en cada muestra desde la POSICIÓN del host (no con un contador propio), así que un loop,
+// un salto o un cambio de tempo la dejan cayendo en su sitio. Modo MIDI: cada nota reinicia la curva en su muestra
+// exacta y desde ahí cuenta negras al tempo del host (también con el host parado: se puede probar tocando notas).
+// Para que la ganancia nunca salte hay tres capas:
 //   1. Profundidad y duración pasan por rampas lineales (un giro de perilla o una automatización por bloques).
-//   2. Cambiar de división o de forma de curva (o parar el host) cambia la curva de golpe: se calcula la diferencia entre la curva vieja y
-//      la nueva en ese instante y se desvanece en 30 ms ("glide"). La curva nueva entra ya en su sitio.
+//   2. Cambiar de división, de forma de curva, de modo o de sensibilidad a la velocidad (o parar el host) cambia la
+//      curva de golpe: se calcula la diferencia entre la curva vieja y la nueva en ese instante y se desvanece en
+//      30 ms ("glide"). La curva nueva entra ya en su sitio.
 //   3. El suavizado final (perilla) redondea los saltos que quedan: los golpes y los saltos de la línea de tiempo. Un
 //      golpe que llega antes de que la curva termine baja desde la ganancia actual, no desde 1.
 class Engine
@@ -56,6 +64,8 @@ public:
         durationRamp.setTime (durationRampSeconds, sampleRate);
         durationRamp.snap (std::clamp (settings.duration, 0.0f, 1.0f));
         division = settings.division;
+        mode = settings.mode;
+        velocitySensitive = settings.velocitySensitive;
         smoothingMs = -1.0f;
         updateSmoothing (settings.smoothingMs);
 
@@ -65,6 +75,8 @@ public:
         gain = 1.0f;
         minGain = 1.0f;
         primed = false;
+        state = {};
+        hit = {};
     }
 
     void setBypassed (bool bypassed) noexcept { processing = ! bypassed; }
@@ -83,19 +95,27 @@ public:
         depthRamp.setTarget (std::clamp (settings.depth, 0.0f, 1.0f));
         durationRamp.setTarget (std::clamp (settings.duration, 0.0f, 1.0f));
         division = settings.division;
+        mode = settings.mode;
+        velocitySensitive = settings.velocitySensitive;
         updateSmoothing (settings.smoothingMs);
     }
 
     // Procesa en el sitio. El reloj ya tiene que haber recibido el bloque (HostClock::beginBlock). Con más de
-    // maxChannels canales, los de más se dejan intactos.
-    void process (float* const* channels, int numChannels, int numSamples, const HostClock& clock) noexcept
+    // maxChannels canales, los de más se dejan intactos. 'triggers': los disparos MIDI del bloque, ordenados por muestra
+    // (en modo tempo se ignoran); varios en la misma muestra = gana el último.
+    void process (float* const* channels, int numChannels, int numSamples, const HostClock& clock,
+                  std::span<const Trigger> triggers = {}) noexcept
     {
         numChannels = std::min (numChannels, maxChannels);
         beginBlock (clock);
         minGain = 1.0f;
+        size_t nextTrigger = state.mode == TriggerMode::midi ? 0 : triggers.size();
 
         for (int i = 0; i < numSamples; ++i)
         {
+            for (; nextTrigger < triggers.size() && triggers[nextTrigger].offset <= i; ++nextTrigger)
+                startHit (triggers[nextTrigger].velocity);
+
             const float duckGain = nextGain (clock.ppqAt (i));
             const float wet = bypassFade.next (processing); // 1 = procesado, 0 = original
             minGain = std::min (minGain, 1.0f - wet * (1.0f - duckGain));
@@ -116,13 +136,55 @@ public:
     [[nodiscard]] float blockMinGain() const noexcept { return minGain; }
 
 private:
-    // Forma de la curva (0–1) en una posición, con un período y un estado dados. Parado no hay ducking: la canción no
-    // avanza y la curva quedaría congelada a medias (el bajo sonaría atenuado al previsualizar notas en el Piano roll).
-    [[nodiscard]] float shapeAt (double ppq, double cyclePeriod, bool isActive, float duration) const noexcept
+    // Lo que decide qué curva suena. Si cambia de un bloque al siguiente, la curva saltaría: se hace glide.
+    struct CurveState
     {
-        if (! isActive)
+        TriggerMode mode = TriggerMode::tempo;
+        double period = 1.0;    // tempo: duración del ciclo; MIDI: largo de la curva (con duración 100 %); en negras
+        bool running = false;   // el host avanza (reproduciendo o reloj libre)
+        bool velocitySensitive = false;
+        bool hasHit = false;    // MIDI: ya llegó una nota (antes de la primera no hay ducking)
+    };
+
+    // El último golpe MIDI: cuánto lleva sonando su curva y con qué velocidad llegó.
+    struct MidiHit
+    {
+        double beats = 0.0;     // negras desde la nota
+        bool finished = false;  // la curva ya pasó su largo: se queda en el valor del último punto
+        float velocity = 1.0f;
+    };
+
+    // Forma de la curva (0–1) en una posición, con un estado dado. Modo tempo parado: sin ducking (la canción no avanza
+    // y la curva quedaría congelada a medias: el bajo sonaría atenuado al previsualizar notas en el Piano roll).
+    [[nodiscard]] float shapeAt (double ppq, const CurveState& s, float duration) const noexcept
+    {
+        if (s.mode == TriggerMode::midi)
+        {
+            if (! s.hasHit)
+                return 0.0f;
+            const double length = s.period * static_cast<double> (std::max (duration, 1.0e-3f));
+            const float scale = s.velocitySensitive ? hit.velocity : 1.0f;
+            return scale * duckAt (curve, hit.finished ? length : std::min (hit.beats, length), s.period, duration);
+        }
+        if (! s.running)
             return 0.0f;
-        return duckAt (curve, positionInCycle (ppq, origin, quartersPerBar, cyclePeriod), cyclePeriod, duration);
+        return duckAt (curve, positionInCycle (ppq, origin, quartersPerBar, s.period), s.period, duration);
+    }
+
+    void startHit (float velocity) noexcept
+    {
+        hit = { 0.0, false, std::clamp (velocity, 0.0f, 1.0f) };
+        state.hasHit = true;
+    }
+
+    // Avanza el golpe MIDI una muestra. Termina al pasar su largo (con la duración de ese momento): así, si después se
+    // alarga la división, una curva que ya terminó no vuelve a sonar a medias.
+    void advanceHit (float duration) noexcept
+    {
+        if (! state.hasHit || hit.finished)
+            return;
+        hit.beats += beatsPerSample;
+        hit.finished = hit.beats >= state.period * static_cast<double> (std::max (duration, 1.0e-3f));
     }
 
     void applyPendingCurve() noexcept
@@ -140,34 +202,43 @@ private:
     void beginBlock (const HostClock& clock) noexcept
     {
         const auto signature = clock.timeSignature();
-        const double newPeriod = divisionBeats (division, signature);
-        const bool nowActive = clock.isRunning();
         origin = clock.barOrigin();
         quartersPerBar = signature.quartersPerBar();
+        beatsPerSample = clock.getBeatsPerSample();
+
+        CurveState next;
+        next.mode = mode;
+        next.period = divisionBeats (division, signature);
+        next.running = clock.isRunning();
+        next.velocitySensitive = velocitySensitive;
+        // Al entrar en modo MIDI se empieza sin golpe (no revive uno viejo), y al parar el host se suelta el que sonaba,
+        // como en el modo tempo. Con el host parado las notas nuevas sí disparan (se puede probar tocando el teclado).
+        const bool stopped = state.running && ! next.running;
+        next.hasHit = next.mode == TriggerMode::midi && state.mode == TriggerMode::midi && state.hasHit && ! stopped;
 
         if (! primed)
         {
             primed = true;
-            period = newPeriod;
-            active = nowActive;
+            state = next;
             applyPendingCurve();
             return;
         }
 
-        // Cambio de división (o de compás, con "1 bar"), de forma, o el host se paró: la curva saltaría. Se mide el
-        // salto en la primera muestra del bloque y se desvanece. Arrancar NO desvanece: el primer golpe suena entero.
-        if (newPeriod != period || (active && ! nowActive) || curvePending)
+        // La curva saltaría: se mide el salto en la primera muestra del bloque y se desvanece. Arrancar el host NO
+        // desvanece: el primer golpe suena entero.
+        const bool changed = next.period != state.period || next.mode != state.mode || stopped
+                             || next.velocitySensitive != state.velocitySensitive || next.hasHit != state.hasHit || curvePending;
+        if (changed)
         {
             const double ppq = clock.ppqAt (0);
             const float duration = durationRamp.value;
-            const float before = std::clamp (shapeAt (ppq, period, active, duration) + glideValue(), 0.0f, 1.0f);
+            const float before = std::clamp (shapeAt (ppq, state, duration) + glideValue(), 0.0f, 1.0f);
             applyPendingCurve();
-            const float after = shapeAt (ppq, newPeriod, nowActive, duration);
+            const float after = shapeAt (ppq, next, duration);
             glideOffset = before - after;
             glideRemaining = glideSamples;
         }
-        period = newPeriod;
-        active = nowActive;
+        state = next;
     }
 
     float nextGain (double ppq) noexcept
@@ -175,7 +246,8 @@ private:
         const float duration = durationRamp.next();
         const float depth = depthRamp.next();
 
-        float shape = shapeAt (ppq, period, active, duration);
+        float shape = shapeAt (ppq, state, duration);
+        advanceHit (duration);
         if (glideRemaining > 0)
         {
             shape = std::clamp (shape + glideValue(), 0.0f, 1.0f);
@@ -208,6 +280,8 @@ private:
 
     deepwater::dsp::LinearRamp depthRamp, durationRamp;
     int division = defaultDuckDivision;
+    TriggerMode mode = TriggerMode::tempo;
+    bool velocitySensitive = false;
     BreakpointCurve curve = defaultCurve();
     BreakpointCurve pendingCurve;
     bool curvePending = false;
@@ -216,10 +290,11 @@ private:
 
     // Estado del bloque actual.
     bool primed = false;
-    bool active = false;
-    double period = 1.0;
+    CurveState state;
+    MidiHit hit;
     double origin = 0.0;
     double quartersPerBar = 4.0;
+    double beatsPerSample = 0.0;
 
     float glideOffset = 0.0f;
     int glideRemaining = 0;

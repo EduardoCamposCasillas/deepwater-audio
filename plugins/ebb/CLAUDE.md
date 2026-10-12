@@ -64,9 +64,10 @@ plugins/ebb/
     dsp/HostClock.h          # reloj musical: posición del host por muestra, saltos, reloj libre; compás.tiempo.semicorchea
     dsp/TempoCurve.h         # modo tempo: divisiones, posición en el ciclo y la curva estirada a la duración (funciones puras)
     dsp/CurveShapes.h        # formas de fábrica (curvas por puntos) y cuál coincide con una curva dada
+    dsp/Triggers.h           # modos de disparo (tempo, MIDI), el disparo dentro del bloque, filtro y nombres de nota (FL)
     dsp/Engine.h             # cadena de audio completa, sin JUCE: curva, rampas, glide, suavizado y bypass
     gui/                     # tema, LookAndFeel (perillas), visor del transporte, vista de la curva y medidor,
-                             # editor de la curva (CurveEditor.h)
+                             # editor de la curva (CurveEditor.h), luz de actividad MIDI (MidiActivityView.h)
   tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE)
 ```
 
@@ -106,33 +107,48 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 3 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
-- Librería: `deepwater/dsp/BreakpointCurve.h` (nueva, con test en `DeepwaterDspTests`): curva x ∈ [0, 1] → y ∈ [0, 1]
-  por puntos (máx. 32, tamaño fijo, trivialmente copiable). Tensión por tramo en [−1, 1]: exponencial normalizada
-  `expm1(k·t) / expm1(k)`, k = tensión · 8 (> 0 arranca lenta, < 0 rápida, 0 recta). Evaluación con búsqueda binaria;
-  escalón vertical si dos puntos comparten x (gana el de la derecha). Edición que nunca desordena (`insert`, `remove`
-  sin tocar extremos, `move` limitado por los vecinos, `setTension`) y `sanitise` (NaN, rango, orden, extremos en 0 y 1).
-- `dsp/CurveShapes.h`: 8 formas de fábrica (Clásica, Lineal, Rápida, Lenta, Retención, Entrada suave, Eco, Puerta).
-  y = nivel de volumen (1 = entero, 0 = la profundidad completa); x = del golpe al final de la DURACIÓN; pasada la
-  duración la curva se queda en el y del último punto. "Clásica" = la smoothstep de la Fase 2 con 5 puntos y tensiones
-  ajustadas (error ≤ 0.006, ≈ 0.03 dB a 70 %): es la de por defecto, así que los proyectos de la Fase 2 suenan igual
-  (no bit a bit).
-- `dsp/Engine.h`: `setCurve` deja la curva pendiente; se aplica en `beginBlock` con el mismo glide de 30 ms que el
-  cambio de división (antes de arrancar, sin glide). Sin el glide, cambiar Lenta → Rápida salta 0.82 (comprobado).
-- La curva NO es un parámetro (número variable de puntos, no automatizable): hijo `<Curve><Point x y tension/>` del
-  estado del APVTS. Hilo de mensajes → audio por un `TripleBuffer<BreakpointCurve>`; `processBlock` la pasa al motor
-  solo si es nueva. `curveVersion` (atómico) avisa a la GUI de cambios de fuera (proyecto cargado). Estado sin curva
-  (Fase 2) o con < 2 puntos → forma por defecto. El menú FORMA no se guarda: muestra la forma de fábrica idéntica a la
-  curva o "Personalizada".
-- GUI 960 × 600: transporte (500 px) + vista previa de dos ciclos arriba; `CurveEditor` a todo lo ancho (arrastrar
-  puntos, Mayús = cuadrícula 1/8 × 1/4, doble clic añade/quita, clic derecho quita, asa hueca de tensión arrastrable
-  y doble clic = recta); fila de DIVISIÓN, FORMA y 3 perillas. Captura del Standalone revisada; la interacción con el
-  ratón no se pudo automatizar (JUCE ignora los mensajes de ratón enviados con PostMessage): la prueba el usuario.
-- Tests: `EbbTests` +2 (formas válidas y reconocibles, Clásica ≈ smoothstep; cambio de forma sonando sin saltos > 0.01,
-  curva que termina abajo se queda abajo hasta el siguiente golpe). Release con 0 warnings; ctest 6/6; pluginval
-  strictness 10 ampliado: SUCCESS.
+Fase 4 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
+- `dsp/Triggers.h` (nuevo): `TriggerMode` (tempo, MIDI; la Fase 5 añade audio al final), `Trigger` (muestra dentro del
+  bloque + velocidad 0–1), filtro de nota (0 = todas, 1–128 = nota 0–127) y `flNoteName` (60 = C5, como FL).
+- `dsp/Engine.h`: `process` recibe un `std::span<const Trigger>` ordenado (en modo tempo se ignora). Cada disparo
+  reinicia la curva en su muestra; desde ahí cuenta negras con `clock.getBeatsPerSample()` (también con el host parado
+  o sin host: notas tocadas en vivo disparan al último tempo). En MIDI la DIVISIÓN es el LARGO de la curva
+  (largo × DURACIÓN). Pasado el largo el golpe queda "terminado" en el y del último punto: alargar la división después
+  no la revive. Antes de la primera nota, al entrar en modo MIDI y al parar el host (play → stop) no hay golpe (sin
+  ducking). Velocidad opcional: forma × velocidad. El estado que decide la curva (`CurveState`: modo, período, host
+  corriendo, velocidad, hay golpe) se compara entre bloques y cualquier cambio hace el glide de 30 ms; arrancar el host
+  no. Sin glide, cambiar el largo 1/4 → 1/16 salta 0.74, tempo → MIDI 0.74, velocidad on → off 0.44 (comprobado).
+  Un redisparo solo pasa por el suavizado (baja desde la ganancia actual), como un golpe del modo tempo.
+- Parámetros nuevos (versionHint 4): `mode` (elección Tempo/MIDI, Tempo: los proyectos anteriores suenan igual),
+  `midiNote` (elección de 129: "Todas", "C0 (0)"… "G10 (127)"; Todas), `velocity` (bool, off).
+- Procesador: `NEEDS_MIDI_INPUT TRUE`, `acceptsMidi() = true`. `collectTriggers` recorre el MidiBuffer (note-on con
+  velocidad > 0), cuenta todas las notas (atómicos: recibidas, disparos, última nota) y, en modo MIDI y si pasan el
+  filtro, las pasa como disparos a un `std::array<Trigger, 256>` reservado (si sobran, gana la última).
+- GUI 960 × 640: fila de controles con MODO + NOTA MIDI, DIVISIÓN/LARGO (la etiqueta y el tooltip cambian con el modo)
+  + FORMA, columna ACTIVIDAD MIDI (luz: acento = disparó, ámbar = llegó sin disparar; última nota; "USAR ÚLTIMA NOTA"
+  = MIDI learn de un clic; VELOCIDAD) y las 3 perillas. NOTA y VELOCIDAD se atenúan en modo tempo. La vista previa en
+  modo MIDI dibuja un solo golpe desde el reposo en el espacio de dos ciclos. Capturas del Standalone (tempo y MIDI)
+  revisadas.
+- Tests `EbbTests` (+4): filtro y nombres de nota; golpes exactos a la muestra con un kick de dembow desplazado (pasos
+  1, 7, 11, 15) a 4 sample rates, iguales con bloques de 1–7; modo tempo ignora las notas (idéntico); velocidad;
+  redisparo con el paso limitado por el suavizado; cambios de largo/modo/velocidad sonando < 0.01; curva terminada no
+  revive; notas con el host parado; parar suelta el golpe sin clic y queda en 1 exacto. Release con 0 warnings;
+  ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 4 (modo MIDI trigger).
+Siguiente: que el usuario pruebe la Fase 4 en FL Studio; después, Fase 5 (modo audio sidechain).
+
+### Fase 3 (completada 2026-10-12, probada en FL)
+- Librería: `deepwater/dsp/BreakpointCurve.h` (con test en `DeepwaterDspTests`): curva x ∈ [0, 1] → y ∈ [0, 1] por
+  puntos (máx. 32, tamaño fijo). Tensión por tramo en [−1, 1]: `expm1(k·t) / expm1(k)`, k = tensión · 8. Escalón
+  vertical si dos puntos comparten x (gana el de la derecha). Edición que nunca desordena y `sanitise`.
+- `dsp/CurveShapes.h`: 8 formas de fábrica. y = nivel de volumen; x = del golpe al final de la DURACIÓN; pasada la
+  duración se queda en el y del último punto. "Clásica" (por defecto) = la smoothstep de la Fase 2 (error ≤ 0.006).
+- `dsp/Engine.h`: `setCurve` deja la curva pendiente y se aplica con el glide de 30 ms (sin él, Lenta → Rápida salta 0.82).
+- La curva NO es un parámetro: hijo `<Curve><Point x y tension/>` del estado; mensajes → audio por un
+  `TripleBuffer<BreakpointCurve>`; `curveVersion` avisa a la GUI. Estado sin curva o con < 2 puntos → forma por
+  defecto. El menú FORMA muestra la forma de fábrica idéntica o "Personalizada".
+- GUI: `CurveEditor` (arrastrar, Mayús = cuadrícula 1/8 × 1/4, doble clic añade/quita, clic derecho quita, asa de
+  tensión; doble clic = recta). La interacción con el ratón no se puede automatizar (JUCE ignora PostMessage).
 
 ### Fase 2 (completada 2026-10-11, probada en FL)
 - `dsp/TempoCurve.h`: 9 divisiones (1 bar, 1/2, 1/4, 1/8, 1/16 y sus tresillos; "1 bar" = el compás del host). La

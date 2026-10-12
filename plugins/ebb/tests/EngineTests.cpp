@@ -12,6 +12,7 @@
 #include "dsp/Engine.h"
 #include "dsp/HostClock.h"
 #include "dsp/TempoCurve.h"
+#include "dsp/Triggers.h"
 
 namespace
 {
@@ -291,6 +292,65 @@ float maxStep (const std::vector<float>& gain, size_t from, size_t to)
     for (size_t i = std::max<size_t> (from, 1); i < std::min (to, gain.size()); ++i)
         largest = std::max (largest, std::abs (gain[i] - gain[i - 1]));
     return largest;
+}
+
+// Una nota MIDI en una muestra absoluta de la simulación.
+struct Note
+{
+    int sample;
+    float velocity = 1.0f;
+};
+
+TempoSettings midiCurve (int division = defaultDuckDivision, float duration = 0.5f)
+{
+    TempoSettings settings = rawCurve (division, duration);
+    settings.mode = TriggerMode::midi;
+    return settings;
+}
+
+// Como renderGain, pero además entrega las notas a su bloque, con su posición dentro de él (como hace el procesador con
+// el MidiBuffer). 'beforeBlock' puede cambiar ajustes o transporte; con el host parado la posición no avanza.
+template <typename BeforeBlock>
+std::vector<float> renderMidi (double sampleRate, double bpm, TempoSettings settings, int totalSamples, int maxBlock,
+                               const std::vector<Note>& notes, BeforeBlock beforeBlock)
+{
+    HostClock clock;
+    clock.prepare (sampleRate);
+    Engine engine;
+    engine.prepare (sampleRate, false, settings);
+
+    std::vector<float> out (static_cast<size_t> (totalSamples), 1.0f);
+    std::vector<Trigger> triggers;
+    BlockSizes sizes;
+    const double perSample = bpm / (60.0 * sampleRate);
+    double ppq = 0.0;
+    for (int done = 0; done < totalSamples;)
+    {
+        const int numSamples = std::min (sizes.next (maxBlock), totalSamples - done);
+        auto info = playingAt (ppq, bpm);
+        beforeBlock (done, settings, info);
+
+        triggers.clear();
+        for (const auto& note : notes)
+            if (note.sample >= done && note.sample < done + numSamples)
+                triggers.push_back ({ note.sample - done, note.velocity });
+
+        clock.beginBlock (info, numSamples);
+        engine.setSettings (settings);
+        float* channel = out.data() + done;
+        engine.process (&channel, 1, numSamples, clock, triggers);
+
+        if (info.isPlaying)
+            ppq += numSamples * perSample;
+        done += numSamples;
+    }
+    return out;
+}
+
+std::vector<float> renderMidi (double sampleRate, double bpm, TempoSettings settings, int totalSamples, int maxBlock,
+                               const std::vector<Note>& notes)
+{
+    return renderMidi (sampleRate, bpm, settings, totalSamples, maxBlock, notes, [] (int, TempoSettings&, TransportInfo&) {});
 }
 
 void testTempoCurve()
@@ -591,6 +651,165 @@ void testEnginePassthrough()
             }
 }
 
+void testTriggerHelpers()
+{
+    std::printf ("Disparos: filtro de nota y nombres como en FL (C5 = 60)\n");
+
+    CHECK (noteFilterAccepts (0, 36) && noteFilterAccepts (0, 127));      // 0 = todas
+    CHECK (noteFilterAccepts (61, 60) && ! noteFilterAccepts (61, 62));   // 61 = solo la nota 60
+    CHECK (flNoteName (60) == "C5 (60)");
+    CHECK (flNoteName (69) == "A5 (69)");
+    CHECK (flNoteName (37) == "C#3 (37)");
+    CHECK (flNoteName (0) == "C0 (0)" && flNoteName (127) == "G10 (127)");
+    CHECK (triggerModeFromIndex (0) == TriggerMode::tempo && triggerModeFromIndex (1) == TriggerMode::midi);
+    CHECK (triggerModeFromIndex (7) == TriggerMode::tempo);
+}
+
+void testMidiHits()
+{
+    std::printf ("Modo MIDI: cada nota dispara en su muestra exacta (dembow), con cualquier bloque y sample rate\n");
+
+    for (const double sampleRate : sampleRates)
+    {
+        // 95 BPM y un kick de dembow desplazado: pasos 1, 7, 11 y 15 del compás (0, 1.5, 2.5 y 3.5 negras).
+        // Largo 1/8 al 100 %: la curva dura media negra, menos que la distancia entre golpes, así que vuelve a 1.
+        const double beat = sampleRate * 60.0 / 95.0;
+        std::vector<Note> notes;
+        for (const double at : { 0.0, 1.5, 2.5, 3.5 })
+            notes.push_back ({ 1000 + static_cast<int> (std::lround (at * beat)) });
+        const int total = notes.back().sample + static_cast<int> (beat);
+        const auto gain = renderMidi (sampleRate, 95.0, midiCurve (3, 1.0f), total, 4096, notes);
+
+        bool exact = gain[999] == 1.0f; // antes de la primera nota no hay ducking
+        for (const auto& note : notes)
+        {
+            const auto hit = static_cast<size_t> (note.sample);
+            const auto quarterCurve = static_cast<size_t> (std::lround (beat * 0.125));
+            exact = exact && gain[hit] == 0.0f && gain[hit - 1] == 1.0f;
+            exact = exact && std::abs (gain[hit + quarterCurve] - defaultCurve().valueAt (0.25f)) < 2.0e-3f;
+            exact = exact && gain[hit + static_cast<size_t> (beat * 0.5) + 2] == 1.0f; // pasado el largo, entero
+        }
+        CHECK (exact);
+
+        // Igual con bloques de 1 a 7 muestras.
+        const auto small = renderMidi (sampleRate, 95.0, midiCurve (3, 1.0f), total, 7, notes);
+        float difference = 0.0f;
+        for (size_t i = 0; i < gain.size(); ++i)
+            difference = std::max (difference, std::abs (gain[i] - small[i]));
+        CHECK (difference < 1.0e-4f);
+    }
+
+    // En modo tempo las notas no hacen nada: la salida es idéntica a la de renderGain.
+    const std::vector<Note> notes { { 300 }, { 7000 }, { 15000 } };
+    const auto tempo = renderMidi (48000.0, 120.0, rawCurve(), 30000, 512, notes);
+    CHECK (tempo == renderSteady (48000.0, 120.0, rawCurve(), 30000, 512));
+
+    // Velocidad: con la opción encendida, una nota a velocidad 0.5 baja la mitad.
+    TempoSettings velocity = midiCurve();
+    velocity.velocitySensitive = true;
+    const auto soft = renderMidi (48000.0, 120.0, velocity, 20000, 256, { { 100, 0.5f }, { 10000, 1.0f } });
+    CHECK (soft[100] == 0.5f && soft[10000] == 0.0f);
+    const auto flat = renderMidi (48000.0, 120.0, midiCurve(), 20000, 256, { { 100, 0.5f } });
+    CHECK (flat[100] == 0.0f);
+}
+
+void testMidiRetriggerAndChanges()
+{
+    std::printf ("Modo MIDI: redisparo desde la ganancia actual; cambiar modo, largo o velocidad sonando sin saltos\n");
+
+    constexpr double sampleRate = 48000.0;
+    constexpr int beat = 24000; // 120 BPM
+
+    // Redisparo a mitad de la subida, con suavizado: arranca donde estaba la ganancia y cada paso queda limitado.
+    TempoSettings smooth = midiCurve (2, 1.0f);
+    smooth.depth = 0.8f;
+    smooth.smoothingMs = 5.0f;
+    const float coef = static_cast<float> (1.0 - std::exp (-3.0 / (0.005 * sampleRate)));
+    const int second = static_cast<int> (0.6 * beat);
+    const auto gain = renderMidi (sampleRate, 120.0, smooth, 2 * beat, 256, { { 0 }, { second } });
+    CHECK (maxStep (gain, 1, gain.size()) <= coef * 1.0001f);
+    CHECK (gain[static_cast<size_t> (second - 1)] > 0.3f && gain[static_cast<size_t> (second - 1)] < 0.95f);
+    CHECK (gain[static_cast<size_t> (second + 480)] < gain[static_cast<size_t> (second - 1)] - 0.2f);
+
+    // Cambios con una curva sonando (nota en 0, cambio hacia la negra 0.3), sin suavizado: solo actúa el glide.
+    struct Change
+    {
+        const char* name;
+        TempoSettings start;
+        void (*apply) (TempoSettings&);
+    };
+    TempoSettings velocityOn = midiCurve (2, 0.9f);
+    velocityOn.velocitySensitive = true;
+    const Change changes[] {
+        { "largo 1/4 -> 1/16", midiCurve (2, 0.9f), [] (TempoSettings& s) { s.division = 4; } },
+        { "largo 1/4 -> 1 bar", midiCurve (2, 0.9f), [] (TempoSettings& s) { s.division = 0; } },
+        { "MIDI -> tempo", midiCurve (2, 0.9f), [] (TempoSettings& s) { s.mode = TriggerMode::tempo; } },
+        { "tempo -> MIDI", rawCurve (2, 0.9f), [] (TempoSettings& s) { s.mode = TriggerMode::midi; } },
+        { "velocidad on -> off", velocityOn, [] (TempoSettings& s) { s.velocitySensitive = false; } },
+    };
+    for (const auto& change : changes)
+    {
+        const auto changed = renderMidi (sampleRate, 120.0, change.start, beat - 10, 64, { { 0, 0.4f } },
+                                         [&] (int sample, TempoSettings& s, TransportInfo&) {
+                                             if (sample >= static_cast<int> (0.3 * beat))
+                                                 change.apply (s);
+                                         });
+        const float step = maxStep (changed, static_cast<size_t> (0.25 * beat), changed.size());
+        if (step >= 0.01f)
+            std::printf ("  %s: salto de %.4f\n", change.name, static_cast<double> (step));
+        CHECK (step < 0.01f);
+    }
+}
+
+void testMidiHoldAndTransport()
+{
+    std::printf ("Modo MIDI: curva terminada no revive, notas con FL parado, parar suelta el golpe sin clic\n");
+
+    constexpr double sampleRate = 44100.0;
+    const int glideSamples = static_cast<int> (std::lround (Engine::glideSeconds * sampleRate));
+
+    // Una curva que termina en 0.4 (se queda a 1 − 0.6 = 0.4 de ganancia con profundidad 100 %). Terminada la de 1/16,
+    // pasar a "1 bar" no la hace sonar de nuevo a medias: sigue quieta en 0.4.
+    HostClock clock;
+    clock.prepare (sampleRate);
+    Engine engine;
+    TempoSettings settings = midiCurve (4, 1.0f);
+    engine.prepare (sampleRate, false, settings);
+    engine.setCurve (BreakpointCurve { { 0.0f, 0.0f }, { 1.0f, 0.4f } });
+    std::vector<float> held (20000, 1.0f);
+    const Trigger hit[] { { 0, 1.0f } };
+    double ppq = 0.0;
+    for (size_t done = 0; done < held.size(); done += 500)
+    {
+        if (done == 10000)
+            settings.division = 0;
+        clock.beginBlock (playingAt (ppq, 120.0), 500);
+        ppq += 500 * 120.0 / (60.0 * sampleRate);
+        engine.setSettings (settings);
+        float* channel = held.data() + done;
+        engine.process (&channel, 1, 500, clock, done == 0 ? std::span<const Trigger> (hit) : std::span<const Trigger>());
+    }
+    CHECK (held[0] == 0.0f);
+    CHECK (std::abs (held[9999] - 0.4f) < 1.0e-6f && std::abs (held.back() - 0.4f) < 1.0e-6f);
+
+    // Con FL parado las notas disparan igual (al último tempo conocido): 1/8 a 120 BPM = 11025 muestras.
+    const auto stopped = renderMidi (sampleRate, 120.0, midiCurve (3, 1.0f), 30000, 512, { { 5000 } },
+                                     [] (int, TempoSettings&, TransportInfo& info) { info.isPlaying = false; });
+    CHECK (stopped[4999] == 1.0f && stopped[5000] == 0.0f);
+    CHECK (stopped[5000 + 5512] > 0.3f && stopped[5000 + 5512] < 0.7f);
+    CHECK (stopped[5000 + 11025 + 1] == 1.0f);
+
+    // Parar FL con una curva sonando: el golpe se suelta con el glide (sin clic) y queda en 1 exacto.
+    const auto release = renderMidi (sampleRate, 120.0, midiCurve (1, 1.0f), 44100, 128, { { 0 } },
+                                     [] (int sample, TempoSettings&, TransportInfo& info) {
+                                         if (sample >= 4410)
+                                             info.isPlaying = false;
+                                     });
+    CHECK (release[4000] < 0.5f);
+    CHECK (maxStep (release, 4000, release.size()) <= 1.0f / static_cast<float> (glideSamples) + 1.0e-3f);
+    CHECK (release[static_cast<size_t> (4410 + 128 + glideSamples)] == 1.0f);
+}
+
 } // namespace
 
 int main()
@@ -608,6 +827,10 @@ int main()
     testCurveChangeAndHold();
     testStoppedAndFreeRunning();
     testEnginePassthrough();
+    testTriggerHelpers();
+    testMidiHits();
+    testMidiRetriggerAndChanges();
+    testMidiHoldAndTransport();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de Ebb pasaron.\n");

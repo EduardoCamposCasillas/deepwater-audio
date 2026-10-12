@@ -343,3 +343,144 @@ Inténtalo y después pide pistas.
   profundidad. Las formas con varias bajadas son efectos, no limpieza.
 - **Dibujar el patrón del kick en el editor como solución general.** Funciona en un loop fijo (el reto), pero si el
   kick cambia de sección a sección tendrías que redibujar: para eso llegan los modos MIDI (Fase 4) y audio (Fase 5).
+
+## Fase 4 — Modo MIDI: que el ducking siga al kick de verdad
+
+En el modo tempo la curva cae en una cuadrícula fija: cada 1/4, cada 1/8… Pero en el dembow experimental el kick se
+mueve: cae en el 1, en el paso 7, se salta un tiempo, cambia en el coro. En el **modo MIDI** la cuadrícula desaparece:
+**cada nota MIDI que le llega a Ebb dispara la curva**, justo en la muestra en la que cae la nota. Si le mandas las
+mismas notas que tocan el kick, el ducking cae siempre con el kick, siga el patrón que siga.
+
+### Conceptos aprendidos
+
+- **Disparo (trigger).** Un evento que arranca algo: aquí, una nota MIDI (note-on) que reinicia la curva. Ebb ignora el
+  note-off y la duración de la nota: solo importa *cuándo* empieza. Es como pegarle a un pad de batería.
+- **Exacto a la muestra.** FL le pasa a Ebb el audio en bloques de unos 5–20 ms, y cada nota viene con su posición
+  dentro del bloque. Ebb no espera al bloque siguiente: arranca la curva en esa muestra exacta (a 44.1 kHz, con un
+  error de 0.02 ms). Por eso el ducking cae igual de justo con un buffer de 64 que de 4096.
+- **El largo de la curva.** Sin cuadrícula, DIVISIÓN pasa a llamarse **LARGO**: cuánto dura la curva después de cada
+  nota, en figuras musicales (1/4 = una negra a tu tempo). Con DURACIÓN la recortas: largo 1/4 y duración 50 % = la
+  curva dura media negra. Sigue ligada al tempo: si subes el BPM, la curva se acorta con la canción.
+- **Redisparo.** Si llega otra nota antes de que la curva termine, vuelve a empezar **desde donde esté el volumen**, no
+  desde arriba (el suavizado se encarga de que no haya clic). Dos kicks seguidos = dos bajadas, aunque estén a una
+  semicorchea.
+- **Entre notas.** Antes de la primera nota no hay ducking. Cuando la curva termina, el volumen se queda en el valor
+  del último punto hasta la siguiente nota (con las formas de fábrica, arriba del todo). Al **parar** FL, la curva que
+  sonaba se suelta con un fundido. Con FL parado las notas siguen disparando: puedes probarlo tocando un teclado.
+- **Velocidad (velocity).** La fuerza con la que se toca la nota (1–127). Con **VELOCIDAD** encendido, la profundidad
+  se multiplica por ella: una nota a 64 baja la mitad que una a 127. Sirve cuando el kick tiene golpes fantasma más
+  suaves: el bajo se aparta menos para ellos.
+- **Filtro de nota.** Si mandas todo el patrón de batería por el mismo canal (kick en C5, caja en D5…), con **NOTA
+  MIDI** eliges cuál dispara. FL nombra las notas con una octava más que otros programas: el do central (MIDI 60) es
+  **C5** en FL y C4 en Ableton o en los libros.
+
+### Cómo mandar MIDI a Ebb en FL Studio (el ruteo)
+
+Ebb está en el Mixer y el Mixer no tiene notas: las notas viven en el Channel Rack. Se conectan con un **puerto MIDI**
+interno de FL, un "cable" numerado:
+
+1. Pon Ebb en el insert del bajo (como en las fases anteriores) y ponlo en **MODO MIDI**.
+2. En la ventana de Ebb, abre el menú del envoltorio de FL (el **engranaje / flecha** arriba a la izquierda de la
+   ventana del plugin) → **Settings** (o la pestaña *Processing*, según tu versión). En la sección **MIDI**, pon
+   **Input port** en un número libre, por ejemplo **10**.
+3. En el **Channel Rack**, añade un canal **MIDI Out** (botón **+** → MIDI Out). En su ventana, pon **Port** en el
+   **mismo número (10)**. El MIDI Out no suena: solo manda notas por ese puerto.
+4. Escribe en el MIDI Out las notas del kick: en el step sequencer, enciende los mismos pasos que el kick; o en el
+   Piano roll del kick, selecciona todo (Ctrl+A), copia (Ctrl+C) y pégalo en el Piano roll del MIDI Out (Ctrl+V).
+5. Reproduce: la luz de **ACTIVIDAD MIDI** de Ebb se enciende en verde agua con cada kick. Si se enciende en **ámbar**,
+   las notas llegan pero no disparan (Ebb está en modo Tempo, o NOTA MIDI no es esa nota). Si **no se enciende**, los
+   números de puerto no coinciden.
+
+**Truco: escribir el kick una sola vez.** Crea un canal **Layer** (+ → Layer) y pon el kick y el MIDI Out como sus
+hijos (selecciona los dos en el Channel Rack y, en la ventana del Layer, pulsa *Set children*). Ahora programas las
+notas solo en el Layer y suenan el kick y el disparo de Ebb a la vez: si cambias el patrón en el coro, el ducking
+cambia solo.
+
+En el **Standalone** (Ebb.exe) puedes probar con un teclado MIDI: Options → Audio/MIDI Settings → activa tu teclado
+en *Active MIDI inputs*.
+
+### Qué hace cada control
+
+- **MODO**: *Tempo* (la cuadrícula de las fases anteriores) o *MIDI* (cada nota dispara). Cambiar de modo con la
+  canción sonando no hace clic.
+- **NOTA MIDI**: *Todas* o una sola nota. Atenuado en modo Tempo.
+- **LARGO** (la DIVISIÓN en modo MIDI): cuánto dura la curva tras cada nota, al tempo de FL. La vista previa de arriba
+  muestra un solo golpe y cuántos ms tarda en volver.
+- **ACTIVIDAD MIDI**: la luz (verde agua = disparó, ámbar = llegó sin disparar) y la última nota recibida.
+- **USAR ÚLTIMA NOTA**: pone en NOTA MIDI la última nota que llegó. Toca (o reproduce) el kick y pulsa: así no tienes
+  que saber cómo se llama la nota.
+- **VELOCIDAD**: la velocidad de cada nota escala la profundidad. Atenuado en modo Tempo.
+- **PROFUNDIDAD, DURACIÓN, SUAVIZADO y FORMA** hacen lo mismo que en modo tempo.
+
+### Ejercicio guiado: tempo contra MIDI sobre un dembow desplazado (con el volumen igualado)
+
+1. **95 BPM**. Un kick "experimental": pasos **1, 7, 11 y 15** del compás (el segundo kick se adelanta al "y" del 2;
+   el tercero y el cuarto caen a destiempo). Un **808 largo** (F3 de FL = 87 Hz) en su insert, con Ebb.
+2. **Modo Tempo**, 1/4, forma Clásica, profundidad 50 %, duración 40 %, suavizado 2 ms. Escucha la mezcla: el 808 se
+   agacha en los tiempos 1, 2, 3 y 4, pero solo el primero coincide con un kick. En los demás, el 808 baja *donde no
+   hay kick*, y los kicks de los pasos 7, 11 y 15 chocan con el 808 entero. Mira el medidor: baja en el sitio
+   equivocado.
+3. Haz el ruteo de arriba (MIDI Out con los pasos del kick) y pasa a **Modo MIDI** con LARGO 1/4. Ahora cada bajada
+   cae con su kick. Alterna entre Tempo y MIDI con la canción sonando: es el mismo ducking, puesto en el sitio correcto
+   o en el equivocado.
+4. **Iguala el volumen** antes de juzgar: los dos modos bajan una cantidad parecida de energía, pero compruébalo con el
+   BYPASS y el fader del 808 (súbelo 1–2 dB en el modo que suene más bajo).
+5. **Redisparo:** añade un kick extra en el paso **8** (justo después del 7). Con LARGO 1/4 la segunda bajada llega
+   cuando la primera todavía está subiendo: fíjate en que no hay clic y en que el 808 se queda abajo un poco más.
+6. **Velocidad:** pon el kick del paso 15 a velocidad 50 % (en el MIDI Out, o en el Layer) y enciende VELOCIDAD. Ese
+   golpe ahora baja el 808 la mitad. Apágalo y compara.
+
+### Receta: dembow experimental con el bajo limpio
+
+Kick irregular que cambia por sección, 808 largo. Ebb en el 808: **Modo MIDI, notas del kick vía Layer (kick + MIDI
+Out), LARGO 1/4, FORMA Clásica (o Retención si el kick tiene cola), profundidad 35–45 %, duración 45 %, suavizado
+2 ms, VELOCIDAD encendido si el kick tiene golpes fantasma.**
+- Por qué MIDI: el 808 solo se aparta cuando de verdad hay un kick, y el patrón puede cambiar en cada sección sin
+  tocar Ebb.
+- Por qué LARGO 1/4 × 45 %: a 95 BPM son unos 285 ms, lo que dura un kick de reggaetón. Si dos kicks están a una
+  semicorchea (158 ms), el segundo redispara a mitad de camino y el 808 se queda abajo durante la ráfaga, que es lo
+  que quieres.
+- Si el kick es un 808 de cola larga, sube el LARGO a 1/2 en lugar de la profundidad: el problema es *cuándo* vuelve
+  el bajo.
+
+Variación creativa: Ebb en un pad, Modo MIDI, forma *Puerta*, LARGO 1/16, profundidad 100 %. Escribe en el MIDI Out un
+ritmo *distinto* del kick (por ejemplo, el de la caja): el pad se corta siguiendo ese ritmo. Un "trance gate"
+programado nota a nota.
+
+### Reto sin receta
+
+En el reto de la Fase 3 dibujaste la curva para que un pad respirara con la caja del dembow (pasos 4, 7, 12 y 15)
+usando "1 bar". Hazlo ahora con el **modo MIDI**: ¿qué notas pones en el MIDI Out, qué LARGO eliges para que el pad
+vuelva antes del siguiente golpe de caja, y qué pasa con el hueco largo entre el paso 7 y el 12? Después, cambia el
+patrón de la caja en la segunda mitad de la canción: ¿qué tuviste que tocar en Ebb esta vez?
+
+Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **MIDI**: el idioma de las notas. No es sonido, son instrucciones (qué nota, cuándo, con qué fuerza). *En música:*
+  todo lo que escribes en el Piano roll de FL es MIDI hasta que un instrumento lo convierte en sonido.
+- **Note-on / note-off**: el mensaje de "empieza la nota" y el de "suéltala". Ebb solo escucha el note-on.
+- **Velocity (velocidad)**: la fuerza de la nota, 1–127. *En música:* los hi-hats "humanizados" del trap, con
+  velocidades alternadas, suenan vivos; todos a 127 suenan a máquina.
+- **Ghost note (nota fantasma)**: un golpe muy suave entre los principales. *En música:* los kicks y cajas fantasma del
+  funk y del R&B (y del perreo más "sucio").
+- **Trigger / retrigger (disparo / redisparo)**: arrancar un evento y volver a arrancarlo antes de que termine. *En
+  música:* el "stutter" de un sample de voz redisparado en semicorcheas en el EDM.
+- **Puerto MIDI**: un canal numerado por donde viajan las notas de un sitio a otro. En FL conecta un MIDI Out con un
+  plugin del Mixer.
+
+### Errores comunes y cuándo NO usarlo
+
+- **Puertos distintos.** El error más común: la luz de Ebb no se enciende. El *Input port* de Ebb y el *Port* del MIDI
+  Out tienen que ser el mismo número.
+- **Dejar Ebb en Modo Tempo.** Las notas llegan (luz ámbar) pero no disparan.
+- **Que el MIDI y el kick se separen.** Si editas el patrón del kick y te olvidas del MIDI Out, el ducking cae donde ya
+  no hay kick. Usa el Layer para escribir las notas una sola vez.
+- **Filtro en la nota equivocada.** Con NOTA MIDI en una nota concreta y el MIDI Out tocando otra, la luz se queda en
+  ámbar. Usa USAR ÚLTIMA NOTA.
+- **LARGO demasiado largo con kicks seguidos.** Si los kicks están muy juntos y la curva es larga, el bajo casi nunca
+  vuelve arriba: pierdes graves en toda la sección. Acorta LARGO o DURACIÓN.
+- **Cuándo NO usarlo:** si el kick es un audio grabado (un loop, un sample de batería entera) y no tienes sus notas
+  MIDI, lo que necesitas es el modo audio (Fase 5). Si el kick es "four on the floor" de principio a fin, el modo
+  tempo hace lo mismo con menos ruteo.

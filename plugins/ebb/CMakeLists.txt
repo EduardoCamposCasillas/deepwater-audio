@@ -9,7 +9,7 @@ juce_add_plugin(Ebb
     PLUGIN_CODE              Ebb1          # único por plugin de este fabricante
     FORMATS                  VST3 Standalone
     IS_SYNTH                 FALSE
-    NEEDS_MIDI_INPUT         FALSE         # Fase 4 (modo MIDI trigger) lo cambia a TRUE
+    NEEDS_MIDI_INPUT         TRUE          # modo MIDI (Fase 4): las notas disparan la curva
     NEEDS_MIDI_OUTPUT        FALSE
     IS_MIDI_EFFECT           FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE

@@ -13,7 +13,13 @@ inline constexpr const char* depth = "depth";         // %: cuánto baja el volu
 inline constexpr const char* duration = "duration";   // %: fracción del ciclo que tarda en volver
 inline constexpr const char* smoothing = "smoothing"; // ms: suavizado final de la ganancia
 
+// Fase 4: modo MIDI trigger.
+inline constexpr const char* mode = "mode";           // qué dispara la curva (índice de triggerModeNames)
+inline constexpr const char* midiNote = "midiNote";   // 0 = todas las notas, 1–128 = solo la nota MIDI 0–127
+inline constexpr const char* velocity = "velocity";   // la velocidad de la nota escala la profundidad
+
 // Versión en la que apareció cada parámetro (la usa el VST3 para ordenar y reconocer parámetros nuevos).
 inline constexpr int versionHintPhase1 = 1;
 inline constexpr int versionHintPhase2 = 2;
+inline constexpr int versionHintPhase4 = 4;
 } // namespace ebb::params

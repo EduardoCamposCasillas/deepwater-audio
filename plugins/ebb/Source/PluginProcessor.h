@@ -9,6 +9,7 @@
 
 // Efecto mono/estéreo. Fase 2: modo tempo, una curva de ducking sincronizada con la posición del host (PlayHead).
 // Fase 3: la forma de esa curva es una curva por puntos editable, guardada en el estado del proyecto.
+// Fase 4: modo MIDI, cada nota recibida dispara la curva en su muestra exacta.
 // El audio está en ebb::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class EbbAudioProcessor final : public juce::AudioProcessor
 {
@@ -27,7 +28,7 @@ public:
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return JucePlugin_Name; }
-    bool acceptsMidi() const override { return false; }
+    bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
@@ -61,12 +62,26 @@ public:
     void setCurve (const deepwater::dsp::BreakpointCurve& newCurve);
     int getCurveVersion() const noexcept { return curveVersion.load(); }
 
+    // Hilo de la GUI: actividad MIDI, para comprobar el ruteo en FL. Contadores de notas recibidas (todas) y de las que
+    // dispararon (las que pasan el filtro y en modo MIDI), y el número de la última nota recibida (−1 = ninguna).
+    struct MidiActivity
+    {
+        std::uint32_t notes = 0;
+        std::uint32_t triggers = 0;
+        int lastNote = -1;
+    };
+    MidiActivity getMidiActivity() const noexcept
+    {
+        return { midiNotesReceived.load(), midiTriggersFired.load(), lastMidiNote.load() };
+    }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     ebb::dsp::TransportInfo readHostTransport() noexcept;
     ebb::dsp::TempoSettings readTempoSettings() const noexcept;
     void publishTransport (int numSamples) noexcept;
     void loadCurveFromState();
+    std::span<const ebb::dsp::Trigger> collectTriggers (const juce::MidiBuffer& midi, int numSamples) noexcept;
 
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* bypassParam = nullptr;
@@ -74,6 +89,9 @@ private:
     std::atomic<float>* depthParam = nullptr;
     std::atomic<float>* durationParam = nullptr;
     std::atomic<float>* smoothingParam = nullptr;
+    std::atomic<float>* modeParam = nullptr;
+    std::atomic<float>* midiNoteParam = nullptr;
+    std::atomic<float>* velocityParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     ebb::dsp::Engine engine;
@@ -86,6 +104,11 @@ private:
     deepwater::dsp::TripleBuffer<deepwater::dsp::BreakpointCurve> curveBox; // mensajes → audio
     deepwater::dsp::BreakpointCurve audioCurve;                  // hilo de audio: la última leída del buzón
     std::atomic<int> curveVersion { 0 };
+
+    // Disparos MIDI del bloque actual, reservados de antemano. Si llegan más (no pasa con un kick), gana el último.
+    std::array<ebb::dsp::Trigger, 256> triggers {};
+    std::atomic<std::uint32_t> midiNotesReceived { 0 }, midiTriggersFired { 0 };
+    std::atomic<int> lastMidiNote { -1 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EbbAudioProcessor)
 };

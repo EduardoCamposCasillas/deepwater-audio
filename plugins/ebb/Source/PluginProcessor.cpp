@@ -28,6 +28,9 @@ EbbAudioProcessor::EbbAudioProcessor()
     depthParam = parameters.getRawParameterValue (ebb::params::depth);
     durationParam = parameters.getRawParameterValue (ebb::params::duration);
     smoothingParam = parameters.getRawParameterValue (ebb::params::smoothing);
+    modeParam = parameters.getRawParameterValue (ebb::params::mode);
+    midiNoteParam = parameters.getRawParameterValue (ebb::params::midiNote);
+    velocityParam = parameters.getRawParameterValue (ebb::params::velocity);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (ebb::params::bypass));
     jassert (bypassParameter != nullptr);
     setCurve (ebb::dsp::defaultCurve());
@@ -64,6 +67,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout EbbAudioProcessor::createPar
         juce::AudioParameterFloatAttributes()
             .withLabel ("ms")
             .withStringFromValueFunction ([] (float ms, int) { return juce::String (ms, ms < 10.0f ? 2 : 1) + " ms"; })));
+
+    // Fase 4: modo MIDI trigger. Por defecto, tempo: los proyectos anteriores suenan igual.
+    juce::StringArray modeNames;
+    for (const auto* name : ebb::dsp::triggerModeNames)
+        modeNames.add (name);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::mode, id::versionHintPhase4 }, "Mode", modeNames, 0));
+
+    juce::StringArray noteNames { "Todas" };
+    for (int note = 0; note < 128; ++note)
+        noteNames.add (ebb::dsp::flNoteName (note));
+    jassert (noteNames.size() == ebb::dsp::midiNoteFilterCount);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::midiNote, id::versionHintPhase4 }, "MIDI Note",
+                                                              noteNames, 0));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::velocity, id::versionHintPhase4 }, "Velocity", false));
     return layout;
 }
 
@@ -94,6 +111,8 @@ ebb::dsp::TempoSettings EbbAudioProcessor::readTempoSettings() const noexcept
     settings.depth = depthParam->load() / 100.0f;
     settings.duration = durationParam->load() / 100.0f;
     settings.smoothingMs = smoothingParam->load();
+    settings.mode = ebb::dsp::triggerModeFromIndex (static_cast<int> (modeParam->load()));
+    settings.velocitySensitive = velocityParam->load() >= 0.5f;
     return settings;
 }
 
@@ -121,7 +140,36 @@ ebb::dsp::TransportInfo EbbAudioProcessor::readHostTransport() noexcept
     return info;
 }
 
-void EbbAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+// Las notas del bloque → disparos para el motor, en la muestra exacta en que caen. El MidiBuffer ya viene ordenado por
+// muestra. Las notas se cuentan siempre (aunque estemos en modo tempo) para que la GUI muestre si el MIDI llega.
+std::span<const ebb::dsp::Trigger> EbbAudioProcessor::collectTriggers (const juce::MidiBuffer& midi, int numSamples) noexcept
+{
+    const int filter = static_cast<int> (midiNoteParam->load());
+    const bool midiMode = ebb::dsp::triggerModeFromIndex (static_cast<int> (modeParam->load())) == ebb::dsp::TriggerMode::midi;
+    size_t count = 0;
+    for (const auto metadata : midi)
+    {
+        const auto message = metadata.getMessage();
+        if (! message.isNoteOn()) // una nota con velocidad 0 es un note-off: no dispara
+            continue;
+        const int note = message.getNoteNumber();
+        midiNotesReceived.fetch_add (1, std::memory_order_relaxed);
+        lastMidiNote.store (note, std::memory_order_relaxed);
+        if (! midiMode || ! ebb::dsp::noteFilterAccepts (filter, note))
+            continue;
+
+        midiTriggersFired.fetch_add (1, std::memory_order_relaxed);
+        const ebb::dsp::Trigger trigger { juce::jlimit (0, juce::jmax (0, numSamples - 1), metadata.samplePosition),
+                                          message.getFloatVelocity() };
+        if (count < triggers.size())
+            triggers[count++] = trigger;
+        else
+            triggers.back() = trigger;
+    }
+    return { triggers.data(), count };
+}
+
+void EbbAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
 
@@ -138,7 +186,7 @@ void EbbAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     clock.beginBlock (readHostTransport(), numSamples);
     engine.setBypassed (bypassParam->load() >= 0.5f);
     engine.setSettings (readTempoSettings());
-    engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples, clock);
+    engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples, clock, collectTriggers (midi, numSamples));
     publishTransport (numSamples);
 
     // Mínimo acumulado hasta que la GUI lo lea. Si la GUI lo reinicia justo entre la lectura y la escritura se pierde a
