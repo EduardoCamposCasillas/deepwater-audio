@@ -94,7 +94,7 @@ incluyen notas de para qué sirven y por qué.
 - [x] Fase 2 — Modo tempo: curva de ducking sincronizada (1/2, 1/4, 1/8, 1/16, 1 compás y tresillos), controles de
       profundidad, duración y suavizado; sin clics en ningún cambio de parámetro.
 - [x] Fase 3 — Curvas: presets de forma (como las de Kickstart) y editor de curva propio con puntos y tensión.
-- [ ] Fase 4 — Modo MIDI trigger: cada nota MIDI recibida dispara la curva (para seguir el patrón real del kick del
+- [x] Fase 4 — Modo MIDI trigger: cada nota MIDI recibida dispara la curva (para seguir el patrón real del kick del
       dembow). Explicar cómo rutear MIDI hacia el plugin en FL Studio.
 - [ ] Fase 5 — Modo audio sidechain: entrada sidechain real (bus auxiliar VST3), detección de transitorios con umbral
       y retención, y opción de lookahead (reportando latencia al host). Explicar cómo configurar el sidechain en el
@@ -107,7 +107,7 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 4 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 4 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - `dsp/Triggers.h` (nuevo): `TriggerMode` (tempo, MIDI; la Fase 5 añade audio al final), `Trigger` (muestra dentro del
   bloque + velocidad 0–1), filtro de nota (0 = todas, 1–128 = nota 0–127) y `flNoteName` (60 = C5, como FL).
 - `dsp/Engine.h`: `process` recibe un `std::span<const Trigger>` ordenado (en modo tempo se ignora). Cada disparo
@@ -135,7 +135,7 @@ Fase 4 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
   revive; notas con el host parado; parar suelta el golpe sin clic y queda en 1 exacto. Release con 0 warnings;
   ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 4 en FL Studio; después, Fase 5 (modo audio sidechain).
+Siguiente: Fase 5 (modo audio sidechain).
 
 ### Fase 3 (completada 2026-10-12, probada en FL)
 - Librería: `deepwater/dsp/BreakpointCurve.h` (con test en `DeepwaterDspTests`): curva x ∈ [0, 1] → y ∈ [0, 1] por
