@@ -20,7 +20,9 @@ juce::String depthToText (float percent, int)
 EbbAudioProcessor::EbbAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
+                          // Fase 5: el kick llega por aquí (en FL: "Sidechain to this track" + el puerto en Processing).
+                          .withInput ("Sidechain", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "EbbState", createParameterLayout())
 {
     bypassParam = parameters.getRawParameterValue (ebb::params::bypass);
@@ -31,9 +33,13 @@ EbbAudioProcessor::EbbAudioProcessor()
     modeParam = parameters.getRawParameterValue (ebb::params::mode);
     midiNoteParam = parameters.getRawParameterValue (ebb::params::midiNote);
     velocityParam = parameters.getRawParameterValue (ebb::params::velocity);
+    thresholdParam = parameters.getRawParameterValue (ebb::params::threshold);
+    holdParam = parameters.getRawParameterValue (ebb::params::hold);
+    lookaheadParam = parameters.getRawParameterValue (ebb::params::lookahead);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (ebb::params::bypass));
     jassert (bypassParameter != nullptr);
     setCurve (ebb::dsp::defaultCurve());
+    startTimerHz (10); // vigila el lookahead para informar la latencia nueva al host
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout EbbAudioProcessor::createParameterLayout()
@@ -81,27 +87,77 @@ juce::AudioProcessorValueTreeState::ParameterLayout EbbAudioProcessor::createPar
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::midiNote, id::versionHintPhase4 }, "MIDI Note",
                                                               noteNames, 0));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::velocity, id::versionHintPhase4 }, "Velocity", false));
+
+    // Fase 5: modo audio sidechain.
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::threshold, id::versionHintPhase5 }, "Threshold", juce::NormalisableRange<float> (-60.0f, 0.0f, 0.1f), -24.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("dB")
+            .withStringFromValueFunction ([] (float db, int) { return juce::String (db, 1) + " dB"; })));
+
+    // Lo que importa está en los primeros ms (un flam dura 10–40 ms): rango con sesgo, 40 ms al centro.
+    juce::NormalisableRange<float> holdRange (0.0f, 250.0f, 1.0f);
+    holdRange.setSkewForCentre (40.0f);
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::hold, id::versionHintPhase5 }, "Hold", holdRange, 30.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("ms")
+            .withStringFromValueFunction ([] (float ms, int) { return juce::String (juce::roundToInt (ms)) + " ms"; })));
+
+    // Cambia la latencia del plugin: no se automatiza (el host tendría que recolocar todas las pistas en plena
+    // reproducción). 0 por defecto: los proyectos anteriores no ganan latencia.
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::lookahead, id::versionHintPhase5 }, "Lookahead", juce::NormalisableRange<float> (0.0f, 10.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("ms")
+            .withAutomatable (false)
+            .withStringFromValueFunction ([] (float ms, int) { return juce::String (ms, 1) + " ms"; })));
     return layout;
 }
 
 void EbbAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
 {
-    // Sin buffers propios: el motor procesa en el sitio y el reloj y la curva son de tamaño fijo.
+    // El motor procesa en el sitio; lo único que reserva es la línea de retardo del lookahead (10 ms como máximo).
     currentSampleRate = sampleRate;
-    engine.prepare (sampleRate, bypassParam->load() >= 0.5f, readTempoSettings());
+    const int lookahead = lookaheadSamplesFromParameter (sampleRate);
+    setLatencySamples (lookahead);
+    reportedLookahead = lookahead;
+    engine.prepare (sampleRate, bypassParam->load() >= 0.5f, readTempoSettings(), lookahead);
     clock.prepare (sampleRate);
-    setLatencySamples (0);
+    detector.prepare (sampleRate);
+}
+
+int EbbAudioProcessor::lookaheadSamplesFromParameter (double sampleRate) const noexcept
+{
+    const auto samples = static_cast<int> (std::lround (lookaheadParam->load() * 0.001 * sampleRate));
+    return juce::jlimit (0, ebb::dsp::Engine::maxLookaheadSamples (sampleRate), samples);
+}
+
+// Hilo de mensajes. Primero se informa al host y después el audio empieza a usar el retraso nuevo (con su fundido).
+void EbbAudioProcessor::timerCallback()
+{
+    const int wanted = lookaheadSamplesFromParameter (currentSampleRate.load());
+    if (wanted != getLatencySamples())
+        setLatencySamples (wanted);
+    reportedLookahead = wanted;
 }
 
 void EbbAudioProcessor::releaseResources() {}
 
 bool EbbAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    // Mono → mono o estéreo → estéreo. (El bus sidechain llega en la Fase 5.)
+    // Mono → mono o estéreo → estéreo. El sidechain, mono, estéreo o desactivado (el host puede no conectarlo).
     const auto& output = layouts.getMainOutputChannelSet();
     if (output != juce::AudioChannelSet::mono() && output != juce::AudioChannelSet::stereo())
         return false;
-    return layouts.getMainInputChannelSet() == output;
+    if (layouts.getMainInputChannelSet() != output)
+        return false;
+    if (layouts.inputBuses.size() > 1)
+    {
+        const auto& sidechain = layouts.getChannelSet (true, 1);
+        return sidechain.isDisabled() || sidechain == juce::AudioChannelSet::mono() || sidechain == juce::AudioChannelSet::stereo();
+    }
+    return true;
 }
 
 ebb::dsp::TempoSettings EbbAudioProcessor::readTempoSettings() const noexcept
@@ -169,14 +225,41 @@ std::span<const ebb::dsp::Trigger> EbbAudioProcessor::collectTriggers (const juc
     return { triggers.data(), count };
 }
 
+// El sidechain del bloque → disparos para el motor (solo en modo audio). El detector corre siempre, para que el medidor
+// muestre si llega el kick antes de elegir el modo.
+std::span<const ebb::dsp::Trigger> EbbAudioProcessor::detectSidechain (juce::AudioBuffer<float>& buffer, int numSamples) noexcept
+{
+    detector.setThresholdDb (thresholdParam->load());
+    detector.setHoldSeconds (holdParam->load() * 0.001);
+
+    // Sin bus (o desactivado) el detector recibe silencio. 'sidechain' apunta a los canales de 'buffer' (no copia nada).
+    const auto* bus = getBus (true, 1);
+    const bool connected = bus != nullptr && bus->isEnabled();
+    const auto sidechain = connected ? getBusBuffer (buffer, true, 1) : juce::AudioBuffer<float>();
+    const bool audioMode = ebb::dsp::triggerModeFromIndex (static_cast<int> (modeParam->load())) == ebb::dsp::TriggerMode::audio;
+
+    const auto result = ebb::dsp::detectAudioTriggers (detector, sidechain.getArrayOfReadPointers(), sidechain.getNumChannels(),
+                                                       numSamples, audioMode ? std::span (audioTriggers) : std::span<ebb::dsp::Trigger>());
+    const auto detected = static_cast<std::uint32_t> (result.detected);
+    sidechainDetected.fetch_add (detected, std::memory_order_relaxed);
+    if (audioMode)
+        sidechainTriggersFired.fetch_add (detected, std::memory_order_relaxed);
+    // Como el mínimo de la ganancia: perder un bloque del medidor si la GUI lo lee justo ahora no importa.
+    if (result.peakEnvelope > sidechainPeakSinceRead.load (std::memory_order_relaxed))
+        sidechainPeakSinceRead.store (result.peakEnvelope, std::memory_order_relaxed);
+    return { audioTriggers.data(), static_cast<size_t> (result.stored) };
+}
+
 void EbbAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
 
+    // Los canales del bus principal van primero en el buffer; los del sidechain, después (solo se leen).
     const int numSamples = buffer.getNumSamples();
-    const int numChannels = juce::jmin (buffer.getNumChannels(), getTotalNumInputChannels(), ebb::dsp::Engine::maxChannels);
+    const int mainChannels = getMainBusNumInputChannels();
+    const int numChannels = juce::jmin (buffer.getNumChannels(), mainChannels, ebb::dsp::Engine::maxChannels);
     // Canales de salida sin entrada (no debería pasar con los layouts aceptados): mejor silencio que basura.
-    for (int ch = getTotalNumInputChannels(); ch < buffer.getNumChannels(); ++ch)
+    for (int ch = mainChannels; ch < getMainBusNumOutputChannels(); ++ch)
         buffer.clear (ch, 0, numSamples);
 
     // ~400 bytes por bloque; solo si llegó una curva nueva se la pasa al motor (que hace el glide).
@@ -186,7 +269,12 @@ void EbbAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     clock.beginBlock (readHostTransport(), numSamples);
     engine.setBypassed (bypassParam->load() >= 0.5f);
     engine.setSettings (readTempoSettings());
-    engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples, clock, collectTriggers (midi, numSamples));
+    engine.setLookahead (reportedLookahead.load (std::memory_order_relaxed));
+    const auto midiTriggers = collectTriggers (midi, numSamples);
+    const auto sidechainTriggers = detectSidechain (buffer, numSamples);
+    const auto mode = ebb::dsp::triggerModeFromIndex (static_cast<int> (modeParam->load()));
+    engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples, clock,
+                    mode == ebb::dsp::TriggerMode::audio ? sidechainTriggers : midiTriggers);
     publishTransport (numSamples);
 
     // Mínimo acumulado hasta que la GUI lo lea. Si la GUI lo reinicia justo entre la lectura y la escritura se pierde a

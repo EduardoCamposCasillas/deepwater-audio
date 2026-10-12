@@ -18,8 +18,14 @@ inline constexpr const char* mode = "mode";           // qué dispara la curva (
 inline constexpr const char* midiNote = "midiNote";   // 0 = todas las notas, 1–128 = solo la nota MIDI 0–127
 inline constexpr const char* velocity = "velocity";   // la velocidad de la nota escala la profundidad
 
+// Fase 5: modo audio sidechain.
+inline constexpr const char* threshold = "threshold"; // dB: nivel del sidechain a partir del cual hay golpe
+inline constexpr const char* hold = "hold";           // ms: retención, tiempo mínimo entre dos golpes
+inline constexpr const char* lookahead = "lookahead"; // ms: cuánto se adelanta la curva (latencia informada al host)
+
 // Versión en la que apareció cada parámetro (la usa el VST3 para ordenar y reconocer parámetros nuevos).
 inline constexpr int versionHintPhase1 = 1;
 inline constexpr int versionHintPhase2 = 2;
 inline constexpr int versionHintPhase4 = 4;
+inline constexpr int versionHintPhase5 = 5;
 } // namespace ebb::params

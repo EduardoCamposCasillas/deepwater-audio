@@ -14,8 +14,8 @@ namespace ebb::gui
 
 // Fase 2: dos ciclos de la curva de ganancia con los ajustes actuales y la forma del editor (Fase 3) (arriba = volumen
 // completo, abajo = silencio), con el suavizado incluido, y a la derecha un medidor de cuánto está bajando el volumen
-// ahora mismo. En modo MIDI (Fase 4), un solo golpe en el mismo espacio: lo que pasa después de una nota si no llega
-// otra. La curva en vivo con cursor de reproducción llega en la Fase 7.
+// ahora mismo. En modo MIDI o audio (Fases 4 y 5), un solo golpe en el mismo espacio: lo que pasa después de un golpe
+// si no llega otro. La curva en vivo con cursor de reproducción llega en la Fase 7.
 class CurveView final : public juce::Component
 {
 public:
@@ -78,7 +78,7 @@ private:
 
     static juce::String utf8 (const char* text) { return juce::String::fromUTF8 (text); }
 
-    [[nodiscard]] bool isMidi() const noexcept { return settings.mode == dsp::TriggerMode::midi; }
+    [[nodiscard]] bool isSingleHit() const noexcept { return dsp::isHitMode (settings.mode); }
 
     [[nodiscard]] double periodBeats() const noexcept { return dsp::divisionBeats (settings.division, signature); }
 
@@ -88,7 +88,7 @@ private:
         const double ms = periodBeats() * 60000.0 / bpm;
         g.setColour (theme::text);
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-        const auto prefix = isMidi() ? juce::String ("1 nota, largo ") : juce::String();
+        const auto prefix = isSingleHit() ? juce::String ("1 golpe, largo ") : juce::String();
         g.drawText (prefix + dsp::duckDivisions[static_cast<size_t> (index)].name + " = " + juce::String (ms, 0) + " ms a "
                         + juce::String (bpm, 1) + " BPM",
                     area, juce::Justification::centredLeft);
@@ -118,7 +118,7 @@ private:
         }
         // Marca de cada golpe.
         g.setColour (theme::accent.withAlpha (0.35f));
-        for (int cycle = 0; cycle < (isMidi() ? 1 : 2); ++cycle)
+        for (int cycle = 0; cycle < (isSingleHit() ? 1 : 2); ++cycle)
             g.drawVerticalLine (juce::roundToInt (plot.getX() + plot.getWidth() * static_cast<float> (cycle) * 0.5f), plot.getY(), plot.getBottom());
 
         const int points = juce::jmax (2, static_cast<int> (plot.getWidth()));
@@ -128,15 +128,15 @@ private:
                                ? 1.0f
                                : static_cast<float> (1.0 - std::exp (-3.0 * secondsPerPoint / (settings.smoothingMs * 0.001)));
 
-        // En modo MIDI: una sola pasada desde el reposo (volumen entero) con un golpe al principio; el tiempo sigue
+        // En modo MIDI o audio: una sola pasada desde el reposo (volumen entero) con un golpe al principio; el tiempo sigue
         // contando más allá del ciclo y la curva se queda en su último punto.
         float gain = 1.0f;
         juce::Path curve;
-        for (int pass = isMidi() ? 1 : 0; pass < 2; ++pass)
+        for (int pass = isSingleHit() ? 1 : 0; pass < 2; ++pass)
             for (int i = 0; i < points; ++i)
             {
                 const double position = static_cast<double> (i) / points * 2.0;
-                const double inCycle = (isMidi() ? position : std::fmod (position, 1.0)) * periodBeats();
+                const double inCycle = (isSingleHit() ? position : std::fmod (position, 1.0)) * periodBeats();
                 const float target = 1.0f - settings.depth * dsp::duckAt (shape, inCycle, periodBeats(), settings.duration);
                 gain += (target - gain) * coef;
                 if (pass == 1)

@@ -484,3 +484,130 @@ Inténtalo y después pide pistas.
 - **Cuándo NO usarlo:** si el kick es un audio grabado (un loop, un sample de batería entera) y no tienes sus notas
   MIDI, lo que necesitas es el modo audio (Fase 5). Si el kick es "four on the floor" de principio a fin, el modo
   tempo hace lo mismo con menos ruteo.
+
+## Fase 5 — Modo audio: que el kick mismo dispare el ducking
+
+El modo MIDI sigue al kick, pero necesita sus notas. Si el kick es un **audio** (un sample suelto en el Playlist, un
+loop de batería, un kick grabado o con swing humano), no hay notas que copiar. En el **modo audio** Ebb *escucha* el
+kick por una segunda entrada, la **entrada sidechain**, y dispara la curva en la muestra exacta en que empieza cada
+golpe. Es lo que hace un compresor sidechain clásico, pero con la curva dibujada de Ebb en lugar de la reacción de un
+compresor.
+
+### Conceptos aprendidos
+
+- **Entrada sidechain.** Ebb tiene dos entradas: la principal (el bajo, que se procesa y sale) y la sidechain (el kick,
+  que *solo se escucha*: no sale por Ebb). Una señal controla lo que le pasa a otra: eso es literalmente "sidechain".
+- **Envolvente.** El kick oscila cientos de veces por segundo; para saber "cuándo hay un golpe" Ebb lo convierte en una
+  curva lenta de *qué tan fuerte suena* (la barra del medidor). Sube al instante con cada pico y baja en unos 50 ms.
+- **Umbral (threshold).** El nivel a partir del cual hay golpe. Cuando la envolvente **cruza el umbral hacia arriba**,
+  Ebb dispara la curva justo en esa muestra.
+- **Histéresis (rearme).** Después de un golpe, Ebb no vuelve a disparar hasta que la envolvente baja **6 dB por debajo
+  del umbral** (la línea punteada del medidor). Sin esto, la cola del kick, que ronda el umbral, dispararía diez veces.
+  La consecuencia: entre dos kicks el nivel tiene que bajar de la punteada. Si la cola es tan larga que no baja, el
+  kick siguiente no dispara (sube el umbral).
+- **Retención (hold).** Tiempo mínimo entre dos golpes: lo que llegue antes se ignora. Algunos kicks tienen dos ataques
+  (el "click" del principio y el cuerpo un instante después) o vienen en flam; la retención hace que disparen una vez.
+- **Lookahead (mirar adelante).** El detector solo se entera del kick cuando ya sonó, y la ganancia tarda un par de ms
+  en bajar (SUAVIZADO): el ataque del kick y el del bajo chocan un instante. Con LOOKAHEAD, Ebb **retrasa el bajo**
+  unos ms y la curva empieza antes de que el bajo llegue: cuando suena el kick, el bajo ya está abajo.
+- **Latencia y compensación (PDC).** Ese retraso es *latencia*. Ebb se la informa a FL y FL **atrasa todas las demás
+  pistas lo mismo** (compensación de retardo, *plugin delay compensation*), así que en la mezcla nada se desalinea. Por
+  eso el lookahead no se automatiza: cambiarlo obliga a FL a recolocar todo. Funciona en los tres modos: en tempo y en
+  MIDI también adelanta la curva.
+
+### Cómo configurar el sidechain en FL Studio (el ruteo)
+
+1. Pon el kick en su propia pista del Mixer (por ejemplo, la **1**) y el bajo en otra (la **2**) con Ebb en un slot.
+2. **Selecciona la pista del kick** (clic en ella). En la pista del **bajo**, haz **clic derecho en la flecha de envío**
+   (el triangulito de abajo de la pista) → **Sidechain to this track**. El cable que aparece es "solo para escuchar":
+   el kick no suena dos veces.
+3. Abre Ebb y, en el envoltorio de FL, el **engranaje** (arriba a la izquierda) → pestaña **Processing**. En
+   **Connections**, en la entrada **Sidechain** (o en el segundo puerto de entrada de Ebb), elige la pista del kick
+   (**1**). Solo aparecen las pistas que mandaste con "Sidechain to this track". Según la versión de FL el nombre puede
+   cambiar un poco; lo que importa es que la entrada 2 de Ebb sea el kick.
+4. Pon Ebb en **MODO Audio** y reproduce. La **barra del medidor SIDECHAIN** tiene que moverse con cada kick. Si no se
+   mueve, el sidechain no llega: revisa el paso 2 (que la pista del kick esté seleccionada al hacer clic derecho) y el 3.
+5. **Ajusta el umbral** arrastrando la línea ámbar (o con UMBRAL) hasta que la luz se encienda en verde agua con
+   **cada** kick y con nada más.
+
+En el **Standalone** no hay sidechain que configurar (Options → Audio/MIDI Settings solo da la entrada principal); el
+modo audio se prueba en FL.
+
+### Qué hace cada control
+
+- **MODO → Audio**: los golpes los detecta Ebb en el sidechain. El LARGO, la FORMA, la PROFUNDIDAD, la DURACIÓN y el
+  SUAVIZADO funcionan igual que en MIDI.
+- **Medidor SIDECHAIN**: la barra es el nivel del kick (verde agua cuando pasa el umbral). Línea **ámbar** = umbral
+  (arrástrala); **punteada** = rearme (umbral − 6 dB). La luz: verde agua = disparó la curva; ámbar = se detectó un golpe
+  pero Ebb no está en modo Audio. El medidor funciona en cualquier modo: sirve para comprobar el ruteo antes de cambiar.
+- **UMBRAL**: −60 a 0 dB. Atenuado fuera del modo Audio.
+- **RETENCIÓN**: 0 a 250 ms (30 por defecto). Atenuado fuera del modo Audio.
+- **LOOKAHEAD**: 0 a 10 ms (0 por defecto = sin latencia). En los tres modos.
+
+### Ejercicio guiado: MIDI contra audio sobre un kick con swing (con el volumen igualado)
+
+1. **95 BPM**, el dembow desplazado de la Fase 4 (pasos 1, 7, 11 y 15), el **808 largo** con Ebb y el ruteo MIDI de la
+   Fase 4 funcionando. Profundidad 50 %, LARGO 1/4, duración 40 %, suavizado 2 ms.
+2. Haz además el ruteo sidechain de arriba. Alterna **MIDI ↔ Audio** con la canción sonando: deberían sonar casi
+   igual. Si el audio suena distinto, mira la luz: ¿dispara en todos los kicks?
+3. **Humaniza el kick:** en el Piano roll del kick, *Tools → Randomize* solo la posición (unos pocos ticks), o mueve a
+   mano el kick del paso 11 un poco tarde. **No toques el MIDI Out.** En modo MIDI el ducking cae donde estaba la nota
+   antigua (el 808 se agacha un instante antes del kick, y vuelve cuando el kick llega). En modo audio, sigue al kick
+   donde esté. Ese es el caso del modo audio: el kick real manda.
+4. **El umbral:** súbelo hasta −6 dB: algunos kicks dejan de disparar (luz apagada en esos golpes, el 808 no se
+   aparta). Bájalo hasta −50 dB con un loop de batería entero en el sidechain: la caja y los hats también disparan.
+   Busca el punto donde solo dispara el kick.
+5. **El lookahead:** pon SUAVIZADO en 8 ms (una bajada lenta). Sin lookahead, el principio del kick choca con el 808
+   (el kick pierde "pegada"). Sube LOOKAHEAD a 5 ms: el 808 ya está abajo cuando llega el kick. Compara con BYPASS e
+   **iguala el volumen** con el fader del 808 antes de decidir.
+
+### Receta: kick grabado (o sample con swing) y 808, limpio
+
+Ebb en el 808: **Modo Audio, sidechain desde la pista del kick, UMBRAL unos 12–18 dB por debajo del pico del kick,
+RETENCIÓN 30–50 ms, LOOKAHEAD 2–3 ms, LARGO 1/4, duración 40–50 %, profundidad 35–50 %, suavizado 2 ms.**
+- Por qué el umbral tan abajo del pico: el golpe se detecta en los primeros ms del ataque (el disparo es más
+  temprano) y aguanta que algunos kicks suenen más suaves que otros.
+- Por qué 30–50 ms de retención: más que el doble ataque de un kick (10–20 ms), menos que la distancia mínima entre dos
+  kicks del dembow (una semicorchea a 95 BPM = 158 ms).
+- Por qué 2–3 ms de lookahead: lo justo para que el suavizado termine antes del ataque del kick. Más no mejora nada y
+  suma latencia (molesta si tocas en vivo un instrumento que pasa por esa pista).
+
+### Reto sin receta
+
+Tienes un **loop de batería entero** (kick, caja y hats en un solo audio) y quieres que el bajo se aparte solo con el
+kick. Ebb no tiene filtro en el sidechain (todavía). ¿Cómo consigues que la caja y los hats no disparen, usando solo el
+Mixer de FL y Ebb? Pista de por dónde empezar: el kick vive en los graves y los demás no; ¿qué pasaría si la señal que
+manda la pista del loop al sidechain no fuera el loop tal cual?
+
+Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Sidechain**: usar una señal para controlar el procesamiento de otra. *En música:* el bajo que "respira" con el kick
+  en casi todo el EDM desde los 2000 (Daft Punk, Eric Prydz "Call on Me").
+- **Envolvente (envelope)**: la forma del volumen de un sonido en el tiempo (ataque, cuerpo, cola). *En música:* un
+  kick de 808 tiene un ataque corto y una cola larga; un kick de house, ataque y cola cortos.
+- **Umbral (threshold)**: el nivel donde algo empieza a actuar. *En música:* lo tienen los compresores, los gates y los
+  "triggers" de batería (los que cambian el kick grabado de una batería por un sample).
+- **Histéresis**: tener un umbral para "encender" y otro más bajo para "apagar", para no parpadear en el borde. *En
+  música:* los gates de batería la usan para no cortar a medias la cola de un tom.
+- **Retención (hold)**: tiempo en que un detector ignora todo después de actuar. *En música:* el *hold* de un gate o el
+  *retrigger time* de un reemplazador de batería.
+- **Lookahead**: retrasar la señal para que el procesamiento "vea el futuro". *En música:* los limitadores de
+  mastering lo usan para bajar el volumen antes de que llegue el pico.
+- **Latencia / PDC**: el retraso que añade un plugin y la compensación que hace el DAW para alinear las pistas.
+
+### Errores comunes y cuándo NO usarlo
+
+- **El medidor no se mueve.** El sidechain no llega: falta "Sidechain to this track" o la entrada sidechain de Ebb en
+  *Processing* no apunta a la pista del kick.
+- **La luz se enciende en ámbar.** El kick llega pero Ebb sigue en modo Tempo o MIDI.
+- **Disparos de más.** Umbral demasiado bajo con otros instrumentos en el sidechain (o un kick con doble ataque y la
+  retención en 0). Sube el umbral o la retención; mejor aún, manda al sidechain solo el kick.
+- **Kicks que no disparan.** Umbral demasiado alto, o la cola del kick anterior no baja de la línea punteada antes del
+  siguiente. Mira el medidor: entre kicks la barra tiene que pasar a la izquierda de la punteada.
+- **Retención más larga que la distancia entre kicks.** Con 200 ms y kicks a una semicorchea (158 ms), uno de cada dos
+  no dispara.
+- **Lookahead de más.** No suena mejor y suma latencia a todo el proyecto. Si grabas o tocas en vivo, déjalo en 0.
+- **Cuándo NO usarlo:** si tienes las notas del kick y el patrón no tiene swing humano, el modo MIDI es más exacto (no
+  depende de un umbral). Si el kick es "four on the floor" fijo, el modo tempo no necesita ningún ruteo.

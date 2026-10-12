@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "deepwater/dsp/TransientDetector.h"
 #include "dsp/CurveShapes.h"
 #include "dsp/Engine.h"
 #include "dsp/HostClock.h"
@@ -662,7 +663,8 @@ void testTriggerHelpers()
     CHECK (flNoteName (37) == "C#3 (37)");
     CHECK (flNoteName (0) == "C0 (0)" && flNoteName (127) == "G10 (127)");
     CHECK (triggerModeFromIndex (0) == TriggerMode::tempo && triggerModeFromIndex (1) == TriggerMode::midi);
-    CHECK (triggerModeFromIndex (7) == TriggerMode::tempo);
+    CHECK (triggerModeFromIndex (2) == TriggerMode::audio && triggerModeFromIndex (7) == TriggerMode::tempo);
+    CHECK (! isHitMode (TriggerMode::tempo) && isHitMode (TriggerMode::midi) && isHitMode (TriggerMode::audio));
 }
 
 void testMidiHits()
@@ -810,6 +812,190 @@ void testMidiHoldAndTransport()
     CHECK (release[static_cast<size_t> (4410 + 128 + glideSamples)] == 1.0f);
 }
 
+// --- Fase 5: modo audio y lookahead ----------------------------------------------------------------------------------
+
+// Kick sintético para el sidechain: un coseno de 55 Hz (empieza en su pico, así el golpe empieza en la muestra exacta)
+// que se apaga con τ = 60 ms, en cada una de las muestras 'onsets'.
+std::vector<float> kickTrack (double sampleRate, int totalSamples, const std::vector<int>& onsets)
+{
+    std::vector<float> track (static_cast<size_t> (totalSamples), 0.0f);
+    for (const int onset : onsets)
+        for (int i = onset; i < totalSamples; ++i)
+        {
+            const double t = static_cast<double> (i - onset) / sampleRate;
+            track[static_cast<size_t> (i)] += static_cast<float> (0.9 * std::cos (2.0 * 3.141592653589793 * 55.0 * t) * std::exp (-t / 0.06));
+        }
+    return track;
+}
+
+TempoSettings audioCurve (int division = defaultDuckDivision, float duration = 0.5f)
+{
+    TempoSettings settings = rawCurve (division, duration);
+    settings.mode = TriggerMode::audio;
+    return settings;
+}
+
+// Como el procesador: en cada bloque el detector recorre el sidechain y sus disparos van al motor, que procesa 'main'
+// (mono) con el lookahead dado. Con 'main' constante 1 la salida es la ganancia.
+std::vector<float> renderAudio (double sampleRate, double bpm, const TempoSettings& settings, std::vector<float> main,
+                                const std::vector<float>& sidechain, int maxBlock, int lookahead = 0)
+{
+    HostClock clock;
+    clock.prepare (sampleRate);
+    Engine engine;
+    engine.prepare (sampleRate, false, settings, lookahead);
+    deepwater::dsp::TransientDetector detector;
+    detector.prepare (sampleRate);
+    detector.setThresholdDb (-18.0f);
+    detector.setHoldSeconds (0.03);
+
+    std::array<Trigger, 256> triggers {};
+    BlockSizes sizes;
+    const double perSample = bpm / (60.0 * sampleRate);
+    double ppq = 0.0;
+    const int totalSamples = static_cast<int> (main.size());
+    for (int done = 0; done < totalSamples;)
+    {
+        const int numSamples = std::min (sizes.next (maxBlock), totalSamples - done);
+        const float* scChannel = sidechain.data() + done;
+        const auto detection = detectAudioTriggers (detector, &scChannel, 1, numSamples, triggers);
+        clock.beginBlock (playingAt (ppq, bpm), numSamples);
+        engine.setSettings (settings);
+        float* channel = main.data() + done;
+        engine.process (&channel, 1, numSamples, clock, std::span<const Trigger> (triggers.data(), static_cast<size_t> (detection.stored)));
+        ppq += numSamples * perSample;
+        done += numSamples;
+    }
+    return main;
+}
+
+void testAudioHits()
+{
+    std::printf ("Modo audio: cada kick del sidechain dispara en su muestra exacta (dembow), con cualquier bloque y sample rate\n");
+
+    for (const double sampleRate : sampleRates)
+    {
+        // El mismo patrón que en el modo MIDI, pero ahora es audio: pasos 1, 7, 11 y 15 a 95 BPM.
+        const double beat = sampleRate * 60.0 / 95.0;
+        std::vector<int> onsets;
+        for (const double at : { 0.0, 1.5, 2.5, 3.5 })
+            onsets.push_back (1000 + static_cast<int> (std::lround (at * beat)));
+        const int total = onsets.back() + static_cast<int> (beat);
+        const auto kicks = kickTrack (sampleRate, total, onsets);
+        const std::vector<float> ones (static_cast<size_t> (total), 1.0f);
+        const auto gain = renderAudio (sampleRate, 95.0, audioCurve (3, 1.0f), ones, kicks, 4096);
+
+        bool exact = gain[999] == 1.0f; // antes del primer kick no hay ducking
+        for (const int onset : onsets)
+        {
+            const auto hit = static_cast<size_t> (onset);
+            exact = exact && gain[hit] == 0.0f && gain[hit - 1] == 1.0f;
+            exact = exact && gain[hit + static_cast<size_t> (beat * 0.5) + 2] == 1.0f; // pasado el largo, entero
+        }
+        CHECK (exact);
+
+        // Igual con bloques de 1 a 7 muestras.
+        CHECK (renderAudio (sampleRate, 95.0, audioCurve (3, 1.0f), ones, kicks, 7) == gain);
+    }
+
+    // Sin canales de sidechain (bus desconectado): el detector recibe silencio y no hay golpes.
+    deepwater::dsp::TransientDetector detector;
+    detector.prepare (48000.0);
+    std::array<Trigger, 4> triggers {};
+    const auto none = detectAudioTriggers (detector, nullptr, 0, 512, triggers);
+    CHECK (none.detected == 0 && none.stored == 0 && none.peakEnvelope == 0.0f);
+
+    // Estéreo: un kick solo en el canal derecho también cuenta (se mira el mayor |x| de los canales).
+    std::vector<float> left (2000, 0.0f), right (2000, 0.0f);
+    right[300] = 0.8f;
+    const std::array<const float*, 2> stereo { left.data(), right.data() };
+    const auto found = detectAudioTriggers (detector, stereo.data(), 2, 2000, triggers);
+    CHECK (found.detected == 1 && found.stored == 1 && triggers[0].offset == 300);
+}
+
+void testLookahead()
+{
+    std::printf ("Lookahead: retraso exacto (también en bypass), la curva llega antes que el golpe, cambios sin clic\n");
+
+    for (const double sampleRate : sampleRates)
+    {
+        // Sin ducking, la salida es la entrada retrasada exactamente 'lookahead' muestras, bit a bit.
+        const int lookahead = Engine::maxLookaheadSamples (sampleRate);
+        std::vector<float> input (8000);
+        for (size_t i = 0; i < input.size(); ++i)
+            input[i] = std::sin (static_cast<float> (i) * 0.05f) * 0.5f + static_cast<float> (i % 7) * 0.01f;
+        TempoSettings flat = rawCurve();
+        flat.depth = 0.0f;
+        for (const bool bypassed : { false, true })
+        {
+            HostClock clock;
+            clock.prepare (sampleRate);
+            Engine engine;
+            engine.prepare (sampleRate, bypassed, flat, lookahead);
+            auto output = input;
+            BlockSizes sizes;
+            for (int done = 0; done < static_cast<int> (output.size());)
+            {
+                const int numSamples = std::min (sizes.next (300), static_cast<int> (output.size()) - done);
+                clock.beginBlock (playingAt (0.0, 120.0), numSamples);
+                engine.setSettings (flat);
+                float* channel = output.data() + done;
+                engine.process (&channel, 1, numSamples, clock);
+                done += numSamples;
+            }
+            bool delayed = true;
+            for (size_t i = 0; i < output.size(); ++i)
+                delayed = delayed && output[i] == (i < static_cast<size_t> (lookahead) ? 0.0f : input[i - static_cast<size_t> (lookahead)]);
+            CHECK (delayed);
+        }
+
+        // Modo audio con lookahead: el kick del sidechain dispara la curva en su muestra, pero la señal principal (alineada
+        // con el kick) sale 'lookahead' muestras después: cuando llega, la ganancia ya está abajo (con 2 ms de suavizado,
+        // casi entera). Sin lookahead llega con la ganancia aún a medio camino.
+        const int la = static_cast<int> (std::lround (0.005 * sampleRate));
+        const int onset = 3000;
+        const auto kick = kickTrack (sampleRate, 20000, { onset });
+        std::vector<float> marker (20000, 0.0f);
+        marker[static_cast<size_t> (onset)] = 1.0f; // la señal principal: un impulso alineado con el kick
+        TempoSettings soft = audioCurve (2, 1.0f);
+        soft.smoothingMs = 2.0f;
+        const auto ahead = renderAudio (sampleRate, 120.0, soft, marker, kick, 512, la);
+        const auto late = renderAudio (sampleRate, 120.0, soft, marker, kick, 512, 0);
+        CHECK (ahead[static_cast<size_t> (onset + la)] < 0.01f);
+        CHECK (late[static_cast<size_t> (onset)] > 0.5f);
+    }
+
+    // Cambiar el lookahead sonando (un seno de 100 Hz, de 0 a 5 ms = medio ciclo: de golpe saltaría hasta 2): el fundido
+    // cruzado lo deja sin clic, y al terminar la salida es la entrada retrasada 5 ms exactos.
+    constexpr double sampleRate = 48000.0;
+    const auto sine = [] (size_t i) { return static_cast<float> (std::sin (2.0 * 3.141592653589793 * 100.0 * static_cast<double> (i) / sampleRate)); };
+    std::vector<float> signal (24000);
+    for (size_t i = 0; i < signal.size(); ++i)
+        signal[i] = sine (i);
+    TempoSettings flat = rawCurve();
+    flat.depth = 0.0f;
+    HostClock clock;
+    clock.prepare (sampleRate);
+    Engine engine;
+    engine.prepare (sampleRate, false, flat, 0);
+    for (size_t done = 0; done < signal.size(); done += 256)
+    {
+        if (done >= 4800)
+            engine.setLookahead (240);
+        const int numSamples = static_cast<int> (std::min<size_t> (256, signal.size() - done));
+        clock.beginBlock (playingAt (0.0, 120.0), numSamples);
+        engine.setSettings (flat);
+        float* channel = signal.data() + done;
+        engine.process (&channel, 1, numSamples, clock);
+    }
+    const float sineStep = static_cast<float> (2.0 * 3.141592653589793 * 100.0 / sampleRate); // paso máximo del seno
+    CHECK (maxStep (signal, 1, signal.size()) < 2.0f * sineStep);
+    bool settled = true;
+    for (size_t i = 12000; i < signal.size(); ++i)
+        settled = settled && std::abs (signal[i] - sine (i - 240)) < 1.0e-6f;
+    CHECK (settled);
+}
+
 } // namespace
 
 int main()
@@ -831,6 +1017,8 @@ int main()
     testMidiHits();
     testMidiRetriggerAndChanges();
     testMidiHoldAndTransport();
+    testAudioHits();
+    testLookahead();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de Ebb pasaron.\n");

@@ -5,11 +5,13 @@
 namespace
 {
 constexpr int editorWidth = 960;
-constexpr int editorHeight = 640;
+constexpr int editorHeight = 750;
 constexpr int headerHeight = 44;
 constexpr int topRowHeight = 170;   // transporte + vista previa de la curva
 constexpr int transportWidth = 500; // cabe "123 . 4 . 4" y los detalles
-constexpr int curveEditorHeight = 230;
+constexpr int curveEditorHeight = 210;
+constexpr int controlsHeight = 160;
+constexpr int sidechainHeight = 124;
 constexpr int footerHeight = 26;
 constexpr int gap = 8;
 constexpr int padding = 12;
@@ -101,6 +103,33 @@ EbbAudioProcessorEditor::EbbAudioProcessorEditor (EbbAudioProcessor& p) : AudioP
                      "instant\xc3\xa1nea: en un bajo se oye un clic. 1\xe2\x80\x93" "5 ms = sin clic y con golpe. "
                      "M\xc3\xa1s = una entrada blanda, que se come el ataque del ducking."));
 
+    // Fase 5: sidechain.
+    setUpComboLabel (sidechainLabel, utf8 ("SIDECHAIN  \xc2\xb7  nivel del kick contra el umbral (arrastra la l\xc3\xadnea)"));
+    sidechainLabel.setJustificationType (juce::Justification::centredLeft);
+    sidechainMeter.setTooltip (utf8 ("El nivel que llega por la entrada sidechain. Cada kick tiene que pasar la l\xc3\xadnea "
+                                     "\xc3\xa1mbar (UMBRAL) y, entre kick y kick, bajar de la punteada (6 dB menos). Luz verde "
+                                     "agua: el golpe dispar\xc3\xb3 la curva. \xc3\x81mbar: se detect\xc3\xb3 pero no est\xc3\xa1s "
+                                     "en modo Audio. Barra quieta: no llega sidechain (revisa el ruteo en FL)."));
+    auto* thresholdParameter = processor.getParameters().getParameter (id::threshold);
+    sidechainMeter.onDragStart = [thresholdParameter] { thresholdParameter->beginChangeGesture(); };
+    sidechainMeter.onDragEnd = [thresholdParameter] { thresholdParameter->endChangeGesture(); };
+    sidechainMeter.onThresholdDrag = [thresholdParameter] (float db) {
+        thresholdParameter->setValueNotifyingHost (thresholdParameter->convertTo0to1 (db));
+    };
+    addAndMakeVisible (sidechainMeter);
+    setUpKnob (thresholdKnob, id::threshold, "UMBRAL",
+               utf8 ("Nivel del sidechain a partir del cual hay golpe. B\xc3\xa1jalo hasta que todos los kicks disparen; "
+                     "s\xc3\xba" "belo si la cola de un kick largo impide que dispare el siguiente (tiene que bajar 6 dB "
+                     "por debajo del umbral para rearmarse)."));
+    setUpKnob (holdKnob, id::hold, utf8 ("RETENCI\xc3\x93N"),
+               utf8 ("Tiempo m\xc3\xadnimo entre dos golpes: lo que llegue antes se ignora. Evita que un kick con dos "
+                     "ataques (click + cuerpo) o un flam dispare dos veces. Que sea menor que la distancia entre los kicks "
+                     "m\xc3\xa1s juntos del patr\xc3\xb3n (una semicorchea a 95 BPM = 158 ms)."));
+    setUpKnob (lookaheadKnob, id::lookahead, "LOOKAHEAD",
+               utf8 ("Adelanta la curva: retrasa la se\xc3\xb1" "al que se aten\xc3\xba" "a estos ms y FL atrasa las dem\xc3\xa1s "
+                     "pistas lo mismo (compensaci\xc3\xb3n de latencia). As\xc3\xad el volumen ya est\xc3\xa1 abajo cuando "
+                     "llega el ataque del kick. Sirve en los tres modos. 0 = sin latencia. No se automatiza."));
+
     bypassButton.setClickingTogglesState (true);
     bypassButton.setTooltip (utf8 ("Escuchar la se\xc3\xb1" "al original. Es el mismo bypass que el de FL y entra con un "
                                    "fundido de 20 ms (sin clics)."));
@@ -152,16 +181,21 @@ void EbbAudioProcessorEditor::updateModeControls (ebb::dsp::TriggerMode mode)
 {
     shownMode = mode;
     const bool midi = mode == ebb::dsp::TriggerMode::midi;
-    divisionLabel.setText (midi ? juce::String ("LARGO") : utf8 ("DIVISI\xc3\x93N"), juce::dontSendNotification);
+    const bool hits = ebb::dsp::isHitMode (mode);
+    divisionLabel.setText (hits ? juce::String ("LARGO") : utf8 ("DIVISI\xc3\x93N"), juce::dontSendNotification);
     divisionBox.setTooltip (
-        midi ? utf8 ("Modo MIDI: cu\xc3\xa1nto dura la curva despu\xc3\xa9s de cada nota, en figuras al tempo de FL "
-                     "(multiplicado por la DURACI\xc3\x93N). 1/4 con duraci\xc3\xb3n 70 % = vuelve en 0.7 negras. Si llega otra "
-                     "nota antes, la curva vuelve a empezar desde donde est\xc3\xa9 el volumen.")
+        hits ? utf8 ("Modo MIDI o Audio: cu\xc3\xa1nto dura la curva despu\xc3\xa9s de cada golpe, en figuras al tempo de FL "
+                     "(multiplicado por la DURACI\xc3\x93N). 1/4 con duraci\xc3\xb3n 70 % = vuelve en 0.7 negras. Si llega otro "
+                     "golpe antes, la curva vuelve a empezar desde donde est\xc3\xa9 el volumen.")
              : utf8 ("Cada cu\xc3\xa1nto baja el volumen, en figuras musicales al tempo de FL. 1/4 = un golpe por "
                      "tiempo (el kick del dembow cl\xc3\xa1sico). T = tresillo: tres golpes en el espacio de dos. "
                      "1 bar = un golpe por comp\xc3\xa1s."));
     for (auto* component : std::initializer_list<juce::Component*> { &noteBox, &noteLabel, &velocityButton })
         component->setEnabled (midi);
+    const bool audio = mode == ebb::dsp::TriggerMode::audio;
+    for (auto* component : std::initializer_list<juce::Component*> { &sidechainMeter, &thresholdKnob.slider, &thresholdKnob.label,
+                                                                      &holdKnob.slider, &holdKnob.label })
+        component->setEnabled (audio);
     repaint();
 }
 
@@ -217,6 +251,9 @@ void EbbAudioProcessorEditor::timerCallback()
     settings.depth = parameters.getRawParameterValue (ebb::params::depth)->load() / 100.0f;
     settings.duration = parameters.getRawParameterValue (ebb::params::duration)->load() / 100.0f;
     settings.smoothingMs = parameters.getRawParameterValue (ebb::params::smoothing)->load();
+    const auto sidechain = processor.takeSidechainActivity();
+    sidechainMeter.update (sidechain.peakEnvelope, sidechain.detected, sidechain.triggers,
+                           parameters.getRawParameterValue (ebb::params::threshold)->load());
     curveView.setCurve (settings, processor.getCurve(), lastSnapshot.bpm, lastSnapshot.timeSignature);
     curveView.setMinGain (processor.takeMinGain());
 }
@@ -233,7 +270,15 @@ juce::Rectangle<int> EbbAudioProcessorEditor::controlsArea() const
 {
     return getLocalBounds()
         .withTrimmedTop (headerHeight + topRowHeight + curveEditorHeight + 2 * gap)
-        .withTrimmedBottom (footerHeight)
+        .withHeight (controlsHeight)
+        .reduced (padding, 0);
+}
+
+juce::Rectangle<int> EbbAudioProcessorEditor::sidechainArea() const
+{
+    return getLocalBounds()
+        .withTrimmedTop (headerHeight + topRowHeight + curveEditorHeight + controlsHeight + 3 * gap)
+        .withHeight (sidechainHeight)
         .reduced (padding, 0);
 }
 
@@ -248,9 +293,9 @@ void EbbAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("EBB", header.removeFromLeft (60), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("ducker  -  Fase 4: modo MIDI trigger", header, juce::Justification::centredLeft);
+    g.drawText ("ducker  -  Fase 5: modo audio sidechain", header, juce::Justification::centredLeft);
 
-    for (const auto& panelArea : { editorPanelArea(), controlsArea() })
+    for (const auto& panelArea : { editorPanelArea(), controlsArea(), sidechainArea() })
     {
         const auto panel = panelArea.toFloat();
         g.setColour (theme::panel);
@@ -271,10 +316,20 @@ void EbbAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (shownMode == ebb::dsp::TriggerMode::midi
-                    ? utf8 ("Modo MIDI: manda las notas del kick a Ebb con un canal MIDI Out (mismo puerto en los dos).")
-                    : utf8 ("Modo Tempo: con FL parado no hay ducking. Para seguir un kick irregular, usa el modo MIDI."),
-                getLocalBounds().removeFromBottom (footerHeight), juce::Justification::centred);
+    const auto footer = [this] {
+        switch (shownMode)
+        {
+            case ebb::dsp::TriggerMode::midi:
+                return utf8 ("Modo MIDI: manda las notas del kick a Ebb con un canal MIDI Out (mismo puerto en los dos).");
+            case ebb::dsp::TriggerMode::audio:
+                return utf8 ("Modo Audio: en el mixer, \"Sidechain to this track\" desde el kick; en Ebb, el puerto sidechain "
+                             "en \xe2\x9a\x99 > Processing.");
+            case ebb::dsp::TriggerMode::tempo:
+                break;
+        }
+        return utf8 ("Modo Tempo: con FL parado no hay ducking. Para seguir un kick irregular, usa MIDI o Audio.");
+    }();
+    g.drawText (footer, getLocalBounds().removeFromBottom (footerHeight), juce::Justification::centred);
 }
 
 void EbbAudioProcessorEditor::resized()
@@ -319,6 +374,20 @@ void EbbAudioProcessorEditor::resized()
     {
         auto column = controls.removeFromLeft (knobWidth);
         knob->label.setBounds (column.removeFromTop (20));
+        knob->slider.setBounds (column);
+    }
+
+    // Sidechain: el medidor a la izquierda (ancho de las tres primeras columnas) y las tres perillas alineadas con las de
+    // arriba.
+    auto sidechain = sidechainArea().reduced (14, 6);
+    auto meterColumn = sidechain.removeFromLeft (3 * 170 + 2 * 16);
+    sidechain.removeFromLeft (16);
+    sidechainLabel.setBounds (meterColumn.removeFromTop (22));
+    sidechainMeter.setBounds (meterColumn.removeFromTop (52));
+    for (auto* knob : { &thresholdKnob, &holdKnob, &lookaheadKnob })
+    {
+        auto column = sidechain.removeFromLeft (knobWidth);
+        knob->label.setBounds (column.removeFromTop (18));
         knob->slider.setBounds (column);
     }
 }

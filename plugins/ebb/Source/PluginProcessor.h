@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "deepwater/dsp/TransientDetector.h"
 #include "deepwater/dsp/TripleBuffer.h"
 #include "dsp/Engine.h"
 #include "dsp/HostClock.h"
@@ -10,8 +11,9 @@
 // Efecto mono/estéreo. Fase 2: modo tempo, una curva de ducking sincronizada con la posición del host (PlayHead).
 // Fase 3: la forma de esa curva es una curva por puntos editable, guardada en el estado del proyecto.
 // Fase 4: modo MIDI, cada nota recibida dispara la curva en su muestra exacta.
+// Fase 5: modo audio, una entrada sidechain (2.º bus de entrada) cuyos golpes disparan la curva, y lookahead.
 // El audio está en ebb::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
-class EbbAudioProcessor final : public juce::AudioProcessor
+class EbbAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
 public:
     EbbAudioProcessor();
@@ -75,8 +77,24 @@ public:
         return { midiNotesReceived.load(), midiTriggersFired.load(), lastMidiNote.load() };
     }
 
+    // Hilo de la GUI: el sidechain. Envolvente más alta desde la lectura anterior (amplitud; la reinicia) y contadores
+    // de golpes detectados (siempre) y de los que dispararon la curva (solo en modo audio).
+    struct SidechainActivity
+    {
+        float peakEnvelope = 0.0f;
+        std::uint32_t detected = 0;
+        std::uint32_t triggers = 0;
+    };
+    SidechainActivity takeSidechainActivity() noexcept
+    {
+        return { sidechainPeakSinceRead.exchange (0.0f), sidechainDetected.load(), sidechainTriggersFired.load() };
+    }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    void timerCallback() override;
+    [[nodiscard]] int lookaheadSamplesFromParameter (double sampleRate) const noexcept;
+    std::span<const ebb::dsp::Trigger> detectSidechain (juce::AudioBuffer<float>& buffer, int numSamples) noexcept;
     ebb::dsp::TransportInfo readHostTransport() noexcept;
     ebb::dsp::TempoSettings readTempoSettings() const noexcept;
     void publishTransport (int numSamples) noexcept;
@@ -92,11 +110,14 @@ private:
     std::atomic<float>* modeParam = nullptr;
     std::atomic<float>* midiNoteParam = nullptr;
     std::atomic<float>* velocityParam = nullptr;
+    std::atomic<float>* thresholdParam = nullptr;
+    std::atomic<float>* holdParam = nullptr;
+    std::atomic<float>* lookaheadParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     ebb::dsp::Engine engine;
     ebb::dsp::HostClock clock;
-    double currentSampleRate = 44100.0;
+    std::atomic<double> currentSampleRate { 44100.0 };
     deepwater::dsp::TripleBuffer<TransportSnapshot> transportBox;
     std::atomic<float> minGainSinceRead { 1.0f };
 
@@ -110,5 +131,15 @@ private:
     std::atomic<std::uint32_t> midiNotesReceived { 0 }, midiTriggersFired { 0 };
     std::atomic<int> lastMidiNote { -1 };
 
+    // Sidechain (Fase 5): el detector corre siempre (para el medidor), pero solo dispara la curva en modo audio.
+    deepwater::dsp::TransientDetector detector;
+    std::array<ebb::dsp::Trigger, 256> audioTriggers {};
+    std::atomic<float> sidechainPeakSinceRead { 0.0f };
+    std::atomic<std::uint32_t> sidechainDetected { 0 }, sidechainTriggersFired { 0 };
+
+    // Lookahead en muestras YA informado al host. Lo cambia el temporizador (hilo de mensajes): avisar al host de una
+    // latencia nueva toma un lock dentro de JUCE, y eso no se hace en el hilo de audio. El audio usa este valor, así el
+    // retraso real y la latencia informada coinciden.
+    std::atomic<int> reportedLookahead { 0 };
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EbbAudioProcessor)
 };

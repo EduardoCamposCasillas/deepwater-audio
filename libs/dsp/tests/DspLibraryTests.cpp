@@ -35,6 +35,7 @@
 #include "deepwater/dsp/Smoothing.h"
 #include "deepwater/dsp/SpectrumAnalyzer.h"
 #include "deepwater/dsp/Svf.h"
+#include "deepwater/dsp/TransientDetector.h"
 #include "deepwater/dsp/TripleBuffer.h"
 
 namespace
@@ -1055,6 +1056,77 @@ void testEnvelopeFollower()
     CHECK (instant.process (0.7) == 0.7 && instant.process (0.2) == 0.2);
 }
 
+// Índices de las muestras en que el detector dispara.
+std::vector<size_t> detectTransients (dw::TransientDetector& detector, const std::vector<float>& signal)
+{
+    std::vector<size_t> hits;
+    for (size_t i = 0; i < signal.size(); ++i)
+        if (detector.process (std::abs (signal[i])))
+            hits.push_back (i);
+    return hits;
+}
+
+void testTransientDetector()
+{
+    std::printf ("TransientDetector: un golpe por kick en su muestra exacta, sin redisparos en la cola ni en un grave sostenido\n");
+
+    for (const double sr : sampleRates)
+    {
+        // Kick sintético: un coseno de 55 Hz (arranca en su pico: el golpe empieza en la primera muestra) que se apaga
+        // con τ = 60 ms. Patrón de dembow desplazado a 95 BPM: pasos 1, 7, 11 y 15 (0, 1.5, 2.5 y 3.5 negras).
+        const double beat = sr * 60.0 / 95.0;
+        std::vector<float> kicks (static_cast<size_t> (5.0 * beat), 0.0f);
+        std::vector<size_t> onsets;
+        for (const double at : { 0.0, 1.5, 2.5, 3.5 })
+        {
+            const auto onset = static_cast<size_t> (std::lround (0.2 * sr + at * beat));
+            onsets.push_back (onset);
+            for (size_t i = onset; i < kicks.size(); ++i)
+            {
+                const double t = static_cast<double> (i - onset) / sr;
+                kicks[i] += static_cast<float> (0.9 * std::cos (2.0 * pi * 55.0 * t) * std::exp (-t / 0.06));
+            }
+        }
+        dw::TransientDetector detector;
+        detector.prepare (sr);
+        detector.setThresholdDb (-18.0f);
+        detector.setHoldSeconds (0.03);
+        CHECK (detectTransients (detector, kicks) == onsets);
+
+        // Un grave sostenido (30 Hz, el que más ondula la envolvente) por encima del umbral: un solo golpe.
+        detector.reset();
+        auto sub = sineSignal (30.0, sr, static_cast<size_t> (sr));
+        for (auto& sample : sub)
+            sample *= 0.5f;
+        CHECK (detectTransients (detector, sub).size() == 1);
+
+        // Por debajo del umbral, nunca.
+        detector.reset();
+        detector.setThresholdDb (-3.0f);
+        CHECK (detectTransients (detector, sub).empty());
+    }
+
+    // Retención: dos clics a 100 ms. La envolvente baja de 0 dB a −12 dB (umbral − histéresis) en 69 ms, así que con
+    // 20 ms de retención los dos disparan y con 150 ms el segundo se ignora.
+    dw::TransientDetector detector;
+    detector.prepare (48000.0);
+    detector.setThresholdDb (-6.0f);
+    std::vector<float> clicks (9600, 0.0f);
+    clicks[100] = clicks[100 + 4800] = 1.0f;
+    detector.setHoldSeconds (0.02);
+    CHECK ((detectTransients (detector, clicks) == std::vector<size_t> { 100, 4900 }));
+    detector.reset();
+    detector.setHoldSeconds (0.15);
+    CHECK ((detectTransients (detector, clicks) == std::vector<size_t> { 100 }));
+
+    // Histéresis: a los 40 ms la envolvente solo bajó a −7 dB (no a −12): aun sin retención, el segundo clic no dispara.
+    detector.reset();
+    detector.setHoldSeconds (0.0);
+    std::vector<float> close (4800, 0.0f);
+    close[0] = close[1920] = 1.0f;
+    CHECK ((detectTransients (detector, close) == std::vector<size_t> { 0 }));
+}
+
 void testBreakpointCurve()
 {
     std::printf ("Curva por puntos: tension, evaluacion, edicion sin desordenar y saneado\n");
@@ -1318,6 +1390,7 @@ int main()
     testSimdMatchesScalar();
     testMidiNoteToHz();
     testEnvelopeFollower();
+    testTransientDetector();
     testBreakpointCurve();
     testLfoDivisions();
     testAnalyzerTap();

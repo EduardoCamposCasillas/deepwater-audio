@@ -7,14 +7,15 @@
 #include "deepwater/dsp/Smoothing.h"
 #include "dsp/CurveShapes.h"
 #include "dsp/HostClock.h"
+#include "dsp/Lookahead.h"
 #include "dsp/TempoCurve.h"
 #include "dsp/Triggers.h"
 
 namespace ebb::dsp
 {
 
-// Ajustes de la curva, en unidades reales. El procesador los lee de los parámetros una vez por bloque. En modo MIDI
-// (Fase 4) la división no marca cada cuánto hay golpe sino el LARGO de la curva, al tempo del host.
+// Ajustes de la curva, en unidades reales. El procesador los lee de los parámetros una vez por bloque. En los modos MIDI
+// (Fase 4) y audio (Fase 5) la división no marca cada cuánto hay golpe sino el LARGO de la curva, al tempo del host.
 struct TempoSettings
 {
     TriggerMode mode = TriggerMode::tempo;
@@ -28,14 +29,16 @@ struct TempoSettings
 // Cadena de audio completa del ducker, sin JUCE (se prueba en tests/EngineTests.cpp):
 //
 //   reloj del host ── curva de tempo ── profundidad ── suavizado ── ganancia
-//                                                                     │
-//   entrada ──┬──────────────────────────────────────────── × ganancia ──┐
-//             │                                                          ├─ fundido de bypass ── salida
-//             └──────────────── señal original (dry) ────────────────────┘
+//   o disparos (MIDI / sidechain)                                     │
+//   entrada ── lookahead ──┬──────────────────────────────── × ganancia ──┐
+//                          │                                              ├─ fundido de bypass ── salida
+//                          └──────────── señal original (dry) ────────────┘
 //
 // Modo tempo: la curva se calcula en cada muestra desde la POSICIÓN del host (no con un contador propio), así que un loop,
 // un salto o un cambio de tempo la dejan cayendo en su sitio. Modo MIDI: cada nota reinicia la curva en su muestra
-// exacta y desde ahí cuenta negras al tempo del host (también con el host parado: se puede probar tocando notas).
+// exacta y desde ahí cuenta negras al tempo del host (también con el host parado: se puede probar tocando notas). Modo
+// audio: igual, pero los disparos los detecta el procesador en el sidechain. El lookahead retrasa la entrada (también la
+// del bypass, para que la latencia no cambie), así la curva empieza antes de que llegue el golpe.
 // Para que la ganancia nunca salte hay tres capas:
 //   1. Profundidad y duración pasan por rampas lineales (un giro de perilla o una automatización por bloques).
 //   2. Cambiar de división, de forma de curva, de modo o de sensibilidad a la velocidad (o parar el host) cambia la
@@ -51,10 +54,13 @@ public:
     static constexpr double depthRampSeconds = 0.02;
     static constexpr double durationRampSeconds = 0.05;
     static constexpr double glideSeconds = 0.03;
+    static constexpr double maxLookaheadSeconds = 0.01;
 
-    void prepare (double newSampleRate, bool bypassed, const TempoSettings& settings) noexcept
+    // Fuera del hilo de audio (reserva el lookahead).
+    void prepare (double newSampleRate, bool bypassed, const TempoSettings& settings, int lookaheadSamples = 0)
     {
         sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
+        lookahead.prepare (sampleRate, maxLookaheadSamples (sampleRate), lookaheadSamples);
         bypassFade.setTime (bypassFadeSeconds, sampleRate);
         processing = ! bypassed;
         bypassFade.snap (processing);
@@ -81,6 +87,14 @@ public:
 
     void setBypassed (bool bypassed) noexcept { processing = ! bypassed; }
 
+    // Retraso de la entrada en muestras (hasta maxLookaheadSamples). Un cambio se hace con un fundido cruzado de 20 ms.
+    void setLookahead (int samples) noexcept { lookahead.setDelay (samples); }
+
+    [[nodiscard]] static int maxLookaheadSamples (double rate) noexcept
+    {
+        return static_cast<int> (std::ceil (maxLookaheadSeconds * rate));
+    }
+
     // Forma de la curva (Fase 3). Se aplica al principio del siguiente process(), con glide desde la forma anterior.
     // Copia unos 400 bytes: llamarla solo cuando la curva cambió.
     void setCurve (const BreakpointCurve& newCurve) noexcept
@@ -101,15 +115,15 @@ public:
     }
 
     // Procesa en el sitio. El reloj ya tiene que haber recibido el bloque (HostClock::beginBlock). Con más de
-    // maxChannels canales, los de más se dejan intactos. 'triggers': los disparos MIDI del bloque, ordenados por muestra
-    // (en modo tempo se ignoran); varios en la misma muestra = gana el último.
+    // maxChannels canales, los de más se dejan intactos. 'triggers': los disparos del bloque (MIDI o sidechain), ordenados
+    // por muestra (en modo tempo se ignoran); varios en la misma muestra = gana el último.
     void process (float* const* channels, int numChannels, int numSamples, const HostClock& clock,
                   std::span<const Trigger> triggers = {}) noexcept
     {
         numChannels = std::min (numChannels, maxChannels);
         beginBlock (clock);
         minGain = 1.0f;
-        size_t nextTrigger = state.mode == TriggerMode::midi ? 0 : triggers.size();
+        size_t nextTrigger = isHitMode (state.mode) ? 0 : triggers.size();
 
         for (int i = 0; i < numSamples; ++i)
         {
@@ -120,10 +134,11 @@ public:
             const float wet = bypassFade.next (processing); // 1 = procesado, 0 = original
             minGain = std::min (minGain, 1.0f - wet * (1.0f - duckGain));
 
+            lookahead.advance();
             for (int ch = 0; ch < numChannels; ++ch)
             {
                 float& sample = channels[ch][i];
-                const float dry = sample;
+                const float dry = lookahead.process (ch, sample);
                 const float processed = dry * duckGain;
 
                 // Fuera del fundido se copia la señal tal cual: con el bypass puesto (o profundidad 0), bit a bit.
@@ -140,13 +155,13 @@ private:
     struct CurveState
     {
         TriggerMode mode = TriggerMode::tempo;
-        double period = 1.0;    // tempo: duración del ciclo; MIDI: largo de la curva (con duración 100 %); en negras
+        double period = 1.0;    // tempo: duración del ciclo; MIDI/audio: largo de la curva (con duración 100 %); en negras
         bool running = false;   // el host avanza (reproduciendo o reloj libre)
         bool velocitySensitive = false;
-        bool hasHit = false;    // MIDI: ya llegó una nota (antes de la primera no hay ducking)
+        bool hasHit = false;    // MIDI/audio: ya hubo un golpe (antes del primero no hay ducking)
     };
 
-    // El último golpe MIDI: cuánto lleva sonando su curva y con qué velocidad llegó.
+    // El último golpe (MIDI o sidechain): cuánto lleva sonando su curva y con qué velocidad llegó.
     struct MidiHit
     {
         double beats = 0.0;     // negras desde la nota
@@ -158,7 +173,7 @@ private:
     // y la curva quedaría congelada a medias: el bajo sonaría atenuado al previsualizar notas en el Piano roll).
     [[nodiscard]] float shapeAt (double ppq, const CurveState& s, float duration) const noexcept
     {
-        if (s.mode == TriggerMode::midi)
+        if (isHitMode (s.mode))
         {
             if (! s.hasHit)
                 return 0.0f;
@@ -177,7 +192,7 @@ private:
         state.hasHit = true;
     }
 
-    // Avanza el golpe MIDI una muestra. Termina al pasar su largo (con la duración de ese momento): así, si después se
+    // Avanza el golpe una muestra. Termina al pasar su largo (con la duración de ese momento): así, si después se
     // alarga la división, una curva que ya terminó no vuelve a sonar a medias.
     void advanceHit (float duration) noexcept
     {
@@ -211,10 +226,11 @@ private:
         next.period = divisionBeats (division, signature);
         next.running = clock.isRunning();
         next.velocitySensitive = velocitySensitive;
-        // Al entrar en modo MIDI se empieza sin golpe (no revive uno viejo), y al parar el host se suelta el que sonaba,
-        // como en el modo tempo. Con el host parado las notas nuevas sí disparan (se puede probar tocando el teclado).
+        // Al entrar en modo MIDI o audio se empieza sin golpe (no revive uno viejo), y al parar el host se suelta el que
+        // sonaba, como en el modo tempo. Con el host parado los golpes nuevos sí disparan (se puede probar tocando el
+        // teclado o con el kick sonando en el Standalone).
         const bool stopped = state.running && ! next.running;
-        next.hasHit = next.mode == TriggerMode::midi && state.mode == TriggerMode::midi && state.hasHit && ! stopped;
+        next.hasHit = isHitMode (next.mode) && next.mode == state.mode && state.hasHit && ! stopped;
 
         if (! primed)
         {
@@ -277,6 +293,7 @@ private:
     double sampleRate = 44100.0;
     deepwater::dsp::EffectSwitch bypassFade;
     bool processing = true;
+    LookaheadDelay lookahead;
 
     deepwater::dsp::LinearRamp depthRamp, durationRamp;
     int division = defaultDuckDivision;

@@ -58,8 +58,8 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
   `fastTanh` (`FastMath.h`), FFT (`Fft.h`), toma de señal lock-free audio → GUI (`AnalyzerTap.h`), buzón del último valor audio → GUI (`TripleBuffer.h`, venía de Ebb), analizador de
   espectro calibrado, fuera del audio (`SpectrumAnalyzer.h`, venía de Riptide), `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de
   pico/RMS (`LevelMeter.h`), LFO con divisiones de tempo (`Lfo.h`, venía de Undertow), curva por puntos con tensión
-  (`BreakpointCurve.h`, venía de Ebb) y seguidor de envolvente
-  (`EnvelopeFollower.h`).
+  (`BreakpointCurve.h`, venía de Ebb), seguidor de envolvente
+  (`EnvelopeFollower.h`) y detector de golpes por umbral con histéresis y retención (`TransientDetector.h`, venía de Ebb).
 - Suavizado: usar `LinearRamp` (llega exacto al objetivo). `SmoothedParameter` tiene un bug conocido (nunca termina de
   llegar) y solo lo usa Undertow; arreglarlo cambiaría su sonido.
 - Sin JUCE ni GUI, C++20 estándar. Lo que corre en el hilo de audio va en headers (para que se inlinee); lo que corre

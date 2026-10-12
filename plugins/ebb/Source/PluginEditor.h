@@ -6,14 +6,15 @@
 #include "gui/CurveView.h"
 #include "gui/EbbLookAndFeel.h"
 #include "gui/MidiActivityView.h"
+#include "gui/SidechainMeterView.h"
 #include "gui/TransportView.h"
 
 class EbbAudioProcessor;
 
 // GUI funcional. Fase 1: el visor del reloj del host y el bypass en la cabecera. Fase 2: la curva del modo tempo con
 // sus controles y un medidor de cuánto baja el volumen. Fase 3: el menú de formas y el editor de la curva. Fase 4: el
-// modo (tempo / MIDI), el filtro de nota, la velocidad y la luz de actividad MIDI. Un temporizador a 30 cuadros por
-// segundo recoge lo que publicó el audio.
+// modo (tempo / MIDI), el filtro de nota, la velocidad y la luz de actividad MIDI. Fase 5: el panel del sidechain
+// (medidor con el umbral, retención y lookahead). Un temporizador a 30 cuadros por segundo recoge lo que publicó el audio.
 class EbbAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -39,6 +40,7 @@ private:
     void setUpKnob (Knob& knob, const char* parameterId, const juce::String& name, const juce::String& tooltip);
     [[nodiscard]] juce::Rectangle<int> controlsArea() const;
     [[nodiscard]] juce::Rectangle<int> editorPanelArea() const;
+    [[nodiscard]] juce::Rectangle<int> sidechainArea() const;
     void showCurve();
     void setUpComboLabel (juce::Label& label, const juce::String& text);
     void setUpCombo (juce::ComboBox& box, const char* parameterId, const juce::String& tooltip,
@@ -76,6 +78,10 @@ private:
     juce::Label shapeLabel;
     juce::ComboBox shapeBox;
     Knob depthKnob, durationKnob, smoothingKnob;
+
+    juce::Label sidechainLabel;
+    ebb::gui::SidechainMeterView sidechainMeter;
+    Knob thresholdKnob, holdKnob, lookaheadKnob;
 
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<ButtonAttachment> bypassAttachment;
