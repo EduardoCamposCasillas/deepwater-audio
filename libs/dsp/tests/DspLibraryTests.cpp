@@ -12,6 +12,7 @@
 #include <cstring>
 #include <numbers>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "deepwater/dsp/AnalyzerTap.h"
@@ -32,6 +33,7 @@
 #include "deepwater/dsp/Smoothing.h"
 #include "deepwater/dsp/SpectrumAnalyzer.h"
 #include "deepwater/dsp/Svf.h"
+#include "deepwater/dsp/TripleBuffer.h"
 
 namespace
 {
@@ -1172,6 +1174,56 @@ void testSpectrumAnalyzer()
     }
 }
 
+void testTripleBuffer()
+{
+    std::printf ("TripleBuffer: el lector ve el ultimo valor completo, nunca mezclado, aun con dos hilos\n");
+
+    struct Pair
+    {
+        std::uint64_t a = 0;
+        std::uint64_t b = 0;
+    };
+
+    // Un solo hilo: sin escrituras se lee T{}; varias escrituras seguidas = solo la última; sin nada nuevo, se repite.
+    dw::TripleBuffer<Pair> box;
+    Pair value;
+    CHECK (! box.read (value) && value.a == 0 && value.b == 0);
+    for (std::uint64_t i = 1; i <= 5; ++i)
+        box.write ({ i, i * 10 });
+    CHECK (box.read (value) && value.a == 5 && value.b == 50);
+    CHECK (! box.read (value) && value.a == 5);
+    box.write ({ 6, 60 });
+    CHECK (box.read (value) && value.a == 6 && value.b == 60);
+
+    // Dos hilos: el escritor publica pares (n, 3n) sin parar; el lector comprueba que cada par sea coherente (no
+    // mezcla dos escrituras) y que n nunca retroceda.
+    dw::TripleBuffer<Pair> shared;
+    constexpr std::uint64_t writes = 2'000'000;
+    std::thread writer ([&shared]
+    {
+        for (std::uint64_t n = 1; n <= writes; ++n)
+            shared.write ({ n, 3 * n });
+    });
+
+    bool coherent = true;
+    bool monotonic = true;
+    std::uint64_t last = 0;
+    int freshReads = 0;
+    while (last < writes)
+    {
+        Pair read;
+        if (shared.read (read))
+            ++freshReads;
+        coherent = coherent && read.b == 3 * read.a;
+        monotonic = monotonic && read.a >= last;
+        last = read.a;
+    }
+    writer.join();
+    CHECK (coherent);
+    CHECK (monotonic);
+    CHECK (freshReads > 0);
+}
+
 } // namespace
 
 int main()
@@ -1204,6 +1256,7 @@ int main()
     testLfoDivisions();
     testAnalyzerTap();
     testSpectrumAnalyzer();
+    testTripleBuffer();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de deepwater::dsp pasaron.\n");

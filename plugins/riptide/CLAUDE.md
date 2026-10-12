@@ -465,4 +465,4 @@ Fase 1 COMPLETADA (2026-10-10). Probada por el usuario en FL Studio: funciona.
   pluginval strictness 10 ampliado (4 sample rates, bloques 1–4096, `--repeat 3 --randomise`): SUCCESS. Revisado con
   captura del Standalone.
 
-Siguiente: Riptide está terminado. Plugin 3 de la suite: EQ paramétrico (ver el `CLAUDE.md` raíz).
+Siguiente: Riptide está terminado. Plugin 3 de la suite: Ebb, el ducker (ver el `CLAUDE.md` raíz).

@@ -36,3 +36,4 @@ add_subdirectory(libs/presets)
 # --- Plugins -------------------------------------------------------------------
 add_subdirectory(plugins/undertow)
 add_subdirectory(plugins/riptide)
+add_subdirectory(plugins/ebb)

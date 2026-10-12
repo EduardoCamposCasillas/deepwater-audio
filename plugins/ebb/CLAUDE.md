@@ -3,9 +3,9 @@
 Plugin 3 de la suite. Las reglas generales (modo de trabajo, stack, reglas del hilo de audio, estilo, git) están en
 el `CLAUDE.md` de la raíz del repositorio; aquí solo va lo propio del ducker.
 
-Nombre de trabajo: **Ebb** (la marea que baja: el volumen "se retira" y vuelve). Fabricante `Undw`, el de toda la
-suite; `COMPANY_NAME "Deepwater"`. El nombre definitivo, el target y el `PLUGIN_CODE` (único en la suite; propuesta:
-`Ebb1`) se deciden al empezar la Fase 1.
+Nombre: **Ebb** (la marea que baja: el volumen "se retira" y vuelve). Target `Ebb`, `PLUGIN_CODE Ebb1`; fabricante
+`Undw`, el de toda la suite; `COMPANY_NAME "Deepwater"`. Decidido con el usuario al empezar la Fase 1 (otras ideas que
+se consideraron: Backwash, Swell, Lull, Moonpull, Breaker, Seiche).
 
 ## Objetivo del proyecto
 Construir un ducker / modulador de volumen de calidad profesional (referencia de nivel: Nicky Romero Kickstart 2,
@@ -43,6 +43,30 @@ Antes de empezar, mover a la librería lo reutilizable de Riptide que haga falta
 otros plugins va en la librería con tests: la curva por puntos con tensión (Fase 3) le sirve a futuros LFO y
 envolventes, y el detector de transitorios (Fase 5) al compresor.
 
+## Comandos
+Desde la raíz del repositorio (ver también los comandos generales en el `CLAUDE.md` raíz):
+```
+cmake --build build --config Release --target Ebb_VST3      # solo el plugin
+build/plugins/ebb/Release/EbbTests.exe                      # tests del reloj y del motor (sin JUCE)
+```
+- VST3: `build/plugins/ebb/Ebb_artefacts/Release/VST3/Ebb.vst3`.
+- Standalone: `build/plugins/ebb/Ebb_artefacts/Release/Standalone/Ebb.exe` (sin host: reloj libre a 120 BPM).
+
+## Estructura
+```
+plugins/ebb/
+  CMakeLists.txt           # plugin y tests; enlaza deepwater::dsp
+  Source/
+    PluginProcessor.h/.cpp   # parámetros, estado, processBlock, lectura del PlayHead y publicación para la GUI
+    PluginEditor.h/.cpp      # GUI
+    Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
+    TransportSnapshot.h      # lo que el audio publica para la GUI en cada bloque (TripleBuffer)
+    dsp/HostClock.h          # reloj musical: posición del host por muestra, saltos, reloj libre; compás.tiempo.semicorchea
+    dsp/Engine.h             # cadena de audio completa, sin JUCE
+    gui/                     # tema, LookAndFeel, visor del transporte
+  tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE)
+```
+
 ## Aprendizaje de mezcla y diseño sonoro (igual de importante que el código)
 Además de los 6 puntos del raíz (en efectos, siempre con el volumen igualado), este plugin se enfoca en:
 - **Qué es el sidechain y por qué se usa**: una señal controla lo que le pasa a otra.
@@ -59,7 +83,7 @@ Actualizar el archivo `APRENDIZAJE.md` de esta carpeta (`plugins/ebb/`) al final
 incluyen notas de para qué sirven y por qué.
 
 ## Hoja de ruta
-- [ ] Fase 1 — Proyecto base: `plugins/ebb/` con su `CMakeLists.txt` (VST3 + Standalone, efecto mono/estéreo),
+- [x] Fase 1 — Proyecto base: `plugins/ebb/` con su `CMakeLists.txt` (VST3 + Standalone, efecto mono/estéreo),
       añadido al CMake raíz y enlazado a `deepwater::dsp`. Passthrough, lectura del tempo y la posición del host
       (PlayHead: BPM, compás, posición en negras, reproduciendo o no) mostrados en una GUI funcional. Tests y
       pluginval. Decidir antes: el nombre y su `PLUGIN_CODE`.
@@ -79,4 +103,30 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Pendiente: solo planificado (2026-10-11). Todavía no hay código; la Fase 1 empieza cuando se decida arrancar el plugin.
+Fase 1 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio.
+- Nombre decidido con el usuario: Ebb (`Ebb1`), categoría VST3 `Fx Dynamics`. Layouts mono → mono y estéreo → estéreo
+  (el bus sidechain llega en la Fase 5; `NEEDS_MIDI_INPUT` pasa a TRUE en la Fase 4). Latencia 0.
+- `dsp/HostClock.h` (sin JUCE): `TransportInfo` (lo que dice el PlayHead, todo opcional), `HostClock` y
+  `musicalPosition`. El reloj se resincroniza con el host al principio de CADA bloque y extrapola dentro del bloque
+  (`ppqAt (offset)` = inicio + offset · bpm / (60 · fs)). Fuentes: `host` (reproduciendo), `stopped` (la posición queda
+  quieta donde la deja el host) y `freeRunning` (sin host o sin posición: cuenta desde 0, o desde donde iba el host, al
+  último tempo conocido o 120). Saltos = reproduciendo y la posición difiere de la esperada en más de 1/64 de negra
+  (la automatización de tempo se desvía milésimas; un loop, compases). Arrancar no es un salto (`startedThisBlock`).
+  Tempo inválido se ignora y se limita a 20–999 BPM; compás inválido (denominador no potencia de 2) se ignora.
+  `musicalPosition` usa el inicio de compás del host si es coherente (respeta cambios de compás) y si no asume el
+  mismo compás desde el inicio; margen de 1e-6 negras para el redondeo del host.
+- `dsp/Engine.h`: passthrough con fundido de bypass de 20 ms (`EffectSwitch`); la salida es la entrada bit a bit.
+- Librería (nuevo): `TripleBuffer.h` = buzón del último valor (3 copias + un byte atómico con índice y bit de "nuevo";
+  escritor y lector nunca esperan). El procesador publica un `TransportSnapshot` por bloque; la GUI lo lee a 30 fps.
+- Parámetros (versionHint 1): `bypass` (devuelto por `getBypassParameter()`).
+- GUI 580 × 270: estado (▶ / ■ / ○ en ámbar), compás.tiempo.semicorchea en grande, luces por tiempo del compás, y
+  FL (B:S) (compás:paso, como el contador Bar:Step de FL), Tempo, Compás, Posición en negras, Loop, Saltos, Audio (Hz
+  y tamaño del bloque). BYPASS en la cabecera. Revisada con captura del Standalone (sin audio en este entorno).
+- Tests: `DeepwaterDspTests` (+1: TripleBuffer en un hilo y con dos hilos, 2 millones de escrituras, nunca un valor
+  mezclado ni hacia atrás) y `EbbTests` (posición musical en 4/4, 3/4, 6/8, 7/8, inicio de compás del host, redondeo y
+  pre-roll; reloj libre continuo; sigue al host con bloques de 1–4096 y cambios de tempo sin saltos falsos, 4 sample
+  rates; saltos de loop y adelante, arranque, parado, host que desaparece; tempo/compás inválidos; paso de FL; passthrough y
+  bypass bit a bit en mono/estéreo).
+- Release con 0 warnings; ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
+
+Siguiente: Fase 2 (modo tempo), cuando el usuario confirme la Fase 1 en FL.

@@ -24,14 +24,14 @@ libs/
 plugins/
   undertow/             # sintetizador wavetable
   riptide/              # saturador
-  ebb/                  # ducker para sidechain (pendiente: por ahora solo CLAUDE.md y APRENDIZAJE.md)
+  ebb/                  # ducker para sidechain
   <plugin>/             # cada plugin: CMakeLists.txt, Source/, tests/, CLAUDE.md, APRENDIZAJE.md
 scripts/
   null_test.py          # resta dos carpetas de WAV (verificar que un refactor no cambia el sonido)
   level_match.py        # iguala la sonoridad (LUFS) de varias versiones de un audio para compararlas a oído (y a ciegas)
 ```
 - Cada plugin compila a su propio VST3/Standalone independiente. Todos comparten `PLUGIN_MANUFACTURER_CODE Undw` y
-  `COMPANY_NAME "Deepwater"`; cada uno tiene su `PLUGIN_CODE` (Undertow `Uwt1`, Riptide `Rpt1`).
+  `COMPANY_NAME "Deepwater"`; cada uno tiene su `PLUGIN_CODE` (Undertow `Uwt1`, Riptide `Rpt1`, Ebb `Ebb1`).
 - Compilar solo el plugin en el que se trabaja: `cmake --build build --config Release --target <Plugin>_VST3`.
 - La librería compartida se enlaza estáticamente dentro de cada plugin (`target_link_libraries(... deepwater::dsp)`).
 
@@ -55,7 +55,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
   (`Oversampler.h`; los dos con versión en bloque, idéntica bit a bit y unas 2 veces más rápida), filtro DC (`DcBlocker.h`), SVF TPT/ZDF (`Svf.h`), crossover Linkwitz-Riley y divisor multibanda
   (`Crossover.h`), filtro de 1 polo TPT y tilt EQ (`OnePole.h`), suavizado de parámetros y fundidos
   (`Smoothing.h`), línea de retardo con lectura lineal, cúbica y Lagrange (`DelayLine.h`), SIMD SSE2 (`Simd.h`),
-  `fastTanh` (`FastMath.h`), FFT (`Fft.h`), toma de señal lock-free audio → GUI (`AnalyzerTap.h`), analizador de
+  `fastTanh` (`FastMath.h`), FFT (`Fft.h`), toma de señal lock-free audio → GUI (`AnalyzerTap.h`), buzón del último valor audio → GUI (`TripleBuffer.h`, venía de Ebb), analizador de
   espectro calibrado, fuera del audio (`SpectrumAnalyzer.h`, venía de Riptide), `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de
   pico/RMS (`LevelMeter.h`), LFO con divisiones de tempo (`Lfo.h`, venía de Undertow) y seguidor de envolvente
   (`EnvelopeFollower.h`).
@@ -85,7 +85,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 |---|--------|---------------------|--------|
 | 1 | Undertow — sintetizador wavetable (FM, warp, unison, matriz de modulación, FX) | Serum 2, Vital | ✅ Terminado (ampliación en curso: cuerda pulsada) |
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | ✅ Terminado |
-| 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | Pendiente |
+| 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | En curso (Fase 1) |
 | 4 | EQ paramétrico con analizador de espectro | FabFilter Pro-Q | Pendiente |
 | 5 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
 | 6 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
