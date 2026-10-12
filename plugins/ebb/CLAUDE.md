@@ -117,10 +117,10 @@ incluyen notas de para qué sirven y por qué.
 - [x] Fase 7 — GUI: visualización de la curva y de la forma de onda en vivo, cursor de reproducción, indicador de
       cuándo se dispara.
 - [x] Fase 8 — Presets con notas educativas (dembow, house, trap, pads bombeando como efecto creativo).
-- [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
+- [x] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 9 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio. Con el tempo fijo el audio no cambia: idéntico bit a
+Fase 9 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona. Ebb TERMINADO. Con el tempo fijo el audio no cambia: idéntico bit a
 bit a la Fase 8 (336 escenarios, ver abajo).
 - Tempo automatizado (fallo encontrado por los tests nuevos): el host informa el tempo del principio del bloque y, si el
   tempo cambia dentro del bloque, su posición real se aleja de la extrapolada. `HostClock` saltaba a la del host en el
@@ -171,8 +171,7 @@ bit a la Fase 8 (336 escenarios, ver abajo).
   culpa de processBlock.
 - Release con 0 warnings; ctest 7/7; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 9 en FL Studio (tempo automatizado, buffer grande, CPU con la GUI abierta y
-cerrada). Con eso Ebb queda terminado; después, plugin 4 (EQ paramétrico, ver el `CLAUDE.md` raíz).
+Siguiente: Ebb está terminado. Plugin 4 de la suite: el EQ paramétrico (ver el `CLAUDE.md` raíz).
 
 ### Fase 8 (completada 2026-10-12, probada en FL)
 - Librería `libs/presets`: "estado extra" opcional en `PresetFormat` (`extraStateTag`, `captureExtraState`,
