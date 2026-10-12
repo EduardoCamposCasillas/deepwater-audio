@@ -655,7 +655,7 @@ Cambio desde Riptide Fase 9 (2026-10-11). El sonido no cambia (huellas de los 49
   Arreglado de paso: el aviso de "versión más nueva" llevaba tildes sin `fromUTF8` (aserción de JUCE en Debug).
 - `UndertowPresetTests`, pluginval strictness 10 ampliado: SUCCESS. Revisado con capturas del Standalone.
 
-Fase 17 COMPLETADA (2026-10-11). Pendiente de probar en FL Studio. Lo existente suena igual: null test de los 6 presets
+Fase 17 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona. Lo existente suena igual: null test de los 6 presets
 de referencia (`out/render-fase16` vs `out/render-fase17`): idéntico bit a bit; huellas de los 49 presets: iguales.
 - Origen: el usuario oía "distorsionada" la sierra del Init en acordes graves (C2–C4 de FL). Medido con el motor real
   (programa aparte, scratch): afinación C2–C4 a 4 sample rates, peor 0.004 cents; alias < 16 kHz −92…−97 dB; armónicos
