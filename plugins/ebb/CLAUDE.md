@@ -103,7 +103,7 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 1 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio.
+Fase 1 COMPLETADA (2026-10-11). Probada por el usuario en FL Studio: funciona.
 - Nombre decidido con el usuario: Ebb (`Ebb1`), categoría VST3 `Fx Dynamics`. Layouts mono → mono y estéreo → estéreo
   (el bus sidechain llega en la Fase 5; `NEEDS_MIDI_INPUT` pasa a TRUE en la Fase 4). Latencia 0.
 - `dsp/HostClock.h` (sin JUCE): `TransportInfo` (lo que dice el PlayHead, todo opcional), `HostClock` y
@@ -129,4 +129,4 @@ Fase 1 IMPLEMENTADA (2026-10-11), pendiente de probar en FL Studio.
   bypass bit a bit en mono/estéreo).
 - Release con 0 warnings; ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 2 (modo tempo), cuando el usuario confirme la Fase 1 en FL.
+Siguiente: Fase 2 (modo tempo).
