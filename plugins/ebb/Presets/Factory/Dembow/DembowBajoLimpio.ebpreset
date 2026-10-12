@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Dembow clásico (kick en cada tiempo): el bajo se aparta 3–4 dB en cada golpe, sin que se oiga el bombeo. -->
+<EbbPreset formatVersion="1" name="Dembow Bajo Limpio" category="Dembow" author="Ebb">
+  <Notes>
+    Para el 808 o el bajo de un dembow clásico, con el kick en los cuatro tiempos (pasos 1, 5, 9 y 13). El kick sale
+    limpio y el pico de la suma kick + bajo baja (más margen para el limitador del Master), sin que se oiga bombear.
+
+    Cómo se construyó:
+    - Modo Tempo, 1/4: un golpe por tiempo, como el kick.
+    - Profundidad 35 % (−3.7 dB): bastan 3–4 dB para que el kick "salga"; más y empieza a oírse como efecto.
+    - Duración 35 %: a 95 BPM una negra son 632 ms; el 35 % son unos 220 ms, justo cuando el kick se apaga.
+    - Suavizado 2 ms: sin clic en la caída y sin comerse el golpe.
+
+    Pruébalo: con toda la batería sonando, alterna BYPASS (iguala el volumen con el fader). En el visor, el hueco
+    blanco tiene que caer bajo cada kick y la línea volver arriba antes del siguiente.
+    Cuándo NO usarlo: si tu kick no cae en los cuatro tiempos (dembow experimental): este modo baja el bajo donde no
+    hay kick. Usa "Dembow MIDI Kick Irregular" o "Dembow Audio Kick Grabado".
+    Viene de: Fase 2 (receta del dembow con el bajo limpio).
+  </Notes>
+  <Parameters>
+    <PARAM id="depth" value="35"/>
+    <PARAM id="duration" value="35"/>
+  </Parameters>
+</EbbPreset>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mezcla: el sample melódico baja 3 dB con cada kick, para que el kick no se pierda en un sample denso. -->
+<EbbPreset formatVersion="1" name="Trap Sample Sutil" category="Trap" author="Ebb">
+  <Notes>
+    El sample melódico de un beat de trap (un loop de piano, una guitarra, un coro sampleado) suele venir masterizado,
+    denso y fuerte, y tapa el ataque del kick. Bajarlo 3 dB solo durante el golpe deja pasar el kick sin quitarle
+    presencia al sample: no se oye como bombeo.
+
+    Cómo se construyó:
+    - Modo Audio (el kick por el sidechain), UMBRAL −20 dB, RETENCIÓN 60 ms.
+    - Forma Rápida: vuelve enseguida y se acerca despacio al final (el ducking que menos se nota).
+    - LARGO 1/4 × duración 50 %: a 140 BPM, unos 214 ms. Profundidad 30 % (−3.1 dB), suavizado 3 ms.
+    - BANDA Todo: el sample choca con el kick en el ataque (1–4 kHz) además de en los graves.
+
+    Pruébalo: alterna BYPASS con el beat completo e iguala el volumen. Fíjate en el CLIC del kick: con Ebb se oye más
+    definido. Sube la profundidad hasta oír el bombeo y bájala hasta que deje de oírse: ahí va.
+    Cuándo NO usarlo: si el sample ya tiene huecos donde cae el kick; con un sample sin graves ni ataques (un pad
+    suave) casi no hace falta.
+    Viene de: nuevo (Fase 8), con la forma Rápida de la Fase 3 y el modo Audio de la Fase 5.
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Audio"/>
+    <PARAM id="threshold" value="-20"/>
+    <PARAM id="hold" value="60"/>
+    <PARAM id="depth" value="30"/>
+    <PARAM id="duration" value="50"/>
+    <PARAM id="smoothing" value="3"/>
+  </Parameters>
+  <Curve shape="Rápida"/>
+</EbbPreset>

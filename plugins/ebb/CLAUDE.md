@@ -48,6 +48,7 @@ Desde la raíz del repositorio (ver también los comandos generales en el `CLAUD
 ```
 cmake --build build --config Release --target Ebb_VST3      # solo el plugin
 build/plugins/ebb/Release/EbbTests.exe                      # tests del reloj y del motor (sin JUCE)
+build/plugins/ebb/EbbPresetTests_artefacts/Release/EbbPresetTests.exe   # presets (--verbose: tabla; --notes: notas)
 ```
 - VST3: `build/plugins/ebb/Ebb_artefacts/Release/VST3/Ebb.vst3`.
 - Standalone: `build/plugins/ebb/Ebb_artefacts/Release/Standalone/Ebb.exe` (sin host: reloj libre a 120 BPM).
@@ -55,7 +56,7 @@ build/plugins/ebb/Release/EbbTests.exe                      # tests del reloj y 
 ## Estructura
 ```
 plugins/ebb/
-  CMakeLists.txt           # plugin y tests; enlaza deepwater::dsp
+  CMakeLists.txt           # plugin, presets de fábrica (BinaryData) y tests; enlaza deepwater::dsp y deepwater::presets
   Source/
     PluginProcessor.h/.cpp   # parámetros, estado, processBlock, lectura del PlayHead y publicación para la GUI
     PluginEditor.h/.cpp      # GUI
@@ -75,7 +76,10 @@ plugins/ebb/
                              # editor de la curva (CurveEditor.h), luz de actividad MIDI (MidiActivityView.h),
                              # medidor del sidechain con el umbral arrastrable (SidechainMeterView.h),
                              # respuesta en frecuencia de las bandas (BandView.h), visor en vivo (LiveView.h)
+    presets/EbbPresets.h/.cpp  # formato propio (categorías, .ebpreset, bypass excluido, BinaryData) y curva ↔ <Curve>
+  Presets/Factory/         # .ebpreset de fábrica por categoría (compilados dentro del plugin)
   tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE)
+  tests/PresetTests.cpp    # tests de presets (con JUCE: compila el procesador; dembow sintético por MIDI y sidechain)
 ```
 
 ## Aprendizaje de mezcla y diseño sonoro (igual de importante que el código)
@@ -114,44 +118,52 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 7 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
-- `dsp/LiveScope.h` (nuevo): osciloscopio de barrido. Ventana de 1, 2 o 4 compases (`setBars`, atómico) en 512
-  columnas; con el host corriendo (o el reloj libre) arranca en un inicio de compás (compases 1–2, 3–4... a partir de
-  `barOrigin`); parado, el barrido sigue al tempo conocido. Cada columna: pico de entrada (después del lookahead),
-  de salida y del sidechain, ganancia mínima que sonó (con mix y bypass) y si empezó una curva. Atómicos relajados
-  escritos muestra a muestra (sin locks; una lectura a medias se ve un cuadro). Dos pasadas independientes por bloque:
-  `write` (motor) y `addSidechain` (procesador); cada una reinicia su parte al entrar en una columna nueva.
-  No se usó `AnalyzerTap` (libs/dsp): entrega muestras crudas en orden de llegada, y el visor necesita resúmenes
-  colocados por la posición musical (depende de `HostClock`, por eso vive en Ebb y no en la librería).
-- `dsp/Engine.h`: `setScope` (nullptr = sin visor; no cambia el sonido: test bit a bit), `hitCount` (golpes MIDI/audio
-  y, en tempo, cada inicio de ciclo: la posición cae en la 1.ª muestra del ciclo viniendo de más atrás o de no sonar;
-  un loop o arranque a mitad de ciclo no cuenta) y `curvePosition` (0–1 del eje del editor; 1 = terminó; −1 = no suena).
-  `shapeAt` se partió en `curveBeats` + `shapeFromBeats` (misma cuenta).
-- Procesador: el visor solo se alimenta con la GUI abierta (`setLiveViewOpen`); publica `curveHits` y
-  `curvePosition` (atómicos).
-- GUI escalable (como Riptide): lienzo fijo de 1160 × 590 en `content` con transformación de escala, 70–200 %,
-  ventana redimensionable con proporción fija; zoom en el estado ("uiZoom") y en `%APPDATA%/Deepwater/Ebb.settings`;
-  la primera vez, el mayor (≤ 100 %) que cabe (en la pantalla del usuario, 1280 × 720 lógicos, cabe a 100 %).
-  Distribución: cabecera (EBB | reloj del host en una tira | zoom | bypass); fila 1: EN VIVO | PREVIA + medidor;
-  fila 2: FORMA DE LA CURVA (con el menú FORMA en su título) | BANDAS; fila 3: MODO y DIVISIÓN | 3 perillas | MIDI (Tempo
-  y MIDI) o SIDECHAIN (Audio) | LOOKAHEAD. Compases del visor en el estado ("liveBars").
-- `gui/LiveView.h` (nuevo): gris = entrada, verde agua = salida (polígonos escalonados: con un rectángulo por columna
-  el relleno sale a rayas), blanca = ganancia, ámbar = sidechain (escala propia), triángulos = golpes, cuadrícula de
-  compás/tiempo/semicorchea con números encima de la señal, cursor con hueco borrado delante, botón 1/2/4 compases y
-  luz GOLPE. Escala automática (sube al instante, baja ≈ 2 s; piso −40 dBFS) y picos retenidos ±12.5 ms entre columnas
-  vecinas (un sub de 40 Hz se veía a rayas).
-- `gui/CurveEditor.h`: cursor de reproducción (línea + punto blanco sobre la forma; apagado al terminar) y tooltip con
-  la ayuda. `gui/TransportView.h`: tira compacta para la cabecera. `gui/CurveView.h`: título "PREVIA".
-- Captura del Standalone revisada (sin dispositivo de audio en esta máquina el Standalone no procesa: el visor se
-  revisó alimentándolo con un dembow sintético desde la GUI, cambio temporal ya quitado), también el modo Audio.
-- Tests `EbbTests` (+1, `testLiveView`): el visor no cambia la salida (bit a bit); tempo 1/4 en 2 compases = 9 golpes
-  con marcas exactamente en las 4 columnas de los tiempos; ganancia 0 en el golpe y 1 pasada la duración; posición de
-  la curva a mitad (0.5) y terminada (1); arrancar a mitad de un tiempo y un loop a mitad de ciclo no cuentan; dembow
-  MIDI en ventana de 2 compases con sus 4 marcas (±1 columna por el redondeo del host) y cursor a la mitad; compás 4 de
-  una ventana de 2 = 2.ª mitad; sidechain en su columna; host parado = el barrido avanza. Release con 0 warnings;
-  ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
+Fase 8 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio. El audio no cambia (el motor no se tocó).
+- Librería `libs/presets` (cambio compartido; Undertow y Riptide no lo usan y sus tests pasan): "estado extra" opcional
+  en `PresetFormat` (`extraStateTag`, `captureExtraState`, `applyExtraState` → avisos) y `Preset::extraState`
+  (`juce::ValueTree`), para lo que es parte del sonido pero no es un parámetro. Se escribe como un elemento hijo del
+  preset, se aplica al cargar (inválido = el de Init), se guarda con los presets del usuario y entra en el "*"
+  (comparado con lo capturado al cargar, `isEquivalentTo`).
+- `presets/EbbPresets.h/.cpp`: `<EbbPreset>`, `.ebpreset`, `Documentos\Ebb\Presets`, categorías Init, Dembow, Trap,
+  House, Mezcla, Creativo, Otros; bypass EXCLUIDO. La curva es el estado extra `<Curve>`: puntos
+  (`<Point x y tension/>`, el mismo formato del estado del proyecto) o una forma de fábrica por nombre
+  (`<Curve shape="Retención"/>`, así los presets se leen como recetas). `curveToTree` / `curveFromTree` (sin `<Curve>` =
+  Clásica sin aviso; forma desconocida o < 2 puntos = Clásica con aviso) los usa también el procesador.
+- Procesador: `curve` arranca en la forma por defecto ANTES del `PresetManager` (último miembro: una instancia nueva es
+  "Init" sin "*"); `getStateInformation` escribe el nombre del preset y el "*"; `setStateInformation` llama a
+  `stateRestored` después de cargar la curva. Proyecto de la Fase 7 → "Sin nombre".
+- GUI: barra de presets (400 px) en la cabecera entre EBB y el reloj (al reloj le caben estado, posición, luces, BPM y
+  compás); el navegador y el panel de guardar tapan las tres filas; los mensajes de los presets, 6 s en el pie, en
+  ámbar. `theme::presetPalette()` (usuario en ámbar). Revisado con captura del Standalone (el navegador, abierto con un
+  parche temporal: el clic simulado no llega a JUCE).
+- 19 presets de fábrica (Init + 6 Dembow, 3 Trap, 2 House, 2 Mezcla, 5 Creativo) con notas: qué hace cada ajuste y por
+  qué, qué ruteo necesita, cómo probarlo, cuándo NO usarlo y de qué fase viene. Las recetas de las fases 2–7 y presets
+  nuevos; no resuelven los retos pendientes (no hay preset de Agudos: es el reto de la Fase 6). "Rebote" es el único con
+  una curva escrita punto a punto.
+- Tests `EbbPresetTests` (en ctest): cada preset de fábrica se lee y se carga sin avisos (también su curva),
+  categorías, notas, sin bypass; curva por nombre / por puntos / sin `<Curve>` / rara; cargar (unidades, nombres de
+  opciones, defectos, bypass intacto, Init devuelve la curva); "*" con parámetros y con la curva; guardar con la curva
+  (ida y vuelta exacta), reemplazar, borrar; estado del proyecto (nombre, "*" de la curva, proyecto antiguo); cada
+  preset sobre un dembow desplazado a 120 BPM (kick por MIDI y por sidechain): sin NaN ni reservas, el pico no sube más
+  de 1 dB, baja en el kick (5–30 ms después) y en MIDI/Audio suelta lejos de él; bloques 1–4096 × mono/estéreo ×
+  con/sin sidechain × 4 sample rates; cambiar de preset cada 150 ms con un seno (mayor salto entre muestras 0.010).
+  Encontrado al escribirlos: con un kick de cola larga (caída de 180 ms) el del paso 15 no deja rearmar el detector antes
+  del "1" con UMBRAL −20 dB (la limitación de la Fase 5). El test usa un kick de dembow seco (70 ms) y las notas de los
+  presets de Audio dicen que el kick tiene que bajar de la línea punteada entre golpe y golpe.
+- Release con 0 warnings; ctest 7/7; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 8 (presets).
+Siguiente: que el usuario pruebe la Fase 8 en FL Studio; después, Fase 9 (pulido).
+
+### Fase 7 (completada 2026-10-12, probada en FL)
+- `dsp/LiveScope.h`: osciloscopio de barrido de 1, 2 o 4 compases en 512 columnas, anclado a un inicio de compás; por
+  columna, pico de entrada/salida/sidechain, ganancia mínima y si empezó una curva (atómicos relajados, sin locks). Solo
+  se alimenta con la GUI abierta. No usa `AnalyzerTap`: necesita resúmenes colocados por la posición musical.
+- `dsp/Engine.h`: `setScope` (bit a bit), `hitCount` (golpes MIDI/audio y cada inicio de ciclo en tempo) y
+  `curvePosition` (0–1; 1 = terminó; −1 = no suena).
+- GUI escalable 1160 × 590 (70–200 %, zoom en "uiZoom" y en `%APPDATA%/Deepwater/Ebb.settings`): cabecera; EN VIVO |
+  PREVIA; FORMA DE LA CURVA | BANDAS; MODO y DIVISIÓN | perillas | MIDI o SIDECHAIN | LOOKAHEAD. `LiveView` (gris
+  entrada, verde agua salida, blanca ganancia, ámbar sidechain, triángulos golpes; escala automática), cursor en el
+  editor de la curva. Compases del visor en "liveBars".
 
 ### Fase 6 (completada 2026-10-12, probada en FL)
 - `dsp/Bands.h`: `DuckBand` (Todo, Graves, Agudos; índice: solo añadir al final) y `BandDucker`: `LinkwitzRileySplit`

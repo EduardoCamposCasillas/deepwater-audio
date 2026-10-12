@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Una curva propia (escrita punto a punto): el volumen cae, rebota, vuelve a caer y sube. -->
+<EbbPreset formatVersion="1" name="Rebote" category="Creativo" author="Ebb">
+  <Notes>
+    El volumen cae de golpe, sube casi entero, vuelve a caer a la mitad y sube despacio: como una pelota que rebota. En
+    una blanca (dos tiempos) le da a un pad o a unos acordes un movimiento que no es ni corchea ni negra.
+
+    Es el único preset de fábrica con una curva PROPIA (el menú FORMA dice "Personalizada"): en el archivo los puntos
+    están escritos uno a uno, como los guarda Ebb cuando dibujas la tuya.
+    - (0, 0) → (0.3, 0.85): sube rápido (tensión −0.5: la vuelta empieza veloz y frena).
+    - (0.3, 0.85) → (0.38, 0.4): la segunda caída, recta y corta.
+    - (0.38, 0.4) → (0.7, 1): vuelve a subir, otra vez rápida al principio.
+    - (0.7, 1) → (1, 1): entero hasta el final del ciclo.
+
+    Cómo se construyó: modo Tempo, división 1/2, duración 90 %, profundidad 75 % (−12 dB), suavizado 2 ms.
+
+    Pruébalo: en el editor, arrastra el punto del rebote (el de x = 0.38) arriba y abajo y escucha cómo cambia el
+    segundo golpe. Cambia la DIVISIÓN a 1/4: el rebote se vuelve el doble de rápido.
+    Cuándo NO usarlo: en el bajo; debajo de la voz principal.
+    Viene de: nuevo (Fase 8), con el editor de curvas de la Fase 3.
+  </Notes>
+  <Parameters>
+    <PARAM id="division" value="1/2"/>
+    <PARAM id="depth" value="75"/>
+    <PARAM id="duration" value="90"/>
+  </Parameters>
+  <Curve>
+    <Point x="0" y="0" tension="-0.5"/>
+    <Point x="0.3" y="0.85" tension="0"/>
+    <Point x="0.38" y="0.4" tension="-0.5"/>
+    <Point x="0.7" y="1" tension="0"/>
+    <Point x="1" y="1" tension="0"/>
+  </Curve>
+</EbbPreset>

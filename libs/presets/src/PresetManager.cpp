@@ -150,6 +150,10 @@ std::optional<Preset> parsePreset (const juce::XmlElement& xml, const PresetForm
     if (const auto* list = xml.getChildByName (parametersTag))
         for (const auto* parameter : list->getChildWithTagNameIterator (parameterTag))
             preset.values.emplace_back (parameter->getStringAttribute ("id"), parameter->getStringAttribute ("value"));
+
+    if (format.extraStateTag.isNotEmpty())
+        if (const auto* extra = xml.getChildByName (format.extraStateTag))
+            preset.extraState = juce::ValueTree::fromXml (*extra);
     return preset;
 }
 
@@ -170,6 +174,10 @@ std::unique_ptr<juce::XmlElement> presetToXml (const Preset& preset, const Prese
         parameter->setAttribute ("id", id);
         parameter->setAttribute ("value", value);
     }
+
+    if (format.extraStateTag.isNotEmpty() && preset.extraState.isValid())
+        if (auto extra = preset.extraState.createXml())
+            xml->addChildElement (extra.release()); // el XmlElement padre toma la propiedad
     return xml;
 }
 
@@ -183,6 +191,7 @@ PresetManager::PresetManager (juce::AudioProcessorValueTreeState& s, PresetForma
                 parameters.push_back (ranged);
 
     snapshot = currentValues(); // una instancia nueva tiene los valores por defecto = "Init"
+    extraSnapshot = currentExtraState();
 }
 
 const std::vector<Preset>& PresetManager::getPresets()
@@ -294,6 +303,8 @@ juce::StringArray PresetManager::load (const Preset& preset)
     juce::StringArray problems;
     const auto values = resolve (preset, &problems);
     apply (values);
+    if (format.applyExtraState)
+        problems.addArray (format.applyExtraState (preset.extraState));
     setCurrent (preset.name, preset.factory, false);
     return problems;
 }
@@ -368,6 +379,7 @@ juce::Result PresetManager::save (const juce::String& name, const juce::String& 
     // valores por defecto de esta versión. Las listas se guardan por índice, que es lo que nunca cambia.
     for (const auto* parameter : parameters)
         preset.values.emplace_back (parameter->paramID, formatValue (parameter->convertFrom0to1 (parameter->getValue())));
+    preset.extraState = currentExtraState();
 
     // Si ya existe con ese nombre (aunque esté en una subcarpeta) se reemplaza ese archivo.
     auto file = format.userFolder.getChildFile (juce::File::createLegalFileName (cleanName) + format.fileExtension);
@@ -423,8 +435,9 @@ juce::String PresetManager::getCurrentName() const
 bool PresetManager::isModified() const
 {
     const auto now = currentValues();
+    const auto extraNow = currentExtraState();
     const juce::ScopedLock sl (lock);
-    if (modifiedWhenRestored)
+    if (modifiedWhenRestored || ! extraNow.isEquivalentTo (extraSnapshot))
         return true;
     for (size_t i = 0; i < now.size() && i < snapshot.size(); ++i)
         if (std::abs (now[i] - snapshot[i]) > modifiedTolerance)
@@ -441,15 +454,22 @@ std::vector<float> PresetManager::currentValues() const
     return values;
 }
 
+juce::ValueTree PresetManager::currentExtraState() const
+{
+    return format.captureExtraState ? format.captureExtraState() : juce::ValueTree();
+}
+
 void PresetManager::setCurrent (const juce::String& name, bool factory, bool modified)
 {
     auto values = currentValues();
+    auto extra = currentExtraState();
     {
         const juce::ScopedLock sl (lock);
         currentName = name;
         currentFactory = factory;
         modifiedWhenRestored = modified;
         snapshot = std::move (values);
+        extraSnapshot = std::move (extra);
     }
     // También en el estado "vivo": así una copia del estado (p. ej. la de FL al clonar el canal) lo lleva.
     state.state.setProperty (presetNameProperty, name, nullptr);

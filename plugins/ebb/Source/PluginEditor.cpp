@@ -18,6 +18,8 @@ constexpr int sideWidth = 330;       // columna derecha: vista previa y bandas
 constexpr int gap = 8;
 constexpr int padding = 12;
 constexpr int captionHeight = 28;    // título de los paneles del editor de la curva y de las bandas
+constexpr int presetBarWidth = 400;
+constexpr juce::uint32 messageSeconds = 6;
 constexpr int baseWidth = 1160;
 constexpr int baseHeight = headerHeight + liveRowHeight + gap + editorRowHeight + gap + controlsHeight + footerHeight;
 
@@ -60,7 +62,8 @@ juce::Rectangle<int> bandsArea() { return editorRow().withTrimmedLeft (editorRow
 
 
 EbbAudioProcessorEditor::EbbAudioProcessorEditor (EbbAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p), settings (openSettings())
+    : AudioProcessorEditor (p), processor (p), settings (openSettings()),
+      presets (p.getPresetManager(), ebb::gui::theme::presetPalette(), settings.get())
 {
     namespace id = ebb::params;
     setLookAndFeel (&lookAndFeel);
@@ -222,6 +225,10 @@ EbbAudioProcessorEditor::EbbAudioProcessorEditor (EbbAudioProcessor& p)
     content.addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), id::bypass, bypassButton);
 
+    // Presets (Fase 8). Al final: el navegador y el panel de guardar quedan por encima de todo lo demás.
+    presets.onMessage = [this] (const juce::String& text) { showMessage (text); };
+    presets.addTo (content);
+
     updateModeControls (shownMode);
     updateBandControls (shownBand);
     layOutContent();
@@ -289,6 +296,13 @@ void EbbAudioProcessorEditor::showZoomMenu()
                             if (safeThis != nullptr && result > 0)
                                 safeThis->setZoom (static_cast<float> (result) / 100.0f);
                         });
+}
+
+void EbbAudioProcessorEditor::showMessage (const juce::String& text)
+{
+    message = text;
+    messageExpiry = juce::Time::getApproximateMillisecondCounter() + messageSeconds * 1000;
+    content.repaint (0, baseHeight - footerHeight, baseWidth, footerHeight);
 }
 
 void EbbAudioProcessorEditor::setUpComboLabel (juce::Label& label, const juce::String& text)
@@ -389,6 +403,14 @@ void EbbAudioProcessorEditor::timerCallback()
     if (processor.readTransport (lastSnapshot))
         transportView.setSnapshot (lastSnapshot);
 
+    presets.update(); // nombre del preset y "*" si se tocó algo (también la curva)
+    if (messageExpiry != 0 && juce::Time::getApproximateMillisecondCounter() > messageExpiry)
+    {
+        messageExpiry = 0;
+        message.clear();
+        content.repaint (0, baseHeight - footerHeight, baseWidth, footerHeight);
+    }
+
     // La curva cambia también desde fuera del editor (un proyecto o un preset cargado).
     if (processor.getCurveVersion() != shownCurveVersion)
         showCurve();
@@ -478,8 +500,16 @@ void EbbAudioProcessorEditor::paintContent (juce::Graphics& g)
                           tempoHintArea, juce::Justification::centredLeft, 2);
     }
 
-    g.setColour (theme::dimText.withAlpha (0.6f));
+    // Pie: la ayuda del modo o, durante unos segundos, el último mensaje de los presets.
     g.setFont (juce::FontOptions (11.0f));
+    const auto footerArea = juce::Rectangle<int> (0, baseHeight - footerHeight, baseWidth, footerHeight);
+    if (message.isNotEmpty())
+    {
+        g.setColour (theme::freeRunning);
+        g.drawText (message, footerArea, juce::Justification::centred);
+        return;
+    }
+    g.setColour (theme::dimText.withAlpha (0.6f));
     const auto footer = [this] {
         switch (shownMode)
         {
@@ -493,7 +523,7 @@ void EbbAudioProcessorEditor::paintContent (juce::Graphics& g)
         }
         return utf8 ("Modo Tempo: con FL parado no hay ducking. Para seguir un kick irregular, usa MIDI o Audio.");
     }();
-    g.drawText (footer, juce::Rectangle<int> (0, baseHeight - footerHeight, baseWidth, footerHeight), juce::Justification::centred);
+    g.drawText (footer, footerArea, juce::Justification::centred);
 }
 
 void EbbAudioProcessorEditor::resized()
@@ -513,14 +543,18 @@ void EbbAudioProcessorEditor::resized()
 
 void EbbAudioProcessorEditor::layOutContent()
 {
-    // Cabecera: EBB | reloj | zoom | bypass.
+    // Cabecera: EBB | presets | reloj | zoom | bypass. El reloj se queda con lo que sobra (sus datos de la derecha
+    // desaparecen si no caben). El navegador y el panel de guardar tapan las tres filas.
     auto header = juce::Rectangle<int> (0, 0, baseWidth, headerHeight).reduced (padding, 8);
     bypassButton.setBounds (header.removeFromRight (90));
     header.removeFromRight (gap);
     zoomButton.setBounds (header.removeFromRight (64));
     header.removeFromRight (2 * gap);
     header.removeFromLeft (60);
+    const auto presetBar = header.removeFromLeft (presetBarWidth);
+    header.removeFromLeft (2 * gap);
     transportView.setBounds (header);
+    presets.setBounds (presetBar, liveRow().getUnion (controlsArea()));
 
     auto live = liveRow();
     curveView.setBounds (live.removeFromRight (sideWidth));

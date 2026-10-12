@@ -71,11 +71,12 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 ## Librería de presets (`libs/presets`, namespace `deepwater::presets`)
 - Nació en Undertow (Fase 10) y pasó a la librería con Riptide (Fase 9). Usa JUCE: es una librería INTERFACE con
   fuentes (cada plugin compila `src/` con su configuración de JUCE) y no tiene tests propios: la prueban
-  `UndertowPresetTests` y `RiptidePresetTests` (cambiarla = correr los dos).
+  `UndertowPresetTests`, `RiptidePresetTests` y `EbbPresetTests` (cambiarla = correr los tres).
 - `PresetManager.h`: formato XML legible en unidades reales (lo que falta = valor por defecto; en listas, un número es el
   índice de la opción), fábrica (BinaryData del plugin) + carpeta del usuario, preset actual y "*" en el proyecto.
   Cada plugin describe lo suyo en un `PresetFormat` (etiqueta raíz, extensión, categorías con "Init" primero y
-  "Otros" al final, carpeta, parámetros excluidos como el bypass, archivos de fábrica).
+  "Otros" al final, carpeta, parámetros excluidos como el bypass, archivos de fábrica) y, opcional, un "estado extra"
+  que no es un parámetro (la curva de Ebb: un `ValueTree` guardado como elemento hijo del preset que cuenta para el "*").
 - GUI: `PresetPanel.h` (barra + navegador + panel de guardar y todo su comportamiento; el editor solo llama a `addTo`,
   `setBounds`, `update` y `onMessage`), con los colores del plugin en una `Palette`.
 - Un plugin nuevo: `Source/presets/<Plugin>Presets.cpp` con su `format()`, `Presets/Factory/<Categoría>/*.<ext>`
@@ -86,7 +87,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 |---|--------|---------------------|--------|
 | 1 | Undertow — sintetizador wavetable (FM, warp, unison, matriz de modulación, FX) | Serum 2, Vital | ✅ Terminado (ampliación en curso: cuerda pulsada) |
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | ✅ Terminado |
-| 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | En curso (Fase 1) |
+| 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | En curso (Fase 8) |
 | 4 | EQ paramétrico con analizador de espectro | FabFilter Pro-Q | Pendiente |
 | 5 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
 | 6 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |

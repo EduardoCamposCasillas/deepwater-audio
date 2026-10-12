@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ducking del sub que sigue al kick real (sidechain): el bajo se aparta 6 dB solo por debajo de 80 Hz. -->
+<EbbPreset formatVersion="1" name="Mezcla Sub Invisible" category="Mezcla" author="Ebb">
+  <Notes>
+    El ducking "que nadie oye": solo lo que hay por debajo de 80 Hz baja 6 dB con cada golpe del kick real. Sirve en
+    casi cualquier bajo de casi cualquier género como primera capa de limpieza de graves, antes de pensar en EQ.
+
+    Cómo se construyó:
+    - Modo Audio (el kick por el sidechain): sigue el kick que haya, regular o no. UMBRAL −20 dB, RETENCIÓN 40 ms.
+    - BANDA Graves, CRUCE 80 Hz: solo el sub más hondo, donde el kick y el bajo se suman (el pico del Master).
+    - Profundidad 50 % (−6 dB), forma Rápida, LARGO 1/4 × duración 35 %, suavizado 2 ms.
+    - LOOKAHEAD 1.5 ms: lo justo para que el sub ya esté bajando cuando llega el ataque.
+
+    Pruébalo: mira el medidor del Master de FL con y sin Ebb (BYPASS): el pico del kick + bajo baja 1–3 dB. Esos dB son
+    margen para el limitador, o sea, un tema más fuerte y limpio.
+    Cuándo NO usarlo: si el kick no tiene sub (un kick de rock o de boom bap con el cuerpo en 100 Hz: sube el CRUCE);
+    con un bajo que ya deja hueco al kick.
+    Viene de: nuevo (Fase 8), con el modo Audio de la Fase 5 y las bandas de la Fase 6.
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Audio"/>
+    <PARAM id="threshold" value="-20"/>
+    <PARAM id="hold" value="40"/>
+    <PARAM id="lookahead" value="1.5"/>
+    <PARAM id="band" value="Graves"/>
+    <PARAM id="crossover" value="80"/>
+    <PARAM id="depth" value="50"/>
+    <PARAM id="duration" value="35"/>
+  </Parameters>
+  <Curve shape="Rápida"/>
+</EbbPreset>

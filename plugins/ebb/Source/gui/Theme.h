@@ -2,6 +2,8 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include "deepwater/presets/Palette.h"
+
 // Colores de toda la interfaz en un solo sitio. La base es la de la suite (Undertow, Riptide); el acento es un verde
 // agua: la marea que baja y vuelve.
 namespace ebb::gui::theme
@@ -19,4 +21,10 @@ inline const juce::Colour accent { 0xff3fd0c0 };
 // Estado del reloj: reproduciendo = acento; reloj libre (sin host) = ámbar, para que se note que NO sigue a FL.
 inline const juce::Colour freeRunning { 0xffffb74d };
 inline const juce::Colour bypassOn { 0xffef5350 };
+
+// Fase 8: los colores de la barra de presets, el navegador y el panel de guardar (los presets del usuario, en ámbar).
+[[nodiscard]] inline deepwater::presets::Palette presetPalette()
+{
+    return { background, panel, panelOutline, display, text, dimText, accent, freeRunning };
+}
 } // namespace ebb::gui::theme

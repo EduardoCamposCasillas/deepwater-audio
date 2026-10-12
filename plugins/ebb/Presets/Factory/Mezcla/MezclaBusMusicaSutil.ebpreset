@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ducking que no se oye: el bus de la música baja 2 dB con cada tiempo y le abre sitio al kick. -->
+<EbbPreset formatVersion="1" name="Mezcla Bus Música Sutil" category="Mezcla" author="Ebb">
+  <Notes>
+    Sobre el bus de la música (todo menos la batería y la voz): baja unos 2 dB en cada tiempo. No se oye como efecto,
+    pero el kick gana claridad y la mezcla "respira" con el ritmo. Es el truco que hace que una mezcla densa no
+    tape al kick sin tener que bajar los instrumentos.
+
+    Cómo se construyó:
+    - Modo Tempo, 1/4: para un kick en cada tiempo (dembow clásico, house). Con un kick irregular, cambia a MIDI.
+    - Profundidad 20 % (−1.9 dB): por debajo de 3 dB el oído no lo percibe como bombeo.
+    - Forma Rápida, duración 50 %: vuelve enseguida y el resto del tiempo está entero.
+    - Suavizado 3 ms: con tantos instrumentos, una caída un poco más blanda pasa desapercibida.
+
+    Pruébalo: con la mezcla completa, alterna BYPASS (igualando el volumen) y escucha el kick, no la música. Luego sube
+    la profundidad a 50 %: ahí ya se oye el bombeo. El punto bueno está justo antes de oírlo.
+    Cuándo NO usarlo: en un tema sin kick marcado (balada, ambient); con voces dentro del bus (la voz bombearía).
+    Viene de: nuevo (Fase 8): ducking sutil de mezcla.
+  </Notes>
+  <Parameters>
+    <PARAM id="depth" value="20"/>
+    <PARAM id="duration" value="50"/>
+    <PARAM id="smoothing" value="3"/>
+  </Parameters>
+  <Curve shape="Rápida"/>
+</EbbPreset>

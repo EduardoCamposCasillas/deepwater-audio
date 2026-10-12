@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- El kick mismo (por el sidechain) dispara el ducking: sigue el swing, el humanizado y los samples. -->
+<EbbPreset formatVersion="1" name="Dembow Audio Kick Grabado" category="Dembow" author="Ebb">
+  <Notes>
+    Para un kick de audio (grabado, un sample con swing, un loop del kick solo): cada golpe que entra por el sidechain
+    dispara la curva en su muestra exacta. Sigue cualquier patrón y cualquier desplazamiento, sin MIDI.
+
+    Necesita el ruteo: en el Mixer, la pista del kick con "Sidechain to this track" hacia la del bajo, y en Ebb el
+    puerto sidechain en ⚙ > Processing (Fase 5).
+
+    Cómo se construyó:
+    - Modo Audio, UMBRAL −20 dB: unos 12–18 dB por debajo del pico de un kick normal. El golpe se detecta en los
+      primeros ms del ataque y aguanta kicks más suaves. Ajústalo a TU kick: cada golpe tiene que pasar la línea
+      ámbar del medidor y bajar de la punteada entre golpe y golpe.
+    - RETENCIÓN 40 ms: más que el doble ataque de un kick (10–20 ms), menos que dos kicks a una semicorchea (158 ms).
+    - LOOKAHEAD 2.5 ms: el bajo ya está abajo cuando llega el ataque del kick (FL compensa la latencia).
+    - LARGO 1/4 × duración 45 %, profundidad 45 % (−5.2 dB), suavizado 2 ms.
+
+    Pruébalo: con el visor en 1 compás, cada kick (ámbar) tiene que tener su triángulo y el hueco debajo de su ataque.
+    Pon LOOKAHEAD en 0 y compara: el principio del kick choca con el bajo.
+    Cuándo NO usarlo: si tocas en vivo un instrumento que pasa por esta pista (la latencia molesta); con un loop de
+    batería entero en el sidechain (la caja y los hats también disparan).
+    Viene de: Fase 5 (receta del kick grabado y 808).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Audio"/>
+    <PARAM id="threshold" value="-20"/>
+    <PARAM id="hold" value="40"/>
+    <PARAM id="lookahead" value="2.5"/>
+    <PARAM id="depth" value="45"/>
+    <PARAM id="duration" value="45"/>
+  </Parameters>
+</EbbPreset>

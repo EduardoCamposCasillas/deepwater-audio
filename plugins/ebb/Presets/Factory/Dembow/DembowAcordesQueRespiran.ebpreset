@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Efecto: los acordes o el sintetizador "respiran" siguiendo el kick real, aunque se mueva. -->
+<EbbPreset formatVersion="1" name="Dembow Acordes que Respiran" category="Dembow" author="Ebb">
+  <Notes>
+    Bombeo como EFECTO sobre los acordes, un pad o un sintetizador de un reggaetón: el volumen cae con cada kick y
+    vuelve despacio, y como lo dispara el MIDI del kick, el "respirar" sigue el patrón aunque sea irregular. Es el
+    pumping del house llevado a un dembow que se mueve.
+
+    Cómo se construyó:
+    - Modo MIDI (las notas del kick), forma Lenta: se queda abajo casi todo el tiempo y sube al final.
+    - LARGO 1/4 × duración 85 %: a 95 BPM vuelve en unos 540 ms, casi en el tiempo siguiente.
+    - Profundidad 65 % (−9.1 dB): se oye como efecto, pero el acorde no desaparece.
+    - Suavizado 3 ms: la caída no hace clic en los acordes con ataque lento.
+
+    Pruébalo: en solo suena exagerado; escúchalo con toda la mezcla. Baja el MIX a 50 % para la mitad del efecto, o
+    automatízalo para que el bombeo entre en el coro.
+    Cuándo NO usarlo: en la voz o en algo que tenga que sonar estable. Con kicks muy seguidos el acorde se queda abajo
+    (acorta el LARGO a 1/8 si molesta).
+    Viene de: nuevo (Fase 8), con la forma Lenta de la Fase 3 y el modo MIDI de la Fase 4.
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="MIDI"/>
+    <PARAM id="depth" value="65"/>
+    <PARAM id="duration" value="85"/>
+    <PARAM id="smoothing" value="3"/>
+  </Parameters>
+  <Curve shape="Lenta"/>
+</EbbPreset>

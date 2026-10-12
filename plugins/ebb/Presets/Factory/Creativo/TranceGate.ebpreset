@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trance gate: el pad se corta en semicorcheas, como un "chop". -->
+<EbbPreset formatVersion="1" name="Trance Gate 1/16" category="Creativo" author="Ebb">
+  <Notes>
+    Un pad o un acorde largo se convierte en un ritmo de semicorcheas: suena, se corta, suena, se corta. Es el "trance
+    gate" del trance de los 2000 y de muchas intros de EDM, y funciona también en un coro o en una reverb larga.
+
+    Cómo se construyó:
+    - Modo Tempo, división 1/16, duración 100 %: un ciclo por semicorchea, y la curva lo ocupa entero.
+    - Forma Puerta: silencio la primera mitad y de vuelta de golpe a la mitad.
+    - Profundidad 100 %: corte total.
+    - Suavizado 1.5 ms: sin esto, cada corte hace clic.
+
+    Pruébalo: abre el editor y mueve el punto del escalón a la izquierda (notas más largas, más legato) o a la derecha
+    (más staccato). Cambia la DIVISIÓN a 1/16 T para un gate en tresillos. Baja el MIX a 60 % para un gate que no
+    corta del todo.
+    Cuándo NO usarlo: en el bajo o el kick (destroza el groove); en un sonido que ya tiene ritmo propio (arpegios).
+    Viene de: Fase 3 (variación creativa: trance gate en un pad).
+  </Notes>
+  <Parameters>
+    <PARAM id="division" value="1/16"/>
+    <PARAM id="depth" value="100"/>
+    <PARAM id="duration" value="100"/>
+    <PARAM id="smoothing" value="1.5"/>
+  </Parameters>
+  <Curve shape="Puerta"/>
+</EbbPreset>

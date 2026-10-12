@@ -17,10 +17,23 @@ juce_add_plugin(Ebb
     VST3_CATEGORIES          Fx Dynamics
 )
 
-target_sources(Ebb
-    PRIVATE
-        Source/PluginProcessor.cpp
-        Source/PluginEditor.cpp
+# Todo el código del plugin (también lo compila EbbPresetTests).
+set(EBB_PLUGIN_SOURCES
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/presets/EbbPresets.cpp
+)
+
+target_sources(Ebb PRIVATE ${EBB_PLUGIN_SOURCES})
+
+# --- Presets de fábrica (Fase 8) ---------------------------------------------------
+# Los .ebpreset de Presets/Factory se compilan DENTRO del plugin (BinaryData.h), como en Undertow y Riptide.
+# CONFIGURE_DEPENDS: un preset nuevo se detecta al compilar, sin reconfigurar a mano.
+file(GLOB_RECURSE EBB_FACTORY_PRESETS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Factory/*.ebpreset")
+juce_add_binary_data(EbbPresetData
+    HEADER_NAME BinaryData.h
+    NAMESPACE   BinaryData
+    SOURCES     ${EBB_FACTORY_PRESETS}
 )
 
 target_include_directories(Ebb PRIVATE Source)
@@ -35,7 +48,9 @@ target_compile_definitions(Ebb
 target_link_libraries(Ebb
     PRIVATE
         juce::juce_audio_utils         # incluye audio_processors, audio_devices, gui, etc.
+        EbbPresetData
         deepwater::dsp                 # librería DSP compartida de la suite (libs/dsp)
+        deepwater::presets             # presets de la suite (libs/presets)
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -59,4 +74,27 @@ if(EBB_BUILD_TESTS)
     endif()
 
     add_test(NAME EbbTests COMMAND EbbTests)
+
+    # Tests de presets (Fase 8): necesitan JUCE (parámetros, estado, XML), así que son una app de consola aparte que
+    # compila el procesador completo. Validan cada preset de fábrica (también su curva), guardar/cargar y el estado del
+    # proyecto, y pasan un dembow sintético por cada preset (sin NaN, sin reservas de memoria, cambio de preset sin clic).
+    juce_add_console_app(EbbPresetTests PRODUCT_NAME "EbbPresetTests")
+    target_sources(EbbPresetTests PRIVATE tests/PresetTests.cpp ${EBB_PLUGIN_SOURCES})
+    target_include_directories(EbbPresetTests PRIVATE Source)
+    target_compile_definitions(EbbPresetTests
+        PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            "JucePlugin_Name=\"Ebb\""
+    )
+    target_link_libraries(EbbPresetTests
+        PRIVATE
+            juce::juce_audio_utils
+            EbbPresetData
+            deepwater::dsp
+            deepwater::presets
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
+    )
+    add_test(NAME EbbPresetTests COMMAND EbbPresetTests)
 endif()

@@ -59,6 +59,15 @@ struct PresetFormat
 
     std::function<std::vector<FactoryFile>()> factoryFiles;
 
+    // Estado que forma parte del sonido pero NO es un parámetro (nació con Ebb, Fase 8: su curva por puntos). Opcional:
+    // si 'extraStateTag' está vacío no se usa. En el archivo es un elemento hijo con esa etiqueta, escrito tal cual lo
+    // devuelve captureExtraState (un ValueTree → XML) y leído con ValueTree::fromXml.
+    //   capture: lo que suena ahora (al guardar, y para el "*": se compara con lo capturado al cargar).
+    //   apply:   al cargar un preset; un árbol inválido (el preset no lo trae) = el valor de Init. Devuelve los avisos.
+    juce::String extraStateTag;
+    std::function<juce::ValueTree()> captureExtraState;
+    std::function<juce::StringArray (const juce::ValueTree&)> applyExtraState;
+
     // Posición de una categoría en 'categories' (las desconocidas, en la última).
     [[nodiscard]] int categoryIndex (const juce::String& category) const;
 };
@@ -74,6 +83,9 @@ struct Preset
 
     // id del parámetro → valor tal como está escrito en el archivo (número o nombre de una opción).
     std::vector<std::pair<juce::String, juce::String>> values;
+
+    // PresetFormat::extraStateTag (inválido si el archivo no lo trae).
+    juce::ValueTree extraState;
 
     // Posición de la categoría en PresetFormat::categories (la pone quien lee o crea el preset).
     int categoryOrder = 0;
@@ -136,6 +148,7 @@ private:
     void apply (const std::vector<float>& normalised);
     void setCurrent (const juce::String& name, bool factory, bool modified);
     [[nodiscard]] std::vector<float> currentValues() const;
+    [[nodiscard]] juce::ValueTree currentExtraState() const;
     [[nodiscard]] int indexOfCurrent() const;
 
     juce::AudioProcessorValueTreeState& state;
@@ -150,6 +163,7 @@ private:
     bool currentFactory = true;
     bool modifiedWhenRestored = false;
     std::vector<float> snapshot; // valores al cargar: con ellos se detecta si el preset se modificó
+    juce::ValueTree extraSnapshot; // lo mismo para el estado extra
 
     JUCE_DECLARE_NON_COPYABLE (PresetManager)
 };

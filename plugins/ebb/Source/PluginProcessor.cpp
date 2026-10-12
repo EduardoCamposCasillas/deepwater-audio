@@ -372,13 +372,6 @@ void EbbAudioProcessor::publishTransport (int numSamples) noexcept
     transportBox.write (snapshot);
 }
 
-namespace
-{
-const juce::Identifier curveTag { "Curve" };
-const juce::Identifier pointTag { "Point" };
-const juce::Identifier xId { "x" }, yId { "y" }, tensionId { "tension" };
-} // namespace
-
 void EbbAudioProcessor::setCurve (const deepwater::dsp::BreakpointCurve& newCurve)
 {
     curve = newCurve;
@@ -386,38 +379,26 @@ void EbbAudioProcessor::setCurve (const deepwater::dsp::BreakpointCurve& newCurv
     curveBox.write (curve);
     ++curveVersion;
 
-    // En el estado, en unidades de la curva y legible: <Curve><Point x="0.25" y="0.156" tension="0.034"/>...
+    // En el estado, en unidades de la curva y legible (el mismo formato que en los presets, ver EbbPresets.h).
     auto& state = parameters.state;
-    juce::ValueTree tree (curveTag);
-    for (int i = 0; i < curve.size(); ++i)
-        tree.appendChild (juce::ValueTree (pointTag, { { xId, curve[i].x }, { yId, curve[i].y }, { tensionId, curve[i].tension } }), nullptr);
-    if (const auto old = state.getChildWithName (curveTag); old.isValid())
+    if (const auto old = state.getChildWithName (ebb::presets::curveTag); old.isValid())
         state.removeChild (old, nullptr);
-    state.appendChild (tree, nullptr);
+    state.appendChild (ebb::presets::curveToTree (curve), nullptr);
 }
 
 void EbbAudioProcessor::loadCurveFromState()
 {
-    // Un proyecto de la Fase 2 no tiene curva: queda la forma por defecto (la misma que sonaba entonces).
-    const auto tree = parameters.state.getChildWithName (curveTag);
-    if (! tree.isValid())
-    {
-        setCurve (ebb::dsp::defaultCurve());
-        return;
-    }
-    std::vector<deepwater::dsp::CurvePoint> points;
-    for (const auto& point : tree)
-        if (point.hasType (pointTag))
-            points.push_back ({ static_cast<float> (point[xId]), static_cast<float> (point[yId]), static_cast<float> (point[tensionId]) });
-    // Un estado dañado (menos de dos puntos) vuelve a la forma por defecto; el resto lo sanea la curva.
-    setCurve (points.size() >= 2 ? deepwater::dsp::BreakpointCurve (points.data(), static_cast<int> (points.size()))
-                                 : ebb::dsp::defaultCurve());
+    // Un proyecto de la Fase 2 no tiene curva: queda la forma por defecto (la misma que sonaba entonces). Un estado
+    // dañado (menos de dos puntos) también vuelve a ella; el resto lo sanea la curva.
+    setCurve (ebb::presets::curveFromTree (parameters.state.getChildWithName (ebb::presets::curveTag), nullptr));
 }
 
 void EbbAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // Se ejecuta en el hilo de mensajes (al guardar el proyecto de FL), no en el de audio.
-    if (auto xml = parameters.copyState().createXml())
+    auto state = parameters.copyState();
+    presetManager.writeStateProperties (state); // nombre del preset y si estaba modificado
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
@@ -436,6 +417,8 @@ void EbbAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
                 if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter); ranged != nullptr && ranged->isDiscrete())
                     if (const float exact = ranged->convertTo0to1 (ranged->convertFrom0to1 (ranged->getValue())); exact != ranged->getValue())
                         ranged->setValueNotifyingHost (exact);
+
+            presetManager.stateRestored(); // después de la curva: también es parte del preset
         }
 }
 

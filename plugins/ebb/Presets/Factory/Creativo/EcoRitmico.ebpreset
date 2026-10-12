@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Dos caídas por tiempo, la segunda más débil: un ritmo de corcheas con un solo golpe. -->
+<EbbPreset formatVersion="1" name="Eco Rítmico" category="Creativo" author="Ebb">
+  <Notes>
+    Cada tiempo tiene dos caídas: una honda en el golpe y otra más débil a la mitad, como un eco del primero. El pad
+    o el acorde gana un ritmo de corcheas "fantasma" que se mueve con el tempo sin escribir nada.
+
+    Cómo se construyó:
+    - Modo Tempo, 1/4, duración 90 %: la curva casi ocupa el tiempo entero.
+    - Forma Eco: baja, sube, y a mitad del ciclo vuelve a bajar hasta el 40 % del volumen (la segunda caída es más
+      suave que la primera).
+    - Profundidad 80 % (−14 dB), suavizado 2 ms.
+
+    Pruébalo: abre el editor y baja el punto del medio (el del eco) para que la segunda caída sea igual de honda:
+    suena como un ducking a corcheas. Súbelo para que casi no se note.
+    Cuándo NO usarlo: en el bajo (el eco cae donde no hay kick); en un tema con mucho swing (la mitad exacta del
+    tiempo no coincide con la corchea con swing).
+    Viene de: nuevo (Fase 8), con la forma Eco de la Fase 3.
+  </Notes>
+  <Parameters>
+    <PARAM id="depth" value="80"/>
+    <PARAM id="duration" value="90"/>
+  </Parameters>
+  <Curve shape="Eco"/>
+</EbbPreset>

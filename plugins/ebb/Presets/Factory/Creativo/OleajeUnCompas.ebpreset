@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Un pad que cae en el "1" y vuelve a crecer durante todo el compás, como una ola. -->
+<EbbPreset formatVersion="1" name="Oleaje 1 Compás" category="Creativo" author="Ebb">
+  <Notes>
+    Una sola caída por compás: el pad casi desaparece en el "1" y crece despacio hasta el compás siguiente, como una
+    ola que se retira y vuelve (o como una reverb al revés). Para intros, breaks y transiciones.
+
+    Cómo se construyó:
+    - Modo Tempo, división 1 bar, duración 100 %: un ciclo por compás (sigue al compás de FL: en 3/4, tres tiempos).
+    - Forma Lenta: se queda abajo buena parte del compás y la subida se acelera al final.
+    - Profundidad 90 % (−20 dB), suavizado 5 ms (una caída más blanda, el pad no "corta").
+
+    Pruébalo: ponlo en un pad durante un break de 4 compases y automatiza el MIX de 0 a 100 % para que la ola crezca
+    hacia el drop. Cambia la forma a Lineal: la ola crece a ritmo constante.
+    Cuándo NO usarlo: en un tema con cambios de compás si quieres que la ola dure siempre lo mismo (con 1 bar, en 3/4
+    dura menos que en 4/4).
+    Viene de: nuevo (Fase 8), con la división "1 bar" de la Fase 2.
+  </Notes>
+  <Parameters>
+    <PARAM id="division" value="1 bar"/>
+    <PARAM id="depth" value="90"/>
+    <PARAM id="duration" value="100"/>
+    <PARAM id="smoothing" value="5"/>
+  </Parameters>
+  <Curve shape="Lenta"/>
+</EbbPreset>

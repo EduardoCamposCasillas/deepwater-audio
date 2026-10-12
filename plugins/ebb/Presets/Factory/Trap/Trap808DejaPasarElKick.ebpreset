@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trap: kick y 808 golpean juntos; el sub del 808 se aparta solo durante el golpe del kick. -->
+<EbbPreset formatVersion="1" name="Trap 808 Deja Pasar el Kick" category="Trap" author="Ebb">
+  <Notes>
+    En el trap el 808 suele sonar a la vez que el kick (muchas veces con la misma nota). Si los dos golpean juntos, el
+    sub suma un pico enorme y el kick pierde pegada. Aquí el sub del 808 se aparta solo los primeros milisegundos, lo
+    que dura el golpe del kick, y vuelve enseguida: el 808 conserva toda su cola.
+
+    Cómo se construyó (pensado a 140 BPM):
+    - Modo Audio (el kick por el sidechain): sigue los kicks del patrón, también los rápidos de los redobles.
+    - LARGO 1/8 × duración 50 %: a 140 BPM son unos 107 ms. Forma Retención: abajo los primeros 37 ms (el golpe del
+      kick) y luego una S de vuelta.
+    - BANDA Graves, CRUCE 100 Hz, profundidad 70 % (−10.5 dB): se va hondo pero solo en el sub.
+    - UMBRAL −20 dB, RETENCIÓN 50 ms, LOOKAHEAD 2 ms, suavizado 1.5 ms (más rápido que en el dembow: el kick del trap
+      es corto y seco).
+
+    Pruébalo: en el visor en 1 compás, el hueco tiene que ser corto y estar justo bajo cada ataque ámbar. Sube la
+    DURACIÓN hasta oír que el 808 "llega tarde" y bájala un poco.
+    Cuándo NO usarlo: si el 808 ES el kick (un solo sonido que hace de los dos): no hay nada que apartar. Si el kick
+    no está en otra pista (viene dentro de un loop), usa el modo MIDI con las notas del kick.
+    Viene de: nuevo (Fase 8), con la Retención de la Fase 3, el modo Audio de la Fase 5 y las bandas de la Fase 6.
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="Audio"/>
+    <PARAM id="threshold" value="-20"/>
+    <PARAM id="hold" value="50"/>
+    <PARAM id="lookahead" value="2"/>
+    <PARAM id="division" value="1/8"/>
+    <PARAM id="duration" value="50"/>
+    <PARAM id="band" value="Graves"/>
+    <PARAM id="crossover" value="100"/>
+    <PARAM id="smoothing" value="1.5"/>
+  </Parameters>
+  <Curve shape="Retención"/>
+</EbbPreset>

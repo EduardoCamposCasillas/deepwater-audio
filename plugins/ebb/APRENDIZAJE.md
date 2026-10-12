@@ -826,3 +826,118 @@ Inténtalo y después pide pistas.
   golpe) se aplastan. Para el ataque y el lookahead, 1 compás.
 - **Esperar ver huecos con FL parado en modo Tempo.** Parado no hay ducking (por diseño): el visor muestra la señal
   pasando sin huecos. En MIDI o Audio, tocar el kick sí dispara y se ve.
+
+## Fase 8 — Presets: recetas que se guardan y se explican
+
+Hasta ahora cada receta de este cuaderno había que montarla a mano, perilla por perilla. Ahora Ebb trae **19 presets
+de fábrica** (dembow, trap, house, mezcla y efectos creativos) y puedes guardar los tuyos. Cada preset es una receta
+completa (también la forma de la curva) con **notas** que explican qué hace cada ajuste, por qué, qué ruteo necesita y
+cuándo NO usarlo. No son "sonidos mágicos": son puntos de partida que se ajustan a tu kick y a tu tema.
+
+### Conceptos aprendidos
+
+- **Un preset es una foto de los ajustes que dan forma al sonido.** Se guarda como un archivo XML legible
+  (`.ebpreset`, en `Documentos\Ebb\Presets`), en unidades reales: "depth 35" son 35 %, "crossover 120" son 120 Hz. Lo
+  que el preset no escribe toma el valor de **Init**; así un preset de fábrica se lee como una receta (solo lo que
+  cambia) y sigue funcionando cuando Ebb gane controles nuevos.
+- **La curva también viaja con el preset**, aunque no sea un parámetro (un parámetro es un número que FL puede
+  automatizar; la curva tiene un número variable de puntos). En el archivo va aparte, como `<Curve shape="Lenta"/>` (una
+  forma de fábrica por su nombre) o punto a punto (`<Point x="0.3" y="0.85" tension="-0.5"/>`), igual que en el proyecto
+  de FL. Abre `Rebote` en el Bloc de notas para ver una curva escrita a mano.
+- **El BYPASS no es parte del preset.** Elegir un preset no enciende ni apaga Ebb.
+- **El asterisco (\*)**: aparece junto al nombre en cuanto tocas algo (una perilla o un punto de la curva) y se va si
+  lo devuelves a como estaba. Viaja con el proyecto: al reabrirlo sabes si ese sonido es el preset tal cual o una
+  versión tuya.
+- **Lo que un preset NO puede saber**: el nivel de tu kick (el UMBRAL de los presets de Audio es un punto de partida),
+  la nota MIDI de tu kick (quedan en "Todas") ni el tempo de tu tema (las notas dicen a qué tempo se pensaron los ms).
+
+### Qué hace cada control
+
+- **◀ ▶**: preset anterior / siguiente, en el orden del navegador. Sirve para recorrer una categoría con el tema
+  sonando.
+- **Nombre del preset** (con la categoría a la izquierda): abre el **navegador**. A la izquierda, las categorías y "Mis
+  presets"; en el centro, la lista y la búsqueda (busca también dentro de las notas: prueba "808" o "MIDI"); a la
+  derecha, las notas del preset elegido. Un clic o las flechas del teclado ya lo cargan (para escuchar rápido con el
+  tema sonando); doble clic o Enter lo cargan y cierran el navegador; Esc lo cierra.
+- **Guardar**: guarda lo que suena como preset tuyo, con nombre, categoría, autor y notas. Si partiste de uno de
+  fábrica, las notas empiezan con "Basado en «…»": escribe ahí qué cambiaste y por qué (tu yo de dentro de seis meses
+  te lo agradece).
+- **···**: Init (empezar de cero), guardar como, abrir la carpeta de tus presets en el Explorador, volver a leerla.
+- **Pie de la ventana**: durante unos segundos muestra, en ámbar, qué preset se cargó o si algo del archivo no se
+  entendió.
+- **Las familias de presets**, en lenguaje musical:
+  - **Dembow**: limpiar el grave del bajo/808 con el kick del reggaetón, en los tres modos (Tempo para el clásico, MIDI
+    para el kick que se mueve, Audio para un kick grabado), con el 808 de cola larga y con gruñido (solo el sub), y un
+    efecto: acordes que respiran con el kick real.
+  - **Trap**: el 808 que deja pasar el golpe del kick (corto, solo el sub), un sample que se aparta 3 dB y un pad en
+    tresillos contra el pulso.
+  - **House**: el bombeo clásico (efecto) y el sub del bajo apartado en cada tiempo (limpieza).
+  - **Mezcla**: ducking que no se oye (2 dB en el bus de la música; 6 dB solo por debajo de 80 Hz).
+  - **Creativo**: el ducking ES el efecto (trance gate, stutter por MIDI, eco rítmico, rebote, oleaje de un compás).
+
+### Ejercicio guiado: los tres modos del dembow, preset contra preset (con el volumen igualado)
+
+1. **95 BPM**, dembow desplazado (kick en los pasos 1, 7, 11 y 15), un **808 largo**. Deja preparados los dos ruteos:
+   el MIDI Out con las notas del kick (Fase 4) y "Sidechain to this track" del kick al 808 (Fase 5).
+2. Ebb en el 808, preset **Dembow Bajo Limpio** (Tempo). Mira el visor en 1 compás: hay huecos en los cuatro tiempos,
+   pero el kick está en 1, 7, 11 y 15. Escucha los pasos 5, 9 y 13: el 808 baja sin que haya kick (un "hipo" del bajo).
+3. Pasa a **Dembow MIDI Kick Irregular** con ▶ ◀ o el navegador. Ahora cada hueco tiene su triángulo debajo de un kick.
+   El hipo desapareció.
+4. Pasa a **Dembow Audio Kick Grabado**. Ajusta el UMBRAL a tu kick (el medidor del SIDECHAIN: cada golpe por encima de
+   la línea ámbar). Compara con el anterior: suena casi igual, pero ahora mover el kick en el Playlist (o ponerle swing)
+   también mueve el hueco, sin MIDI.
+5. Entre preset y preset, **iguala el volumen** con el fader del 808 antes de juzgar: los de más profundidad suenan más
+   bajos y el oído tiende a preferir el más fuerte.
+6. Por último, **Dembow 808 Gruñido Graves** contra **Dembow MIDI Kick Irregular**: el primero baja mucho más (80 %),
+   pero solo el sub; con el 808 saturado se oye más limpio y menos "bombeado". Míralo en el panel BANDAS.
+
+### Receta: tu preset de dembow, a medida
+
+Parte del preset del modo que usas (MIDI o Audio) y ajústalo a TU kick y TU 808:
+- **El disparo**: en MIDI, USAR ÚLTIMA NOTA con el kick sonando; en Audio, el UMBRAL hasta que cada kick tenga su
+  triángulo y, entre golpe y golpe, el nivel baje de la línea punteada.
+- **La vuelta**: LARGO × DURACIÓN para que la línea blanca vuelva arriba justo cuando se apaga el kick (visor en 1
+  compás). Si el kick tiene cola, forma Retención antes que más duración.
+- **Cuánto**: la profundidad mínima con la que el kick se oye limpio; en Graves se puede ir más hondo.
+- **Guardar** con un nombre que diga para qué es ("808 Perreo 95 Audio") y en las notas: qué kick, a qué tempo, qué
+  cambiaste y por qué.
+- Por qué funciona: los presets de fábrica no conocen tu kick; un preset tuyo sí. La próxima vez que uses ese kick (o
+  ese pack), cargas el preset y está listo en un clic, y las notas te recuerdan el porqué.
+
+### Reto sin receta
+
+Cambias el kick del dembow por un **808 de cola larga** (suena unos 400 ms) y usas **Dembow Audio Kick Grabado**. En el
+visor ves que el kick del **"1"** a veces no tiene triángulo: el 808 no se aparta justo en el golpe más importante del
+compás. Los demás kicks sí disparan. ¿Por qué precisamente el del "1"? ¿Qué control de Ebb lo arregla, y en qué
+dirección hay que moverlo (al revés de lo que dice la intuición)? Pista para empezar: mira cuántos pasos hay entre el
+kick del paso 15 y el del "1" siguiente, y qué hace la línea punteada del medidor del SIDECHAIN en ese hueco.
+
+Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Preset**: un juego de ajustes guardado con nombre. *En música:* los "patches" de los sintetizadores de los 80 (el
+  piano eléctrico "E.PIANO 1" del Yamaha DX7, un preset de fábrica, suena en medio pop de esa década).
+- **Init (inicializar)**: todos los controles en su valor por defecto; el punto de partida "en blanco". *En música:* el
+  "Init Patch" de Serum o Vital, del que salen la mayoría de los sonidos de diseño propio.
+- **Trance gate**: cortar un sonido sostenido en un ritmo fijo con una puerta de volumen. *En música:* los pads
+  cortados en semicorcheas del trance de los 2000 (el sonido típico de las intros de ATB o Tiësto).
+- **Stutter**: repetir o cortar un sonido en ráfagas cortas como un "tartamudeo". *En música:* los cortes de voz del
+  EDM y del pop electrónico, y los "chops" de voz del reggaetón más electrónico.
+- **Plantilla (template)**: un proyecto de FL ya preparado con tus ruteos y plugins. *En música:* casi todos los
+  productores trabajan con una; en la tuya, el MIDI Out del kick y el sidechain al 808 ya conectados, con Ebb y tu
+  preset cargados.
+
+### Errores comunes y cuándo NO usar un preset
+
+- **Cargar y no escuchar.** Un preset está pensado para un tempo, un kick y un nivel. Siempre revisa el disparo (los
+  triángulos), la vuelta (la línea blanca) y la profundidad con TU material.
+- **Preset de Audio sin ruteo, o de MIDI sin notas.** Sin sidechain o sin MIDI no hay golpes: Ebb no hace nada (el pie y
+  las notas te recuerdan qué ruteo necesita cada uno).
+- **Comparar presets sin igualar el volumen.** El que baja menos suena más fuerte y "gana" sin ser mejor.
+- **Elegir por el nombre del género.** "Trap 808 Deja Pasar el Kick" puede ser justo lo que necesita un dembow con un
+  808 que golpea con el kick; los géneros son una pista, no una regla. Lee las notas.
+- **Guardar sin notas.** Dentro de unos meses no sabrás por qué ese preset tenía 2.5 ms de lookahead.
+- **Cuándo NO usar un preset:** cuando ya sabes qué quieres (montarlo desde Init es igual de rápido y aprendes más), o
+  cuando el problema no es de ducking (un bajo que choca con el kick en TODO momento, no solo en el golpe, se arregla
+  con EQ o con el arreglo, no con Ebb).

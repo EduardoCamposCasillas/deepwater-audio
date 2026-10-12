@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Kick 808 con cola: el bajo se queda abajo mientras suena el cuerpo del kick y vuelve en S. -->
+<EbbPreset formatVersion="1" name="Dembow 808 Cola Larga" category="Dembow" author="Ebb">
+  <Notes>
+    Cuando el kick del dembow es un 808 con cola (200–300 ms), la forma Clásica empieza a subir mientras el kick
+    todavía suena y el bajo lo tapa. Aquí el bajo espera abajo a que pase el cuerpo del kick.
+
+    Cómo se construyó:
+    - Forma Retención: abajo y quieta el primer 35 % de la curva, luego una S hasta arriba.
+    - 1/4 con duración 55 %: a 95 BPM son 348 ms; la retención dura unos 120 ms, el cuerpo del kick.
+    - Profundidad 45 % (−5.2 dB): un poco más que en "Dembow Bajo Limpio" porque el choque dura más.
+
+    Pruébalo: cambia la FORMA a Clásica y vuelve a Retención: con Clásica la cola del kick se pierde bajo el bajo.
+    Si la cola es todavía más larga, sube la DURACIÓN, no la profundidad: el problema es CUÁNDO vuelve el bajo, no
+    cuánto baja.
+    Cuándo NO usarlo: con un kick corto y seco (el bajo se queda abajo de más y pierdes peso).
+    Viene de: Fase 3 (receta del dembow con kick largo).
+  </Notes>
+  <Parameters>
+    <PARAM id="depth" value="45"/>
+    <PARAM id="duration" value="55"/>
+  </Parameters>
+  <Curve shape="Retención"/>
+</EbbPreset>

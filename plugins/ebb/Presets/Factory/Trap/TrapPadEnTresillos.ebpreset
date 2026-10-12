@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Efecto: un pad que bombea en tresillos de negra contra el pulso binario (3 contra 2). -->
+<EbbPreset formatVersion="1" name="Trap Pad en Tresillos" category="Trap" author="Ebb">
+  <Notes>
+    Un pad, un coro o una melodía larga que "respira" en tresillos: tres bombeos en el espacio de dos tiempos. Contra
+    el kick y los hats binarios se crea una polirritmia (3 contra 2) que da movimiento sin tocar las notas. Muy usado
+    en los breaks e intros del trap y el drill.
+
+    Cómo se construyó:
+    - Modo Tempo, división 1/4 T: a 140 BPM, un golpe cada 286 ms.
+    - Forma Lenta, duración 85 %: el pad se queda abajo casi todo el ciclo y sube al final (bombeo marcado).
+    - Profundidad 75 % (−12 dB), suavizado 2 ms.
+
+    Pruébalo: cambia la DIVISIÓN a 1/4 y vuelve a 1/4 T: con 1/4 el pad va con el kick; con 1/4 T va "contra" él. Prueba
+    también 1/8 T (el doble de rápido, como los hats en tresillo).
+    Cuándo NO usarlo: debajo de una voz (el bombeo en tresillos distrae); en el bajo (choca con el kick binario).
+    Viene de: nuevo (Fase 8), con los tresillos de la Fase 2 y la forma Lenta de la Fase 3.
+  </Notes>
+  <Parameters>
+    <PARAM id="division" value="1/4 T"/>
+    <PARAM id="depth" value="75"/>
+    <PARAM id="duration" value="85"/>
+  </Parameters>
+  <Curve shape="Lenta"/>
+</EbbPreset>

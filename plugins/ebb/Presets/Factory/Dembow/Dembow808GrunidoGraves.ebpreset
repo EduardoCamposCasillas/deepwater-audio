@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 808 saturado: solo el sub se aparta (mucho) y el gruñido sigue sonando. No se oye bombear. -->
+<EbbPreset formatVersion="1" name="Dembow 808 Gruñido Graves" category="Dembow" author="Ebb">
+  <Notes>
+    Para un 808 con gruñido (saturado, con armónicos): el kick gana su hueco en el sub y los armónicos del 808 (lo que
+    lo hace oírse en un celular) no se tocan. Se puede ir muy hondo sin que se note como efecto.
+
+    Cómo se construyó:
+    - BANDA Graves, CRUCE 120 Hz: el sub y el cuerpo del kick de reggaetón viven por debajo; el gruñido, por encima.
+    - Profundidad 80 % (−14 dB): solo afecta al sub, que es justo lo que choca con el kick.
+    - Modo MIDI (las notas del kick por un MIDI Out), LARGO 1/4 × duración 40 %, suavizado 2.5 ms.
+
+    Pruébalo: cambia la BANDA a Todo con la misma profundidad: el 808 entero bombea. Vuelve a Graves e iguala el
+    volumen antes de decidir (con Todo suena más bajo, y eso engaña al oído).
+    Con un kick de audio, cambia el MODO a Audio y ajusta el UMBRAL a tu kick.
+    Ojo: la saturación tiene que ir ANTES de Ebb; si va después, regenera armónicos con el sub agachado y el gruñido
+    bombea igual.
+    Cuándo NO usarlo: en un bajo sin sub (que empieza en 150 Hz): no hay nada que apartar por debajo del cruce.
+    Viene de: Fase 6 (receta del 808 con gruñido).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="MIDI"/>
+    <PARAM id="band" value="Graves"/>
+    <PARAM id="crossover" value="120"/>
+    <PARAM id="depth" value="80"/>
+    <PARAM id="duration" value="40"/>
+    <PARAM id="smoothing" value="2.5"/>
+  </Parameters>
+</EbbPreset>

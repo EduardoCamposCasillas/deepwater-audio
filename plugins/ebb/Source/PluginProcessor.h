@@ -7,6 +7,7 @@
 #include "dsp/Engine.h"
 #include "dsp/HostClock.h"
 #include "dsp/LiveScope.h"
+#include "presets/EbbPresets.h"
 #include "TransportSnapshot.h"
 
 // Efecto mono/estéreo. Fase 2: modo tempo, una curva de ducking sincronizada con la posición del host (PlayHead).
@@ -15,6 +16,8 @@
 // Fase 5: modo audio, una entrada sidechain (2.º bus de entrada) cuyos golpes disparan la curva, y lookahead.
 // Fase 6: la curva se aplica a toda la señal o a una banda (graves / agudos), y mix dry/wet.
 // Fase 7: publica para la GUI el visor en vivo (LiveScope), los golpes de la curva y por dónde va.
+// Fase 8: presets (libs/presets), con la curva como estado extra. El nombre del preset y si se modificó viajan con el
+// proyecto de FL.
 // El audio está en ebb::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class EbbAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
@@ -103,6 +106,9 @@ public:
     std::uint32_t getCurveHits() const noexcept { return curveHits.load (std::memory_order_relaxed); }
     float getCurvePosition() const noexcept { return curvePosition.load (std::memory_order_relaxed); }
 
+    // Fase 8: biblioteca de presets, preset actual y guardar/cargar (solo desde el hilo de mensajes).
+    deepwater::presets::PresetManager& getPresetManager() noexcept { return presetManager; }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void timerCallback() override;
@@ -138,7 +144,8 @@ private:
     deepwater::dsp::TripleBuffer<TransportSnapshot> transportBox;
     std::atomic<float> minGainSinceRead { 1.0f };
 
-    deepwater::dsp::BreakpointCurve curve;                       // hilo de mensajes
+    // Hilo de mensajes. Empieza en la forma por defecto ANTES de crear el PresetManager (que la toma como la de "Init").
+    deepwater::dsp::BreakpointCurve curve = ebb::dsp::defaultCurve();
     deepwater::dsp::TripleBuffer<deepwater::dsp::BreakpointCurve> curveBox; // mensajes → audio
     deepwater::dsp::BreakpointCurve audioCurve;                  // hilo de audio: la última leída del buzón
     std::atomic<int> curveVersion { 0 };
@@ -164,5 +171,10 @@ private:
     std::atomic<bool> liveViewOpen { false };
     std::atomic<std::uint32_t> curveHits { 0 };
     std::atomic<float> curvePosition { -1.0f };
+
+    // Al final: usa 'parameters' y 'curve' desde su constructor.
+    deepwater::presets::PresetManager presetManager {
+        parameters, ebb::presets::format ([this] { return curve; }, [this] (const deepwater::dsp::BreakpointCurve& c) { setCurve (c); })
+    };
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EbbAudioProcessor)
 };

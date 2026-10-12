@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Gate programado nota a nota: cada nota MIDI corta el pad. El ritmo lo escribes tú en el MIDI Out. -->
+<EbbPreset formatVersion="1" name="Stutter MIDI" category="Creativo" author="Ebb">
+  <Notes>
+    Como "Trance Gate 1/16", pero el ritmo no es una cuadrícula fija: cada nota que llega a Ebb corta el sonido. Escribe
+    en un canal MIDI Out el ritmo que quieras (síncopas, huecos, ráfagas) y el pad, la voz o el sample lo sigue. Es el
+    "stutter" de los cortes de voz del EDM y del reggaetón más electrónico.
+
+    Cómo se construyó:
+    - Modo MIDI, LARGO 1/16 × duración 100 %: cada nota abre un corte de una semicorchea.
+    - Forma Puerta: silencio la primera mitad (una fusa) y de vuelta de golpe.
+    - Profundidad 100 %, suavizado 1.5 ms (sin clic en los cortes).
+
+    Pruébalo: en el MIDI Out, escribe notas solo en algunos pasos (p. ej. 3, 4, 11 y 12) y escucha cómo el sonido
+    "tartamudea" solo ahí. Prueba a escribir el ritmo de la caja o de los hats en vez del del kick.
+    Cuándo NO usarlo: si quieres que siga al kick para limpiar graves (para eso, "Dembow MIDI Kick Irregular").
+    Viene de: Fase 4 (variación creativa: trance gate programado nota a nota).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="MIDI"/>
+    <PARAM id="division" value="1/16"/>
+    <PARAM id="depth" value="100"/>
+    <PARAM id="duration" value="100"/>
+    <PARAM id="smoothing" value="1.5"/>
+  </Parameters>
+  <Curve shape="Puerta"/>
+</EbbPreset>

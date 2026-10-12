@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Dembow experimental: el bajo se aparta solo donde hay kick, siguiendo las notas que le llegan por MIDI. -->
+<EbbPreset formatVersion="1" name="Dembow MIDI Kick Irregular" category="Dembow" author="Ebb">
+  <Notes>
+    Para el reggaetón experimental, donde el kick se mueve (síncopas, kicks desplazados, patrones que cambian por
+    sección). Cada nota que le llega a Ebb dispara la curva: el bajo solo se aparta cuando de verdad hay un kick.
+
+    Necesita el ruteo MIDI: las notas del kick copiadas a un canal MIDI Out con el mismo puerto que Ebb (Fase 4).
+    NOTA MIDI está en "Todas": si mandas toda la batería por el mismo canal, toca el kick y pulsa USAR ÚLTIMA NOTA.
+
+    Cómo se construyó:
+    - Modo MIDI, LARGO 1/4 × duración 45 %: a 95 BPM son unos 285 ms, lo que dura un kick de reggaetón. Dos kicks a
+      una semicorchea (158 ms): el segundo redispara a mitad de camino y el bajo se queda abajo durante la ráfaga.
+    - Profundidad 40 % (−4.4 dB), forma Clásica, suavizado 2 ms.
+    - VELOCIDAD encendido: los kicks fantasma (velocidad baja) apartan menos el bajo.
+
+    Pruébalo: mueve un kick en el Channel Rack con la canción sonando: el hueco del visor se mueve con él, sin tocar
+    Ebb. Si el kick tiene cola larga, sube el LARGO a 1/2 (o usa la forma Retención).
+    Cuándo NO usarlo: si no puedes mandar el MIDI del kick (un loop de audio o un kick grabado): usa el modo Audio.
+    Viene de: Fase 4 (receta del dembow experimental).
+  </Notes>
+  <Parameters>
+    <PARAM id="mode" value="MIDI"/>
+    <PARAM id="depth" value="40"/>
+    <PARAM id="duration" value="45"/>
+    <PARAM id="velocity" value="On"/>
+  </Parameters>
+</EbbPreset>

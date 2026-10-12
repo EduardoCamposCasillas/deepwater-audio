@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bajo de house: solo el sub se aparta en cada tiempo; el bajo sigue sonando entero entre kicks. -->
+<EbbPreset formatVersion="1" name="House Bajo Solo Sub" category="House" author="Ebb">
+  <Notes>
+    El bajo del house suele ir en contratiempo (entre los kicks), pero sus notas largas o su cola se pisan con el kick
+    del tiempo siguiente. Aquí solo el sub del bajo se aparta en cada tiempo: el kick suena redondo y el bajo no bombea.
+
+    Cómo se construyó:
+    - Modo Tempo, 1/4 (four on the floor).
+    - BANDA Graves, CRUCE 110 Hz: el sub del kick de house está por debajo; el cuerpo del bajo, por encima.
+    - Profundidad 75 % (−12 dB): hondo, pero solo en el sub.
+    - Duración 45 %: a 124 BPM son unos 220 ms; el sub vuelve antes del contratiempo, donde suena la nota del bajo.
+
+    Pruébalo: pon la DURACIÓN en 90 %: el sub del bajo del contratiempo también queda abajo y el groove pierde peso.
+    Vuelve a 45 %. Compara con BYPASS con el volumen igualado.
+    Cuándo NO usarlo: si el bajo y el kick no se pisan nunca (un bajo corto y en contratiempo); en un house con el
+    kick desplazado o con swing (usa el modo MIDI o Audio).
+    Viene de: nuevo (Fase 8), con las bandas de la Fase 6.
+  </Notes>
+  <Parameters>
+    <PARAM id="band" value="Graves"/>
+    <PARAM id="crossover" value="110"/>
+    <PARAM id="depth" value="75"/>
+    <PARAM id="duration" value="45"/>
+  </Parameters>
+</EbbPreset>

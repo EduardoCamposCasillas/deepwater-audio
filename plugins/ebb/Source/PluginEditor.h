@@ -5,6 +5,8 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "deepwater/presets/PresetPanel.h"
+
 #include "gui/BandView.h"
 #include "gui/CurveEditor.h"
 #include "gui/CurveView.h"
@@ -26,6 +28,8 @@ class EbbAudioProcessor;
 //   fila 1:    visor EN VIVO                                    | vista PREVIA + medidor de reducción
 //   fila 2:    FORMA DE LA CURVA (editor, con el menú de formas)  | BANDAS
 //   fila 3:    MODO y DIVISIÓN | profundidad, duración, suavizado | MIDI o SIDECHAIN (según el modo) | lookahead
+// Fase 8: la barra de presets en la cabecera (EBB | presets | reloj | zoom | bypass); el navegador y el panel de
+// guardar tapan las tres filas; los mensajes de los presets ocupan el pie unos segundos.
 // Escalado (como Riptide y Undertow): todo vive en 'content', que siempre mide lo mismo y se dibuja con una
 // transformación de escala (70–200 %). El zoom se guarda en el proyecto (propiedad "uiZoom") y como preferencia; la
 // primera vez se elige el mayor (≤ 100 %) que cabe en la pantalla.
@@ -76,6 +80,7 @@ private:
     void useLastMidiNote();
     void updateModeControls (ebb::dsp::TriggerMode mode);
     void updateBandControls (ebb::dsp::DuckBand band);
+    void showMessage (const juce::String& text);
 
     EbbAudioProcessor& processor;
     ebb::gui::EbbLookAndFeel lookAndFeel;
@@ -127,6 +132,11 @@ private:
     ebb::gui::BandView bandView;
     Knob crossoverKnob, mixKnob;
     ebb::dsp::DuckBand shownBand = ebb::dsp::DuckBand::full;
+
+    // Presets (Fase 8). Mensajes ("Preset: …", avisos al cargar) en el pie, hasta messageExpiry (ms del sistema).
+    deepwater::presets::PresetPanel presets;
+    juce::String message;
+    juce::uint32 messageExpiry = 0;
 
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<ButtonAttachment> bypassAttachment;

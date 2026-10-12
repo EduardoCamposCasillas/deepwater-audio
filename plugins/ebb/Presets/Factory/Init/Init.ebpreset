@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Punto de partida: todos los controles en su valor por defecto y la forma Clásica. Un preset de fábrica solo escribe
+     lo que cambia respecto a este. -->
+<EbbPreset formatVersion="1" name="Init" category="Init" author="Ebb">
+  <Notes>
+    Todos los controles en su valor por defecto: modo Tempo, división 1/4, profundidad 70 % (−10.5 dB), duración 70 %,
+    suavizado 2 ms, banda Todo, mix 100 %, sin lookahead y la forma Clásica.
+
+    Ojo: Init NO es sutil. 70 % de profundidad en cada tiempo ya es un bombeo que se oye. Para limpiar graves en la
+    mezcla, baja la profundidad a 15–40 %.
+
+    Cómo empezar desde aquí:
+    1. Elige el MODO según el kick: Tempo si cae fijo en cada tiempo, MIDI si lo programas (patrón irregular), Audio si
+       es un kick grabado o con swing.
+    2. Ajusta cuándo vuelve el volumen (DIVISIÓN o LARGO × DURACIÓN) mirando el visor EN VIVO: la línea blanca tiene
+       que volver arriba antes del kick siguiente.
+    3. Decide QUÉ baja (BANDA: todo o solo los graves) y CUÁNTO (PROFUNDIDAD; el MIX la escala).
+    4. Compara con BYPASS con el volumen igualado.
+  </Notes>
+  <Parameters>
+  </Parameters>
+</EbbPreset>

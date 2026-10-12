@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- El bombeo del house francés: el pad desaparece en cada tiempo y vuelve justo antes del siguiente. -->
+<EbbPreset formatVersion="1" name="House Pumping Clásico" category="House" author="Ebb">
+  <Notes>
+    El "sidechain" como efecto, el sonido del house francés y del EDM: pads, acordes o la mezcla entera de la música
+    caen en cada kick y vuelven a subir, como si respiraran con el tempo. Piensa en "One More Time" de Daft Punk.
+
+    Cómo se construyó:
+    - Modo Tempo, 1/4: el kick del house es four on the floor (uno por tiempo), así que la cuadrícula fija basta.
+    - Profundidad 85 % (−16.5 dB): casi desaparece; es un efecto, no limpieza.
+    - Duración 95 %: vuelve justo antes del tiempo siguiente (a 124 BPM, en unos 460 ms).
+    - Suavizado 4 ms: una caída firme pero sin clic en el pad.
+
+    Pruébalo: cambia la DURACIÓN de 95 a 60 %: el pad vuelve antes y se queda arriba un rato (menos bombeo, más
+    "golpe"). Prueba la forma Lenta para un bombeo todavía más exagerado.
+    Cuándo NO usarlo: en el bajo para limpiar (demasiado: usa "House Bajo Solo Sub"); en la voz principal.
+    Viene de: Fase 2 (variación creativa: pads que respiran).
+  </Notes>
+  <Parameters>
+    <PARAM id="depth" value="85"/>
+    <PARAM id="duration" value="95"/>
+    <PARAM id="smoothing" value="4"/>
+  </Parameters>
+</EbbPreset>
