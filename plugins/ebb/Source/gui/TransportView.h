@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "TransportSnapshot.h"
@@ -8,11 +10,20 @@
 namespace ebb::gui
 {
 
-// Fase 1: lo que Ebb sabe del host, para comprobar a ojo que sigue a FL. La posición grande (compás.tiempo.semicorchea)
-// debería ir a la par con la de FL; las luces marcan el tiempo del compás (el primero, más brillante).
-class TransportView final : public juce::Component
+// Fase 1: lo que Ebb sabe del host, para comprobar a ojo que sigue a FL. Desde la Fase 7 es una tira en la cabecera
+// (el espacio grande es para el visor en vivo): estado, posición compás.tiempo.semicorchea (debería ir a la par con la
+// de FL), una luz por tiempo del compás (la primera, más brillante) y los detalles (tempo, compás, paso B:S de FL,
+// loop, saltos y audio).
+class TransportView final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
+    TransportView()
+    {
+        setTooltip (juce::String::fromUTF8 ("El reloj del host tal como lo ve Ebb. La posici\xc3\xb3n (comp\xc3\xa1s . tiempo . "
+                                            "semicorchea) y B:S deben ir a la par con FL. Saltos cuenta los loops y los "
+                                            "saltos en la l\xc3\xadnea de tiempo; la curva sigue cayendo en su sitio."));
+    }
+
     void setSnapshot (const TransportSnapshot& newSnapshot)
     {
         snapshot = newSnapshot;
@@ -21,17 +32,59 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        auto bounds = getLocalBounds().toFloat();
-        g.setColour (theme::panel);
-        g.fillRoundedRectangle (bounds, 8.0f);
-        g.setColour (theme::panelOutline);
-        g.drawRoundedRectangle (bounds.reduced (0.5f), 8.0f, 1.0f);
+        auto area = getLocalBounds();
+        const auto status = statusText();
+        g.setColour (status.second);
+        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        g.drawText (status.first, area.removeFromLeft (112), juce::Justification::centredLeft);
 
-        auto area = getLocalBounds().reduced (16, 12);
-        auto details = area.removeFromRight (220);
-        area.removeFromRight (16);
-        paintPosition (g, area);
-        paintDetails (g, details);
+        const auto pos = position();
+        g.setColour (theme::text);
+        g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+        g.drawText (juce::String (pos.bar) + " . " + juce::String (pos.beat) + " . " + juce::String (pos.sixteenth),
+                    area.removeFromLeft (112), juce::Justification::centredLeft);
+
+        // Una luz por tiempo del compás (como el metrónomo de FL). Con compases muy largos se achican.
+        const int beats = snapshot.timeSignature.numerator;
+        auto lights = area.removeFromLeft (110).toFloat();
+        const float size = juce::jmin (12.0f, (lights.getWidth() - 4.0f * static_cast<float> (beats - 1)) / static_cast<float> (beats));
+        const float gap = juce::jmin (4.0f, size * 0.3f);
+        for (int b = 0; b < beats; ++b)
+        {
+            const auto light = juce::Rectangle<float> (lights.getX() + static_cast<float> (b) * (size + gap), lights.getCentreY() - size * 0.5f, size, size);
+            const auto colour = b == 0 ? theme::accent : theme::accent.withMultipliedSaturation (0.55f);
+            g.setColour (b + 1 == pos.beat ? colour : theme::track);
+            g.fillEllipse (light);
+        }
+
+        const auto& sig = snapshot.timeSignature;
+        const auto audio = snapshot.sampleRate > 0.0
+                               ? juce::String (snapshot.sampleRate / 1000.0, 1) + " kHz / " + juce::String (snapshot.blockSize)
+                               : juce::String ("-");
+        const std::pair<juce::String, juce::String> details[] {
+            { "", juce::String (snapshot.bpm, 2) + " BPM" },
+            { "", juce::String (sig.numerator) + "/" + juce::String (sig.denominator) },
+            { "B:S", juce::String (pos.bar) + ":" + juce::String (pos.step).paddedLeft ('0', 2) },
+            { "loop", snapshot.looping ? utf8 ("s\xc3\xad") : juce::String ("no") },
+            { "saltos", juce::String (static_cast<int> (snapshot.jumps)) },
+            { "audio", audio },
+        };
+        for (const auto& [name, value] : details)
+        {
+            const juce::Font nameFont (juce::FontOptions (11.0f));
+            const juce::Font valueFont (juce::FontOptions (12.0f, juce::Font::bold));
+            const int nameWidth = name.isEmpty() ? 0 : juce::roundToInt (juce::GlyphArrangement::getStringWidth (nameFont, name)) + 4;
+            const int valueWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (valueFont, value)) + 2;
+            if (nameWidth + valueWidth > area.getWidth())
+                break;
+            g.setColour (theme::dimText);
+            g.setFont (nameFont);
+            g.drawText (name, area.removeFromLeft (nameWidth), juce::Justification::centredLeft);
+            g.setColour (theme::text);
+            g.setFont (valueFont);
+            g.drawText (value, area.removeFromLeft (valueWidth), juce::Justification::centredLeft);
+            area.removeFromLeft (14);
+        }
     }
 
 private:
@@ -43,81 +96,14 @@ private:
         return dsp::musicalPosition (snapshot.ppq, snapshot.timeSignature, barStart);
     }
 
-    void paintPosition (juce::Graphics& g, juce::Rectangle<int> area) const
-    {
-        const auto pos = position();
-        const auto status = statusText();
-
-        g.setColour (status.second);
-        g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-        g.drawText (status.first, area.removeFromTop (22), juce::Justification::centredLeft);
-
-        area.removeFromTop (6);
-        g.setColour (theme::text);
-        g.setFont (juce::FontOptions (46.0f, juce::Font::bold));
-        g.drawText (juce::String (pos.bar) + " . " + juce::String (pos.beat) + " . " + juce::String (pos.sixteenth),
-                    area.removeFromTop (54), juce::Justification::centredLeft);
-        g.setColour (theme::dimText);
-        g.setFont (juce::FontOptions (12.0f));
-        g.drawText (utf8 ("comp\xc3\xa1" "s . tiempo . semicorchea"), area.removeFromTop (18),
-                    juce::Justification::centredLeft);
-
-        // Una luz por tiempo del compás (como el metrónomo de FL). Con compases muy largos se achican.
-        area.removeFromTop (14);
-        const int beats = snapshot.timeSignature.numerator;
-        const auto lights = area.removeFromTop (26).toFloat();
-        const float size = juce::jmin (22.0f, (lights.getWidth() - 6.0f * static_cast<float> (beats - 1)) / static_cast<float> (beats));
-        const float gap = juce::jmin (6.0f, size * 0.3f);
-        for (int b = 0; b < beats; ++b)
-        {
-            const auto light = juce::Rectangle<float> (lights.getX() + static_cast<float> (b) * (size + gap), lights.getY(), size, size);
-            const bool current = b + 1 == pos.beat;
-            const auto colour = b == 0 ? theme::accent : theme::accent.withMultipliedSaturation (0.55f);
-            g.setColour (current ? colour : theme::track);
-            g.fillEllipse (light);
-        }
-    }
-
-    void paintDetails (juce::Graphics& g, juce::Rectangle<int> area) const
-    {
-        const auto& sig = snapshot.timeSignature;
-        const auto audio = snapshot.sampleRate > 0.0
-                               ? juce::String (juce::roundToInt (snapshot.sampleRate)) + " Hz, " + juce::String (snapshot.blockSize)
-                                     + utf8 (" muestras")
-                               : juce::String ("-");
-
-        const auto pos = position();
-        const std::pair<juce::String, juce::String> rows[] {
-            { "FL (B:S)", juce::String (pos.bar) + ":" + juce::String (pos.step).paddedLeft ('0', 2) },
-            { "Tempo", juce::String (snapshot.bpm, 2) + " BPM" },
-            { utf8 ("Comp\xc3\xa1" "s"), juce::String (sig.numerator) + "/" + juce::String (sig.denominator) },
-            { utf8 ("Posici\xc3\xb3n"), juce::String (snapshot.ppq, 3) + " negras" },
-            { "Loop", snapshot.looping ? utf8 ("s\xc3\xad") : juce::String ("no") },
-            { "Saltos", juce::String (static_cast<int> (snapshot.jumps)) },
-            { "Audio", audio },
-        };
-
-        const int rowHeight = juce::jmin (22, area.getHeight() / static_cast<int> (std::size (rows)));
-        for (const auto& [name, value] : rows)
-        {
-            auto row = area.removeFromTop (rowHeight);
-            g.setColour (theme::dimText);
-            g.setFont (juce::FontOptions (12.0f));
-            g.drawText (name, row.removeFromLeft (70), juce::Justification::centredLeft);
-            g.setColour (theme::text);
-            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-            g.drawText (value, row, juce::Justification::centredLeft);
-        }
-    }
-
     [[nodiscard]] std::pair<juce::String, juce::Colour> statusText() const
     {
         switch (snapshot.source)
         {
-            case dsp::ClockSource::host: return { utf8 ("\xe2\x96\xb6  Reproduciendo (sigue a FL)"), theme::accent };
+            case dsp::ClockSource::host: return { utf8 ("\xe2\x96\xb6  Reproduciendo"), theme::accent };
             case dsp::ClockSource::stopped: return { utf8 ("\xe2\x96\xa0  Parado"), theme::dimText };
             case dsp::ClockSource::freeRunning:
-            default: return { utf8 ("\xe2\x97\x8b  Reloj libre (sin posici\xc3\xb3n)"), theme::freeRunning };
+            default: return { utf8 ("\xe2\x97\x8b  Reloj libre"), theme::freeRunning };
         }
     }
 

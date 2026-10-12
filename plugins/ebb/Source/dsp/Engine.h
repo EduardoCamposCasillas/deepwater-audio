@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <span>
 
 #include "deepwater/dsp/Smoothing.h"
 #include "dsp/Bands.h"
 #include "dsp/CurveShapes.h"
 #include "dsp/HostClock.h"
+#include "dsp/LiveScope.h"
 #include "dsp/Lookahead.h"
 #include "dsp/TempoCurve.h"
 #include "dsp/Triggers.h"
@@ -54,6 +56,8 @@ struct TempoSettings
 //      30 ms ("glide"). La curva nueva entra ya en su sitio.
 //   3. El suavizado final (perilla) redondea los saltos que quedan: los golpes y los saltos de la línea de tiempo. Un
 //      golpe que llega antes de que la curva termine baja desde la ganancia actual, no desde 1.
+// Fase 7: para la GUI, cuenta los golpes, dice por dónde va la curva y (si hay visor) le pasa cada muestra: entrada,
+// salida, ganancia que sonó y si ahí empezó una curva. Solo lee: el sonido no cambia.
 class Engine
 {
 public:
@@ -92,12 +96,18 @@ public:
         glideRemaining = 0;
         gain = 1.0f;
         minGain = 1.0f;
+        lastCurveBeats = -1.0;
+        hits = 0;
+        position = -1.0f;
         primed = false;
         state = {};
         hit = {};
     }
 
     void setBypassed (bool bypassed) noexcept { processing = ! bypassed; }
+
+    // Fase 7: el visor en vivo que recibe cada muestra (nullptr = ninguno: la GUI está cerrada). No cambia el sonido.
+    void setScope (LiveScope* newScope) noexcept { scope = newScope; }
 
     // Retraso de la entrada en muestras (hasta maxLookaheadSamples). Un cambio se hace con un fundido cruzado de 20 ms.
     void setLookahead (int samples) noexcept { lookahead.setDelay (samples); }
@@ -142,15 +152,21 @@ public:
 
         for (int i = 0; i < numSamples; ++i)
         {
+            bool hitHere = false;
             for (; nextTrigger < triggers.size() && triggers[nextTrigger].offset <= i; ++nextTrigger)
+            {
                 startHit (triggers[nextTrigger].velocity);
+                hitHere = true;
+            }
 
-            const float duckGain = applyMix (nextGain (clock.ppqAt (i)));
+            const float duckGain = applyMix (nextGain (clock.ppqAt (i), hitHere));
             const float wet = bypassFade.next (processing); // 1 = procesado, 0 = original
-            minGain = std::min (minGain, 1.0f - wet * (1.0f - duckGain));
+            const float heardGain = 1.0f - wet * (1.0f - duckGain);
+            minGain = std::min (minGain, heardGain);
 
             lookahead.advance();
             bands.advance();
+            float inputPeak = 0.0f, outputPeak = 0.0f;
             for (int ch = 0; ch < numChannels; ++ch)
             {
                 float& sample = channels[ch][i];
@@ -159,13 +175,27 @@ public:
 
                 // Fuera del fundido se copia la señal tal cual: con el bypass puesto (o profundidad 0), bit a bit.
                 sample = wet == 1.0f ? processed : wet == 0.0f ? dry : dry + (processed - dry) * wet;
+                inputPeak = std::max (inputPeak, std::abs (dry));
+                outputPeak = std::max (outputPeak, std::abs (sample));
             }
+            if (scope != nullptr)
+                scope->write (i, inputPeak, outputPeak, heardGain, hitHere);
         }
+        updatePosition();
     }
 
     // Ganancia más baja que sonó en el último bloque (1 = sin ducking), para el medidor de la GUI. En modo bandas es la de
     // la banda que baja.
     [[nodiscard]] float blockMinGain() const noexcept { return minGain; }
+
+    // Fase 7, para la GUI. Cuántas curvas empezaron desde prepare(): golpes MIDI o del sidechain, y en modo tempo cada
+    // inicio de ciclo (también al arrancar justo en uno, o al volver de un loop a un golpe).
+    [[nodiscard]] std::uint32_t hitCount() const noexcept { return hits; }
+
+    // Dónde va la curva al final del último bloque, en el eje x del editor: 0 = el golpe, 1 = el final de la DURACIÓN
+    // (pasada la duración se queda en 1, en el último punto). −1 = no suena ninguna curva (tempo parado, o antes del
+    // primer golpe en MIDI y audio).
+    [[nodiscard]] float curvePosition() const noexcept { return position; }
 
 private:
     // Lo que decide qué curva suena. Si cambia de un bloque al siguiente, la curva saltaría: se hace glide.
@@ -190,23 +220,51 @@ private:
     // y la curva quedaría congelada a medias: el bajo sonaría atenuado al previsualizar notas en el Piano roll).
     [[nodiscard]] float shapeAt (double ppq, const CurveState& s, float duration) const noexcept
     {
+        return shapeFromBeats (curveBeats (ppq, s), s, duration);
+    }
+
+    // Negras desde que empezó la curva que suena: en tempo, la posición en el ciclo; en MIDI/audio, desde el último
+    // golpe. −1 = no suena ninguna.
+    [[nodiscard]] double curveBeats (double ppq, const CurveState& s) const noexcept
+    {
+        if (isHitMode (s.mode))
+            return s.hasHit ? hit.beats : -1.0;
+        if (! s.running)
+            return -1.0;
+        return positionInCycle (ppq, origin, quartersPerBar, s.period);
+    }
+
+    [[nodiscard]] float shapeFromBeats (double beats, const CurveState& s, float duration) const noexcept
+    {
+        if (beats < 0.0)
+            return 0.0f;
         if (isHitMode (s.mode))
         {
-            if (! s.hasHit)
-                return 0.0f;
             const double length = s.period * static_cast<double> (std::max (duration, 1.0e-3f));
             const float scale = s.velocitySensitive ? hit.velocity : 1.0f;
-            return scale * duckAt (curve, hit.finished ? length : std::min (hit.beats, length), s.period, duration);
+            return scale * duckAt (curve, hit.finished ? length : std::min (beats, length), s.period, duration);
         }
-        if (! s.running)
-            return 0.0f;
-        return duckAt (curve, positionInCycle (ppq, origin, quartersPerBar, s.period), s.period, duration);
+        return duckAt (curve, beats, s.period, duration);
+    }
+
+    // Para la GUI, con la última muestra del bloque.
+    void updatePosition() noexcept
+    {
+        if (lastCurveBeats < 0.0)
+        {
+            position = -1.0f;
+            return;
+        }
+        const double length = state.period * static_cast<double> (std::max (durationRamp.value, 1.0e-3f));
+        const bool finished = isHitMode (state.mode) && hit.finished;
+        position = finished ? 1.0f : static_cast<float> (std::min (1.0, lastCurveBeats / length));
     }
 
     void startHit (float velocity) noexcept
     {
         hit = { 0.0, false, std::clamp (velocity, 0.0f, 1.0f) };
         state.hasHit = true;
+        ++hits;
     }
 
     // Avanza el golpe una muestra. Termina al pasar su largo (con la duración de ese momento): así, si después se
@@ -271,15 +329,30 @@ private:
             glideOffset = before - after;
             glideRemaining = glideSamples;
         }
+        // Otro ciclo u otro modo: la posición anterior ya no sirve para reconocer el inicio de un ciclo.
+        if (next.period != state.period || next.mode != state.mode)
+            lastCurveBeats = -1.0;
         state = next;
     }
 
-    float nextGain (double ppq) noexcept
+    // 'hitHere' (entrada y salida): ya hubo un golpe MIDI o del sidechain en esta muestra; en modo tempo se marca aquí
+    // si empieza un ciclo.
+    float nextGain (double ppq, bool& hitHere) noexcept
     {
         const float duration = durationRamp.next();
         const float depth = depthRamp.next();
 
-        float shape = shapeAt (ppq, state, duration);
+        const double beats = curveBeats (ppq, state);
+        float shape = shapeFromBeats (beats, state, duration);
+        // Inicio de ciclo: la posición cae en la primera muestra del ciclo y viene de más atrás (o de no sonar). Un loop
+        // o un salto a mitad de ciclo no cuenta: ahí la curva no empieza.
+        if (! isHitMode (state.mode) && beats >= 0.0 && beats < beatsPerSample + 1.0e-9
+            && (lastCurveBeats < 0.0 || beats < lastCurveBeats))
+        {
+            hitHere = true;
+            ++hits;
+        }
+        lastCurveBeats = beats;
         advanceHit (duration);
         if (glideRemaining > 0)
         {
@@ -344,6 +417,12 @@ private:
 
     float gain = 1.0f;
     float minGain = 1.0f;
+
+    // Fase 7: para la GUI.
+    LiveScope* scope = nullptr;
+    double lastCurveBeats = -1.0; // curveBeats de la muestra anterior
+    std::uint32_t hits = 0;
+    float position = -1.0f;
 };
 
 } // namespace ebb::dsp

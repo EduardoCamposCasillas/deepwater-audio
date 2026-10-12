@@ -6,6 +6,7 @@
 #include "deepwater/dsp/TripleBuffer.h"
 #include "dsp/Engine.h"
 #include "dsp/HostClock.h"
+#include "dsp/LiveScope.h"
 #include "TransportSnapshot.h"
 
 // Efecto mono/estéreo. Fase 2: modo tempo, una curva de ducking sincronizada con la posición del host (PlayHead).
@@ -13,6 +14,7 @@
 // Fase 4: modo MIDI, cada nota recibida dispara la curva en su muestra exacta.
 // Fase 5: modo audio, una entrada sidechain (2.º bus de entrada) cuyos golpes disparan la curva, y lookahead.
 // Fase 6: la curva se aplica a toda la señal o a una banda (graves / agudos), y mix dry/wet.
+// Fase 7: publica para la GUI el visor en vivo (LiveScope), los golpes de la curva y por dónde va.
 // El audio está en ebb::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class EbbAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
@@ -91,6 +93,16 @@ public:
         return { sidechainPeakSinceRead.exchange (0.0f), sidechainDetected.load(), sidechainTriggersFired.load() };
     }
 
+    // Fase 7, hilo de la GUI. El visor en vivo solo se alimenta mientras la GUI está abierta (setLiveViewOpen).
+    const ebb::dsp::LiveScope& getLiveScope() const noexcept { return liveScope; }
+    void setLiveViewBars (int bars) noexcept { liveScope.setBars (bars); }
+    void setLiveViewOpen (bool open) noexcept { liveViewOpen.store (open); }
+
+    // Fase 7, hilo de la GUI: cuántas curvas empezaron (para la luz de GOLPE) y por dónde va la que suena, en el eje x
+    // del editor (−1 = ninguna). Ver Engine::hitCount y Engine::curvePosition.
+    std::uint32_t getCurveHits() const noexcept { return curveHits.load (std::memory_order_relaxed); }
+    float getCurvePosition() const noexcept { return curvePosition.load (std::memory_order_relaxed); }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void timerCallback() override;
@@ -99,6 +111,7 @@ private:
     ebb::dsp::TransportInfo readHostTransport() noexcept;
     ebb::dsp::TempoSettings readTempoSettings() const noexcept;
     void publishTransport (int numSamples) noexcept;
+    void feedLiveScopeSidechain (juce::AudioBuffer<float>& buffer, int numSamples) noexcept;
     void loadCurveFromState();
     std::span<const ebb::dsp::Trigger> collectTriggers (const juce::MidiBuffer& midi, int numSamples) noexcept;
 
@@ -145,5 +158,11 @@ private:
     // latencia nueva toma un lock dentro de JUCE, y eso no se hace en el hilo de audio. El audio usa este valor, así el
     // retraso real y la latencia informada coinciden.
     std::atomic<int> reportedLookahead { 0 };
+
+    // Fase 7: para la GUI.
+    ebb::dsp::LiveScope liveScope;
+    std::atomic<bool> liveViewOpen { false };
+    std::atomic<std::uint32_t> curveHits { 0 };
+    std::atomic<float> curvePosition { -1.0f };
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EbbAudioProcessor)
 };

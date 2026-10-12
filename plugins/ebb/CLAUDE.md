@@ -69,11 +69,12 @@ plugins/ebb/
     dsp/Lookahead.h          # retardo del lookahead con fundido cruzado al cambiarlo
     dsp/Bands.h              # ducking por bandas: Todo / Graves / Agudos con cruce LR4 suavizado y fundido al cambiar
     dsp/Engine.h             # cadena de audio completa, sin JUCE: lookahead, curva, rampas, glide, suavizado, mix,
-                             # bandas y bypass
+                             # bandas y bypass; golpes y posición de la curva para la GUI
+    dsp/LiveScope.h          # visor en vivo: columnas de barrido ancladas al compás (audio → GUI con atómicos)
     gui/                     # tema, LookAndFeel (perillas), visor del transporte, vista de la curva y medidor,
                              # editor de la curva (CurveEditor.h), luz de actividad MIDI (MidiActivityView.h),
                              # medidor del sidechain con el umbral arrastrable (SidechainMeterView.h),
-                             # respuesta en frecuencia de las bandas (BandView.h)
+                             # respuesta en frecuencia de las bandas (BandView.h), visor en vivo (LiveView.h)
   tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE)
 ```
 
@@ -113,34 +114,53 @@ incluyen notas de para qué sirven y por qué.
 - [ ] Fase 9 — Pulido: CPU, pluginval estricto, pruebas a distintos tempos y cambios de tempo en vivo.
 
 ## Estado actual
-Fase 6 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
-- `dsp/Bands.h` (nuevo): `DuckBand` (Todo, Graves, Agudos; el parámetro guarda el índice: solo añadir al final) y
-  `BandDucker`: un `LinkwitzRileySplit` (libs/dsp, LR4 24 dB/oct) por canal que corre SIEMPRE (también en Todo, para
-  que al cambiar de banda los filtros ya estén en régimen). Graves = low·g + high; Agudos = low + high·g; Todo = x·g
-  (sin pasar por el divisor: bit a bit como en la Fase 5). Cruce suavizado en octavas (rampa de 20 ms; tan() solo
-  mientras se mueve). Cambiar de banda = fundido cruzado de 20 ms entre la salida vieja y la nueva (si llega otro
-  cambio, espera). `lowBandMagnitude` (1 / (1 + r⁴)) para la GUI.
-- `dsp/Engine.h`: `TempoSettings` + `band`, `crossoverHz`, `mix`. Mix = escalar la reducción después del suavizado,
-  `1 − mix·(1 − g)` (equivale a la mezcla en paralelo con la original en fase; sin peine en modo bandas); rampa de
-  20 ms; con mix 1 la ganancia pasa tal cual (bit a bit). El medidor mide la ganancia con mix (en bandas, la de la banda).
-- Parámetros nuevos (versionHint 6): `band` (Todo por defecto), `crossover` (20 Hz–5 kHz logarítmico, 120 Hz; texto
-  "120 Hz" / "1.50 kHz", acepta "k"), `mix` (0–100 %, 100). Proyectos anteriores: suenan igual.
-- GUI sigue en 960 × 750: el editor de la curva se acorta y a su derecha va el panel BANDAS (330 px): `BandView`
-  (respuesta 20 Hz–20 kHz, 0 a −24 dB: gris = sin ducking, acento = en lo más hondo del golpe con profundidad × mix,
-  relleno = lo que se quita, blanca = en vivo, ámbar punteada = cruce), BANDA, CRUCE (atenuada en Todo) y MIX. La vista
-  previa de la curva usa profundidad × mix. Captura del Standalone revisada.
-- PENDIENTE (Fase 7): la pantalla del usuario es de 1280 × 720 lógicos (1920 × 1080 al 150 %, área útil 672 px de
-  alto): la ventana de 750 px ya no cabía entera desde la Fase 5 (el panel SIDECHAIN queda tapado). Hacer la GUI
-  escalable / redimensionable o más baja.
-- Tests `EbbTests` (+3): Graves/Agudos a 4 sample rates (un 40 Hz baja < 0.05 en el golpe y un 5 kHz queda > 0.97, al
-  revés en Agudos; lejos del golpe los dos pasan enteros), profundidad 0 en Graves = el allpass LR4 de referencia
-  (error < 1e-5), bypass bit a bit en bandas, bloques de 7 = 4096 idénticos; mix 50 % = profundidad a la mitad (Todo y
-  Graves, error < 1e-5), mix 0 = bit a bit, bajar el mix sonando sin saltos; Todo → Graves → Agudos → Todo sonando
-  sobre un 80 Hz con el volumen abajo sin pasos mayores que sin cambios (sin el fundido salta 0.24: comprobado) y
-  barrido del cruce 30 Hz–2 kHz finito y acotado. Release con 0 warnings; ctest 6/6; pluginval strictness 10
-  ampliado: SUCCESS.
+Fase 7 IMPLEMENTADA (2026-10-12), pendiente de probar en FL Studio.
+- `dsp/LiveScope.h` (nuevo): osciloscopio de barrido. Ventana de 1, 2 o 4 compases (`setBars`, atómico) en 512
+  columnas; con el host corriendo (o el reloj libre) arranca en un inicio de compás (compases 1–2, 3–4... a partir de
+  `barOrigin`); parado, el barrido sigue al tempo conocido. Cada columna: pico de entrada (después del lookahead),
+  de salida y del sidechain, ganancia mínima que sonó (con mix y bypass) y si empezó una curva. Atómicos relajados
+  escritos muestra a muestra (sin locks; una lectura a medias se ve un cuadro). Dos pasadas independientes por bloque:
+  `write` (motor) y `addSidechain` (procesador); cada una reinicia su parte al entrar en una columna nueva.
+  No se usó `AnalyzerTap` (libs/dsp): entrega muestras crudas en orden de llegada, y el visor necesita resúmenes
+  colocados por la posición musical (depende de `HostClock`, por eso vive en Ebb y no en la librería).
+- `dsp/Engine.h`: `setScope` (nullptr = sin visor; no cambia el sonido: test bit a bit), `hitCount` (golpes MIDI/audio
+  y, en tempo, cada inicio de ciclo: la posición cae en la 1.ª muestra del ciclo viniendo de más atrás o de no sonar;
+  un loop o arranque a mitad de ciclo no cuenta) y `curvePosition` (0–1 del eje del editor; 1 = terminó; −1 = no suena).
+  `shapeAt` se partió en `curveBeats` + `shapeFromBeats` (misma cuenta).
+- Procesador: el visor solo se alimenta con la GUI abierta (`setLiveViewOpen`); publica `curveHits` y
+  `curvePosition` (atómicos).
+- GUI escalable (como Riptide): lienzo fijo de 1160 × 590 en `content` con transformación de escala, 70–200 %,
+  ventana redimensionable con proporción fija; zoom en el estado ("uiZoom") y en `%APPDATA%/Deepwater/Ebb.settings`;
+  la primera vez, el mayor (≤ 100 %) que cabe (en la pantalla del usuario, 1280 × 720 lógicos, cabe a 100 %).
+  Distribución: cabecera (EBB | reloj del host en una tira | zoom | bypass); fila 1: EN VIVO | PREVIA + medidor;
+  fila 2: FORMA DE LA CURVA (con el menú FORMA en su título) | BANDAS; fila 3: MODO y DIVISIÓN | 3 perillas | MIDI (Tempo
+  y MIDI) o SIDECHAIN (Audio) | LOOKAHEAD. Compases del visor en el estado ("liveBars").
+- `gui/LiveView.h` (nuevo): gris = entrada, verde agua = salida (polígonos escalonados: con un rectángulo por columna
+  el relleno sale a rayas), blanca = ganancia, ámbar = sidechain (escala propia), triángulos = golpes, cuadrícula de
+  compás/tiempo/semicorchea con números encima de la señal, cursor con hueco borrado delante, botón 1/2/4 compases y
+  luz GOLPE. Escala automática (sube al instante, baja ≈ 2 s; piso −40 dBFS) y picos retenidos ±12.5 ms entre columnas
+  vecinas (un sub de 40 Hz se veía a rayas).
+- `gui/CurveEditor.h`: cursor de reproducción (línea + punto blanco sobre la forma; apagado al terminar) y tooltip con
+  la ayuda. `gui/TransportView.h`: tira compacta para la cabecera. `gui/CurveView.h`: título "PREVIA".
+- Captura del Standalone revisada (sin dispositivo de audio en esta máquina el Standalone no procesa: el visor se
+  revisó alimentándolo con un dembow sintético desde la GUI, cambio temporal ya quitado), también el modo Audio.
+- Tests `EbbTests` (+1, `testLiveView`): el visor no cambia la salida (bit a bit); tempo 1/4 en 2 compases = 9 golpes
+  con marcas exactamente en las 4 columnas de los tiempos; ganancia 0 en el golpe y 1 pasada la duración; posición de
+  la curva a mitad (0.5) y terminada (1); arrancar a mitad de un tiempo y un loop a mitad de ciclo no cuentan; dembow
+  MIDI en ventana de 2 compases con sus 4 marcas (±1 columna por el redondeo del host) y cursor a la mitad; compás 4 de
+  una ventana de 2 = 2.ª mitad; sidechain en su columna; host parado = el barrido avanza. Release con 0 warnings;
+  ctest 6/6; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 7 (GUI).
+Siguiente: que el usuario pruebe la Fase 7 en FL Studio; después, Fase 8 (presets).
+
+### Fase 6 (completada 2026-10-12, probada en FL)
+- `dsp/Bands.h`: `DuckBand` (Todo, Graves, Agudos; índice: solo añadir al final) y `BandDucker`: `LinkwitzRileySplit`
+  (LR4) por canal SIEMPRE en marcha. Graves = low·g + high; Agudos = low + high·g; Todo = x·g (bit a bit como la
+  Fase 5). Cruce suavizado en octavas (20 ms); cambiar de banda = fundido cruzado de 20 ms. `lowBandMagnitude` para la GUI.
+- `dsp/Engine.h`: mix = `1 − mix·(1 − g)` después del suavizado (rampa de 20 ms; mix 1 = bit a bit). El medidor mide
+  la ganancia con mix (en bandas, la de la banda).
+- Parámetros (versionHint 6): `band` (Todo), `crossover` (20 Hz–5 kHz log, 120 Hz), `mix` (0–100 %, 100).
+- GUI: panel BANDAS (`BandView`, BANDA, CRUCE, MIX); la vista previa usa profundidad × mix.
 
 ### Fase 5 (completada 2026-10-12, probada en FL)
 - Librería: `deepwater/dsp/TransientDetector.h` (con test): envolvente de `EnvelopeFollower` (ataque 0, relajación

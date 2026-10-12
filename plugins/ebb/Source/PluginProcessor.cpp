@@ -163,6 +163,7 @@ void EbbAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*
     engine.prepare (sampleRate, bypassParam->load() >= 0.5f, readTempoSettings(), lookahead);
     clock.prepare (sampleRate);
     detector.prepare (sampleRate);
+    liveScope.reset();
 }
 
 int EbbAudioProcessor::lookaheadSamplesFromParameter (double sampleRate) const noexcept
@@ -314,14 +315,42 @@ void EbbAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     const auto midiTriggers = collectTriggers (midi, numSamples);
     const auto sidechainTriggers = detectSidechain (buffer, numSamples);
     const auto mode = ebb::dsp::triggerModeFromIndex (static_cast<int> (modeParam->load()));
+    // Sin GUI abierta, el visor no se alimenta (no hay quién lo mire).
+    const bool liveView = liveViewOpen.load (std::memory_order_relaxed);
+    if (liveView)
+        liveScope.beginBlock (clock, numSamples);
+    engine.setScope (liveView ? &liveScope : nullptr);
     engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples, clock,
                     mode == ebb::dsp::TriggerMode::audio ? sidechainTriggers : midiTriggers);
+    if (liveView)
+        feedLiveScopeSidechain (buffer, numSamples);
     publishTransport (numSamples);
+    curveHits.store (engine.hitCount(), std::memory_order_relaxed);
+    curvePosition.store (engine.curvePosition(), std::memory_order_relaxed);
 
     // Mínimo acumulado hasta que la GUI lo lea. Si la GUI lo reinicia justo entre la lectura y la escritura se pierde a
     // lo sumo un bloque del medidor: no vale la pena un bucle compare-exchange en el hilo de audio.
     if (const float blockMin = engine.blockMinGain(); blockMin < minGainSinceRead.load (std::memory_order_relaxed))
         minGainSinceRead.store (blockMin, std::memory_order_relaxed);
+}
+
+// El sidechain al visor, después del motor (que ya abrió las columnas del bloque). Sin bus conectado no hay nada que poner.
+void EbbAudioProcessor::feedLiveScopeSidechain (juce::AudioBuffer<float>& buffer, int numSamples) noexcept
+{
+    const auto* bus = getBus (true, 1);
+    if (bus == nullptr || ! bus->isEnabled())
+        return;
+    const auto sidechain = getBusBuffer (buffer, true, 1);
+    const int channels = sidechain.getNumChannels();
+    if (channels == 0)
+        return;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        float level = 0.0f;
+        for (int ch = 0; ch < channels; ++ch)
+            level = juce::jmax (level, std::abs (sidechain.getSample (ch, i)));
+        liveScope.addSidechain (i, level);
+    }
 }
 
 void EbbAudioProcessor::publishTransport (int numSamples) noexcept

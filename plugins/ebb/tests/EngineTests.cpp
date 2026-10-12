@@ -13,6 +13,7 @@
 #include "dsp/CurveShapes.h"
 #include "dsp/Engine.h"
 #include "dsp/HostClock.h"
+#include "dsp/LiveScope.h"
 #include "dsp/TempoCurve.h"
 #include "dsp/Triggers.h"
 
@@ -1191,6 +1192,162 @@ void testBandChangesWhilePlaying()
     CHECK (std::abs (ducker.getCrossoverHz() - 1600.0f) < 0.1f);
 }
 
+// Fase 7: simula a FL reproduciendo con el visor conectado. Las notas van como en renderMidi; 'beforeBlock' puede cambiar
+// el transporte. Devuelve la salida (señal constante 0.5) para compararla con la de sin visor.
+template <typename BeforeBlock>
+std::vector<float> renderScope (Engine& engine, LiveScope* scope, double sampleRate, double bpm, TempoSettings settings,
+                                int totalSamples, int maxBlock, const std::vector<Note>& notes, BeforeBlock beforeBlock)
+{
+    HostClock clock;
+    clock.prepare (sampleRate);
+    engine.prepare (sampleRate, false, settings);
+    engine.setScope (scope);
+    if (scope != nullptr)
+        scope->reset();
+
+    std::vector<float> out (static_cast<size_t> (totalSamples), 0.5f);
+    std::vector<Trigger> triggers;
+    BlockSizes sizes;
+    const double perSample = bpm / (60.0 * sampleRate);
+    double ppq = 0.0;
+    for (int done = 0; done < totalSamples;)
+    {
+        const int numSamples = std::min (sizes.next (maxBlock), totalSamples - done);
+        auto info = playingAt (ppq, bpm);
+        beforeBlock (done, info);
+        if (info.ppqPosition)
+            ppq = *info.ppqPosition;
+
+        triggers.clear();
+        for (const auto& note : notes)
+            if (note.sample >= done && note.sample < done + numSamples)
+                triggers.push_back ({ note.sample - done, note.velocity });
+
+        clock.beginBlock (info, numSamples);
+        if (scope != nullptr)
+            scope->beginBlock (clock, numSamples);
+        engine.setSettings (settings);
+        float* channel = out.data() + done;
+        engine.process (&channel, 1, numSamples, clock, triggers);
+
+        if (info.isPlaying)
+            ppq += numSamples * perSample;
+        done += numSamples;
+    }
+    return out;
+}
+
+void testLiveView()
+{
+    std::printf ("Visor en vivo: columnas ancladas al compas, golpes marcados, cursor de la curva, sin cambiar el sonido\n");
+
+    constexpr double sampleRate = 48000.0;
+    constexpr int beat = 24000; // 120 BPM
+    const auto noChange = [] (int, TransportInfo&) {};
+    const auto columnOf = [] (double beatsInWindow, double windowBeats) {
+        return static_cast<int> (beatsInWindow / windowBeats * LiveScope::numColumns);
+    };
+
+    // Modo tempo 1/4, 2 compases desde el 0: 8 golpes, uno al principio de cada tiempo, y el visor no cambia el sonido.
+    {
+        Engine withScope, without;
+        LiveScope scope;
+        const auto seen = renderScope (withScope, &scope, sampleRate, 120.0, rawCurve(), 8 * beat + 100, 1024, {}, noChange);
+        const auto plain = renderScope (without, nullptr, sampleRate, 120.0, rawCurve(), 8 * beat + 100, 1024, {}, noChange);
+        CHECK (seen == plain);
+        CHECK (withScope.hitCount() == 9); // 8 tiempos + el inicio del compás 3 (las últimas 100 muestras)
+
+        bool marks = true;
+        for (int c = 0; c < LiveScope::numColumns; ++c)
+            marks = marks && scope.column (c).hit == (c % (LiveScope::numColumns / 4) == 0);
+        CHECK (marks);
+        // En el golpe la ganancia es 0 (profundidad 100 %); pasada la duración (media negra) vuelve a 1. La entrada es la
+        // señal constante 0.5 y la salida, 0.5 × ganancia.
+        CHECK (scope.column (0).gain == 0.0f && scope.column (0).input == 0.5f && scope.column (0).output < 0.1f);
+        CHECK (scope.column (columnOf (0.75, 4.0)).gain == 1.0f);
+        CHECK (scope.column (columnOf (0.75, 4.0)).sidechain == 0.0f);
+    }
+
+    // Curva a medias: 1/4 con duración 50 % (media negra de largo), parando a un cuarto de negra = mitad de la curva.
+    {
+        Engine engine;
+        renderScope (engine, nullptr, sampleRate, 120.0, rawCurve(), beat / 4, 64, {}, noChange);
+        CHECK (std::abs (engine.curvePosition() - 0.5f) < 1.0e-3f);
+        // Pasada la duración se queda en 1 (el último punto) hasta el golpe siguiente.
+        renderScope (engine, nullptr, sampleRate, 120.0, rawCurve(), 3 * beat / 4, 64, {}, noChange);
+        CHECK (engine.curvePosition() == 1.0f);
+    }
+
+    // Empezar a mitad de un tiempo no es un golpe (la curva no empieza); un loop de 3.7 a 0.3 negras tampoco. El primer
+    // golpe es el del tiempo 2.
+    {
+        Engine engine;
+        int jumps = 0;
+        renderScope (engine, nullptr, sampleRate, 120.0, rawCurve(), beat, 256, {}, [&jumps] (int done, TransportInfo& info) {
+            if (done == 0)
+                info.ppqPosition = 0.3;
+            else if (*info.ppqPosition > 1.2 && jumps++ == 0)
+                info.ppqPosition = 0.3;
+        });
+        CHECK (engine.hitCount() == 1);
+    }
+
+    // MIDI: un dembow desplazado (0, 1.5, 2.5 y 3.5 negras) con 2 compases en la ventana: el compás 1 cae en la primera
+    // mitad y cada golpe en su columna.
+    {
+        Engine engine;
+        LiveScope scope;
+        scope.setBars (2);
+        std::vector<Note> notes;
+        for (const double at : { 0.0, 1.5, 2.5, 3.5 })
+            notes.push_back ({ static_cast<int> (at * beat) });
+        renderScope (engine, &scope, sampleRate, 120.0, midiCurve (3, 1.0f), 4 * beat, 512, notes, noChange);
+        CHECK (engine.hitCount() == 4);
+        int marked = 0;
+        for (int c = 0; c < LiveScope::numColumns; ++c)
+            marked += scope.column (c).hit ? 1 : 0;
+        CHECK (marked == 4);
+        // La posición del host se acumula en coma flotante: un golpe justo en el borde puede caer en la columna anterior.
+        for (const double at : { 0.0, 1.5, 2.5, 3.5 })
+            CHECK (scope.column (columnOf (at, 8.0)).hit || scope.column (columnOf (at, 8.0) - 1).hit);
+        CHECK (std::abs (scope.getCursor() - 0.5f) < 1.0e-3f);
+    }
+
+    // Ventana de 2 compases en el compás 4 (ppq 12–16): es la 2.ª mitad de la ventana (compases 3–4).
+    {
+        LiveScope scope;
+        scope.setBars (2);
+        scope.reset();
+        HostClock clock;
+        clock.prepare (sampleRate);
+        auto info = playingAt (13.0, 120.0);
+        info.ppqLastBarStart = 12.0;
+        clock.beginBlock (info, 64);
+        scope.beginBlock (clock, 64);
+        CHECK (scope.columnAt (0) == columnOf (5.0, 8.0));
+        scope.addSidechain (0, 0.8f);
+        scope.addSidechain (1, 0.3f);
+        CHECK (scope.column (columnOf (5.0, 8.0)).sidechain == 0.8f);
+        CHECK (LiveScope::validBars (3) == 4 && LiveScope::validBars (0) == 1 && LiveScope::validBars (9) == 4);
+    }
+
+    // Host parado: el barrido sigue al tempo conocido (para ver golpes tocados en vivo).
+    {
+        LiveScope scope;
+        scope.reset();
+        HostClock clock;
+        clock.prepare (sampleRate);
+        TransportInfo stopped = playingAt (2.0, 120.0);
+        stopped.isPlaying = false;
+        clock.beginBlock (stopped, beat);
+        scope.beginBlock (clock, beat);
+        const float first = scope.getCursor();
+        clock.beginBlock (stopped, beat);
+        scope.beginBlock (clock, beat);
+        CHECK (std::abs (first - 0.25f) < 1.0e-4f && std::abs (scope.getCursor() - 0.5f) < 1.0e-4f);
+    }
+}
+
 } // namespace
 
 int main()
@@ -1217,6 +1374,7 @@ int main()
     testBands();
     testMix();
     testBandChangesWhilePlaying();
+    testLiveView();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de Ebb pasaron.\n");

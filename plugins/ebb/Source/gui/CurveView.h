@@ -15,7 +15,8 @@ namespace ebb::gui
 // Fase 2: dos ciclos de la curva de ganancia con los ajustes actuales y la forma del editor (Fase 3) (arriba = volumen
 // completo, abajo = silencio), con el suavizado incluido, y a la derecha un medidor de cuánto está bajando el volumen
 // ahora mismo. En modo MIDI o audio (Fases 4 y 5), un solo golpe en el mismo espacio: lo que pasa después de un golpe
-// si no llega otro. La curva en vivo con cursor de reproducción llega en la Fase 7.
+// si no llega otro. Es la vista PREVIA (lo que harán los ajustes, aunque FL esté parado); lo que suena de verdad lo
+// muestra el visor en vivo (Fase 7, LiveView.h).
 class CurveView final : public juce::Component
 {
 public:
@@ -88,9 +89,8 @@ private:
         const double ms = periodBeats() * 60000.0 / bpm;
         g.setColour (theme::text);
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-        const auto prefix = isSingleHit() ? juce::String ("1 golpe, largo ") : juce::String();
-        g.drawText (prefix + dsp::duckDivisions[static_cast<size_t> (index)].name + " = " + juce::String (ms, 0) + " ms a "
-                        + juce::String (bpm, 1) + " BPM",
+        const auto prefix = juce::String ("PREVIA  ") + (isSingleHit() ? "largo " : "");
+        g.drawText (prefix + dsp::duckDivisions[static_cast<size_t> (index)].name + " = " + juce::String (ms, 0) + " ms",
                     area, juce::Justification::centredLeft);
         g.setColour (theme::dimText);
         g.setFont (juce::FontOptions (11.0f));

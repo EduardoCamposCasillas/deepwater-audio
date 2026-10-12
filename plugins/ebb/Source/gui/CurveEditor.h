@@ -18,7 +18,8 @@ namespace ebb::gui
 //   - el círculo hueco a mitad de cada tramo es su tensión: arrastrarlo arriba/abajo curva el tramo hacia ese lado;
 //     doble clic lo vuelve recto.
 // Cada cambio se avisa por onChange (el procesador lo guarda y lo manda al audio, que lo aplica con glide).
-class CurveEditor final : public juce::Component
+// Fase 7: un cursor blanco marca por dónde va la curva que está sonando.
+class CurveEditor final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     std::function<void (const deepwater::dsp::BreakpointCurve&)> onChange;
@@ -31,6 +32,16 @@ public:
         // Un cambio de fuera (otra forma, un proyecto cargado) puede dejar sin sentido lo que se estaba arrastrando.
         if (dragging.index >= curve.size())
             dragging = {};
+        repaint();
+    }
+
+    // Fase 7: por dónde va la curva que suena (Engine::curvePosition): 0 = el golpe, 1 = el final de la duración (ahí se
+    // queda hasta el golpe siguiente, más apagado); −1 = no suena ninguna (sin cursor). Una vez por cuadro de la GUI.
+    void setPlayhead (float position)
+    {
+        if (position == playhead)
+            return;
+        playhead = position;
         repaint();
     }
 
@@ -78,6 +89,18 @@ public:
         g.fillPath (fill);
         g.setColour (theme::accent);
         g.strokePath (path, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        // Cursor de reproducción: una línea vertical y un punto blanco sobre la curva, en el volumen que está sonando
+        // (sin profundidad ni suavizado: el punto de la forma).
+        if (playhead >= 0.0f)
+        {
+            const bool waiting = playhead >= 1.0f;
+            const auto head = toScreen (playhead, curve.valueAt (playhead));
+            g.setColour (theme::text.withAlpha (waiting ? 0.2f : 0.45f));
+            g.fillRect (head.x - 0.75f, area.getY(), 1.5f, area.getHeight());
+            g.setColour (theme::text.withAlpha (waiting ? 0.4f : 1.0f));
+            g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre (head));
+        }
 
         // Asas de tensión (huecas) y puntos (llenos). Resaltado el que está bajo el ratón o se arrastra.
         const auto active = dragging.kind != Target::none ? dragging : hovered;
@@ -285,6 +308,7 @@ private:
     deepwater::dsp::BreakpointCurve curve;
     Target hovered, dragging;
     float dragStartTension = 0.0f;
+    float playhead = -1.0f;
 };
 
 } // namespace ebb::gui

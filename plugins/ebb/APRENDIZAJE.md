@@ -712,3 +712,117 @@ Inténtalo y después pide pistas.
 - **Cuándo NO usarlo:** en un bombeo creativo de un pad o un bus entero (house francés), *Todo* es el efecto que
   buscas: el bombeo **es** la gracia. Y si el bajo es casi solo sub (un 808 limpio, una senoide), *Graves* y *Todo*
   suenan casi igual: no hay nada arriba que salvar.
+
+## Fase 7 — Ver el ducking: visor en vivo, cursor y luz de golpe
+
+Hasta ahora el ducking se ajustaba sobre todo de oído y con la vista previa, que muestra lo que **harán** los ajustes,
+no lo que está pasando. El visor EN VIVO muestra lo que **pasa de verdad** por Ebb, compás a compás: dónde cae cada
+golpe del kick, cuánto baja el bajo y si vuelve a tiempo antes del golpe siguiente. Con un dembow irregular eso vale
+oro: se ve al instante si un kick no disparó, si la curva es demasiado larga o si el hueco llega tarde.
+
+### Conceptos aprendidos
+
+- **Osciloscopio de barrido sincronizado.** Un osciloscopio dibuja la señal en el tiempo. El de Ebb no "corre" hacia
+  la izquierda como el Wave Candy de FL: un **cursor barre** de izquierda a derecha una ventana de 1, 2 o 4 compases y
+  va reescribiendo lo que había. Como la ventana empieza siempre en un inicio de compás, lo que se repite cada compás
+  (el patrón del kick, la curva del modo tempo) se queda **quieto** en pantalla, y lo que cambia (un kick que se
+  movió, una variación) salta a la vista. Es la misma idea del visor de LFOTool o ShaperBox.
+- **Columnas y picos.** La ventana se divide en 512 columnas; cada una resume unos milisegundos de audio con su **pico**
+  (el valor más alto). El pico de un trozo muy corto puede no "ver" un ciclo entero de un sub de 40 Hz (25 ms), así
+  que el visor muestra el mayor pico de las columnas vecinas (±12.5 ms). Por eso el dibujo del bajo se ve lleno y no a
+  rayas.
+- **Escala automática.** La altura de la señal se escala a lo más fuerte que se vio (sube al instante, baja en unos
+  segundos): un bajo a −18 dBFS llena el visor igual que uno a −3. El visor sirve para ver **formas y tiempos**, no
+  para medir niveles (para eso, el medidor de reducción en dB de la vista previa).
+- **Comunicación audio → pantalla sin esperar.** El hilo de audio no puede esperar a la pantalla (si espera, se oyen
+  cortes). Cada columna son unos números atómicos que el audio sobrescribe y la pantalla lee 30 veces por segundo. Si
+  justo lee una columna a medio escribir, la ve mezclada durante un cuadro: no pasa nada. Sin la pantalla abierta, el
+  visor ni se alimenta.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **Visor EN VIVO** (arriba a la izquierda):
+  - **gris** = la señal que entra (antes del ducking); **verde agua** = la que sale. Lo gris que queda por encima del
+    verde es lo que el ducking quitó.
+  - **línea blanca** = el volumen (arriba = entero, abajo = silencio), tal como sonó: con el suavizado, el mix y el
+    bypass incluidos.
+  - **ámbar** = el sidechain (el kick que entra por el bus auxiliar, con su propia escala).
+  - **triángulos verde agua** = dónde empezó una curva: cada golpe MIDI o del sidechain; en modo Tempo, cada ciclo.
+  - **números** = compás y tiempo (3, 3.2, 3.3...); las marquitas de abajo son las semicorcheas (la cuadrícula del
+    dembow).
+  - El **cursor blanco** es "ahora". Detrás de él, lo recién escrito; delante (después del hueco negro), la vuelta
+    anterior.
+- **1 / 2 / 4 compases** (botón del visor): cuántos compases caben. 1 para ver el patrón de cerca; 2 o 4 para patrones
+  que cambian de un compás a otro. Se guarda con el proyecto.
+- **Luz GOLPE**: parpadea con cada curva que empieza (en cualquier modo).
+- **Cursor del editor de la curva**: el punto blanco sobre la FORMA dice por dónde va la curva que está sonando. Al
+  terminar la duración se queda, apagado, en el final, esperando el golpe siguiente.
+- **Zoom** (botón "100 %" de la cabecera, o arrastrando la esquina de abajo a la derecha): 70–200 %. Se guarda con el
+  proyecto y como preferencia para las ventanas nuevas. La primera vez se elige el mayor que cabe en la pantalla.
+- **Reloj del host**: ahora es una tira en la cabecera (estado, posición, luces del compás, tempo, B:S de FL, loop,
+  saltos y audio).
+- **Fila de controles**: a la derecha aparece lo del modo: NOTA MIDI, VELOCIDAD y ACTIVIDAD MIDI en Tempo y MIDI; el
+  medidor del SIDECHAIN, UMBRAL y RETENCIÓN en Audio. El menú FORMA pasó al título del editor de la curva.
+
+### Ejercicio guiado: diagnosticar un ducking con los ojos (y confirmarlo con el oído)
+
+1. **95 BPM**, dembow desplazado (kick en los pasos 1, 7, 11 y 15), Ebb en el 808 en **modo Tempo 1/4**, profundidad
+   80 %, duración 50 %. Visor en **1 compás**. Dale play.
+2. Mira los triángulos: caen en 1, 2, 3 y 4 (la cuadrícula). Pero los kicks reales están en el 1 y a mitad de los tiempos 2,
+   3 y 4 (pasos 7, 11 y 15): **se ve** que los huecos del 808 no coinciden con los kicks. Esa es la razón de los modos
+   MIDI y Audio.
+3. Cambia a **modo MIDI** (con el ruteo de la Fase 4): los triángulos se mueven bajo cada kick, y los huecos de la
+   línea blanca también.
+4. **La duración, a ojo:** sube la DURACIÓN hasta que la línea blanca **no llegue arriba** antes del triángulo
+   siguiente (entre el kick del paso 7 y el del 11 hay solo 4 semicorcheas). En ese punto el bajo nunca vuelve entero:
+   escúchalo, el 808 pierde cuerpo. Baja la duración hasta que la línea toque arriba justo antes de cada golpe.
+5. **Modo Audio + lookahead:** con el sidechain conectado, mira la línea ámbar (el kick) y el hueco blanco. Sin
+   lookahead, el hueco empieza un pelo **después** de que sube el ámbar (el detector necesita ver el golpe). Sube el
+   LOOKAHEAD a 3–5 ms y mira cómo el hueco se adelanta y queda debajo del ataque del kick (usa 1 compás para verlo).
+6. Con el **volumen igualado** (como siempre), confirma de oído cada cambio: el visor dice dónde mirar, pero el que
+   decide es el oído.
+
+### Receta: ajustar el ducking de un dembow en 30 segundos
+
+Visor en **1 compás** (o 2 si el patrón cambia), modo **MIDI o Audio**, y:
+- Cada kick tiene que tener **su triángulo**. Si falta uno: en MIDI, revisa la nota (NOTA MIDI); en Audio, baja el
+  UMBRAL o la RETENCIÓN.
+- El hueco blanco tiene que empezar **bajo el ataque** del kick (en Audio: LOOKAHEAD 2–5 ms).
+- La línea blanca tiene que **volver arriba antes** del kick siguiente más cercano (DURACIÓN / LARGO).
+- Profundidad: la mínima con la que el kick se oye limpio (en *Graves* se puede ir hondo sin que se note).
+- Por qué funciona: son las tres cosas que hacen que un ducking suene "pegado" al kick: que dispare siempre, que
+  llegue a tiempo y que suelte a tiempo.
+
+### Reto sin receta
+
+En un dembow con variaciones, el último compás de cada 4 tiene un **redoble de kick** (cuatro semicorcheas seguidas al
+final). Con el visor en **4 compases**, ¿qué ves en la línea blanca durante el redoble con LARGO 1/4 y duración 70 %?
+¿El bajo llega a volver entre golpes? ¿Qué cambiarías (LARGO, DURACIÓN, FORMA o la VELOCIDAD) para que el redoble suene
+marcado sin que el bajo desaparezca? Pista: mira dónde está el punto blanco del editor cuando llega cada golpe del
+redoble.
+
+Inténtalo y después pide pistas.
+
+### Vocabulario
+
+- **Osciloscopio**: aparato (o plugin) que dibuja una señal en el tiempo. *En música:* el Wave Candy de FL en modo
+  osciloscopio; los visores de LFOTool y ShaperBox.
+- **Barrido (sweep)**: un cursor que recorre la pantalla y reescribe lo de la vuelta anterior. *En música:* los
+  osciloscopios analógicos funcionan así; en plugins, el visor de Kickstart 2 y el de ShaperBox.
+- **Pico (peak) / envolvente de picos**: el valor más alto de un trozo de señal; la línea que une los picos. *En
+  música:* la forma de onda que ves en la lista de reproducción de FL es una envolvente de picos.
+- **Reducción de ganancia (gain reduction)**: cuánto baja el volumen un procesador, en dB. *En música:* la aguja de un
+  compresor 1176 o el medidor GR de Pro-C 2; en Ebb, la línea blanca y el medidor de la vista previa.
+- **Latencia y lookahead, vistos**: el retraso que se ve entre el ámbar (el kick) y el hueco blanco. *En música:* los
+  limitadores de mastering usan lookahead para que el volumen ya esté abajo cuando llega el pico.
+
+### Errores comunes
+
+- **Mezclar con los ojos.** Una curva "bonita" en el visor puede sonar mal (y al revés). Úsalo para encontrar el
+  problema, decide con el oído y con el volumen igualado.
+- **Leer la altura como volumen real.** La escala es automática: el visor no dice si el bajo está fuerte o bajo, solo
+  la forma. Para niveles, el medidor de reducción en dB y los medidores de FL.
+- **Visor en 4 compases para ajustar el ataque.** Cada columna dura más y los detalles finos (los primeros ms del
+  golpe) se aplastan. Para el ataque y el lookahead, 1 compás.
+- **Esperar ver huecos con FL parado en modo Tempo.** Parado no hay ducking (por diseño): el visor muestra la señal
+  pasando sin huecos. En MIDI o Audio, tocar el kick sí dispara y se ve.
