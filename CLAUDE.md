@@ -24,6 +24,7 @@ libs/
 plugins/
   undertow/             # sintetizador wavetable
   riptide/              # saturador
+  ebb/                  # ducker para sidechain (pendiente: por ahora solo CLAUDE.md y APRENDIZAJE.md)
   <plugin>/             # cada plugin: CMakeLists.txt, Source/, tests/, CLAUDE.md, APRENDIZAJE.md
 scripts/
   null_test.py          # resta dos carpetas de WAV (verificar que un refactor no cambia el sonido)
@@ -84,11 +85,14 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 |---|--------|---------------------|--------|
 | 1 | Undertow — sintetizador wavetable (FM, warp, unison, matriz de modulación, FX) | Serum 2, Vital | ✅ Terminado (ampliación en curso: cuerda pulsada) |
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | ✅ Terminado |
-| 3 | EQ paramétrico con analizador de espectro | FabFilter Pro-Q | Pendiente |
-| 4 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
-| 5 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
-| 6 | Reverb algorítmica (FDN, difusión, modulación; modos vintage y espacial) | Valhalla VintageVerb, Supermassive | Pendiente |
+| 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | Pendiente |
+| 4 | EQ paramétrico con analizador de espectro | FabFilter Pro-Q | Pendiente |
+| 5 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
+| 6 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
+| 7 | Reverb algorítmica (FDN, difusión, modulación; modos vintage y espacial) | Valhalla VintageVerb, Supermassive | Pendiente |
 
+- Ebb va antes del compresor porque es más simple (una curva de ganancia, sin detector de nivel continuo en su
+  modo principal) y reutiliza las envolventes y el suavizado de `libs/dsp`.
 - El delay va antes de la reverb porque reutiliza sus piezas (buffers circulares, filtros, modulación).
 - Cada plugin nuevo empieza moviendo a `libs/dsp` lo reutilizable que haya construido el anterior.
 - Al iniciar un plugin nuevo, crear su carpeta con su `CLAUDE.md` (hoja de ruta por fases) y su `APRENDIZAJE.md`.

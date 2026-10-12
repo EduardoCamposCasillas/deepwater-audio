@@ -14,10 +14,11 @@ que usa y un cuaderno (`APRENDIZAJE.md`) con ejercicios de escucha, recetas y vo
 |---|--------|--------|---------------------|--------|
 | 1 | [Undertow](plugins/undertow) | Sintetizador wavetable: FM, warp, unison, matriz de modulación, efectos, cuerda pulsada (Karplus-Strong) y 49 presets con notas | Serum 2, Vital | ✅ Terminado |
 | 2 | [Riptide](plugins/riptide) | Saturador: 6 modos (cinta, bulbo, transistor, clip, rectificador, wavefold), tono PRE/POST, paralelo con auto gain, hasta 4 bandas, envolvente y LFO, 26 presets con notas | Decapitator, Saturn 2 | ✅ Terminado |
-| 3 | EQ paramétrico | EQ con analizador de espectro | FabFilter Pro-Q | Pendiente |
-| 4 | Compresor | Estilos limpio y FET/1176 | FabFilter Pro-C 2, 1176 | Pendiente |
-| 5 | Delay | Sync, ping-pong, filtros y modulación en el feedback | Valhalla Delay | Pendiente |
-| 6 | Reverb | Algorítmica (FDN, difusión, modulación); modos vintage y espacial | Valhalla VintageVerb, Supermassive | Pendiente |
+| 3 | [Ebb](plugins/ebb) | Ducker / modulador de volumen para sidechain: curvas sincronizadas al tempo, disparo por MIDI o por audio (para patrones irregulares como el dembow), editor de curvas y ducking solo en graves | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | Pendiente |
+| 4 | EQ paramétrico | EQ con analizador de espectro | FabFilter Pro-Q | Pendiente |
+| 5 | Compresor | Estilos limpio y FET/1176 | FabFilter Pro-C 2, 1176 | Pendiente |
+| 6 | Delay | Sync, ping-pong, filtros y modulación en el feedback | Valhalla Delay | Pendiente |
+| 7 | Reverb | Algorítmica (FDN, difusión, modulación); modos vintage y espacial | Valhalla VintageVerb, Supermassive | Pendiente |
 
 Cada plugin tiene su propio README con la guía de uso ([Undertow](plugins/undertow/README.md),
 [Riptide](plugins/riptide/README.md)), su hoja de ruta (`CLAUDE.md`) y su cuaderno (`APRENDIZAJE.md`).
@@ -34,6 +35,7 @@ libs/dsp/          deepwater::dsp, la librería DSP compartida (sin JUCE): overs
 libs/presets/      deepwater::presets (con JUCE): formato XML de presets, biblioteca, barra, navegador y guardar
 plugins/undertow/  sintetizador wavetable
 plugins/riptide/   saturador
+plugins/ebb/       ducker para sidechain (pendiente: por ahora solo la hoja de ruta)
 scripts/           null_test.py: compara dos renders para comprobar que un cambio no alteró el sonido
                    level_match.py: iguala la sonoridad (LUFS) de varias versiones para compararlas a oído o a ciegas
 ```
