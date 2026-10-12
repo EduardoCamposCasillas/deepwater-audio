@@ -1,0 +1,62 @@
+# Fathom — EQ paramétrico con analizador. Se compila desde el CMakeLists.txt raíz (que ya trae JUCE y C++20):
+#   cmake --build build --config Release --target Fathom_VST3
+
+# --- Plugin --------------------------------------------------------------------
+juce_add_plugin(Fathom
+    PRODUCT_NAME             "Fathom"
+    COMPANY_NAME             "Deepwater"
+    PLUGIN_MANUFACTURER_CODE Undw          # el fabricante de toda la suite (no cambiarlo)
+    PLUGIN_CODE              Fth1          # único por plugin de este fabricante
+    FORMATS                  VST3 Standalone
+    IS_SYNTH                 FALSE
+    NEEDS_MIDI_INPUT         FALSE
+    NEEDS_MIDI_OUTPUT        FALSE
+    IS_MIDI_EFFECT           FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    COPY_PLUGIN_AFTER_BUILD  FALSE         # copiar a Common Files requiere administrador
+    VST3_CATEGORIES          Fx EQ
+)
+
+target_sources(Fathom
+    PRIVATE
+        Source/PluginProcessor.cpp
+        Source/PluginEditor.cpp
+)
+
+target_include_directories(Fathom PRIVATE Source)
+
+target_compile_definitions(Fathom
+    PUBLIC
+        JUCE_WEB_BROWSER=0             # no usamos WebView; evita dependencias extra
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0   # no existe una versión VST2 que reemplazar
+)
+
+target_link_libraries(Fathom
+    PRIVATE
+        juce::juce_audio_utils         # incluye audio_processors, audio_devices, gui, etc.
+        deepwater::dsp                 # librería DSP compartida de la suite (libs/dsp)
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags
+)
+
+# --- Tests ---------------------------------------------------------------------
+# Ejecutable independiente de JUCE con los tests del motor.
+# Se ejecuta con:  ctest --test-dir build -C Release --output-on-failure
+option(FATHOM_BUILD_TESTS "Compilar los tests unitarios de Fathom" ${DEEPWATER_BUILD_TESTS})
+
+if(FATHOM_BUILD_TESTS)
+    add_executable(FathomTests tests/EngineTests.cpp)
+    target_include_directories(FathomTests PRIVATE Source)
+    target_link_libraries(FathomTests PRIVATE deepwater::dsp)
+
+    if(MSVC)
+        target_compile_options(FathomTests PRIVATE /W4 /permissive- /utf-8)
+    else()
+        target_compile_options(FathomTests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    add_test(NAME FathomTests COMMAND FathomTests)
+endif()

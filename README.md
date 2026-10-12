@@ -14,8 +14,8 @@ que usa y un cuaderno (`APRENDIZAJE.md`) con ejercicios de escucha, recetas y vo
 |---|--------|--------|---------------------|--------|
 | 1 | [Undertow](plugins/undertow) | Sintetizador wavetable: FM, warp, unison, matriz de modulación, efectos, cuerda pulsada (Karplus-Strong) y 49 presets con notas | Serum 2, Vital | ✅ Terminado |
 | 2 | [Riptide](plugins/riptide) | Saturador: 6 modos (cinta, bulbo, transistor, clip, rectificador, wavefold), tono PRE/POST, paralelo con auto gain, hasta 4 bandas, envolvente y LFO, 26 presets con notas | Decapitator, Saturn 2 | ✅ Terminado |
-| 3 | [Ebb](plugins/ebb) | Ducker / modulador de volumen para sidechain: curvas sincronizadas al tempo, disparo por MIDI o por audio (para patrones irregulares como el dembow), editor de curvas y ducking solo en graves | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | En curso (Fase 1) |
-| 4 | EQ paramétrico | EQ con analizador de espectro | FabFilter Pro-Q | Pendiente |
+| 3 | [Ebb](plugins/ebb) | Ducker / modulador de volumen para sidechain: curvas sincronizadas al tempo, disparo por MIDI o por audio (para patrones irregulares como el dembow), editor de curvas y ducking solo en graves | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | ✅ Terminado |
+| 4 | [Fathom](plugins/fathom) | EQ paramétrico de 24 bandas con analizador: todas las formas y pendientes, edición sobre el espectro, estéreo L/R/Mid/Side, EQ dinámico, fase lineal, dinámica espectral e igualación | FabFilter Pro-Q 4 | En curso (Fase 1) |
 | 5 | Compresor | Estilos limpio y FET/1176 | FabFilter Pro-C 2, 1176 | Pendiente |
 | 6 | Delay | Sync, ping-pong, filtros y modulación en el feedback | Valhalla Delay | Pendiente |
 | 7 | Reverb | Algorítmica (FDN, difusión, modulación); modos vintage y espacial | Valhalla VintageVerb, Supermassive | Pendiente |
@@ -37,6 +37,7 @@ libs/presets/      deepwater::presets (con JUCE): formato XML de presets, biblio
 plugins/undertow/  sintetizador wavetable
 plugins/riptide/   saturador
 plugins/ebb/       ducker para sidechain
+plugins/fathom/    EQ paramétrico con analizador
 scripts/           null_test.py: compara dos renders para comprobar que un cambio no alteró el sonido
                    level_match.py: iguala la sonoridad (LUFS) de varias versiones para compararlas a oído o a ciegas
 ```
@@ -57,6 +58,7 @@ cmake --build build --config Release                                  # toda la 
 cmake --build build --config Release --target UndertowSynth_VST3      # o solo un plugin
 cmake --build build --config Release --target Riptide_VST3
 cmake --build build --config Release --target Ebb_VST3
+cmake --build build --config Release --target Fathom_VST3
 ```
 
 Los plugins quedan en `build/plugins/<plugin>/<Target>_artefacts/Release/VST3` (y `Standalone`). Si `cmake` no se
@@ -68,7 +70,7 @@ reconoce, usa la ruta completa (`"C:\Program Files\CMake\bin\cmake.exe"`) o agr�
    como tipo **VST3** (si queda como VST2, FL no encuentra los plugins). FL busca en las subcarpetas, así que esa sola
    ruta sirve para todos los plugins de la suite.
 2. Pulsa **Find installed plugins**.
-3. Los instrumentos (Undertow) aparecen en el Channel Rack (**+**) y los efectos (Riptide, Ebb) en las ranuras del Mixer,
+3. Los instrumentos (Undertow) aparecen en el Channel Rack (**+**) y los efectos (Riptide, Ebb, Fathom) en las ranuras del Mixer,
    bajo el fabricante **Deepwater**.
 
 ### Tests
