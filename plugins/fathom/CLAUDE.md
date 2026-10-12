@@ -128,7 +128,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 2 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 2 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - Librería: `EqFilter.h` (`EqCoefficients::bell`, `response`, `magnitudeDb`; `EqFilter`). Campana = x + k·(A²−1)·BP
   del SVF con k = 1/(Q·A), A = 10^(dB/40): el prototipo analógico del Cookbook (RBJ), definición de Q del Cookbook
   (ancho medido a la mitad de la ganancia en dB; Q 1.41 = 1 octava). Tests en `DeepwaterDspTests`: medida = response()
@@ -154,4 +154,4 @@ Fase 2 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
   40 dB/s, solo repinta si algo cambia), lectura bajo el mouse y franja de zonas del mapa de frecuencias.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 3 (todas las formas y 24 bandas), cuando el usuario confirme la Fase 2 en FL.
+Siguiente: Fase 3 (todas las formas y 24 bandas).
