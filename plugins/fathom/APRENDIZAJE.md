@@ -319,3 +319,112 @@ basta ±0.3–0.6 dB/oct (GANANCIA ±3–6); el corte va muy abajo (20–25 Hz, 
   pequeño.
 - **Comparar sin igualar el volumen** (siempre): un shelf de agudos casi siempre "gana" la comparación porque suena más
   fuerte.
+
+## Fase 4 — Editar sobre el visor: mover la curva con las manos
+
+El sonido no cambia en esta fase: cambian las **manos**. Hasta ahora cada ajuste pasaba por el panel (elegir banda,
+encender, girar tres perillas). Ahora la curva se toca directamente donde se ve el problema: sobre el analizador. Eso
+cambia la forma de trabajar: en vez de "pensar en números", miras un pico del espectro, pones un nodo encima y lo mueves
+**escuchando**. Los números siguen ahí (en la etiqueta junto al nodo y en el panel) para aprender qué hiciste.
+
+### Conceptos aprendidos
+
+- **El nodo es la banda.** Su posición horizontal es la FRECUENCIA, la vertical es la GANANCIA y la rueda es el **Q**
+  (lo ancho). En un shelf, el nodo está en el punto medio de la subida: subir el nodo 1 dB sube la meseta 2 dB (el nodo
+  sigue al mouse y la meseta sube el doble). En cortes, notch, pasa banda y all-pass no hay ganancia: solo se mueven en
+  horizontal.
+- **Mover en octavas.** Arrastrar a la derecha sube la frecuencia por octavas, no por Hz: el mismo movimiento de mouse
+  va de 100 a 200 Hz que de 5 a 10 kHz. Por eso, al mover **varias bandas juntas**, la forma de la curva se conserva
+  (una a 100 Hz y otra a 1 kHz siguen a una década de distancia).
+- **Ajuste fino.** Con **Shift** el mouse mueve diez veces menos. Para el master o una voz, donde ±0.5 dB ya se oye.
+- **Un solo eje.** Con **Alt** el nodo solo se mueve en la dirección en que más empujaste: cambias la frecuencia sin
+  tocar la ganancia (o al revés). Evita "ensuciar" un ajuste que ya estaba bien.
+- **Banda libre / en uso.** Una banda está *libre* si está apagada y como nace; el doble clic crea en la primera libre.
+  Apagada pero con ajustes propios está *en uso*: su nodo se ve **hueco** y se puede seguir editando (sirve para
+  comparar con y sin ella con doble clic). **Supr** la borra: vuelve a estar libre.
+- **Frecuencia = nota.** El teclado bajo el visor pone cada nota en su frecuencia (nombres de FL: C5 = Do central,
+  A5 = 440 Hz). Un clic en una tecla lleva la banda justo a esa nota; "Afinar a la nota más cercana" (clic derecho)
+  corrige una banda que quedó a unos cents. Un 808 en G2 de FL vibra a 49 Hz: una campana afinada a G2 le da peso **a
+  esa nota** sin tocar las vecinas.
+- **Deshacer = probar sin miedo.** Cada edición (arrastre, rueda, crear, borrar, una perilla del panel) es un paso de
+  Ctrl+Z. La automatización de FL no entra al historial: deshacer no pelea con FL. El historial sigue ahí aunque cierres
+  la ventana del plugin.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **Doble clic en el vacío**: crea una campana ahí, con la ganancia de la altura del clic (encima de la línea de 0 dB
+  sube, debajo baja). En los extremos (bajo 25 Hz o sobre 16 kHz) crea un corte, que es lo que casi siempre va ahí.
+- **Arrastrar un nodo**: frecuencia y ganancia. **Shift** = fino, **Alt** = un solo eje. Junto al nodo se lee la banda,
+  la forma, los Hz, la nota y los dB/Q.
+- **Rueda sobre un nodo**: el Q (hacia arriba = más angosto). Con Shift, fino.
+- **Doble clic en un nodo**: apagar o encender (el nodo queda hueco): el ON/OFF más rápido para comparar una banda.
+- **Ctrl+clic**: agregar o quitar un nodo de la selección. **Arrastrar en el vacío**: un rectángulo que elige todos los
+  nodos de dentro. **Ctrl+A**: todas las bandas en uso. **Esc**: solo la del panel. Arrastrar, la rueda y el menú
+  actúan sobre todas las elegidas (anillo blanco); el panel muestra la que tocaste último (anillo grueso).
+- **Clic derecho** en un nodo: apagar/encender, forma, pendiente, afinar a la nota, borrar. En el vacío: crear
+  cualquier forma ahí.
+- **Teclado del eje**: clic en una tecla = la banda del panel a esa nota exacta. Arriba se lee la nota y sus Hz.
+- **DESHACER / REHACER** (o Ctrl+Z / Ctrl+Y): todo lo que editaste en la GUI.
+
+### Ejercicio de escucha guiado en FL Studio
+
+1. **Barrer para encontrar.** Un loop de voz (o un pad) con Fathom. Doble clic arriba del 0 dB a ~1 kHz para crear una
+   campana de unos +8 dB. Gira la rueda hasta un Q de 5–8 (angosta). Ahora **arrastra lentamente** de 200 Hz a 5 kHz
+   con Alt (solo horizontal). En algún punto algo "silba" o "suena a caja" mucho más que en otros: esa es una
+   resonancia. Suelta ahí.
+2. **Y cortar lo que encontraste.** Sin mover la frecuencia (Alt + arrastrar hacia abajo), baja la campana a −3/−5 dB.
+   Abre un poco el Q (rueda hacia abajo) hasta que el "silbido" desaparezca sin que la voz pierda cuerpo. Doble clic en
+   el nodo para comparar con y sin. Iguala con SALIDA antes de decidir.
+3. **Afinar al 808.** Mira el piano roll de FL: ¿en qué nota está el 808 del beat? (digamos A2 de FL = 55 Hz). Crea una
+   campana en los graves y haz clic en la tecla A2 del teclado del eje: la banda queda en 55 Hz exactos. Sube +2 dB con
+   Q 2. Toca notas distintas del 808: la que coincide con la banda suena más gorda que las otras. Así se entiende por qué
+   se "afina" el EQ del bajo a la tonalidad de la canción (y por qué a veces es mejor no hacerlo).
+4. **Mover el grupo.** Crea tres bandas en un pad: −3 dB en 300 Hz, +2 dB en 3 kHz, +2 dB en 10 kHz. Haz un rectángulo
+   para elegir las tres y arrástralas juntas media octava a la derecha y luego a la izquierda: el "carácter" de la curva
+   es el mismo, pero se oye en otra zona. Ctrl+Z para volver.
+
+### Receta: limpiar una voz con autotune en dos minutos
+
+1. **Corte de graves**: doble clic bien a la izquierda (bajo 25 Hz) crea un corte; arrástralo a ~90–120 Hz y en el clic
+   derecho → Pendiente elige 24 dB/oct.
+2. **Barro**: doble clic en ~300 Hz debajo del 0 dB, −2 dB, Q ~1 (casi una octava y media). Shift para dejarlo fino.
+3. **Resonancia**: el barrido del ejercicio 1 entre 1 y 4 kHz; donde silbe, −3 dB con Q 4–6.
+4. **Aire**: clic derecho en el vacío a ~11 kHz → Crear aquí → Shelf agudos; sube el nodo +1.5 dB (la meseta sube +3).
+5. **Comprobar**: compara todo con el BYPASS con el volumen igualado (si con el EQ suena más fuerte, baja la SALIDA hasta
+   que suene igual de fuerte). Para revisar una sola banda, doble clic en su nodo.
+
+Por qué funciona: el orden (quitar lo que sobra abajo → el barro → la resonancia → sumar al final) es "restar antes de
+sumar". Al quitar primero, muchas veces ya no hace falta sumar nada, y lo que sumas no realza basura.
+
+### Reto sin receta
+
+En un kick del dembow, encuentra la frecuencia de su **golpe grave** y la de su **click** (el ataque) usando solo el
+barrido con una campana angosta; después, deja el kick con más golpe y un poco menos de click **con dos bandas como
+máximo**. Pistas (si no sale): el golpe vive entre 50 y 100 Hz y el click entre 2 y 5 kHz; con Q alto (8+) y +10 dB el
+barrido se oye mucho más claro; si el kick tiene tono, afina el golpe a su nota con el teclado; el click se baja mejor
+con una campana ancha (Q ~1) que con una angosta; compara con el volumen igualado.
+
+### Vocabulario
+
+- **Barrido (sweep)**: subir una campana angosta y moverla para encontrar una frecuencia molesta. "Barre los medios y
+  corta lo que silbe."
+- **Resonancia**: una frecuencia que suena mucho más que sus vecinas (la caja de un tambor, un cuarto mal tratado, el
+  "nasal" de un micro). En el analizador se ve como un pico angosto que no se mueve con las notas.
+- **Nodo / punto**: el control de una banda sobre la curva ("agarra el punto 3 y bájalo").
+- **Ajuste fino**: el modificador que hace el movimiento más lento (Shift en casi todos los plugins).
+- **Afinar el EQ**: poner una banda en la frecuencia exacta de una nota (la tónica del bajo, la fundamental del kick).
+- **Undo / redo**: deshacer / rehacer.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Dejar el barrido subido.** El barrido de +10 dB es para *encontrar*, no para dejarlo así: un pico angosto y alto
+  suena horrible. Siempre termina en un corte (o en nada).
+- **Cortar todo lo que encuentras barriendo.** Con +10 dB y Q 8, *cualquier* frecuencia suena fea. Corta solo lo que
+  también molesta con la campana en 0 dB, escuchando la mezcla completa y no el instrumento solo.
+- **Mirar en vez de escuchar.** El visor ayuda a ubicar, pero el oído decide. Prueba ajustar con los ojos cerrados y
+  luego mira qué hiciste.
+- **Afinar el bajo "a la fuerza".** Si el 808 cambia mucho de nota, una campana afinada a una sola nota hace que unas
+  notas suenen más fuertes que otras. Úsalo cuando la línea de bajo se queda casi siempre en la tónica.
+- **Mover grupos sin escuchar cada banda.** Mover tres bandas a la vez es rápido, pero cada una puede caer en una zona
+  donde ya no hace falta. Después de mover el grupo, revisa cada una con doble clic (on/off).
+- **Comparar sin igualar el volumen** (siempre).

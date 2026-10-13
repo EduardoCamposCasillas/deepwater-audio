@@ -8,9 +8,9 @@
 
 class FathomAudioProcessor;
 
-// El visor (lienzo del EQ con el analizador, la curva y los nodos de las bandas), debajo el panel de la banda elegida,
-// el bypass en la cabecera y la perilla de salida. Un temporizador a 30 cuadros por segundo actualiza el analizador, la
-// curva y el panel.
+// El visor (lienzo del EQ con el analizador, la curva y los nodos editables de las bandas), debajo el panel de la banda
+// elegida, en la cabecera deshacer/rehacer y el bypass, y la perilla de salida. Un temporizador a 30 cuadros por segundo
+// actualiza el analizador, la curva, el panel y los botones de deshacer.
 class FathomAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -19,6 +19,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override; // Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) desde cualquier control
 
 private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -33,6 +34,8 @@ private:
 
     fathom::gui::EqDisplay display;
     fathom::gui::BandPanel bandPanel;
+    juce::TextButton undoButton { "DESHACER" };
+    juce::TextButton redoButton { "REHACER" };
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<ButtonAttachment> bypassAttachment;
     juce::Slider outputKnob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };

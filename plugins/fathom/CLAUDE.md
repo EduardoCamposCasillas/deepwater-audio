@@ -63,15 +63,19 @@ build/plugins/fathom/Release/FathomTests.exe                    # tests del moto
 plugins/fathom/
   CMakeLists.txt           # plugin y tests; enlaza deepwater::dsp
   Source/
-    PluginProcessor.h/.cpp   # parámetros, estado, processBlock y las tomas del analizador
+    PluginProcessor.h/.cpp   # parámetros, estado, processBlock, las tomas del analizador y el historial de deshacer
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie, ganancia de salida y bypass
     dsp/Band.h               # una banda: formas (Shape), pendientes, ajustes (BandSettings), parámetros suavizados,
                              # fundido de encendido/cambio de forma y coeficientes para la GUI
-    gui/                     # tema (con el color de cada banda), LookAndFeel, formato de valores, visor (EqDisplay:
-                             # cuadrícula, analizador, curvas y nodos), panel de la banda elegida (BandPanel)
-  tests/EngineTests.cpp    # tests del motor (sin JUCE)
+    edit/UndoStack.h         # pila de deshacer/rehacer (sin JUCE): pasos con solo los parámetros que cambiaron
+    edit/EditHistory.h       # deshacer con JUCE: escucha los gestos de los parámetros (no la automatización del host)
+    edit/NodeEditing.h       # cuentas de la edición sin JUCE: arrastrar nodos, rueda = Q, banda libre, notas
+    gui/                     # tema (con el color de cada banda), LookAndFeel, formato de valores, atajos (Keys),
+                             # visor (EqDisplay: cuadrícula, analizador, curvas, nodos editables, teclado de piano),
+                             # BandEdits (cambiar parámetros con gestos), panel de la banda elegida (BandPanel)
+  tests/EngineTests.cpp    # tests del motor y de la edición (sin JUCE)
 ```
 
 ## Aprendizaje de mezcla (igual de importante que el código)
@@ -103,7 +107,7 @@ fábrica incluyen notas de para qué sirven y por qué.
 - [x] Fase 3 — Todas las formas y 24 bandas: shelves grave/agudo, tilt shelf, flat tilt, notch, band-pass, all-pass,
       cortes grave/agudo de 6 a 96 dB/oct (Butterworth en cascada, con resonancia). Los parámetros de las 24 bandas
       (IDs definitivos), apagadas por defecto.
-- [ ] Fase 4 — Edición sobre el visor: nodos arrastrables (doble clic crea una banda donde se clica, arrastrar mueve
+- [x] Fase 4 — Edición sobre el visor: nodos arrastrables (doble clic crea una banda donde se clica, arrastrar mueve
       frecuencia/ganancia, rueda = Q, modificadores para ajuste fino y para un solo eje), panel de la banda elegida,
       selección múltiple, deshacer/rehacer y teclado de piano en el eje.
 - [ ] Fase 5 — Analizador profesional: inclinación de 4.5 dB/oct, rango, resolución, velocidad, retención de picos,
@@ -131,7 +135,45 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 3 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
+Fase 4 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
+- Edición sobre el visor (`gui/EqDisplay.h`): doble clic en el vacío = crear en la primera banda LIBRE (apagada y con
+  sus valores por defecto; `edit::freeBand`), campana con la ganancia de la altura del clic; bajo 25 Hz corte de graves,
+  sobre 16 kHz corte de agudos (shelves y cortes nacen con Q 0.71). Doble clic en un nodo = apagar/encender. Supr =
+  borrar las elegidas (vuelven a sus valores por defecto: libres). Arrastrar = frecuencia en octavas + ganancia en dB
+  (`edit::dragged`; shelves × 2 porque su nodo está en el punto medio; formas sin ganancia solo en horizontal; límite
+  20 Hz–20 kHz), por diferencias entre eventos: Shift = fino (× 0.1) a mitad del arrastre sin saltos, Alt = solo el eje
+  que más se movió. Rueda sobre un nodo = Q (Q × 2^deltaY: ≈ × 1.18 por muesca; Shift fino); el paso de deshacer de la
+  rueda se cierra tras 0.5 s quieta. Selección múltiple: Ctrl+clic, rectángulo en el vacío (Ctrl = agrega), Ctrl+A =
+  las que están en uso, Esc = solo la del panel; la del panel (`focusedBand`) siempre está entre las elegidas.
+  Clic derecho en un nodo: encender/apagar, forma, pendiente (solo cortes), afinar a la nota más cercana, borrar (para
+  todas las elegidas); en el vacío: crear con cualquier forma, elegir todas. Etiqueta con banda/forma/Hz/nota/dB/Q
+  junto al nodo bajo el mouse o arrastrado. Nodos: llenos si suenan, huecos si están apagadas pero en uso (o es la del
+  panel), anillo blanco = elegidas. Ayudas en los tooltips y en el pie del editor.
+- Teclado de piano bajo el visor (16 px, entre la curva y las etiquetas de Hz): un semitono = una columna (eje log),
+  negras arriba, cada Do con su nombre de FL (C5 = MIDI 60); la tecla de la banda del panel en su color. Clic en una
+  tecla = la banda del panel justo a esa nota (y encendida).
+- `gui/BandEdits.h`: cambia parámetros como una perilla (abre el gesto de cada parámetro la primera vez que lo toca y
+  los cierra todos en `end()`); `setSettings`, `reset` (valores por defecto).
+- Deshacer/rehacer (`edit/EditHistory.h` en el procesador: sobrevive a cerrar la ventana): escucha
+  `parameterGestureChanged` de todos los parámetros menos el bypass; foto "antes" al abrirse el primer gesto, "después"
+  al cerrarse el último (+ `beginTransaction`/`endTransaction` para agrupar), y `UndoStack` guarda solo los parámetros
+  que cambiaron (deshacer no pisa la automatización del host, que no manda gestos). Aplica con gestos (el host graba).
+  Límite 200 pasos. Cubre visor, panel y salida. Se eligió frente al `UndoManager` del APVTS porque ese registra al
+  copiar el estado al ValueTree (con temporizador, mezclando la automatización) y no por gesto.
+- Atajos (`gui/Keys.h`, `commandLetter`): JUCE en Windows entrega Ctrl+letra como el carácter de control (Ctrl+Z =
+  código 26), así que comparar con `KeyPress ('z', ctrl, 0)` fallaba. Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z en el editor
+  (botones DESHACER/REHACER en la cabecera también); Supr/Ctrl+A/Esc en el visor (que toma el foco al hacer clic).
+- El procesador expone `getDefaultBandSettings (b)` (leídos de los parámetros) y `getEditHistory()`. Editor de 640 px
+  de alto (antes 620) por el teclado.
+- Tests `FathomTests` nuevos: `UndoStack` (solo lo que cambió, orden, rehacer se borra con un cambio nuevo, límite),
+  arrastre (octavas/dB, el nodo del shelf sigue al mouse medido con la curva real, cortes solo en horizontal, límites,
+  Q de la rueda), banda libre, forma según la posición, notas exactas y teclas negras.
+- Revisada con clics automatizados en el Standalone (crear, arrastrar, Shift en grupo, Alt, rueda, rectángulo,
+  Ctrl+clic, menú, Supr, Ctrl+Z, botón deshacer, teclado de piano).
+- Sin cambios: el audio (motor, bandas, parámetros e IDs), el analizador y las escalas.
+- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 3
 - Librería (`EqFilter.h`): `EqCoefficients` ganó la salida high-pass del SVF (`highPass`; con 0 la campana suena
   igual) y las formas: `lowShelf`/`highShelf` (Cookbook sobre el SVF a la Simper: corte del SVF ÷/× √A, la frecuencia
   es el punto medio de la subida; Q 0.71 = sin rebote), `tiltShelf` (shelf de agudos × 1/A: graves −g/2, agudos +g/2,
@@ -173,4 +215,4 @@ Fase 3 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 4 (edición sobre el visor).
+Siguiente: Fase 5 (analizador profesional), cuando el usuario confirme la Fase 4 en FL.

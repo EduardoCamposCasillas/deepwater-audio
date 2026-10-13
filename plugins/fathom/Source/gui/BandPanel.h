@@ -16,7 +16,7 @@ namespace fathom::gui
 
 // El panel de la banda elegida: cuál de las 24 (el selector o un clic en su nodo del visor), encendido, FORMA,
 // PENDIENTE (solo los cortes), FRECUENCIA, GANANCIA y Q, y debajo lo que esos números significan para la forma
-// elegida. Los controles que la forma no usa se atenúan. En la Fase 4 se agrega la edición sobre el visor.
+// elegida. Los controles que la forma no usa se atenúan. Lo mismo se edita arrastrando el nodo en el visor (Fase 4).
 class BandPanel final : public juce::Component
 {
 public:

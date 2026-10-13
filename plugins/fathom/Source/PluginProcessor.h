@@ -4,8 +4,10 @@
 
 #include "deepwater/dsp/AnalyzerTap.h"
 #include "dsp/Engine.h"
+#include "edit/EditHistory.h"
 
-// Efecto mono/estéreo: 24 bandas de EQ con todas las formas y la ganancia de salida (Fase 3). El audio deja una copia de lo que entra
+// Efecto mono/estéreo: 24 bandas de EQ con todas las formas y la ganancia de salida (Fase 3), editables sobre el visor
+// con deshacer/rehacer (Fase 4). El audio deja una copia de lo que entra
 // y de lo que sale en dos tomas lock-free (AnalyzerTap) para el analizador de la GUI. El audio está en fathom::dsp
 // (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor
@@ -52,6 +54,13 @@ public:
     fathom::dsp::BandSettings getBandSettings (int band) const noexcept;
     fathom::dsp::Engine::BandArray getAllBandSettings() const noexcept;
 
+    // Los ajustes con que nace cada banda (los valores por defecto de sus parámetros). Una banda apagada y así está
+    // "libre": el doble clic del visor la usa para crear una nueva.
+    const fathom::dsp::BandSettings& getDefaultBandSettings (int band) const noexcept { return defaultBands[static_cast<size_t> (band)]; }
+
+    // Hilo de la GUI: deshacer/rehacer. Vive en el procesador y no en el editor: sobrevive a cerrar y abrir la ventana.
+    fathom::edit::EditHistory& getEditHistory() noexcept { return history; }
+
     // Hilo de la GUI: las tomas del analizador y la frecuencia de muestreo con la que se escribieron.
     const AnalyzerTap& getInputTap() const noexcept { return inputTap; }
     const AnalyzerTap& getOutputTap() const noexcept { return outputTap; }
@@ -77,11 +86,13 @@ private:
     };
     std::array<BandParameters, fathom::dsp::Engine::numBands> bandParams;
     juce::AudioParameterBool* bypassParameter = nullptr;
+    fathom::dsp::Engine::BandArray defaultBands;
 
     fathom::dsp::Engine engine;
     AnalyzerTap inputTap, outputTap;
     std::atomic<double> analyzerSampleRate { 44100.0 };
     std::atomic<bool> analyzerActive { false };
+    fathom::edit::EditHistory history; // después de 'parameters': se destruye antes (deja de escucharlos)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FathomAudioProcessor)
 };

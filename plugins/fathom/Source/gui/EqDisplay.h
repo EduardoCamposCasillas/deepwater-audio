@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <bitset>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -11,26 +12,36 @@
 #include "Parameters.h"
 #include "PluginProcessor.h"
 #include "deepwater/dsp/SpectrumAnalyzer.h"
+#include "edit/NodeEditing.h"
+#include "gui/BandEdits.h"
 #include "gui/Format.h"
+#include "gui/Keys.h"
 #include "gui/Theme.h"
 
 namespace fathom::gui
 {
 
-// El visor del EQ: el "lienzo" sobre el que las fases siguientes dibujan la curva y sus nodos.
+// El visor del EQ: el "lienzo" donde se ve y se edita la curva.
 //
-//  - Eje horizontal logarítmico (20 Hz - 20 kHz): cada octava ocupa lo mismo, como la oye el oído. Abajo, las zonas del
-//    mapa de frecuencias (SUB, GRAVES, BARRO...) para aprender a ubicar lo que se oye.
+//  - Eje horizontal logarítmico (20 Hz - 20 kHz): cada octava ocupa lo mismo, como la oye el oído. Debajo, un teclado
+//    de piano con las notas de FL en su frecuencia y las zonas del mapa de frecuencias (SUB, GRAVES, BARRO...).
 //  - DOS escalas verticales sobre las mismas líneas: a la derecha la del EQ (cuánto sube o baja la curva, ±12 dB por
-//    defecto; el botón la cambia) y a la izquierda la del analizador (0 a −96 dBFS). Son independientes: una banda de
-//    +3 dB tiene que verse bien aunque el espectro ocupe 90 dB.
+//    defecto; el botón la cambia) y a la izquierda la del analizador (0 a −96 dBFS).
 //  - La curva (blanca) es la respuesta TOTAL del EQ: las 24 bandas en serie (sus dB se suman) más la ganancia de
-//    salida. Se calcula con los mismos coeficientes que usa el audio (EqCascade::response), así que es lo que suena, no
-//    un dibujo aproximado. Lo que cada banda encendida sube o baja va relleno con su color, y su nodo numerado marca su
-//    frecuencia; un clic en un nodo elige esa banda en el panel (Fase 4: se podrán arrastrar).
-//  - Analizador: ENTRADA (línea gris) y SALIDA (relleno azul), medidos igual (un seno de 0 dBFS marca 0 dB). Cada punto
-//    sube casi al instante y baja a 40 dB/s, para que la música se pueda leer sin que tiemble.
-//  - Al pasar el mouse, arriba se lee la frecuencia, la nota (nombres de FL) y los dos niveles en ese punto.
+//    salida, calculada con los mismos coeficientes que usa el audio. Lo que cada banda sube o baja va relleno con su
+//    color y su nodo numerado marca su frecuencia.
+//  - Analizador: ENTRADA (línea gris) y SALIDA (relleno azul). Cada punto sube casi al instante y baja a 40 dB/s.
+//
+// Edición (Fase 4), pensada para no tener que ir al panel:
+//  - Doble clic en el vacío = crear una banda ahí (campana; en los extremos, un corte). Doble clic en un nodo = apagarla
+//    o encenderla. Supr = borrar las elegidas (vuelven a estar libres).
+//  - Arrastrar un nodo = frecuencia (horizontal) y ganancia (vertical). Shift = ajuste fino (10 veces más lento),
+//    Alt = un solo eje (el que más se movió). Rueda sobre un nodo = Q (Shift = fino).
+//  - Selección múltiple: Ctrl+clic agrega o quita un nodo, arrastrar en el vacío = rectángulo, Ctrl+A = todas, Esc =
+//    solo la del panel. Arrastrar, la rueda, el menú y Supr actúan sobre todas las elegidas.
+//  - Clic derecho = menú (forma, pendiente, encender, afinar a la nota, borrar; en el vacío, crear con otra forma).
+//  - Teclado del eje: clic en una tecla = llevar la banda del panel justo a esa nota.
+// Cada edición es un paso de deshacer (BandEdits abre y cierra los gestos de los parámetros).
 //
 // El análisis (FFT) corre aquí, en el hilo de mensajes; el audio solo copia muestras en las tomas del procesador.
 class EqDisplay final : public juce::Component, public juce::TooltipClient
@@ -44,8 +55,10 @@ public:
     static constexpr std::array<float, 4> eqRanges { 6.0f, 12.0f, 24.0f, 36.0f };
     static constexpr float fallDbPerSecond = 40.0f;
     static constexpr double staleSeconds = 0.25; // sin audio nuevo durante este tiempo, el espectro cae a silencio
+    static constexpr double wheelGestureSeconds = 0.5; // la rueda quieta este tiempo = fin del paso de deshacer
+    static constexpr float fineFactor = 0.1f;          // Shift: diez veces más lento
 
-    explicit EqDisplay (FathomAudioProcessor& p) : processor (p)
+    explicit EqDisplay (FathomAudioProcessor& p) : processor (p), edits (p)
     {
         outputGain = processor.getParameters().getRawParameterValue (params::outputGain);
 
@@ -66,6 +79,8 @@ public:
         updateRangeText();
         addAndMakeVisible (rangeButton);
         setMouseCursor (juce::MouseCursor::CrosshairCursor);
+        setWantsKeyboardFocus (true);
+        selection.set (static_cast<size_t> (focusedBand));
     }
 
     // Una vez por cuadro (lo llama el editor).
@@ -80,25 +95,16 @@ public:
                 trace->analyzer.prepare (order);
             scratch.assign (static_cast<size_t> (input.analyzer.getSize()), 0.0f);
         }
+        // La rueda no tiene "soltar": su paso de deshacer se cierra cuando deja de moverse un momento.
+        if (wheelEditing && nowSeconds() - lastWheelSeconds > wheelGestureSeconds)
+        {
+            wheelEditing = false;
+            if (drag != Drag::nodes)
+                edits.end();
+        }
         // Solo se repinta si algo cambió de forma visible: sin audio, las curvas terminan de caer al piso y el visor
         // queda quieto (no gasta CPU).
-        const float gainDb = outputGain->load();
-        bool changed = gainDb != paintedGainDb || sampleRate != curveSampleRate;
-        const bool allBands = sampleRate != curveSampleRate;
-        paintedGainDb = gainDb;
-        curveSampleRate = sampleRate;
-        for (int b = 0; b < dsp::Engine::numBands; ++b)
-        {
-            const auto settings = processor.getBandSettings (b);
-            if (allBands || ! sameSettings (settings, paintedBands[static_cast<size_t> (b)]))
-            {
-                paintedBands[static_cast<size_t> (b)] = settings;
-                updateBandCurve (b);
-                changed = true;
-            }
-        }
-        if (changed)
-            updateTotalCurve();
+        bool changed = refreshBands (sampleRate);
         changed = updateTrace (input, processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
         changed = updateTrace (output, processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
         if (changed)
@@ -118,8 +124,11 @@ public:
         area.removeFromTop (4.0f);
         zoneArea = area.removeFromBottom (16.0f);
         area.removeFromBottom (14.0f); // etiquetas de frecuencia
+        pianoArea = area.removeFromBottom (16.0f);
+        area.removeFromBottom (1.0f);
         plot = area.withTrimmedLeft (30.0f).withTrimmedRight (30.0f); // números de las dos escalas a los lados
         zoneArea = zoneArea.withX (plot.getX()).withWidth (plot.getWidth());
+        pianoArea = pianoArea.withX (plot.getX()).withWidth (plot.getWidth());
 
         // Un punto cada 2 píxeles.
         const auto points = static_cast<size_t> (plot.getWidth() / 2.0f) + 1;
@@ -150,6 +159,7 @@ public:
         g.setColour (theme::display);
         g.fillRoundedRectangle (plot, 4.0f);
         paintGrid (g);
+        paintPiano (g);
         paintZones (g);
         {
             juce::Graphics::ScopedSaveState clip (g);
@@ -168,6 +178,8 @@ public:
                 g.strokePath (tracePath (output.shown, false), juce::PathStrokeType (1.3f));
             }
             paintCurve (g);
+            paintLasso (g);
+            paintNodeLabel (g);
         }
     }
 
@@ -181,37 +193,231 @@ public:
                                            "izquierda). Pasa el mouse para leer la frecuencia y la nota.");
         if (zoneArea.contains (position))
             return zoneTooltip (xToHz (position.x));
+        if (pianoArea.contains (position))
+            return juce::String::fromUTF8 ("Las notas en su frecuencia (nombres de FL: C5 = Do central, A5 = 440 Hz). "
+                                           "Clic en una tecla = llevar la banda del panel justo a esa nota: una campana "
+                                           "afinada a la nota del 808, un notch en el tono que zumba.");
+        if (nodeAt (position) >= 0)
+            return juce::String::fromUTF8 ("Arrastrar = frecuencia y ganancia (Shift = fino, Alt = un solo eje). Rueda = "
+                                           "Q. Doble clic = apagar/encender. Ctrl+clic = elegir varias. Supr = borrar. "
+                                           "Clic derecho = forma, pendiente y m\xc3\xa1s.");
+        if (plot.contains (position))
+            return juce::String::fromUTF8 ("Doble clic = crear una banda aqu\xc3\xad (en los extremos, un corte). Arrastrar "
+                                           "= elegir varios nodos con un rect\xc3\xa1ngulo. Clic derecho = crear otra forma. "
+                                           "Ctrl+Z / Ctrl+Y = deshacer / rehacer.");
         return {};
     }
 
     void mouseMove (const juce::MouseEvent& event) override
     {
         mouse = event.position;
-        setMouseCursor (nodeAt (mouse) >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::CrosshairCursor);
-        repaintReadoutAndZones();
+        const int node = nodeAt (mouse);
+        if (node != hoveredNode)
+        {
+            hoveredNode = node;
+            repaint (plot.toNearestInt());
+        }
+        setMouseCursor (node >= 0 ? juce::MouseCursor::PointingHandCursor
+                                  : pianoArea.contains (mouse) ? juce::MouseCursor::PointingHandCursor
+                                                               : juce::MouseCursor::CrosshairCursor);
+        repaintReadoutAndAxis();
     }
 
     void mouseExit (const juce::MouseEvent&) override
     {
         mouse = { -1.0f, -1.0f };
-        repaintReadoutAndZones();
+        if (hoveredNode >= 0)
+        {
+            hoveredNode = -1;
+            repaint (plot.toNearestInt());
+        }
+        repaintReadoutAndAxis();
     }
 
-    // Un clic sobre un nodo elige esa banda (el más cercano, si hay varios encima).
     void mouseDown (const juce::MouseEvent& event) override
     {
-        if (const int b = nodeAt (event.position); b >= 0 && onBandClicked)
-            onBandClicked (b);
+        grabKeyboardFocus(); // para Supr, Ctrl+A, Esc y Ctrl+Z
+        mouse = event.position;
+        drag = Drag::none;
+
+        if (pianoArea.contains (event.position) && ! event.mods.isPopupMenu())
+        {
+            tuneToNote (juce::roundToInt (edit::hzToNote (xToHz (event.position.x))));
+            return;
+        }
+        if (! plot.contains (event.position))
+            return;
+
+        const int node = nodeAt (event.position);
+        if (node >= 0)
+        {
+            if (event.mods.isCommandDown() && ! event.mods.isPopupMenu())
+            {
+                toggleInSelection (node);
+                return;
+            }
+            if (! selection.test (static_cast<size_t> (node)))
+                selectOnly (node);
+            else
+                focus (node);
+            if (event.mods.isPopupMenu())
+            {
+                showNodeMenu();
+                return;
+            }
+            startNodeDrag (event.position);
+            return;
+        }
+
+        if (event.mods.isPopupMenu())
+        {
+            showEmptyMenu (event.position);
+            return;
+        }
+        // En el vacío: un rectángulo de selección (empieza de verdad al moverse unos píxeles).
+        drag = Drag::lasso;
+        lassoAdds = event.mods.isCommandDown();
+        dragOrigin = event.position;
+        lassoMoved = false;
     }
 
-    // La banda que muestra el panel: su nodo y su relleno se resaltan (y se ve aunque esté apagada).
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        mouse = event.position;
+        if (drag == Drag::lasso)
+        {
+            lassoMoved = lassoMoved || event.position.getDistanceFrom (dragOrigin) > 3.0f;
+            repaint (plot.toNearestInt());
+            return;
+        }
+        if (drag != Drag::nodes)
+            return;
+
+        // Por diferencias desde el evento anterior, no desde el clic: así Shift se puede apretar o soltar a mitad del
+        // arrastre sin que el nodo salte.
+        const auto delta = event.position - dragLast;
+        dragLast = event.position;
+        dragTotal += delta;
+        if (! dragMoved && dragTotal.getDistanceFromOrigin() < 2.0f)
+            return; // un clic con un temblor de 1 px no es una edición
+        if (! dragMoved)
+        {
+            dragMoved = true;
+            edits.begin();
+        }
+        const float fine = event.mods.isShiftDown() ? fineFactor : 1.0f;
+        dragOctaves += static_cast<double> (delta.x * fine * octavesPerPixel());
+        dragDb -= static_cast<double> (delta.y * fine * eqDbPerPixel());
+
+        // Alt: solo el eje en que más se movió el mouse desde el clic.
+        double octaves = dragOctaves, db = dragDb;
+        if (event.mods.isAltDown())
+        {
+            if (std::abs (dragTotal.x) >= std::abs (dragTotal.y))
+                db = 0.0;
+            else
+                octaves = 0.0;
+        }
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (selection.test (static_cast<size_t> (b)))
+            {
+                const auto& start = dragStart[static_cast<size_t> (b)];
+                const auto moved = edit::dragged (start, octaves, db, minHz, maxHz);
+                edits.set (b, params::frequency, moved.frequency);
+                if (dsp::usesGain (start.shape))
+                    edits.set (b, params::gain, moved.gainDb);
+            }
+        refreshNow();
+    }
+
+    void mouseUp (const juce::MouseEvent& event) override
+    {
+        if (drag == Drag::lasso && lassoMoved)
+            finishLasso (lassoRectangle (event.position));
+        if (drag == Drag::nodes && dragMoved && ! wheelEditing)
+            edits.end();
+        drag = Drag::none;
+        repaint (plot.toNearestInt());
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& event) override
+    {
+        if (! plot.contains (event.position) || event.mods.isPopupMenu())
+            return;
+        if (const int node = nodeAt (event.position); node >= 0)
+        {
+            const bool on = processor.getBandSettings (node).enabled;
+            edits.begin();
+            edits.set (node, params::enabled, on ? 0.0f : 1.0f);
+            edits.end();
+            refreshNow();
+            return;
+        }
+        createBand (event.position, edit::shapeForNewBand (xToHz (event.position.x)));
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override
+    {
+        const int node = nodeAt (event.position);
+        if (node < 0)
+            return;
+        if (! selection.test (static_cast<size_t> (node)))
+            selectOnly (node);
+        // Rueda hacia arriba = Q más alto (más angosta). Cada "muesca" (~0.23 en Windows) multiplica el Q por ~1.18: de
+        // Q 1 a Q 10 en unas 14 muescas.
+        const float amount = (wheel.isReversed ? -wheel.deltaY : wheel.deltaY) * (event.mods.isShiftDown() ? fineFactor : 1.0f);
+        if (amount == 0.0f)
+            return;
+        const double factor = std::exp2 (static_cast<double> (amount));
+        if (! edits.isActive())
+            edits.begin();
+        wheelEditing = true;
+        lastWheelSeconds = nowSeconds();
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (selection.test (static_cast<size_t> (b)))
+            {
+                const auto settings = processor.getBandSettings (b); // el valor actual (puede haber varias muescas por cuadro)
+                if (dsp::usesQ (settings.shape, settings.slopeIndex))
+                    edits.set (b, params::q, edit::scaledQ (settings.q, factor));
+            }
+        refreshNow();
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
+        {
+            deleteSelection();
+            return true;
+        }
+        if (commandLetter (key) == 'a')
+        {
+            selectAllInUse();
+            return true;
+        }
+        if (key == juce::KeyPress::escapeKey)
+        {
+            selectOnly (focusedBand);
+            return true;
+        }
+        return false; // Ctrl+Z y demás siguen hacia el editor
+    }
+
+    // La banda que muestra el panel: su nodo y su relleno se resaltan (y se ve aunque esté libre). Si no estaba entre
+    // las elegidas, pasa a ser la única.
     void setSelectedBand (int band)
     {
-        selectedBand = band;
+        focusedBand = band;
+        if (! selection.test (static_cast<size_t> (band)))
+        {
+            selection.reset();
+            selection.set (static_cast<size_t> (band));
+        }
         repaint();
     }
 
-    std::function<void (int)> onBandClicked;
+    // Avisa al editor de qué banda mostrar en el panel (un clic en un nodo, una banda creada...).
+    std::function<void (int)> onBandFocused;
 
 private:
     struct Trace
@@ -220,6 +426,13 @@ private:
         std::vector<float> shown; // lo que se dibuja, en dB, un valor por punto
         std::uint64_t lastWritten = 0;
         double secondsWithoutAudio = 0.0;
+    };
+
+    enum class Drag
+    {
+        none,
+        nodes, // moviendo los nodos elegidos
+        lasso, // rectángulo de selección
     };
 
     // Las zonas del mapa de frecuencias (aproximadas: cada instrumento las cruza, pero sirven para ubicarse).
@@ -245,9 +458,12 @@ private:
                                       "voces y en el master. Con la edad se oye menos." },
     } };
 
-    void repaintReadoutAndZones()
+    static double nowSeconds() { return juce::Time::getMillisecondCounterHiRes() * 0.001; }
+
+    void repaintReadoutAndAxis()
     {
         repaint (titleArea.toNearestInt());
+        repaint (pianoArea.toNearestInt());
         repaint (zoneArea.toNearestInt());
     }
 
@@ -277,6 +493,8 @@ private:
     {
         return minHz * std::pow (maxHz / minHz, (x - plot.getX()) / plot.getWidth());
     }
+    float octavesPerPixel() const noexcept { return std::log2 (maxHz / minHz) / plot.getWidth(); }
+    float eqDbPerPixel() const noexcept { return 2.0f * eqRange() / plot.getHeight(); }
 
     // Las dos escalas verticales: la del EQ (0 dB al centro) y la del analizador (0 dBFS arriba).
     float eqDbToY (float db) const noexcept { return plot.getCentreY() - db / eqRange() * plot.getHeight() * 0.5f; }
@@ -288,6 +506,255 @@ private:
     float yToAnalyzerDb (float y) const noexcept
     {
         return analyzerTopDb - (y - plot.getY()) / plot.getHeight() * (analyzerTopDb - analyzerBottomDb);
+    }
+
+    // ---- Selección y edición ------------------------------------------------------------------------------------------
+
+    void focus (int band)
+    {
+        focusedBand = band;
+        if (onBandFocused)
+            onBandFocused (band); // el editor muestra la banda en el panel (y llama a setSelectedBand)
+        repaint();
+    }
+
+    void selectOnly (int band)
+    {
+        selection.reset();
+        selection.set (static_cast<size_t> (band));
+        focus (band);
+    }
+
+    // Ctrl+clic: agrega o quita. La del panel siempre está elegida: si se quita, el panel pasa a otra de las elegidas.
+    void toggleInSelection (int band)
+    {
+        const auto index = static_cast<size_t> (band);
+        if (! selection.test (index))
+        {
+            selection.set (index);
+            focus (band);
+            return;
+        }
+        if (selection.count() == 1)
+            return;
+        selection.reset (index);
+        if (band == focusedBand)
+            for (int b = 0; b < dsp::Engine::numBands; ++b)
+                if (selection.test (static_cast<size_t> (b)))
+                {
+                    focus (b);
+                    break;
+                }
+        repaint();
+    }
+
+    void selectAllInUse()
+    {
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (inUse (b))
+                selection.set (static_cast<size_t> (b));
+        repaint();
+    }
+
+    juce::Rectangle<float> lassoRectangle (juce::Point<float> end) const
+    {
+        return juce::Rectangle<float> (dragOrigin, end).getIntersection (plot);
+    }
+
+    void finishLasso (juce::Rectangle<float> area)
+    {
+        std::bitset<dsp::Engine::numBands> caught;
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (nodeVisible (b) && area.contains (nodePosition (b)))
+                caught.set (static_cast<size_t> (b));
+        if (caught.none())
+            return;
+        if (! lassoAdds)
+            selection.reset();
+        selection |= caught;
+        if (! selection.test (static_cast<size_t> (focusedBand)))
+            for (int b = 0; b < dsp::Engine::numBands; ++b)
+                if (caught.test (static_cast<size_t> (b)))
+                {
+                    focus (b);
+                    break;
+                }
+        repaint();
+    }
+
+    void startNodeDrag (juce::Point<float> position)
+    {
+        drag = Drag::nodes;
+        dragLast = position;
+        dragTotal = {};
+        dragOctaves = dragDb = 0.0;
+        dragMoved = false;
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            dragStart[static_cast<size_t> (b)] = processor.getBandSettings (b);
+    }
+
+    // Crear una banda donde se hizo clic: la primera libre, encendida, con la forma pedida y (si tiene) la ganancia de
+    // la altura del clic. Sin bandas libres no pasa nada.
+    void createBand (juce::Point<float> position, dsp::Shape shape)
+    {
+        std::array<bool, dsp::Engine::numBands> used {};
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            used[static_cast<size_t> (b)] = inUse (b);
+        const int band = edit::freeBand (used);
+        if (band < 0)
+            return;
+        auto settings = processor.getDefaultBandSettings (band);
+        settings.enabled = true;
+        settings.shape = shape;
+        settings.frequency = juce::jlimit (minHz, maxHz, xToHz (position.x));
+        if (dsp::usesGain (shape))
+            settings.gainDb = juce::jlimit (dsp::BandSettings::minGainDb, dsp::BandSettings::maxGainDb,
+                                            (yToEqDb (position.y) - paintedGainDb) * edit::gainPerNodeDb (shape));
+        if (shape == dsp::Shape::lowShelf || shape == dsp::Shape::highShelf || shape == dsp::Shape::lowCut
+            || shape == dsp::Shape::highCut)
+            settings.q = 0.71f; // sin rebote (Butterworth en los cortes)
+        edits.begin();
+        edits.setSettings (band, settings);
+        edits.end();
+        selectOnly (band);
+        refreshNow();
+    }
+
+    void deleteSelection()
+    {
+        edits.begin();
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (selection.test (static_cast<size_t> (b)))
+                edits.reset (b);
+        edits.end();
+        selectOnly (focusedBand);
+        refreshNow();
+    }
+
+    // Aplica 'change' a cada banda elegida, como un solo paso de deshacer.
+    template <typename Change>
+    void editSelection (Change&& change)
+    {
+        edits.begin();
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (selection.test (static_cast<size_t> (b)))
+                change (b, processor.getBandSettings (b));
+        edits.end();
+        refreshNow();
+    }
+
+    // El teclado del eje: la banda del panel, justo en la nota (y encendida: es una orden explícita sobre ella).
+    void tuneToNote (int note)
+    {
+        const float hz = static_cast<float> (edit::noteToHz (note));
+        if (hz < minHz * 0.97f || hz > maxHz * 1.03f)
+            return;
+        edits.begin();
+        edits.set (focusedBand, params::frequency, hz);
+        edits.set (focusedBand, params::enabled, 1.0f);
+        edits.end();
+        refreshNow();
+    }
+
+    void showNodeMenu()
+    {
+        const auto settings = processor.getBandSettings (focusedBand);
+        const bool several = selection.count() > 1;
+        juce::PopupMenu menu;
+        menu.addSectionHeader (several ? juce::String (static_cast<int> (selection.count())) + " bandas elegidas"
+                                       : "Banda " + juce::String (focusedBand + 1));
+        menu.addItem (settings.enabled ? "Apagar" : "Encender", guarded ([this, on = ! settings.enabled] {
+            editSelection ([this, on] (int b, const dsp::BandSettings&) { edits.set (b, params::enabled, on ? 1.0f : 0.0f); });
+        }));
+        juce::PopupMenu shapes;
+        for (int s = 0; s < dsp::numShapes; ++s)
+            shapes.addItem (juce::String::fromUTF8 (format::shapeNames[static_cast<size_t> (s)]), true,
+                            static_cast<int> (settings.shape) == s, guarded ([this, s] {
+                                editSelection ([this, s] (int b, const dsp::BandSettings&) {
+                                    edits.set (b, params::shape, static_cast<float> (s));
+                                });
+                            }));
+        menu.addSubMenu ("Forma", shapes);
+        juce::PopupMenu slopes;
+        for (size_t s = 0; s < dsp::slopes.size(); ++s)
+            slopes.addItem (juce::String (dsp::slopes[s]) + " dB/oct", true, settings.slopeIndex == static_cast<int> (s), guarded ([this, s] {
+                editSelection ([this, s] (int b, const dsp::BandSettings&) {
+                    edits.set (b, params::slope, static_cast<float> (s));
+                });
+            }));
+        menu.addSubMenu ("Pendiente", slopes, dsp::usesSlope (settings.shape));
+        menu.addItem (juce::String::fromUTF8 ("Afinar a la nota m\xc3\xa1s cercana (") + format::noteName (edit::nearestNoteHz (settings.frequency))
+                          + ")",
+                      guarded ([this] {
+                          editSelection ([this] (int b, const dsp::BandSettings& s) {
+                              edits.set (b, params::frequency, edit::nearestNoteHz (s.frequency));
+                          });
+                      }));
+        menu.addSeparator();
+        menu.addItem (several ? "Borrar las elegidas (Supr)" : "Borrar (Supr)", guarded ([this] { deleteSelection(); }));
+        showMenu (menu);
+    }
+
+    void showEmptyMenu (juce::Point<float> position)
+    {
+        juce::PopupMenu create;
+        for (int s = 0; s < dsp::numShapes; ++s)
+            create.addItem (juce::String::fromUTF8 (format::shapeNames[static_cast<size_t> (s)]),
+                            guarded ([this, s, position] { createBand (position, static_cast<dsp::Shape> (s)); }));
+        juce::PopupMenu menu;
+        menu.addSubMenu (juce::String::fromUTF8 ("Crear aqu\xc3\xad (") + format::hz (xToHz (position.x)) + ")", create);
+        menu.addItem ("Elegir todas (Ctrl+A)", guarded ([this] { selectAllInUse(); }));
+        showMenu (menu);
+    }
+
+    // Las acciones del menú llegan después (el menú es asíncrono): si el visor ya no existe, no hacen nada.
+    template <typename Action>
+    std::function<void()> guarded (Action&& action)
+    {
+        return [safe = juce::Component::SafePointer<EqDisplay> (this), action = std::forward<Action> (action)] {
+            if (safe != nullptr)
+                action();
+        };
+    }
+
+    void showMenu (juce::PopupMenu& menu)
+    {
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    // ---- Bandas y curvas -----------------------------------------------------------------------------------------------
+
+    // Trae los ajustes de las bandas y recalcula las curvas que cambiaron. Devuelve true si algo se movió.
+    bool refreshBands (double sampleRate)
+    {
+        const float gainDb = outputGain->load();
+        bool changed = gainDb != paintedGainDb || sampleRate != curveSampleRate;
+        const bool allBands = sampleRate != curveSampleRate;
+        paintedGainDb = gainDb;
+        curveSampleRate = sampleRate;
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+        {
+            const auto settings = processor.getBandSettings (b);
+            if (allBands || ! sameSettings (settings, paintedBands[static_cast<size_t> (b)]))
+            {
+                paintedBands[static_cast<size_t> (b)] = settings;
+                updateBandCurve (b);
+                changed = true;
+            }
+        }
+        if (changed)
+            updateTotalCurve();
+        return changed;
+    }
+
+    // Después de editar: la curva y los nodos al instante, sin esperar al siguiente cuadro.
+    void refreshNow()
+    {
+        const bool changed = refreshBands (processor.getAnalyzerSampleRate());
+        if (drag == Drag::none)
+            hoveredNode = nodeAt (mouse); // la banda pudo moverse (o borrarse) bajo el mouse quieto
+        if (changed)
+            repaint();
     }
 
     // Devuelve true si algún punto se movió de forma visible (0.05 dB: menos de un píxel).
@@ -373,10 +840,11 @@ private:
             }
         g.setFont (juce::FontOptions (10.0f));
         g.setColour (theme::dimText);
+        const float labelsY = pianoArea.getBottom() + 1.0f;
         for (const float hz : { 30.0f, 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f, 5000.0f, 10000.0f })
         {
             const auto text = hz < 1000.0f ? juce::String (juce::roundToInt (hz)) : juce::String (juce::roundToInt (hz / 1000.0f)) + "k";
-            g.drawText (text, juce::Rectangle<float> (hzToX (hz) - 20.0f, plot.getBottom() + 1.0f, 40.0f, 13.0f), juce::Justification::centred);
+            g.drawText (text, juce::Rectangle<float> (hzToX (hz) - 20.0f, labelsY, 40.0f, 13.0f), juce::Justification::centred);
         }
 
         // Niveles: las mismas líneas para las dos escalas. Derecha = EQ (0 dB al centro, más clara); izquierda = analizador.
@@ -395,6 +863,62 @@ private:
             g.drawText (juce::String (juce::roundToInt (yToAnalyzerDb (y))),
                         juce::Rectangle<float> (plot.getX() - 30.0f, y - 6.0f, 27.0f, 12.0f), juce::Justification::centredRight);
         }
+    }
+
+    // El teclado del eje: cada semitono es una columna del mismo ancho (el eje es logarítmico, como las notas). Las
+    // teclas negras cubren la parte de arriba; abajo, las blancas se separan a la mitad de cada negra, como en un piano
+    // de verdad. Cada Do lleva su nombre de FL; la tecla de la banda del panel se pinta de su color y la del mouse, del
+    // acento.
+    void paintPiano (juce::Graphics& g) const
+    {
+        juce::Graphics::ScopedSaveState clip (g);
+        g.reduceClipRegion (pianoArea.toNearestInt());
+        g.setColour (juce::Colour (0xffb9c2cc));
+        g.fillRect (pianoArea);
+
+        const auto keyLeft = [this] (int note) { return hzToX (static_cast<float> (edit::noteToHz (note - 0.5))); };
+        const int firstNote = static_cast<int> (std::floor (edit::hzToNote (minHz)));
+        const int lastNote = static_cast<int> (std::ceil (edit::hzToNote (maxHz)));
+        const int focusedNote = juce::roundToInt (edit::hzToNote (paintedBands[static_cast<size_t> (focusedBand)].frequency));
+        const int hoveredNote = pianoArea.contains (mouse) ? juce::roundToInt (edit::hzToNote (xToHz (mouse.x))) : -1000;
+        const float blackBottom = pianoArea.getY() + pianoArea.getHeight() * 0.55f;
+
+        for (int note = firstNote; note <= lastNote; ++note)
+        {
+            const float left = keyLeft (note), right = keyLeft (note + 1);
+            const bool black = edit::isBlackKey (note);
+            const auto key = juce::Rectangle<float> (left, pianoArea.getY(), right - left,
+                                                     (black ? blackBottom : pianoArea.getBottom()) - pianoArea.getY());
+            if (black)
+            {
+                g.setColour (juce::Colour (0xff1b2027));
+                g.fillRect (key);
+                // Debajo de la negra, la separación entre las dos blancas vecinas.
+                g.setColour (juce::Colour (0xff6d7782));
+                g.drawVerticalLine (juce::roundToInt ((left + right) * 0.5f), blackBottom, pianoArea.getBottom());
+            }
+            else if (! edit::isBlackKey (note - 1)) // E-F y B-C: dos blancas juntas
+            {
+                g.setColour (juce::Colour (0xff6d7782));
+                g.drawVerticalLine (juce::roundToInt (left), pianoArea.getY(), pianoArea.getBottom());
+            }
+            const auto highlight = note == hoveredNote ? theme::accent.withAlpha (0.8f)
+                                   : note == focusedNote && nodeVisible (focusedBand) ? theme::bandColour (focusedBand)
+                                                                                        : juce::Colours::transparentBlack;
+            if (! highlight.isTransparent())
+            {
+                g.setColour (highlight);
+                g.fillRect (key);
+            }
+        }
+        // Los nombres al final (encima de las teclas): cada Do, con el nombre de FL (C5 = Do central, nota MIDI 60).
+        g.setColour (juce::Colour (0xff1b2027));
+        g.setFont (juce::FontOptions (8.5f, juce::Font::bold));
+        for (int note = firstNote; note <= lastNote; ++note)
+            if (((note % 12) + 12) % 12 == 0)
+                g.drawText ("C" + juce::String (note / 12),
+                            juce::Rectangle<float> (keyLeft (note) + 1.0f, blackBottom - 1.5f, 24.0f, pianoArea.getBottom() - blackBottom + 1.5f),
+                            juce::Justification::centredLeft, false);
     }
 
     // Debajo de las frecuencias: las zonas del mapa, alternando el tono para distinguirlas.
@@ -429,6 +953,17 @@ private:
                && a.slopeIndex == b.slopeIndex;
     }
 
+    // Una banda está "en uso" si está encendida o si se tocó algo (apagada con ajustes propios: su nodo se ve hueco).
+    // Una libre (apagada y como nace) no se dibuja, salvo que la muestre el panel.
+    bool inUse (int b) const noexcept
+    {
+        const auto& s = paintedBands[static_cast<size_t> (b)];
+        const auto& d = processor.getDefaultBandSettings (b);
+        const auto near = [] (float x, float y) { return std::abs (x - y) <= 1.0e-4f * std::max (1.0f, std::abs (y)); };
+        return s.enabled || ! (near (s.frequency, d.frequency) && near (s.gainDb, d.gainDb) && near (s.q, d.q) && s.shape == d.shape
+                               && s.slopeIndex == d.slopeIndex);
+    }
+
     // La respuesta total en dB en una frecuencia: las bandas (con sus coeficientes reales) más la ganancia de salida.
     float totalDb (float hz) const noexcept
     {
@@ -455,8 +990,12 @@ private:
         bandCascades[index] = dsp::Band::coefficientsFor (settings, curveSampleRate);
         // El nodo: sobre la curva de la banda en su frecuencia si la forma tiene ganancia (la campana en su pico, el
         // shelf en su punto medio, los tilts en su eje); los cortes, el notch, el pasa banda y el all-pass, en 0 dB.
-        nodeDb[index] = settings.enabled && dsp::usesGain (settings.shape)
-                            ? static_cast<float> (bandCascades[index].magnitudeDb (settings.frequency, curveSampleRate))
+        // Apagada, donde estaría encendida (hueco): se puede seguir editando.
+        auto active = settings;
+        active.enabled = true;
+        nodeDb[index] = dsp::usesGain (settings.shape)
+                            ? static_cast<float> ((settings.enabled ? bandCascades[index] : dsp::Band::coefficientsFor (active, curveSampleRate))
+                                                      .magnitudeDb (settings.frequency, curveSampleRate))
                             : 0.0f;
         auto& curve = bandCurveDb[index];
         const auto points = curve.size();
@@ -504,11 +1043,13 @@ private:
         return { hzToX (hz), juce::jlimit (plot.getY() + 7.0f, plot.getBottom() - 7.0f, y) };
     }
 
-    bool nodeVisible (int b) const noexcept { return paintedBands[static_cast<size_t> (b)].enabled || b == selectedBand; }
+    bool nodeVisible (int b) const noexcept { return inUse (b) || b == focusedBand; }
 
-    // La banda cuyo nodo está bajo 'position' (o −1).
+    // La banda cuyo nodo está bajo 'position' (o −1). Si hay varios encima, el más cercano.
     int nodeAt (juce::Point<float> position) const noexcept
     {
+        if (! plot.expanded (nodeRadius).contains (position))
+            return -1;
         int best = -1;
         float bestDistance = nodeRadius + 3.0f;
         for (int b = 0; b < dsp::Engine::numBands; ++b)
@@ -522,8 +1063,9 @@ private:
     }
 
     // Las curvas del EQ: lo que cada banda encendida sube o baja (relleno con su color, respecto de la línea de la
-    // salida; la elegida, más marcada), la respuesta total (blanca; pegada al borde si se sale de la escala) y encima los
-    // nodos de las bandas encendidas y de la elegida (hueco si está apagada).
+    // salida; la del panel, más marcada), la respuesta total (blanca; pegada al borde si se sale de la escala) y encima
+    // los nodos: llenos si la banda suena, huecos si está apagada; con anillo blanco los elegidos (más grueso el del
+    // panel).
     void paintCurve (juce::Graphics& g) const
     {
         if (curveDb.size() < 2)
@@ -533,61 +1075,141 @@ private:
         {
             if (! paintedBands[static_cast<size_t> (b)].enabled)
                 continue;
-            const bool selected = b == selectedBand;
+            const bool focused = b == focusedBand;
+            const bool selected = selection.test (static_cast<size_t> (b));
             auto path = curvePath (bandCurveDb[static_cast<size_t> (b)], paintedGainDb);
             const auto colour = theme::bandColour (b);
             if (selected)
             {
-                g.setColour (colour.withAlpha (0.6f));
+                g.setColour (colour.withAlpha (focused ? 0.6f : 0.4f));
                 g.strokePath (path, juce::PathStrokeType (1.0f));
             }
             path.lineTo (plot.getRight(), baseY);
             path.lineTo (plot.getX(), baseY);
             path.closeSubPath();
-            g.setColour (colour.withAlpha (selected ? 0.22f : 0.10f));
+            g.setColour (colour.withAlpha (focused ? 0.22f : selected ? 0.16f : 0.10f));
             g.fillPath (path);
         }
         g.setColour (theme::text.withAlpha (0.9f));
         g.strokePath (curvePath (curveDb, 0.0f), juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
+        const auto lasso = drag == Drag::lasso && lassoMoved ? lassoRectangle (mouse) : juce::Rectangle<float>();
         g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
-        // La elegida al final: queda encima si se superpone con otra.
-        for (int pass = 0; pass < 2; ++pass)
+        // Los elegidos al final y el del panel último de todos: quedan encima si se superponen con otros.
+        for (int pass = 0; pass < 3; ++pass)
             for (int b = 0; b < dsp::Engine::numBands; ++b)
             {
-                if (! nodeVisible (b) || (b == selectedBand) != (pass == 1))
+                const bool focused = b == focusedBand;
+                const bool selected = selection.test (static_cast<size_t> (b)) || (! lasso.isEmpty() && lasso.contains (nodePosition (b)));
+                if (! nodeVisible (b) || pass != (focused ? 2 : selected ? 1 : 0))
                     continue;
                 const bool enabled = paintedBands[static_cast<size_t> (b)].enabled;
                 const auto colour = theme::bandColour (b);
-                const auto node = juce::Rectangle<float> (2.0f * nodeRadius, 2.0f * nodeRadius).withCentre (nodePosition (b));
+                const float radius = nodeRadius + (b == hoveredNode ? 1.5f : 0.0f);
+                const auto node = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (nodePosition (b));
                 if (enabled)
                 {
                     g.setColour (colour);
                     g.fillEllipse (node);
                 }
-                g.setColour (b == selectedBand ? theme::text : enabled ? colour.darker (0.6f) : theme::dimText);
-                g.drawEllipse (node, b == selectedBand ? 2.0f : 1.2f);
-                g.setColour (enabled ? juce::Colours::black.withAlpha (0.8f) : theme::dimText);
+                else
+                {
+                    g.setColour (theme::display.withAlpha (0.8f));
+                    g.fillEllipse (node);
+                }
+                g.setColour (focused ? theme::text : selected ? theme::text.withAlpha (0.75f) : enabled ? colour.darker (0.6f) : colour.withAlpha (0.7f));
+                g.drawEllipse (node, focused ? 2.2f : selected ? 1.6f : 1.2f);
+                g.setColour (enabled ? juce::Colours::black.withAlpha (0.8f) : colour);
                 g.drawText (juce::String (b + 1), node, juce::Justification::centred);
             }
     }
 
-    // Arriba, al pasar el mouse por el visor: frecuencia · nota · escala del EQ · escala del analizador.
+    void paintLasso (juce::Graphics& g) const
+    {
+        if (drag != Drag::lasso || ! lassoMoved)
+            return;
+        const auto area = lassoRectangle (mouse);
+        g.setColour (theme::accent.withAlpha (0.12f));
+        g.fillRect (area);
+        g.setColour (theme::accent.withAlpha (0.7f));
+        g.drawRect (area, 1.0f);
+    }
+
+    // Junto al nodo que se arrastra (o bajo el mouse): sus valores, para no tener que mirar el panel.
+    void paintNodeLabel (juce::Graphics& g) const
+    {
+        const int b = drag == Drag::nodes && dragMoved ? focusedBand : hoveredNode;
+        if (b < 0 || drag == Drag::lasso)
+            return;
+        const auto& s = paintedBands[static_cast<size_t> (b)];
+        const auto dot = juce::String::fromUTF8 (" \xc2\xb7 ");
+        auto first = juce::String (b + 1) + dot + juce::String::fromUTF8 (format::shapeNames[static_cast<size_t> (s.shape)]);
+        if (! s.enabled)
+            first << " (apagada)";
+        const auto note = format::noteName (s.frequency);
+        auto second = format::hz (s.frequency) + (note.isEmpty() ? juce::String() : dot + note);
+        juce::String third;
+        if (dsp::usesGain (s.shape))
+            third = s.shape == dsp::Shape::flatTilt
+                        ? juce::String (s.gainDb * dsp::BandSettings::flatTiltDbPerOctavePerDb, 2) + " dB/oct"
+                        : format::db (s.gainDb);
+        if (dsp::usesSlope (s.shape))
+            third = juce::String (dsp::slopes[static_cast<size_t> (s.slopeIndex)]) + " dB/oct";
+        if (dsp::usesQ (s.shape, s.slopeIndex))
+            third << (third.isEmpty() ? "" : dot) << "Q " << juce::String (s.q, s.q < 10.0f ? 2 : 1);
+
+        const juce::Font font { juce::FontOptions (11.0f) };
+        const float width = 12.0f + juce::jmax (juce::GlyphArrangement::getStringWidth (font, first),
+                                                juce::GlyphArrangement::getStringWidth (font, second),
+                                                juce::GlyphArrangement::getStringWidth (font, third));
+        const float height = 46.0f;
+        const auto centre = nodePosition (b);
+        auto box = juce::Rectangle<float> (width, height).withPosition (centre.x + nodeRadius + 6.0f, centre.y - height - 6.0f);
+        if (box.getRight() > plot.getRight() - 2.0f)
+            box.setX (centre.x - nodeRadius - 6.0f - width);
+        if (box.getY() < plot.getY() + 2.0f)
+            box.setY (centre.y + nodeRadius + 6.0f);
+        g.setColour (theme::panel.withAlpha (0.92f));
+        g.fillRoundedRectangle (box, 4.0f);
+        g.setColour (theme::bandColour (b).withAlpha (0.8f));
+        g.drawRoundedRectangle (box, 4.0f, 1.0f);
+        g.setFont (font);
+        auto lines = box.reduced (6.0f, 3.0f);
+        const float lineHeight = lines.getHeight() / 3.0f;
+        g.setColour (theme::text);
+        g.drawText (first, lines.removeFromTop (lineHeight), juce::Justification::centredLeft);
+        g.setColour (theme::text.withAlpha (0.85f));
+        g.drawText (second, lines.removeFromTop (lineHeight), juce::Justification::centredLeft);
+        g.drawText (third, lines, juce::Justification::centredLeft);
+    }
+
+    // Arriba, al pasar el mouse por el visor: frecuencia · nota · escala del EQ · escala del analizador. Sobre el
+    // teclado, la nota de la tecla y su frecuencia exacta.
     void paintReadout (juce::Graphics& g) const
     {
+        const auto dot = juce::String::fromUTF8 ("  \xc2\xb7  ");
+        const auto area = titleArea.withTrimmedLeft (30.0f);
+        g.setColour (theme::text);
+        g.setFont (juce::FontOptions (11.0f));
+        if (pianoArea.contains (mouse))
+        {
+            const int note = juce::roundToInt (edit::hzToNote (xToHz (mouse.x)));
+            const float hz = static_cast<float> (edit::noteToHz (note));
+            g.drawText (format::noteName (hz) + dot + format::hz (hz) + dot + "clic = llevar la banda " + juce::String (focusedBand + 1) + " a esta nota",
+                        area, juce::Justification::centred);
+            return;
+        }
         if (! plot.contains (mouse))
             return;
         const float hz = xToHz (mouse.x);
-        const auto dot = juce::String::fromUTF8 ("  \xc2\xb7  ");
-        g.setColour (theme::text);
-        g.setFont (juce::FontOptions (11.0f));
         g.drawText (format::hz (hz) + dot + format::noteName (hz) + dot + "curva " + format::db (totalDb (hz)) + dot
                         + "EQ " + format::db (yToEqDb (mouse.y)) + dot
                         + juce::String::fromUTF8 ("analizador ") + juce::String (juce::roundToInt (yToAnalyzerDb (mouse.y))) + " dB",
-                    titleArea.withTrimmedLeft (30.0f), juce::Justification::centred);
+                    area, juce::Justification::centred);
     }
 
     FathomAudioProcessor& processor;
+    BandEdits edits;
     std::atomic<float>* outputGain = nullptr;
     juce::TextButton inButton { "ENTRADA" };
     juce::TextButton outButton { "SALIDA" };
@@ -601,11 +1223,26 @@ private:
     std::array<deepwater::dsp::EqCascade, dsp::Engine::numBands> bandCascades {};
     std::array<std::vector<float>, dsp::Engine::numBands> bandCurveDb; // la curva propia de cada banda, en dB
     std::array<float, dsp::Engine::numBands> nodeDb {};
-    int selectedBand = 0;
     double curveSampleRate = 0.0; // 0 = todavía sin calcular
     std::vector<float> curveDb; // la respuesta total en dB, un valor por punto
-    juce::Rectangle<float> plot, titleArea, zoneArea;
+    juce::Rectangle<float> plot, titleArea, pianoArea, zoneArea;
     juce::Point<float> mouse { -1.0f, -1.0f };
+
+    // Selección: la banda del panel ('focusedBand') siempre está entre las elegidas.
+    int focusedBand = 0;
+    std::bitset<dsp::Engine::numBands> selection;
+    int hoveredNode = -1;
+
+    // Arrastre.
+    Drag drag = Drag::none;
+    std::array<dsp::BandSettings, dsp::Engine::numBands> dragStart {}; // cada banda al empezar a arrastrar
+    juce::Point<float> dragOrigin, dragLast, dragTotal;
+    double dragOctaves = 0.0, dragDb = 0.0; // lo acumulado (con el ajuste fino aplicado)
+    bool dragMoved = false, lassoMoved = false, lassoAdds = false;
+
+    // Rueda.
+    bool wheelEditing = false;
+    double lastWheelSeconds = 0.0;
 };
 
 } // namespace fathom::gui

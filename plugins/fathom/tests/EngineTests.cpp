@@ -1,4 +1,4 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass y las bandas). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass y las bandas) y las cuentas de la edición (deshacer, arrastrar nodos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
 #include <array>
@@ -10,6 +10,8 @@
 
 #include "deepwater/dsp/Decibels.h"
 #include "dsp/Engine.h"
+#include "edit/NodeEditing.h"
+#include "edit/UndoStack.h"
 
 namespace
 {
@@ -493,6 +495,85 @@ void testAllBandsAreStableAtExtremes()
         CHECK (finite);
     }
 }
+void testUndoStack()
+{
+    std::printf ("Deshacer: guarda solo lo que cambio, deshace y rehace en orden, un cambio nuevo borra lo rehacible\n");
+    using fathom::edit::UndoStack;
+    UndoStack stack (3);
+    CHECK (! stack.canUndo() && ! stack.canRedo() && stack.undo() == nullptr && stack.redo() == nullptr);
+    CHECK (! stack.record ({ 0.1f, 0.2f }, { 0.1f, 0.2f })); // nada cambió: no es un paso
+
+    CHECK (stack.record ({ 0.1f, 0.2f, 0.3f }, { 0.1f, 0.5f, 0.3f }));
+    CHECK (stack.record ({ 0.1f, 0.5f, 0.3f }, { 0.9f, 0.5f, 0.0f }));
+    const auto* last = stack.undo();
+    CHECK (last != nullptr && last->indices == std::vector<int> ({ 0, 2 }));
+    CHECK (last->before == std::vector<float> ({ 0.1f, 0.3f }) && last->after == std::vector<float> ({ 0.9f, 0.0f }));
+    const auto* first = stack.undo();
+    CHECK (first != nullptr && first->indices == std::vector<int> ({ 1 }) && first->before[0] == 0.2f);
+    CHECK (! stack.canUndo() && stack.canRedo());
+    const auto* again = stack.redo();
+    CHECK (again != nullptr && again->indices == std::vector<int> ({ 1 }) && again->after[0] == 0.5f);
+
+    // Un cambio nuevo con algo por rehacer: lo rehacible se pierde.
+    CHECK (stack.record ({ 0.1f, 0.5f, 0.3f }, { 0.1f, 0.5f, 0.7f }));
+    CHECK (! stack.canRedo() && stack.size() == 2);
+
+    // Con el límite lleno, se olvida el más viejo.
+    CHECK (stack.record ({ 0.0f }, { 1.0f }));
+    CHECK (stack.record ({ 1.0f }, { 0.0f }));
+    CHECK (stack.size() == 3);
+    int undone = 0;
+    while (stack.undo() != nullptr)
+        ++undone;
+    CHECK (undone == 3);
+}
+
+void testNodeDragging()
+{
+    std::printf ("Arrastrar nodos: octavas y dB, el shelf sigue al mouse, cortes solo en horizontal, limites\n");
+    using namespace fathom::edit;
+    BandSettings bell { true, 1000.0f, 3.0f, 1.0f, Shape::bell, 1 };
+    const auto up = dragged (bell, 1.0, 2.0, 20.0f, 20000.0f);
+    CHECK (std::abs (up.frequency - 2000.0f) < 1.0e-3f && std::abs (up.gainDb - 5.0f) < 1.0e-5f && up.q == 1.0f);
+    const auto down = dragged (bell, -2.0, -40.0, 20.0f, 20000.0f);
+    CHECK (std::abs (down.frequency - 250.0f) < 1.0e-3f && down.gainDb == BandSettings::minGainDb);
+    CHECK (dragged (bell, 20.0, 0.0, 20.0f, 20000.0f).frequency == 20000.0f);
+    CHECK (dragged (bell, -20.0, 0.0, 20.0f, 20000.0f).frequency == 20.0f);
+
+    // Shelf: el nodo está en el punto medio (la mitad de la ganancia); subir el nodo 1 dB = 2 dB de ganancia.
+    BandSettings shelf { true, 8000.0f, 4.0f, 0.71f, Shape::highShelf, 1 };
+    CHECK (std::abs (dragged (shelf, 0.0, 1.0, 20.0f, 20000.0f).gainDb - 6.0f) < 1.0e-5f);
+    const auto node = [] (const BandSettings& s) { return Band::coefficientsFor (s, 48000.0).magnitudeDb (s.frequency, 48000.0); };
+    const auto moved = dragged (shelf, 0.0, 1.5, 20.0f, 20000.0f);
+    CHECK (std::abs ((node (moved) - node (shelf)) - 1.5) < 0.01);
+
+    // Formas sin ganancia: la vertical no cambia nada.
+    BandSettings cut { true, 100.0f, 0.0f, 0.71f, Shape::lowCut, 3 };
+    const auto cutMoved = dragged (cut, 0.5, 6.0, 20.0f, 20000.0f);
+    CHECK (cutMoved.gainDb == 0.0f && std::abs (cutMoved.frequency - 141.4214f) < 1.0e-2f && cutMoved.slopeIndex == 3);
+
+    // Rueda: multiplica el Q y se queda en el rango.
+    CHECK (std::abs (scaledQ (1.0f, 2.0) - 2.0f) < 1.0e-6f);
+    CHECK (scaledQ (30.0f, 4.0) == BandSettings::maxQ && scaledQ (0.05f, 0.1) == BandSettings::minQ);
+}
+
+void testBandCreationAndNotes()
+{
+    std::printf ("Crear bandas y notas: primera banda libre, forma segun la posicion, notas exactas de FL\n");
+    using namespace fathom::edit;
+    std::array<bool, 4> used { true, false, true, false };
+    CHECK (freeBand (used) == 1);
+    used = { true, true, true, true };
+    CHECK (freeBand (used) == -1);
+    CHECK (shapeForNewBand (20.0f) == Shape::lowCut && shapeForNewBand (1000.0f) == Shape::bell
+           && shapeForNewBand (18000.0f) == Shape::highCut);
+
+    CHECK (std::abs (nearestNoteHz (445.0f) - 440.0f) < 1.0e-3f);    // A5 de FL
+    CHECK (std::abs (nearestNoteHz (56.0f) - 55.0f) < 1.0e-4f);      // A2 (un 808 en La)
+    CHECK (std::abs (nearestNoteHz (261.0f) - 261.6256f) < 1.0e-3f); // C5 = Do central
+    CHECK (std::abs (hzToNote (noteToHz (36.0)) - 36.0) < 1.0e-9);
+    CHECK (! isBlackKey (60) && isBlackKey (61) && ! isBlackKey (64) && ! isBlackKey (65) && isBlackKey (70) && ! isBlackKey (71));
+}
 } // namespace
 
 int main()
@@ -509,6 +590,9 @@ int main()
     testAllBandsFlatAreBitExact();
     testShapeAndSlopeChangesHaveNoClicks();
     testAllBandsAreStableAtExtremes();
+    testUndoStack();
+    testNodeDragging();
+    testBandCreationAndNotes();
 
     if (failures > 0)
     {

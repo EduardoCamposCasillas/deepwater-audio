@@ -1,11 +1,12 @@
 #include "PluginEditor.h"
 #include "Parameters.h"
 #include "PluginProcessor.h"
+#include "gui/Keys.h"
 
 namespace
 {
 constexpr int editorWidth = 960;
-constexpr int editorHeight = 620;
+constexpr int editorHeight = 640;
 constexpr int bandPanelHeight = 112;
 constexpr int headerHeight = 44;
 constexpr int footerHeight = 26;
@@ -21,9 +22,19 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
 
     addAndMakeVisible (display);
     addAndMakeVisible (bandPanel);
-    // Elegir una banda (en el selector del panel o con un clic en su nodo) la muestra en los dos.
-    display.onBandClicked = [this] (int band) { selectBand (band); };
+    // Elegir una banda (en el selector del panel, con un clic en su nodo o al crearla en el visor) la muestra en los dos.
+    display.onBandFocused = [this] (int band) { selectBand (band); };
     bandPanel.onBandChosen = [this] (int band) { selectBand (band); };
+
+    // Deshacer cubre todo lo que se edita en la GUI (visor, panel y salida), no la automatización del host ni el bypass.
+    undoButton.setTooltip (juce::String::fromUTF8 ("Deshacer el \xc3\x83\xc2\xbaltimo cambio (Ctrl+Z): mover un nodo, una perilla, "
+                                                   "crear o borrar una banda. Se acuerda aunque cierres la ventana."));
+    redoButton.setTooltip (juce::String::fromUTF8 ("Rehacer lo que deshiciste (Ctrl+Y o Ctrl+Shift+Z)."));
+    undoButton.onClick = [this] { processor.getEditHistory().undo(); };
+    redoButton.onClick = [this] { processor.getEditHistory().redo(); };
+    for (auto* button : { &undoButton, &redoButton })
+        addAndMakeVisible (*button);
+    setWantsKeyboardFocus (true);
 
     bypassButton.setClickingTogglesState (true);
     bypassButton.setTooltip (juce::String::fromUTF8 ("Escuchar la se\xc3\xb1" "al original. Es el mismo bypass que el de FL "
@@ -66,6 +77,21 @@ void FathomAudioProcessorEditor::timerCallback()
     lastFrameSeconds = now;
     display.update (elapsed);
     bandPanel.refresh();
+    undoButton.setEnabled (processor.getEditHistory().canUndo());
+    redoButton.setEnabled (processor.getEditHistory().canRedo());
+}
+
+bool FathomAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
+{
+    const auto letter = fathom::gui::commandLetter (key);
+    const bool shift = key.getModifiers().isShiftDown();
+    if (letter == 'z' && ! shift)
+        processor.getEditHistory().undo();
+    else if (letter == 'y' || (letter == 'z' && shift))
+        processor.getEditHistory().redo();
+    else
+        return false;
+    return true; // la tecla era nuestra aunque no hubiera nada que deshacer (que no la reciba FL)
 }
 
 void FathomAudioProcessorEditor::selectBand (int band)
@@ -85,13 +111,13 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 3: todas las formas y 24 bandas"), header, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 4: edici\xc3\xb3n sobre el visor"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
-    g.drawText (juce::String::fromUTF8 ("Elige una banda en el panel (o con un clic en su nodo), enci\xc3\xa9ndela y "
-                                        "prueba sus formas. Pasa el mouse por los controles para ver qu\xc3\xa9 hace cada uno. "
-                                        "Fase 4: editar sobre el visor."),
+    g.drawText (juce::String::fromUTF8 ("Doble clic = crear banda  \xc2\xb7  arrastrar = frecuencia/ganancia (Shift fino, Alt un "
+                                        "eje)  \xc2\xb7  rueda = Q  \xc2\xb7  Ctrl+clic o rect\xc3\xa1ngulo = varias  \xc2\xb7  "
+                                        "Supr = borrar  \xc2\xb7  clic derecho = men\xc3\xba  \xc2\xb7  Ctrl+Z = deshacer"),
                 getLocalBounds().removeFromBottom (footerHeight), juce::Justification::centred);
 }
 
@@ -99,6 +125,10 @@ void FathomAudioProcessorEditor::resized()
 {
     auto header = getLocalBounds().removeFromTop (headerHeight).reduced (padding, 8);
     bypassButton.setBounds (header.removeFromRight (90));
+    header.removeFromRight (24);
+    redoButton.setBounds (header.removeFromRight (84));
+    header.removeFromRight (6);
+    undoButton.setBounds (header.removeFromRight (90));
 
     auto content = getLocalBounds().withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0);
     auto controls = content.removeFromRight (controlsWidth);

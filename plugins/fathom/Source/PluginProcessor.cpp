@@ -48,6 +48,25 @@ FathomAudioProcessor::FathomAudioProcessor()
     }
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
+
+    // Los valores por defecto, leídos de los propios parámetros (convertidos igual que cualquier valor).
+    const auto defaultOf = [this] (int b, const char* setting) {
+        auto* parameter = parameters.getParameter (id::band (b, setting));
+        return parameter->convertFrom0to1 (parameter->getDefaultValue());
+    };
+    for (int b = 0; b < id::numBands; ++b)
+        defaultBands[static_cast<size_t> (b)] = { defaultOf (b, id::enabled) >= 0.5f,
+                                                  defaultOf (b, id::frequency),
+                                                  defaultOf (b, id::gain),
+                                                  defaultOf (b, id::q),
+                                                  static_cast<fathom::dsp::Shape> (juce::roundToInt (defaultOf (b, id::shape))),
+                                                  juce::roundToInt (defaultOf (b, id::slope)) };
+
+    std::vector<juce::RangedAudioParameter*> undoable;
+    for (auto* parameter : juce::AudioProcessor::getParameters())
+        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter); ranged != nullptr && ranged != bypassParameter)
+            undoable.push_back (ranged);
+    history.attach (std::move (undoable));
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::createParameterLayout()
