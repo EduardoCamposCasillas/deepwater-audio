@@ -131,7 +131,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 3 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 3 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - Librería (`EqFilter.h`): `EqCoefficients` ganó la salida high-pass del SVF (`highPass`; con 0 la campana suena
   igual) y las formas: `lowShelf`/`highShelf` (Cookbook sobre el SVF a la Simper: corte del SVF ÷/× √A, la frecuencia
   es el punto medio de la subida; Q 0.71 = sin rebote), `tiltShelf` (shelf de agudos × 1/A: graves −g/2, agudos +g/2,
@@ -173,4 +173,4 @@ Fase 3 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 4 (edición sobre el visor), cuando el usuario confirme la Fase 3 en FL.
+Siguiente: Fase 4 (edición sobre el visor).
