@@ -19,8 +19,9 @@ inline const juce::Colour dimText { 0xff8794a1 };
 inline const juce::Colour accent { 0xff4f9dff };
 inline const juce::Colour bypassOn { 0xffef5350 };
 
-// El visor: entrada = gris (referencia); salida = el acento, con relleno.
+// El visor: entrada = gris (referencia); salida = el acento, con relleno; sidechain = ámbar.
 inline const juce::Colour spectrumIn { 0xff9aa7b4 };
+inline const juce::Colour spectrumSidechain { 0xffe0a458 }; // otra pista (Fase 5): ámbar
 inline const juce::Colour grid { 0xff1c232b };
 
 // Cada banda tiene su color (el nodo, su relleno y las perillas cuando está elegida). Ocho tonos que se repiten: con

@@ -26,8 +26,19 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
     display.onBandFocused = [this] (int band) { selectBand (band); };
     bandPanel.onBandChosen = [this] (int band) { selectBand (band); };
 
+    // El analizador: lo que se elige en el panel se guarda en el proyecto y lo usa el visor.
+    addAndMakeVisible (analyzerPanel);
+    analyzerPanel.onViewChanged = [this] {
+        processor.setAnalyzerView (analyzerPanel.getView());
+        showAnalyzerView (analyzerPanel.getView());
+    };
+    analyzerPanel.onFreezeChanged = [this] (bool frozen) { display.setFrozen (frozen); };
+    analyzerPanel.onClearPeaks = [this] { display.clearPeakHold(); };
+    analyzerPanel.setView (processor.getAnalyzerView());
+    showAnalyzerView (processor.getAnalyzerView());
+
     // Deshacer cubre todo lo que se edita en la GUI (visor, panel y salida), no la automatización del host ni el bypass.
-    undoButton.setTooltip (juce::String::fromUTF8 ("Deshacer el \xc3\x83\xc2\xbaltimo cambio (Ctrl+Z): mover un nodo, una perilla, "
+    undoButton.setTooltip (juce::String::fromUTF8 ("Deshacer el \xc3\xbaltimo cambio (Ctrl+Z): mover un nodo, una perilla, "
                                                    "crear o borrar una banda. Se acuerda aunque cierres la ventana."));
     redoButton.setTooltip (juce::String::fromUTF8 ("Rehacer lo que deshiciste (Ctrl+Y o Ctrl+Shift+Z)."));
     undoButton.onClick = [this] { processor.getEditHistory().undo(); };
@@ -75,6 +86,12 @@ void FathomAudioProcessorEditor::timerCallback()
     const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
     const double elapsed = juce::jlimit (0.0, 0.2, now - lastFrameSeconds);
     lastFrameSeconds = now;
+    // Un proyecto cargado con la ventana abierta trae su propia vista del analizador.
+    if (const auto view = processor.getAnalyzerView(); view != shownView)
+    {
+        analyzerPanel.setView (view);
+        showAnalyzerView (view);
+    }
     display.update (elapsed);
     bandPanel.refresh();
     undoButton.setEnabled (processor.getEditHistory().canUndo());
@@ -100,6 +117,12 @@ void FathomAudioProcessorEditor::selectBand (int band)
     display.setSelectedBand (band);
 }
 
+void FathomAudioProcessorEditor::showAnalyzerView (const fathom::analysis::ViewSettings& view)
+{
+    shownView = view;
+    display.setView (view);
+}
+
 void FathomAudioProcessorEditor::paint (juce::Graphics& g)
 {
     using namespace fathom::gui;
@@ -111,13 +134,13 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 4: edici\xc3\xb3n sobre el visor"), header, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 5: analizador profesional"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
     g.drawText (juce::String::fromUTF8 ("Doble clic = crear banda  \xc2\xb7  arrastrar = frecuencia/ganancia (Shift fino, Alt un "
                                         "eje)  \xc2\xb7  rueda = Q  \xc2\xb7  Ctrl+clic o rect\xc3\xa1ngulo = varias  \xc2\xb7  "
-                                        "Supr = borrar  \xc2\xb7  clic derecho = men\xc3\xba  \xc2\xb7  Ctrl+Z = deshacer"),
+                                        "clic en un pico = banda  \xc2\xb7  clic derecho = men\xc3\xba  \xc2\xb7  Ctrl+Z = deshacer"),
                 getLocalBounds().removeFromBottom (footerHeight), juce::Justification::centred);
 }
 
@@ -137,8 +160,9 @@ void FathomAudioProcessorEditor::resized()
     content.removeFromBottom (padding);
     display.setBounds (content);
 
-    // La salida abajo a la derecha, junto al final de la cadena (como en una consola).
+    // La salida abajo a la derecha, junto al final de la cadena (como en una consola); el analizador arriba.
     auto knobArea = controls.removeFromBottom (130);
     outputLabel.setBounds (knobArea.removeFromTop (18));
     outputKnob.setBounds (knobArea);
+    analyzerPanel.setBounds (controls.withTrimmedTop (8));
 }

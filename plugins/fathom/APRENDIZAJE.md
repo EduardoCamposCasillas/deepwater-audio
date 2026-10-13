@@ -428,3 +428,130 @@ con una campana ancha (Q ~1) que con una angosta; compara con el volumen igualad
 - **Mover grupos sin escuchar cada banda.** Mover tres bandas a la vez es rápido, pero cada una puede caer en una zona
   donde ya no hace falta. Después de mover el grupo, revisa cada una con doble clic (on/off).
 - **Comparar sin igualar el volumen** (siempre).
+
+
+## Fase 5 — El analizador profesional: aprender a leer el espectro
+
+El sonido no cambia en esta fase: cambian los **ojos**. El analizador de las fases anteriores mostraba "algo"; ahora se
+puede ajustar para que muestre lo que necesitas en cada momento (el balance de una mezcla, la nota que retumba del
+808, el golpe del kick) y se puede usar como herramienta: congelarlo para medir, guardar los picos, ver otra pista por
+el sidechain y **agarrar un pico** para poner una banda justo encima.
+
+### Conceptos aprendidos
+
+- **La música "cae" hacia los agudos.** Casi todo lo que suena tiene más energía en graves que en agudos: un espectro
+  sin compensar baja de izquierda a derecha y los agudos parecen "faltar" aunque estén bien. La **inclinación** suma
+  unos dB por octava hacia los agudos (1 kHz no se mueve) y endereza esa caída: con **4.5 dB/oct** una mezcla
+  equilibrada se ve casi plana, así que una zona con de más o de menos salta a la vista. Es solo la vista: no cambia el
+  sonido. Ojo: los números del analizador (izquierda) quedan "inclinados" también (un pico a 8 kHz marca 13.5 dB más
+  de lo que mediría sin inclinación).
+- **Ver frecuencia o ver tiempo: no se puede todo.** La FFT mira un trozo de audio. Un trozo largo separa mejor las
+  frecuencias (con 16384 puntos los bins están a 2.7 Hz: se distinguen G1 = 49 Hz y G#1 = 52 Hz), pero mezcla todo lo
+  que pasó en esos 0.37 s (un golpe de kick se ve "embarrado" en el tiempo). Un trozo corto (2048: 46 ms) sigue cada
+  golpe, pero en graves cada bin mide 21.5 Hz y dos notas vecinas son la misma mancha. Es el **compromiso
+  tiempo-frecuencia** (el mismo "principio de incertidumbre" de la física). La **resolución** elige de qué lado estás.
+- **Balística: cuánto tarda la línea.** La línea sube hacia lo nuevo con una constante de tiempo (lo que tarda en
+  recorrer el 63 %) y baja a tantos dB por segundo. **Lenta**: un promedio estable, el "balance tonal" (sirve para
+  comparar tu mezcla con una canción de referencia). **Rápida**: ves cada nota y cada golpe (sirve para encontrar qué
+  resuena y cuándo).
+- **Retener los picos.** Una línea fina guarda el máximo de cada frecuencia. Muestra lo que pasó aunque ya no suene:
+  la nota del 808 que llega más alto que las demás, el pico de la "s" de la voz. Con **2 s** ves lo reciente; con
+  **Siempre**, todo lo que sonó (BORRAR PICOS para empezar de nuevo).
+- **Qué es un pico "de verdad".** Un pico vale la pena cuando se **despega** de lo que lo rodea (su **prominencia**:
+  cuánto sube sobre el valle más alto a sus lados). Un bulto pequeño en la ladera de una montaña no es un pico; una
+  aguja angosta sobre un fondo parejo, sí. Fathom marca los picos que se despegan al menos 6 dB.
+- **Agarrar un pico.** La FFT da el nivel en bins separados; un tono que cae entre dos bins se ve más bajo y corrido.
+  Para poner la banda **justo** encima, Fathom ajusta una parábola por los tres bins más altos del pico y toma su
+  vértice: la frecuencia queda a una fracción de Hz de la real (lo comprueban los tests con un seno de 87.31 Hz).
+- **El sidechain para mirar otra pista.** El enmascaramiento (dos sonidos en la misma zona se tapan) se ve cuando
+  pones los dos espectros uno encima del otro: el 808 en azul (SALIDA) y el kick en ámbar (SIDECHAIN). Donde se
+  cruzan, uno de los dos tiene que ceder.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+Todo está en la columna **ANALIZADOR** de la derecha y se guarda con el proyecto (menos CONGELAR).
+
+- **ENTRADA / SALIDA / SIDECHAIN**: qué espectros se ven (gris, azul, ámbar). Si activas SIDECHAIN sin haberlo
+  conectado, el visor dice "SIDECHAIN SIN CONECTAR".
+- **INCLINACIÓN**: 0 (crudo), 3, **4.5** (por defecto) o 6 dB/oct.
+- **RANGO**: cuántos dB cubre la escala de la izquierda: 48 o 72 para ver con detalle lo fuerte (master), 96 (por
+  defecto) o 120 para ver también el ruido de fondo y las colas de reverb.
+- **RESOLUCIÓN**: Baja (2048), **Media** (4096, por defecto), Alta (8192), Máxima (16384).
+- **VELOCIDAD**: de Muy lenta (cae 6 dB/s) a Muy rápida (240 dB/s). Media = la de las fases anteriores.
+- **PICOS**: No / 2 s / Siempre, y **BORRAR PICOS**.
+- **CONGELAR**: el espectro se queda quieto (el audio sigue). Arriba a la izquierda dice "CONGELADO".
+- **Agarrar un pico**: pasa el mouse cerca de un pico del espectro azul: aparece un círculo con sus Hz y su nota. Clic
+  y arrastra: nace una campana angosta (Q 4) justo en el pico; hacia abajo lo cortas, hacia arriba lo realzas. Mientras
+  arrastras, el espectro se congela para que el pico no se te escape. Es un solo Ctrl+Z.
+- **Imán (Ctrl mientras arrastras un nodo)**: el nodo salta al pico más cercano. Suelta Ctrl para moverlo libre.
+
+### Ejercicio de escucha guiado en FL Studio
+
+1. **Inclinación.** Pon Fathom en el master de un beat terminado (sin bandas). Mira el espectro con INCLINACIÓN en 0:
+   cae hacia la derecha. Cambia a 4.5: casi plano. Ahora pon una canción de reggaetón comercial que te guste en otra
+   pista y mírala igual: compara las dos "formas". Si la tuya tiene una joroba en 200-400 Hz que la referencia no
+   tiene, ya sabes dónde está el barro. (Iguala el volumen de las dos antes de escuchar.)
+2. **Resolución con el 808.** En la pista del 808, PICOS = Siempre, VELOCIDAD = Rápida. Resolución **Baja**: toca el
+   patrón del 808: los graves son una mancha. Cambia a **Máxima** (BORRAR PICOS): ahora cada nota del 808 es una aguja
+   separada, y la línea de picos te dice cuál llega más alto. ¿Coincide con la nota que se oye más fuerte?
+3. **Rápido vs. lento.** En la pista de la voz, VELOCIDAD = Muy rápida: ves cada sílaba y las "eses" saltando a
+   5-9 kHz. Muy lenta: ves la "forma promedio" de la voz. Las dos son verdad; cada una sirve para otra cosa.
+4. **Agarrar la resonancia.** En un loop de percusión o una voz, CONGELA cuando veas una aguja que sobresale en los
+   medios. Pasa el mouse por encima, agárrala y arrastra hacia abajo −4 dB. Descongela y escucha con y sin la banda
+   (doble clic en el nodo). ¿Desapareció el "silbido" sin perder cuerpo?
+
+### Receta: tallar el 808 contra el kick del dembow (con el sidechain)
+
+1. El ruteo es el mismo que el de Ebb: kick y 808 en pistas propias del Mixer. **Selecciona la pista del kick**; en
+   la pista del **808**, clic derecho en la flecha de envío (el triangulito de abajo) → **Sidechain to this track**.
+   Abre Fathom en el 808, el **engranaje** del envoltorio de FL → **Processing** → en **Connections**, la entrada
+   **Sidechain** (el segundo puerto de entrada) = la pista del kick. El kick no suena dos veces.
+2. En Fathom: SALIDA (el 808) y SIDECHAIN (el kick), INCLINACIÓN 4.5, RESOLUCIÓN Alta, PICOS = 2 s.
+3. Mira dónde está el pico grave del kick (ámbar, entre 50 y 100 Hz) y dónde el del 808. Si caen en la misma zona,
+   se tapan: el kick "no pega".
+4. Agarra en el espectro del 808 el punto que está justo bajo el pico del kick y bájalo −2 a −4 dB con Q 2-4 (más
+   ancho que la campana con que nace: rueda hacia abajo).
+5. Escucha los dos juntos, con y sin la banda, con el volumen igualado. El kick debe "salir" sin que el 808 pierda peso.
+
+Por qué funciona: no hace falta quitarle graves al 808, solo un hueco angosto donde vive el golpe del kick. El oído
+escucha el 808 "completo" (sus otras notas y armónicos siguen ahí) y el kick gana su lugar. Es tallar espacio, no
+ecualizar a ciegas. (En la Fase 9, ese hueco podrá abrirse solo cuando suena el kick.)
+
+### Reto sin receta
+
+En una voz con autotune, encuentra las **dos resonancias más molestas** usando solo el analizador (congelar, picos
+retenidos, agarrar) y córtalas con un máximo de −4 dB cada una. Después decide si dejaste la voz mejor o solo
+distinta. Pistas (si no sale): los picos que aparecen en TODAS las notas (siempre en la misma frecuencia) son
+resonancias del micro o del cuarto; los que se mueven con las notas son armónicos de la voz y no se cortan; mira con
+VELOCIDAD rápida y PICOS 2 s para verlos aparecer; un corte de −3 dB en la resonancia correcta se oye más que −8 dB en
+la equivocada; compara siempre con el volumen igualado.
+
+### Vocabulario
+
+- **Inclinación (tilt) del analizador**: compensar la caída natural del espectro para leerlo "plano". "Ponle 4.5 al
+  analizador y compara con la referencia."
+- **Resolución (tamaño de FFT)**: cuántos puntos analiza la FFT; más = más detalle en graves, menos = más rápido.
+- **Balística**: cómo sube y baja un medidor (rápido, lento). Los vúmetros y los medidores de pico tienen balísticas
+  distintas.
+- **Retención de picos (peak hold)**: guardar el máximo de cada frecuencia.
+- **Prominencia**: cuánto se despega un pico de su alrededor.
+- **Balance tonal**: la forma promedio del espectro de una mezcla ("esta mezcla está oscura", "le sobra medio").
+- **Pista de referencia**: una canción comercial que se usa para comparar la tuya.
+- **Sidechain**: mandar el audio de una pista a un plugin de otra para que lo "vea" (aquí, para mirarlo; en Ebb, para
+  que lo controle).
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Ecualizar con los ojos.** El analizador dice dónde mirar, no qué hacer. Un pico en el espectro puede ser
+  justamente el carácter del sonido (la fundamental de la voz, el golpe del kick). Agarra un pico, pero decide
+  escuchando.
+- **Querer un espectro "plano".** Con inclinación 4.5 una mezcla equilibrada se ve *casi* plana, no plana. Cada género
+  tiene su forma (el reggaetón lleva mucho más sub que el rock). Compara con referencias del mismo género.
+- **Comparar con distinta configuración.** Si cambias la inclinación, la resolución o la velocidad, la forma cambia.
+  Para comparar dos pistas usa los mismos ajustes en las dos.
+- **Resolución máxima para todo.** Con 16384 puntos el analizador llega tarde a los golpes: los transitorios se ven
+  más bajos de lo que son. Úsala para notas graves, no para percusión.
+- **Cortar todos los picos que aparecen.** Los armónicos de un instrumento son picos y son el instrumento. Corta solo
+  lo que también molesta al oído, sobre todo lo que se queda quieto mientras las notas cambian.
+- **Dejar el sidechain conectado "por si acaso".** No cambia el sonido, pero es una ruta más en el proyecto; quítala
+  cuando termines de comparar.

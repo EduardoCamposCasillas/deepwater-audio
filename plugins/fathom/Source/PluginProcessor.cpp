@@ -30,7 +30,10 @@ juce::NormalisableRange<float> logRange (float minimum, float maximum)
 FathomAudioProcessor::FathomAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
+                          // Fase 5: otra pista para comparar en el analizador (más adelante, el detector del EQ
+                          // dinámico y la igualación). Solo se lee: no cambia el audio.
+                          .withInput ("Sidechain", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "FathomState", createParameterLayout())
 {
     namespace id = fathom::params;
@@ -162,28 +165,85 @@ void FathomAudioProcessor::releaseResources() {}
 
 bool FathomAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    // Mono → mono o estéreo → estéreo.
+    // Mono → mono o estéreo → estéreo. El sidechain, mono, estéreo o desactivado (el host puede no conectarlo).
     const auto& output = layouts.getMainOutputChannelSet();
     if (output != juce::AudioChannelSet::mono() && output != juce::AudioChannelSet::stereo())
         return false;
-    return layouts.getMainInputChannelSet() == output;
+    if (layouts.getMainInputChannelSet() != output)
+        return false;
+    if (layouts.inputBuses.size() > 1)
+    {
+        const auto& sidechain = layouts.getChannelSet (true, 1);
+        return sidechain.isDisabled() || sidechain == juce::AudioChannelSet::mono() || sidechain == juce::AudioChannelSet::stereo();
+    }
+    return true;
+}
+
+bool FathomAudioProcessor::isSidechainConnected() const
+{
+    const auto* bus = getBus (true, 1);
+    return bus != nullptr && bus->isEnabled() && bus->getNumberOfChannels() > 0;
+}
+
+namespace
+{
+constexpr const char* analyzerViewTag = "AnalyzerView";
+} // namespace
+
+fathom::analysis::ViewSettings FathomAudioProcessor::getAnalyzerView() const
+{
+    // Lo que falte (un proyecto de las Fases 1-4) queda con su valor por defecto.
+    const fathom::analysis::ViewSettings defaults;
+    const auto tree = parameters.state.getChildWithName (analyzerViewTag);
+    fathom::analysis::ViewSettings view;
+    view.tiltIndex = tree.getProperty ("tilt", defaults.tiltIndex);
+    view.rangeIndex = tree.getProperty ("range", defaults.rangeIndex);
+    view.resolutionIndex = tree.getProperty ("resolution", defaults.resolutionIndex);
+    view.speedIndex = tree.getProperty ("speed", defaults.speedIndex);
+    view.holdIndex = tree.getProperty ("hold", defaults.holdIndex);
+    view.showInput = tree.getProperty ("showInput", defaults.showInput);
+    view.showOutput = tree.getProperty ("showOutput", defaults.showOutput);
+    view.showSidechain = tree.getProperty ("showSidechain", defaults.showSidechain);
+    return view;
+}
+
+void FathomAudioProcessor::setAnalyzerView (const fathom::analysis::ViewSettings& view)
+{
+    // Sin UndoManager: cambiar la vista no es una edición del sonido (no entra al historial de deshacer).
+    auto tree = parameters.state.getOrCreateChildWithName (analyzerViewTag, nullptr);
+    tree.setProperty ("tilt", view.tiltIndex, nullptr);
+    tree.setProperty ("range", view.rangeIndex, nullptr);
+    tree.setProperty ("resolution", view.resolutionIndex, nullptr);
+    tree.setProperty ("speed", view.speedIndex, nullptr);
+    tree.setProperty ("hold", view.holdIndex, nullptr);
+    tree.setProperty ("showInput", view.showInput, nullptr);
+    tree.setProperty ("showOutput", view.showOutput, nullptr);
+    tree.setProperty ("showSidechain", view.showSidechain, nullptr);
 }
 
 void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
 
+    // Los canales del bus principal van primero en el buffer; los del sidechain, después (solo se leen).
     const int numSamples = buffer.getNumSamples();
-    const int numChannels = juce::jmin (buffer.getNumChannels(), getTotalNumInputChannels(), fathom::dsp::Engine::maxChannels);
+    const int mainChannels = getMainBusNumInputChannels();
+    const int numChannels = juce::jmin (buffer.getNumChannels(), mainChannels, fathom::dsp::Engine::maxChannels);
     // Canales de salida sin entrada (no debería pasar con los layouts aceptados): mejor silencio que basura.
-    for (int ch = getTotalNumInputChannels(); ch < buffer.getNumChannels(); ++ch)
+    for (int ch = mainChannels; ch < juce::jmin (buffer.getNumChannels(), getMainBusNumOutputChannels()); ++ch)
         buffer.clear (ch, 0, numSamples);
 
     // Para la GUI: la entrada tal cual llega (el motor procesa en el sitio, así que antes de procesar). Sin editor
     // abierto no hay quien la lea: no se copia.
     const bool feedAnalyzer = analyzerActive.load (std::memory_order_relaxed);
     if (feedAnalyzer)
+    {
         inputTap.push (buffer.getArrayOfReadPointers(), numChannels, numSamples);
+        // Sin bus conectado no se escribe: la GUI ve que no llega audio y ese espectro cae a silencio.
+        if (const auto* bus = getBus (true, 1); bus != nullptr && bus->isEnabled())
+            if (const auto sidechain = getBusBuffer (buffer, true, 1); sidechain.getNumChannels() > 0)
+                sidechainTap.push (sidechain.getArrayOfReadPointers(), sidechain.getNumChannels(), numSamples);
+    }
 
     engine.setBypassed (bypassParam->load() >= 0.5f);
     engine.setOutputDb (outputGainParam->load());

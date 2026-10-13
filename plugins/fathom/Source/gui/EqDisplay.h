@@ -11,6 +11,7 @@
 
 #include "Parameters.h"
 #include "PluginProcessor.h"
+#include "analysis/SpectrumView.h"
 #include "deepwater/dsp/SpectrumAnalyzer.h"
 #include "edit/NodeEditing.h"
 #include "gui/BandEdits.h"
@@ -30,7 +31,11 @@ namespace fathom::gui
 //  - La curva (blanca) es la respuesta TOTAL del EQ: las 24 bandas en serie (sus dB se suman) más la ganancia de
 //    salida, calculada con los mismos coeficientes que usa el audio. Lo que cada banda sube o baja va relleno con su
 //    color y su nodo numerado marca su frecuencia.
-//  - Analizador: ENTRADA (línea gris) y SALIDA (relleno azul). Cada punto sube casi al instante y baja a 40 dB/s.
+//  - Analizador (Fase 5): ENTRADA (línea gris), SALIDA (relleno azul) y SIDECHAIN (línea ámbar: otra pista), con
+//    inclinación, rango, resolución, velocidad y retención de picos (línea fina) a elección (AnalyzerPanel) y CONGELAR.
+//  - Agarrar un pico: con el mouse cerca de un pico del espectro aparece su marca (Hz y nota); clic y arrastrar = una
+//    campana nueva justo en ese pico (arrastrar hacia abajo = cortarlo). Ctrl mientras se arrastra un nodo = imán a los
+//    picos.
 //
 // Edición (Fase 4), pensada para no tener que ir al panel:
 //  - Doble clic en el vacío = crear una banda ahí (campana; en los extremos, un corte). Doble clic en un nodo = apagarla
@@ -50,11 +55,14 @@ public:
     static constexpr float minHz = 20.0f;
     static constexpr float maxHz = 20000.0f;
     static constexpr float analyzerTopDb = 0.0f;
-    static constexpr float analyzerBottomDb = -96.0f;
     static constexpr int gridIntervals = 8; // las dos escalas comparten estas líneas
     static constexpr std::array<float, 4> eqRanges { 6.0f, 12.0f, 24.0f, 36.0f };
-    static constexpr float fallDbPerSecond = 40.0f;
     static constexpr double staleSeconds = 0.25; // sin audio nuevo durante este tiempo, el espectro cae a silencio
+    static constexpr float peakProminenceDb = 6.0f; // cuánto debe despegarse un pico de sus valles para poder agarrarlo
+    static constexpr float peakReachOctaves = 1.0f / 6.0f; // el vecindario donde un pico debe ser el más alto
+    static constexpr float peakGrabPixels = 14.0f;  // distancia del mouse a la que se ofrece un pico
+    static constexpr float peakSnapPixels = 24.0f;  // Ctrl + arrastrar: distancia del imán
+    static constexpr float grabbedQ = 4.0f;         // la campana nace angosta (un tercio de octava): una resonancia
     static constexpr double wheelGestureSeconds = 0.5; // la rueda quieta este tiempo = fin del paso de deshacer
     static constexpr float fineFactor = 0.1f;          // Shift: diez veces más lento
 
@@ -62,11 +70,6 @@ public:
     {
         outputGain = processor.getParameters().getRawParameterValue (params::outputGain);
 
-        setUpToggle (inButton, theme::spectrumIn,
-                     juce::String::fromUTF8 ("Ver el espectro de lo que ENTRA al plugin (l\xc3\xadnea gris)."));
-        setUpToggle (outButton, theme::accent,
-                     juce::String::fromUTF8 ("Ver el espectro de lo que SALE del plugin (relleno azul). Lo que cambie "
-                                             "entre ENTRADA y SALIDA lo hizo el EQ."));
         rangeButton.setTooltip (juce::String::fromUTF8 ("Escala del EQ (n\xc3\xbameros de la derecha): cu\xc3\xa1nto sube o "
                                                         "baja la curva de arriba a abajo. \xc2\xb1" "6 dB para ajustes finos "
                                                         "(mezcla, master); \xc2\xb1" "24 o \xc2\xb1" "36 para cortes profundos. "
@@ -87,11 +90,11 @@ public:
     void update (double elapsedSeconds)
     {
         const double sampleRate = processor.getAnalyzerSampleRate();
-        const int order = deepwater::dsp::SpectrumAnalyzer::orderForSampleRate (sampleRate);
+        const int order = analysis::fftOrder (view.resolutionIndex, sampleRate);
         if (order != input.analyzer.getOrder())
         {
             // Fuera del audio: aquí sí se puede reservar memoria.
-            for (auto* trace : { &input, &output })
+            for (auto* trace : traces())
                 trace->analyzer.prepare (order);
             scratch.assign (static_cast<size_t> (input.analyzer.getSize()), 0.0f);
         }
@@ -107,8 +110,42 @@ public:
         bool changed = refreshBands (sampleRate);
         changed = updateTrace (input, processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
         changed = updateTrace (output, processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
+        changed = updateTrace (sidechain, processor.getSidechainTap(), sampleRate, elapsedSeconds) || changed;
+        changed = updatePeaks() || changed;
+        const bool connected = processor.isSidechainConnected();
+        changed = changed || connected != sidechainConnected;
+        sidechainConnected = connected;
         if (changed)
             repaint();
+    }
+
+    // Los ajustes del analizador (del AnalyzerPanel o del proyecto). Solo cambian lo que se ve.
+    void setView (const analysis::ViewSettings& newView)
+    {
+        if (newView == view)
+            return;
+        const bool restartHold = newView.holdIndex != view.holdIndex || newView.tiltIndex != view.tiltIndex;
+        view = newView;
+        if (restartHold)
+            clearPeakHold();
+        hoveredPeak = -1;
+        repaint();
+    }
+
+    // CONGELAR: el espectro se queda como está (el audio sigue).
+    void setFrozen (bool shouldFreeze)
+    {
+        frozen = shouldFreeze;
+        repaint();
+    }
+
+    // Borra la línea de picos: empieza desde lo que se ve ahora.
+    void clearPeakHold()
+    {
+        for (auto* trace : traces())
+            for (size_t i = 0; i < trace->held.size(); ++i)
+                trace->held[i] = { trace->shown[i], 0.0 };
+        repaint();
     }
 
     void resized() override
@@ -117,9 +154,6 @@ public:
         auto title = area.removeFromTop (22.0f);
         rangeButton.setBounds (title.removeFromRight (64.0f).reduced (0.0f, 2.0f).toNearestInt());
         title.removeFromRight (12.0f);
-        outButton.setBounds (title.removeFromRight (70.0f).reduced (0.0f, 2.0f).toNearestInt());
-        title.removeFromRight (6.0f);
-        inButton.setBounds (title.removeFromRight (74.0f).reduced (0.0f, 2.0f).toNearestInt());
         titleArea = title;
         area.removeFromTop (4.0f);
         zoneArea = area.removeFromBottom (16.0f);
@@ -132,8 +166,13 @@ public:
 
         // Un punto cada 2 píxeles.
         const auto points = static_cast<size_t> (plot.getWidth() / 2.0f) + 1;
-        for (auto* trace : { &input, &output })
-            trace->shown.assign (points, analyzerBottomDb - 10.0f);
+        for (auto* trace : traces())
+        {
+            trace->shown.assign (points, deepwater::dsp::SpectrumAnalyzer::floorDb);
+            trace->held.assign (points, { deepwater::dsp::SpectrumAnalyzer::floorDb, 0.0 });
+        }
+        peaks.clear();
+        hoveredPeak = -1;
         curveDb.assign (points, 0.0f);
         for (int b = 0; b < dsp::Engine::numBands; ++b)
         {
@@ -164,20 +203,34 @@ public:
         {
             juce::Graphics::ScopedSaveState clip (g);
             g.reduceClipRegion (plot.toNearestInt());
-            if (inButton.getToggleState())
+            const bool holding = view.holdMode() != analysis::Hold::off;
+            if (view.showSidechain)
+            {
+                g.setColour (theme::spectrumSidechain.withAlpha (0.75f));
+                g.strokePath (tracePath (sidechain.shown, false), juce::PathStrokeType (1.2f));
+                if (holding)
+                    paintHeld (g, sidechain, theme::spectrumSidechain);
+            }
+            if (view.showInput)
             {
                 g.setColour (theme::spectrumIn.withAlpha (0.7f));
                 g.strokePath (tracePath (input.shown, false), juce::PathStrokeType (1.2f));
+                if (holding)
+                    paintHeld (g, input, theme::spectrumIn);
             }
-            if (outButton.getToggleState())
+            if (view.showOutput)
             {
                 g.setGradientFill (juce::ColourGradient (theme::accent.withAlpha (0.30f), 0.0f, plot.getY(),
                                                          theme::accent.withAlpha (0.03f), 0.0f, plot.getBottom(), false));
                 g.fillPath (tracePath (output.shown, true));
                 g.setColour (theme::accent.withAlpha (0.85f));
                 g.strokePath (tracePath (output.shown, false), juce::PathStrokeType (1.3f));
+                if (holding)
+                    paintHeld (g, output, theme::accent.brighter (0.4f));
             }
+            paintAnalyzerStatus (g);
             paintCurve (g);
+            paintPeakMarker (g);
             paintLasso (g);
             paintNodeLabel (g);
         }
@@ -198,9 +251,14 @@ public:
                                            "Clic en una tecla = llevar la banda del panel justo a esa nota: una campana "
                                            "afinada a la nota del 808, un notch en el tono que zumba.");
         if (nodeAt (position) >= 0)
-            return juce::String::fromUTF8 ("Arrastrar = frecuencia y ganancia (Shift = fino, Alt = un solo eje). Rueda = "
-                                           "Q. Doble clic = apagar/encender. Ctrl+clic = elegir varias. Supr = borrar. "
-                                           "Clic derecho = forma, pendiente y m\xc3\xa1s.");
+            return juce::String::fromUTF8 ("Arrastrar = frecuencia y ganancia (Shift = fino, Alt = un solo eje, Ctrl = "
+                                           "im\xc3\xa1n a los picos del espectro). Rueda = Q. Doble clic = apagar/encender. "
+                                           "Ctrl+clic = elegir varias. Supr = borrar. Clic derecho = forma, pendiente y "
+                                           "m\xc3\xa1s.");
+        if (hoveredPeak >= 0)
+            return juce::String::fromUTF8 ("Un pico del espectro: algo suena aqu\xc3\xad m\xc3\xa1s fuerte que alrededor. "
+                                           "Clic y arrastrar = una campana justo en el pico (abajo = cortarlo, arriba = "
+                                           "realzarlo). Mientras arrastras, el espectro se congela.");
         if (plot.contains (position))
             return juce::String::fromUTF8 ("Doble clic = crear una banda aqu\xc3\xad (en los extremos, un corte). Arrastrar "
                                            "= elegir varios nodos con un rect\xc3\xa1ngulo. Clic derecho = crear otra forma. "
@@ -212,23 +270,26 @@ public:
     {
         mouse = event.position;
         const int node = nodeAt (mouse);
-        if (node != hoveredNode)
+        const int peak = pickPeak();
+        if (node != hoveredNode || peak != hoveredPeak)
         {
             hoveredNode = node;
+            hoveredPeak = peak;
             repaint (plot.toNearestInt());
         }
-        setMouseCursor (node >= 0 ? juce::MouseCursor::PointingHandCursor
-                                  : pianoArea.contains (mouse) ? juce::MouseCursor::PointingHandCursor
-                                                               : juce::MouseCursor::CrosshairCursor);
+        setMouseCursor (node >= 0 || pianoArea.contains (mouse) ? juce::MouseCursor::PointingHandCursor
+                        : peak >= 0                             ? juce::MouseCursor::DraggingHandCursor
+                                                                : juce::MouseCursor::CrosshairCursor);
         repaintReadoutAndAxis();
     }
 
     void mouseExit (const juce::MouseEvent&) override
     {
         mouse = { -1.0f, -1.0f };
-        if (hoveredNode >= 0)
+        if (hoveredNode >= 0 || hoveredPeak >= 0)
         {
             hoveredNode = -1;
+            hoveredPeak = -1;
             repaint (plot.toNearestInt());
         }
         repaintReadoutAndAxis();
@@ -239,6 +300,8 @@ public:
         grabKeyboardFocus(); // para Supr, Ctrl+A, Esc y Ctrl+Z
         mouse = event.position;
         drag = Drag::none;
+        if (event.getNumberOfClicks() == 1)
+            lastClickGrabbed = false;
 
         if (pianoArea.contains (event.position) && ! event.mods.isPopupMenu())
         {
@@ -272,6 +335,12 @@ public:
         if (event.mods.isPopupMenu())
         {
             showEmptyMenu (event.position);
+            return;
+        }
+        // El segundo clic de un doble clic no agarra otra vez (el primero ya creó la banda).
+        if (hoveredPeak >= 0 && ! event.mods.isCommandDown() && event.getNumberOfClicks() == 1)
+        {
+            grabPeak (event.position);
             return;
         }
         // En el vacío: un rectángulo de selección (empieza de verdad al moverse unos píxeles).
@@ -318,12 +387,15 @@ public:
             else
                 octaves = 0.0;
         }
+        // Ctrl con un solo nodo: imán a los picos del espectro (la frecuencia salta al pico más cercano; al alejarse,
+        // vuelve a seguir al mouse porque lo acumulado no se toca).
+        const bool snap = event.mods.isCommandDown() && selection.count() == 1;
         for (int b = 0; b < dsp::Engine::numBands; ++b)
             if (selection.test (static_cast<size_t> (b)))
             {
                 const auto& start = dragStart[static_cast<size_t> (b)];
                 const auto moved = edit::dragged (start, octaves, db, minHz, maxHz);
-                edits.set (b, params::frequency, moved.frequency);
+                edits.set (b, params::frequency, snap ? snappedHz (moved.frequency) : moved.frequency);
                 if (dsp::usesGain (start.shape))
                     edits.set (b, params::gain, moved.gainDb);
             }
@@ -337,12 +409,13 @@ public:
         if (drag == Drag::nodes && dragMoved && ! wheelEditing)
             edits.end();
         drag = Drag::none;
+        grabbing = false;
         repaint (plot.toNearestInt());
     }
 
     void mouseDoubleClick (const juce::MouseEvent& event) override
     {
-        if (! plot.contains (event.position) || event.mods.isPopupMenu())
+        if (! plot.contains (event.position) || event.mods.isPopupMenu() || lastClickGrabbed)
             return;
         if (const int node = nodeAt (event.position); node >= 0)
         {
@@ -423,10 +496,13 @@ private:
     struct Trace
     {
         deepwater::dsp::SpectrumAnalyzer analyzer;
-        std::vector<float> shown; // lo que se dibuja, en dB, un valor por punto
+        std::vector<float> shown;                 // lo que se dibuja, en dB (con la inclinación), un valor por punto
+        std::vector<analysis::HeldPoint> held;    // la retención de picos de cada punto
         std::uint64_t lastWritten = 0;
         double secondsWithoutAudio = 0.0;
     };
+
+    std::array<Trace*, 3> traces() noexcept { return { &input, &output, &sidechain }; }
 
     enum class Drag
     {
@@ -467,16 +543,6 @@ private:
         repaint (zoneArea.toNearestInt());
     }
 
-    void setUpToggle (juce::TextButton& button, juce::Colour colour, const juce::String& tooltip)
-    {
-        button.setClickingTogglesState (true);
-        button.setToggleState (true, juce::dontSendNotification);
-        button.setColour (juce::TextButton::buttonOnColourId, colour.withAlpha (0.35f));
-        button.setTooltip (tooltip);
-        button.onClick = [this] { repaint(); };
-        addAndMakeVisible (button);
-    }
-
     void updateRangeText()
     {
         rangeButton.setButtonText (juce::String::fromUTF8 ("\xc2\xb1") + juce::String (juce::roundToInt (eqRange())) + " dB");
@@ -499,13 +565,14 @@ private:
     // Las dos escalas verticales: la del EQ (0 dB al centro) y la del analizador (0 dBFS arriba).
     float eqDbToY (float db) const noexcept { return plot.getCentreY() - db / eqRange() * plot.getHeight() * 0.5f; }
     float yToEqDb (float y) const noexcept { return (plot.getCentreY() - y) / (plot.getHeight() * 0.5f) * eqRange(); }
+    float analyzerBottomDb() const noexcept { return analyzerTopDb - view.range(); }
     float analyzerDbToY (float db) const noexcept
     {
-        return plot.getY() + plot.getHeight() * (analyzerTopDb - db) / (analyzerTopDb - analyzerBottomDb);
+        return plot.getY() + plot.getHeight() * (analyzerTopDb - db) / view.range();
     }
     float yToAnalyzerDb (float y) const noexcept
     {
-        return analyzerTopDb - (y - plot.getY()) / plot.getHeight() * (analyzerTopDb - analyzerBottomDb);
+        return analyzerTopDb - (y - plot.getY()) / plot.getHeight() * view.range();
     }
 
     // ---- Selección y edición ------------------------------------------------------------------------------------------
@@ -757,9 +824,12 @@ private:
             repaint();
     }
 
-    // Devuelve true si algún punto se movió de forma visible (0.05 dB: menos de un píxel).
+    // Devuelve true si algún punto se movió de forma visible (0.05 dB: menos de un píxel). Congelado (o mientras se
+    // arrastra un pico agarrado) no se toca nada: ni el análisis ni lo dibujado.
     bool updateTrace (Trace& trace, const FathomAudioProcessor::AnalyzerTap& tap, double sampleRate, double elapsed)
     {
+        if (frozen || grabbing)
+            return false;
         const auto size = static_cast<size_t> (trace.analyzer.getSize());
         const auto written = tap.getWritten();
         if (written != trace.lastWritten && tap.copyLatest (scratch.data(), size))
@@ -778,21 +848,122 @@ private:
         const auto points = trace.shown.size();
         if (points < 2)
             return false;
-        const float fall = static_cast<float> (fallDbPerSecond * elapsed);
-        const double ratio = std::pow (static_cast<double> (maxHz / minHz), 1.0 / static_cast<double> (points - 1));
+        const double ratio = pointRatio();
         const double halfStep = std::sqrt (ratio);
+        const auto& speed = view.speed();
+        const auto holdMode = view.holdMode();
         bool changed = false;
         for (size_t i = 0; i < points; ++i)
         {
             const double centre = minHz * std::pow (ratio, static_cast<double> (i));
             const float level = silent ? deepwater::dsp::SpectrumAnalyzer::floorDb
-                                       : trace.analyzer.levelDb (centre / halfStep, centre * halfStep, sampleRate);
+                                       : trace.analyzer.levelDb (centre / halfStep, centre * halfStep, sampleRate)
+                                             + analysis::tiltDb (centre, view.tilt());
             float& shown = trace.shown[i];
             const float previous = shown;
-            shown = level > shown ? shown + (level - shown) * 0.7f : juce::jmax (level, shown - fall);
-            changed = changed || std::abs (shown - previous) >= 0.05f;
+            const float previousHeld = trace.held[i].db;
+            shown = analysis::follow (shown, level, elapsed, speed);
+            analysis::hold (trace.held[i], shown, elapsed, holdMode);
+            changed = changed || std::abs (shown - previous) >= 0.05f || std::abs (trace.held[i].db - previousHeld) >= 0.05f;
         }
         return changed;
+    }
+
+    // Razón de frecuencia entre dos puntos vecinos de las curvas (uno cada 2 píxeles).
+    double pointRatio() const noexcept
+    {
+        const auto points = input.shown.size();
+        return points < 2 ? 1.0 : std::pow (static_cast<double> (maxHz / minHz), 1.0 / static_cast<double> (points - 1));
+    }
+
+    // ---- Picos del espectro --------------------------------------------------------------------------------------------
+
+    // De qué espectro se agarran los picos: la salida si se ve (lo que se oye), si no la entrada, si no el sidechain.
+    const Trace* grabTrace() const noexcept
+    {
+        return view.showOutput ? &output : view.showInput ? &input : view.showSidechain ? &sidechain : nullptr;
+    }
+
+    // Busca los picos del espectro solo mientras el mouse está en el visor (si no, nadie los va a agarrar).
+    bool updatePeaks()
+    {
+        const int previous = hoveredPeak;
+        peaks.clear();
+        const auto* trace = grabTrace();
+        if (trace != nullptr && plot.contains (mouse) && drag != Drag::lasso)
+        {
+            const double pointsPerOctave = static_cast<double> (trace->shown.size() - 1) / std::log2 (static_cast<double> (maxHz / minHz));
+            const auto reach = static_cast<size_t> (std::max (2.0, std::round (pointsPerOctave * peakReachOctaves)));
+            peaks = analysis::findPeaks (trace->shown, reach, peakProminenceDb, analyzerBottomDb() + peakProminenceDb);
+        }
+        if (! grabbing)
+            hoveredPeak = drag == Drag::none ? pickPeak() : -1;
+        return hoveredPeak != previous || (hoveredPeak >= 0 && ! frozen && ! grabbing);
+    }
+
+    // El pico bajo el mouse (índice en 'peaks') o −1: cerca en horizontal y a menos de 40 px de la línea del espectro.
+    // Un nodo bajo el mouse tiene prioridad.
+    int pickPeak() const noexcept
+    {
+        const auto* trace = grabTrace();
+        if (trace == nullptr || peaks.empty() || ! plot.contains (mouse) || nodeAt (mouse) >= 0 || trace->shown.size() < 2)
+            return -1;
+        const float step = plot.getWidth() / static_cast<float> (trace->shown.size() - 1);
+        const int peak = analysis::nearestPeak (peaks, static_cast<double> ((mouse.x - plot.getX()) / step), static_cast<double> (peakGrabPixels / step));
+        if (peak < 0 || std::abs (analyzerDbToY (trace->shown[peaks[static_cast<size_t> (peak)]]) - mouse.y) > 40.0f)
+            return -1;
+        return peak;
+    }
+
+    // La frecuencia exacta de un pico: la del punto se afina con los bins de la FFT (parábola por el bin más fuerte).
+    float peakHz (size_t point) const
+    {
+        const auto* trace = grabTrace();
+        const double ratio = pointRatio();
+        const double centre = minHz * std::pow (ratio, static_cast<double> (point));
+        if (trace == nullptr)
+            return static_cast<float> (centre);
+        const auto found = trace->analyzer.peak (centre / (ratio * ratio), centre * ratio * ratio, processor.getAnalyzerSampleRate());
+        const bool plausible = found.hz >= centre / (ratio * ratio) && found.hz <= centre * ratio * ratio;
+        return juce::jlimit (minHz, maxHz, static_cast<float> (plausible ? found.hz : centre));
+    }
+
+    // Agarrar un pico: una campana nueva justo encima (encendida, 0 dB, angosta) que sigue al mouse como un nodo
+    // arrastrado; crear y arrastrar son un solo paso de deshacer. Mientras tanto el espectro se queda quieto.
+    void grabPeak (juce::Point<float> position)
+    {
+        std::array<bool, dsp::Engine::numBands> used {};
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            used[static_cast<size_t> (b)] = inUse (b);
+        const int band = edit::freeBand (used);
+        if (band < 0)
+            return;
+        auto settings = processor.getDefaultBandSettings (band);
+        settings.enabled = true;
+        settings.shape = dsp::Shape::bell;
+        settings.frequency = peakHz (peaks[static_cast<size_t> (hoveredPeak)]);
+        settings.gainDb = 0.0f;
+        settings.q = grabbedQ;
+        edits.begin();
+        edits.setSettings (band, settings);
+        selectOnly (band);
+        refreshNow();
+        startNodeDrag (position);
+        dragMoved = true; // el paso de deshacer ya está abierto: lo cierra mouseUp
+        grabbing = true;
+        lastClickGrabbed = true;
+        hoveredPeak = -1;
+    }
+
+    // Ctrl + arrastrar un nodo: la frecuencia del pico más cercano si está a menos de peakSnapPixels; si no, 'hz'.
+    float snappedHz (float hz) const
+    {
+        const auto* trace = grabTrace();
+        if (trace == nullptr || peaks.empty() || trace->shown.size() < 2)
+            return hz;
+        const float step = plot.getWidth() / static_cast<float> (trace->shown.size() - 1);
+        const int peak = analysis::nearestPeak (peaks, static_cast<double> ((hzToX (hz) - plot.getX()) / step), static_cast<double> (peakSnapPixels / step));
+        return peak < 0 ? hz : peakHz (peaks[static_cast<size_t> (peak)]);
     }
 
     juce::Path tracePath (const std::vector<float>& levels, bool closed) const
@@ -1124,6 +1295,62 @@ private:
             }
     }
 
+    // La retención de picos: una línea fina por encima del espectro.
+    void paintHeld (juce::Graphics& g, const Trace& trace, juce::Colour colour) const
+    {
+        std::vector<float> held (trace.held.size());
+        for (size_t i = 0; i < held.size(); ++i)
+            held[i] = trace.held[i].db;
+        g.setColour (colour.withAlpha (0.55f));
+        g.strokePath (tracePath (held, false), juce::PathStrokeType (0.9f));
+    }
+
+    // Arriba a la izquierda del visor: lo que conviene saber del analizador (congelado, sidechain sin conectar).
+    void paintAnalyzerStatus (juce::Graphics& g) const
+    {
+        const juce::Font font { juce::FontOptions (10.0f, juce::Font::bold) };
+        g.setFont (font);
+        auto line = plot.reduced (8.0f, 5.0f).removeFromTop (12.0f);
+        const auto note = [&] (const juce::String& text, juce::Colour colour) {
+            g.setColour (colour);
+            g.drawText (text, line, juce::Justification::topLeft);
+            line.removeFromLeft (juce::GlyphArrangement::getStringWidth (font, text) + 16.0f);
+        };
+        if (frozen)
+            note ("CONGELADO", theme::accent);
+        if (view.showSidechain && ! sidechainConnected)
+            note ("SIDECHAIN SIN CONECTAR", theme::spectrumSidechain);
+    }
+
+    // El pico bajo el mouse: un círculo sobre el espectro con su frecuencia y su nota (afinadas con los bins).
+    void paintPeakMarker (juce::Graphics& g) const
+    {
+        const auto* trace = grabTrace();
+        if (hoveredPeak < 0 || drag != Drag::none || trace == nullptr || trace->shown.size() < 2)
+            return;
+        const auto point = peaks[static_cast<size_t> (hoveredPeak)];
+        const float step = plot.getWidth() / static_cast<float> (trace->shown.size() - 1);
+        const juce::Point<float> centre { plot.getX() + step * static_cast<float> (point), analyzerDbToY (trace->shown[point]) };
+        g.setColour (theme::text);
+        g.drawEllipse (juce::Rectangle<float> (12.0f, 12.0f).withCentre (centre), 1.6f);
+        g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre (centre));
+
+        const float hz = peakHz (point);
+        const auto note = format::noteName (hz);
+        const auto text = format::hz (hz) + (note.isEmpty() ? juce::String() : juce::String::fromUTF8 (" \xc2\xb7 ") + note);
+        const juce::Font font { juce::FontOptions (11.0f, juce::Font::bold) };
+        const float width = 12.0f + juce::GlyphArrangement::getStringWidth (font, text);
+        auto box = juce::Rectangle<float> (width, 18.0f).withCentre ({ centre.x, centre.y - 20.0f });
+        box = box.constrainedWithin (plot.reduced (2.0f));
+        g.setColour (theme::panel.withAlpha (0.92f));
+        g.fillRoundedRectangle (box, 4.0f);
+        g.setColour (theme::text.withAlpha (0.6f));
+        g.drawRoundedRectangle (box, 4.0f, 1.0f);
+        g.setFont (font);
+        g.setColour (theme::text);
+        g.drawText (text, box, juce::Justification::centred);
+    }
+
     void paintLasso (juce::Graphics& g) const
     {
         if (drag != Drag::lasso || ! lassoMoved)
@@ -1211,12 +1438,19 @@ private:
     FathomAudioProcessor& processor;
     BandEdits edits;
     std::atomic<float>* outputGain = nullptr;
-    juce::TextButton inButton { "ENTRADA" };
-    juce::TextButton outButton { "SALIDA" };
     juce::TextButton rangeButton;
     size_t rangeIndex = 1; // ±12 dB
-    Trace input, output;
+    Trace input, output, sidechain;
     std::vector<float> scratch;
+    analysis::ViewSettings view;
+    bool frozen = false;
+    bool sidechainConnected = false;
+
+    // Picos del espectro (índices de punto) y el que está bajo el mouse (índice en 'peaks', o −1).
+    std::vector<size_t> peaks;
+    int hoveredPeak = -1;
+    bool grabbing = false;         // arrastrando la banda recién creada en un pico (el espectro se queda quieto)
+    bool lastClickGrabbed = false; // el primer clic de un posible doble clic agarró un pico
     float paintedGainDb = 0.0f;
     static constexpr float nodeRadius = 8.0f;
     std::array<dsp::BandSettings, dsp::Engine::numBands> paintedBands {};

@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "gui/AnalyzerPanel.h"
 #include "gui/BandPanel.h"
 #include "gui/EqDisplay.h"
 #include "gui/FathomLookAndFeel.h"
@@ -9,8 +10,8 @@
 class FathomAudioProcessor;
 
 // El visor (lienzo del EQ con el analizador, la curva y los nodos editables de las bandas), debajo el panel de la banda
-// elegida, en la cabecera deshacer/rehacer y el bypass, y la perilla de salida. Un temporizador a 30 cuadros por segundo
-// actualiza el analizador, la curva, el panel y los botones de deshacer.
+// elegida, en la cabecera deshacer/rehacer y el bypass, y a la derecha los ajustes del analizador y la perilla de salida.
+// Un temporizador a 30 cuadros por segundo actualiza el analizador, la curva, los paneles y los botones de deshacer.
 class FathomAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -27,6 +28,7 @@ private:
 
     void timerCallback() override;
     void selectBand (int band);
+    void showAnalyzerView (const fathom::analysis::ViewSettings&);
 
     FathomAudioProcessor& processor;
     fathom::gui::FathomLookAndFeel lookAndFeel;
@@ -34,6 +36,8 @@ private:
 
     fathom::gui::EqDisplay display;
     fathom::gui::BandPanel bandPanel;
+    fathom::gui::AnalyzerPanel analyzerPanel;
+    fathom::analysis::ViewSettings shownView; // la vista que muestran el panel y el visor (para notar un proyecto cargado)
     juce::TextButton undoButton { "DESHACER" };
     juce::TextButton redoButton { "REHACER" };
     juce::TextButton bypassButton { "BYPASS" };

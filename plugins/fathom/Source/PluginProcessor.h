@@ -2,19 +2,20 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "analysis/SpectrumView.h"
 #include "deepwater/dsp/AnalyzerTap.h"
 #include "dsp/Engine.h"
 #include "edit/EditHistory.h"
 
 // Efecto mono/estéreo: 24 bandas de EQ con todas las formas y la ganancia de salida (Fase 3), editables sobre el visor
-// con deshacer/rehacer (Fase 4). El audio deja una copia de lo que entra
-// y de lo que sale en dos tomas lock-free (AnalyzerTap) para el analizador de la GUI. El audio está en fathom::dsp
+// con deshacer/rehacer (Fase 4). El audio deja una copia de lo que entra, de lo que sale y del sidechain (Fase 5) en tres
+// tomas lock-free (AnalyzerTap) para el analizador de la GUI. El audio está en fathom::dsp
 // (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor
 {
 public:
-    // 16384 muestras: alcanza para la FFT más grande del analizador (8192 a 96 kHz) con margen.
-    using AnalyzerTap = deepwater::dsp::AnalyzerTap<16384>;
+    // 32768 muestras: la FFT más grande del analizador (resolución máxima a 88.2/96 kHz).
+    using AnalyzerTap = deepwater::dsp::AnalyzerTap<32768>;
 
     FathomAudioProcessor();
     ~FathomAudioProcessor() override = default;
@@ -64,6 +65,15 @@ public:
     // Hilo de la GUI: las tomas del analizador y la frecuencia de muestreo con la que se escribieron.
     const AnalyzerTap& getInputTap() const noexcept { return inputTap; }
     const AnalyzerTap& getOutputTap() const noexcept { return outputTap; }
+    const AnalyzerTap& getSidechainTap() const noexcept { return sidechainTap; }
+
+    // Hilo de la GUI: si el host conectó el bus de sidechain (en FL: "Sidechain to this track" y el puerto en Processing).
+    bool isSidechainConnected() const;
+
+    // Hilo de la GUI: cómo se ve el analizador (inclinación, rango, resolución...). No son parámetros (no tiene sentido
+    // automatizarlos) pero se guardan con el proyecto: viven como un hijo del estado del APVTS.
+    fathom::analysis::ViewSettings getAnalyzerView() const;
+    void setAnalyzerView (const fathom::analysis::ViewSettings&);
     double getAnalyzerSampleRate() const noexcept { return analyzerSampleRate.load (std::memory_order_relaxed); }
 
     // Hilo de la GUI: true mientras haya un editor abierto (sin él, el audio no copia muestras a las tomas).
@@ -89,7 +99,7 @@ private:
     fathom::dsp::Engine::BandArray defaultBands;
 
     fathom::dsp::Engine engine;
-    AnalyzerTap inputTap, outputTap;
+    AnalyzerTap inputTap, outputTap, sidechainTap;
     std::atomic<double> analyzerSampleRate { 44100.0 };
     std::atomic<bool> analyzerActive { false };
     fathom::edit::EditHistory history; // después de 'parameters': se destruye antes (deja de escucharlos)

@@ -37,7 +37,8 @@ Lo que Fathom va a usar de `libs/dsp` (`deepwater::dsp`):
   LP/BP/HP del SVF: campana, shelves, tilt shelf, notch, pasa banda, all-pass, LP/HP de 1 y 2 polos) con
   `response()`/`magnitudeDb()` exactas para esos coeficientes; `EqCascade` (hasta 8 etapas en serie: Butterworth de
   1–16 polos con resonancia) y `FlatTiltDesign` (pendiente constante en dB/oct); `EqFilter` y `EqCascadeFilter`.
-- `SpectrumAnalyzer.h` + `AnalyzerTap.h` (vienen de Riptide): el analizador y la toma audio → GUI.
+- `SpectrumAnalyzer.h` + `AnalyzerTap.h` (vienen de Riptide): el analizador y la toma audio → GUI. En la Fase 5
+  ganó `peak()` (el pico de una zona afinado con una parábola por los bins: < 0.05 bin).
 - `Smoothing.h` (`LinearRamp`, `EffectSwitch`), `Decibels.h`, `Pitch.h`, `LevelMeter.h`.
 - `Fft.h`: fase lineal y dinámica espectral (Fases 10–11).
 - `EnvelopeFollower.h`: detector del EQ dinámico (Fase 9).
@@ -63,7 +64,8 @@ build/plugins/fathom/Release/FathomTests.exe                    # tests del moto
 plugins/fathom/
   CMakeLists.txt           # plugin y tests; enlaza deepwater::dsp
   Source/
-    PluginProcessor.h/.cpp   # parámetros, estado, processBlock, las tomas del analizador y el historial de deshacer
+    PluginProcessor.h/.cpp   # parámetros, estado (con la vista del analizador), processBlock, el bus de sidechain,
+                             # las tomas del analizador (entrada, salida, sidechain) y el historial de deshacer
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie, ganancia de salida y bypass
@@ -72,10 +74,13 @@ plugins/fathom/
     edit/UndoStack.h         # pila de deshacer/rehacer (sin JUCE): pasos con solo los parámetros que cambiaron
     edit/EditHistory.h       # deshacer con JUCE: escucha los gestos de los parámetros (no la automatización del host)
     edit/NodeEditing.h       # cuentas de la edición sin JUCE: arrastrar nodos, rueda = Q, banda libre, notas
+    analysis/SpectrumView.h  # cuentas del analizador sin JUCE: inclinación, rango, resolución, balística, retención
+                             # de picos, ajustes de la vista (ViewSettings) y búsqueda de picos del espectro
     gui/                     # tema (con el color de cada banda), LookAndFeel, formato de valores, atajos (Keys),
-                             # visor (EqDisplay: cuadrícula, analizador, curvas, nodos editables, teclado de piano),
-                             # BandEdits (cambiar parámetros con gestos), panel de la banda elegida (BandPanel)
-  tests/EngineTests.cpp    # tests del motor y de la edición (sin JUCE)
+                             # visor (EqDisplay: cuadrícula, analizador, curvas, nodos editables, teclado de piano,
+                             # agarrar picos), BandEdits (cambiar parámetros con gestos), panel de la banda elegida
+                             # (BandPanel), ajustes del analizador (AnalyzerPanel)
+  tests/EngineTests.cpp    # tests del motor, de la edición y del analizador (sin JUCE)
 ```
 
 ## Aprendizaje de mezcla (igual de importante que el código)
@@ -110,7 +115,7 @@ fábrica incluyen notas de para qué sirven y por qué.
 - [x] Fase 4 — Edición sobre el visor: nodos arrastrables (doble clic crea una banda donde se clica, arrastrar mueve
       frecuencia/ganancia, rueda = Q, modificadores para ajuste fino y para un solo eje), panel de la banda elegida,
       selección múltiple, deshacer/rehacer y teclado de piano en el eje.
-- [ ] Fase 5 — Analizador profesional: inclinación de 4.5 dB/oct, rango, resolución, velocidad, retención de picos,
+- [x] Fase 5 — Analizador profesional: inclinación de 4.5 dB/oct, rango, resolución, velocidad, retención de picos,
       congelar; ver entrada/salida/sidechain; "agarrar" un pico del espectro para crear o mover una banda.
 - [ ] Fase 6 — Escuchar y comparar: solo de banda (escuchar la zona que toca), auto gain (volumen igualado al
       comparar), escala de ganancia global, ganancia y paneo de salida, invertir la fase, comparación A/B.
@@ -135,7 +140,46 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 4 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
+Fase 5 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
+- `analysis/SpectrumView.h` (sin JUCE): inclinación k·log2(f / 1 kHz) con 0 / 3 / 4.5 / 6 dB/oct (4.5 por defecto);
+  rango 48 / 72 / 96 / 120 dB (múltiplos de 8: la cuadrícula cae en números redondos; 96 por defecto); resolución =
+  FFT de 2048 a 16384 a 44.1/48 kHz (el doble a 88.2/96: misma duración; media = 4096, la de antes); velocidad =
+  constante de tiempo de subida + caída en dB/s (`follow`, independiente de los cuadros por segundo; media = 40 dB/s, la
+  de antes); retención de picos No / 2 s (después cae a 20 dB/s) / Siempre (`hold`); `ViewSettings`; `findPeaks`
+  (máximo de su vecindario de ±1/6 de octava y prominencia ≥ 6 dB sobre el valle más alto de los dos lados; en una
+  meseta, uno solo) y `nearestPeak`.
+- Librería: `SpectrumAnalyzer::peak (lowHz, highHz, sr)`: el bin más fuerte de la zona + parábola en dB por él y sus
+  vecinos (< 0.05 bin y < 0.4 dB con Hann; si la zona no tiene un máximo local, el bin). Aditivo: no cambia nada de lo
+  que ya usaban Riptide y Fathom.
+- Procesador: bus de entrada "Sidechain" (estéreo, activo por defecto como en Ebb; acepta mono, estéreo o
+  desactivado); el motor procesa solo los canales del bus principal (`getMainBusNumInputChannels`). Tercera toma
+  `sidechainTap` (solo si el bus está conectado) e `isSidechainConnected()`. Tomas de 32768 muestras (la FFT máxima a
+  96 kHz). La vista del analizador se guarda en el proyecto como hijo `AnalyzerView` del estado del APVTS (no son
+  parámetros ni entran al deshacer; lo que falta = valor por defecto: los proyectos de las Fases 1-4 se ven igual que
+  antes, salvo la inclinación).
+- GUI: `gui/AnalyzerPanel.h` en la columna derecha (sobre SALIDA): ENTRADA / SALIDA / SIDECHAIN, INCLINACIÓN, RANGO,
+  RESOLUCIÓN, VELOCIDAD, PICOS, BORRAR PICOS y CONGELAR (no se guarda). El editor guarda la vista al cambiarla y en
+  cada cuadro compara con la del proyecto (cargar un proyecto con la ventana abierta). Visor: sidechain en ámbar,
+  retención como línea fina sobre cada espectro visible, avisos "CONGELADO" y "SIDECHAIN SIN CONECTAR"; los botones
+  ENTRADA/SALIDA salieron de la cabecera del visor.
+- Agarrar picos (`EqDisplay`): con el mouse en el visor se buscan los picos del espectro de la SALIDA (si no se ve, la
+  entrada; si no, el sidechain). A menos de 14 px en horizontal y 40 px de la línea aparece una marca con Hz y nota
+  (afinados con `peak()`); clic y arrastrar = campana nueva en la primera banda libre, encendida, 0 dB, Q 4, justo en
+  el pico, y se arrastra como un nodo (crear + arrastrar = un paso de deshacer); mientras tanto el espectro se congela.
+  El segundo clic de un doble clic no agarra otra vez ni crea otra banda. Ctrl mientras se arrastra UN nodo = imán al
+  pico más cercano (24 px); al alejarse vuelve a seguir al mouse. Los nodos tienen prioridad sobre los picos.
+- Arreglado de paso: el tooltip de DESHACER tenía la "ú" codificada dos veces ("Ãº").
+- Tests nuevos: `DeepwaterDspTests` (`peak()` entre bins a 4 frecuencias de muestreo y una zona sin máximo local);
+  `FathomTests` (inclinación, tamaños de FFT, valores por defecto = los de antes, balística igual a 30 y 60 cuadros por
+  segundo, constante de tiempo, retención en sus tres modos, picos con prominencia/meseta/piso/el más cercano, y de
+  punta a punta: un seno de 87.31 Hz y otro de 2.5 kHz se agarran a < 0.5 Hz a 44.1 y 96 kHz).
+- Revisada con clics automatizados en el Standalone (panel, SIDECHAIN sin conectar, CONGELAR, rango 120 dB, PICOS,
+  la vista guardada al cerrar y abrir). Agarrar picos e imán NO se pudieron probar ahí (el Standalone silencia la
+  entrada): solo con los tests de punta a punta; probarlos en FL.
+- Sin cambios: el audio (motor, bandas, parámetros e IDs), latencia 0.
+- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 4
 - Edición sobre el visor (`gui/EqDisplay.h`): doble clic en el vacío = crear en la primera banda LIBRE (apagada y con
   sus valores por defecto; `edit::freeBand`), campana con la ganancia de la altura del clic; bajo 25 Hz corte de graves,
   sobre 16 kHz corte de agudos (shelves y cortes nacen con Q 0.71). Doble clic en un nodo = apagar/encender. Supr =
@@ -215,4 +259,4 @@ Fase 4 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 5 (analizador profesional).
+Siguiente: Fase 6 (escuchar y comparar), cuando el usuario confirme la Fase 5 en FL.

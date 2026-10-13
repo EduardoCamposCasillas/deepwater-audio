@@ -1614,7 +1614,7 @@ void testAnalyzerTap()
 void testSpectrumAnalyzer()
 {
     std::printf ("SpectrumAnalyzer: seno de 0 dBFS = 0 dB en su bin, -6 dB con amplitud 0.5, scalloping < 1.5 dB, "
-                 "fuga lejos del tono < -90 dB, silencio en el piso\n");
+                 "fuga lejos del tono < -90 dB, pico entre bins a < 0.05 bin, silencio en el piso\n");
 
     CHECK (dw::SpectrumAnalyzer::orderForSampleRate (44100.0) == 12);
     CHECK (dw::SpectrumAnalyzer::orderForSampleRate (48000.0) == 12);
@@ -1658,6 +1658,19 @@ void testSpectrumAnalyzer()
             analyzer.analyze (signal.data());
             const float between = analyzer.levelDb (10.2 * binHz, 10.4 * binHz, sampleRate);
             CHECK (between <= analyzer.binsDb()[10] + 1.0e-4f && between >= analyzer.binsDb()[11] - 1.0e-4f);
+        }
+
+        // peak(): un tono entre bins se ubica a menos de 0.05 bin, con el nivel a < 0.4 dB (sin interpolar, hasta 1.42).
+        for (const double bin : { 37.0, 93.25, 200.5, 311.8 })
+        {
+            const auto signal = sineSignal (bin * binHz, sampleRate, size);
+            analyzer.analyze (signal.data());
+            const auto found = analyzer.peak ((bin - 6.0) * binHz, (bin + 6.0) * binHz, sampleRate);
+            CHECK (std::abs (found.hz / binHz - bin) < 0.05);
+            CHECK (std::abs (found.levelDb) < 0.4f);
+            // Una zona que solo corta la falda del tono (sin máximo local dentro): se queda en el bin más fuerte.
+            const auto slope = analyzer.peak ((bin + 2.0) * binHz, (bin + 5.0) * binHz, sampleRate);
+            CHECK (std::abs (slope.hz / binHz - std::ceil (bin + 2.0)) < 1.0e-9);
         }
 
         const std::vector<float> silence (size, 0.0f);

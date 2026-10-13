@@ -1,4 +1,5 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass y las bandas) y las cuentas de la edición (deshacer, arrastrar nodos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass y las bandas), las cuentas de la edición (deshacer, arrastrar
+// nodos) y las del analizador (inclinación, balística, retención y picos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
 #include <array>
@@ -8,7 +9,9 @@
 #include <cstdio>
 #include <vector>
 
+#include "analysis/SpectrumView.h"
 #include "deepwater/dsp/Decibels.h"
+#include "deepwater/dsp/SpectrumAnalyzer.h"
 #include "dsp/Engine.h"
 #include "edit/NodeEditing.h"
 #include "edit/UndoStack.h"
@@ -574,6 +577,119 @@ void testBandCreationAndNotes()
     CHECK (std::abs (hzToNote (noteToHz (36.0)) - 36.0) < 1.0e-9);
     CHECK (! isBlackKey (60) && isBlackKey (61) && ! isBlackKey (64) && ! isBlackKey (65) && isBlackKey (70) && ! isBlackKey (71));
 }
+void testAnalyzerView()
+{
+    std::printf ("Vista del analizador: inclinacion con pivote en 1 kHz, tamanos de FFT, balistica independiente de los "
+                 "cuadros por segundo, retencion de picos\n");
+    using namespace fathom::analysis;
+    CHECK (tiltDb (1000.0, 4.5f) == 0.0f);
+    CHECK (std::abs (tiltDb (2000.0, 4.5f) - 4.5f) < 1.0e-5f && std::abs (tiltDb (250.0, 4.5f) + 9.0f) < 1.0e-5f);
+    CHECK (tiltDb (20.0, 0.0f) == 0.0f);
+
+    // La resolución: 2048 a 16384 puntos a 44.1/48 kHz; el doble a 88.2/96 (la misma duración).
+    CHECK (fftOrder (0, 44100.0) == 11 && fftOrder (1, 48000.0) == 12 && fftOrder (3, 44100.0) == 14);
+    CHECK (fftOrder (1, 96000.0) == 13 && fftOrder (3, 88200.0) == 15 && fftOrder (9, 44100.0) == 14);
+
+    // Por defecto, lo mismo que en las Fases 1-4: 96 dB, FFT de 4096 (medio), velocidad media (cae 40 dB/s).
+    const ViewSettings defaults;
+    CHECK (defaults.range() == 96.0f && fftOrder (defaults.resolutionIndex, 44100.0) == 12 && defaults.speed().fallDbPerSecond == 40.0f);
+    CHECK (defaults.tilt() == 4.5f && defaults.holdMode() == Hold::off);
+
+    // Balística: sube con su constante de tiempo y baja a dB/s, igual a 30 que a 60 cuadros por segundo.
+    for (const auto& speed : speeds)
+    {
+        float at30 = -100.0f, at60 = -100.0f;
+        for (int frame = 0; frame < 90; ++frame)
+            at30 = follow (at30, -20.0f, 1.0 / 30.0, speed);
+        for (int frame = 0; frame < 180; ++frame)
+            at60 = follow (at60, -20.0f, 1.0 / 60.0, speed);
+        CHECK (std::abs (at30 - at60) < 0.01f && std::abs (at30 + 20.0f) < 0.01f); // 3 segundos después, arriba
+        float falling = -20.0f;
+        for (int frame = 0; frame < 30; ++frame)
+            falling = follow (falling, -120.0f, 1.0 / 30.0, speed);
+        CHECK (std::abs (falling - std::max (-120.0f, -20.0f - speed.fallDbPerSecond)) < 0.01f);
+    }
+    CHECK (follow (-100.0f, -10.0f, 1.0 / 30.0, speeds.back()) == -10.0f); // muy rápida = al instante
+    // La constante de tiempo: tras riseSeconds recorrió el 63 %.
+    {
+        float shown = -100.0f;
+        for (int frame = 0; frame < 100; ++frame)
+            shown = follow (shown, 0.0f, speeds[1].riseSeconds / 100.0, speeds[1]);
+        CHECK (std::abs (shown + 100.0f * std::exp (-1.0f)) < 0.01f);
+    }
+
+    // Retención: sin ella sigue a la línea; con 2 s, se queda y después cae a 20 dB/s; "siempre" no cae nunca.
+    HeldPoint off, timed, forever;
+    for (auto* point : { &off, &timed, &forever })
+        hold (*point, -10.0f, 0.0, Hold::forever);
+    double seconds = 0.0;
+    for (int frame = 0; frame < 90; ++frame) // 3 segundos con la línea en −60
+    {
+        seconds += 1.0 / 30.0;
+        hold (off, -60.0f, 1.0 / 30.0, Hold::off);
+        hold (timed, -60.0f, 1.0 / 30.0, Hold::seconds);
+        hold (forever, -60.0f, 1.0 / 30.0, Hold::forever);
+        if (seconds < holdSeconds - 0.01)
+            CHECK (timed.db == -10.0f);
+    }
+    CHECK (off.db == -60.0f && forever.db == -10.0f);
+    CHECK (timed.db < -10.0f - 0.9f * holdFallDbPerSecond * 0.9f && timed.db > -10.0f - holdFallDbPerSecond * 1.1f);
+    hold (forever, -5.0f, 1.0 / 30.0, Hold::forever); // un máximo nuevo la empuja arriba
+    CHECK (forever.db == -5.0f && forever.age == 0.0);
+}
+
+void testSpectrumPeaks()
+{
+    std::printf ("Picos del espectro: prominencia, mesetas, piso, el mas cercano; un seno se agarra a < 0.5 Hz\n");
+    using namespace fathom::analysis;
+    // Dos picos claros (índices 10 y 30), un bulto de 2 dB en una ladera (no cuenta), una meseta (cuenta una vez) y un
+    // pico bajo el piso.
+    std::vector<float> levels (60, -60.0f);
+    for (int i = 4; i <= 16; ++i)
+        levels[static_cast<size_t> (i)] = -20.0f - 3.0f * static_cast<float> (std::abs (i - 10));
+    for (int i = 24; i <= 36; ++i)
+        levels[static_cast<size_t> (i)] = -30.0f - 2.0f * static_cast<float> (std::abs (i - 30));
+    levels[34] = levels[33] + 2.0f; // un bulto sobre la ladera derecha del segundo pico
+    levels[44] = levels[45] = levels[46] = -40.0f; // meseta
+    levels[54] = -90.0f; levels[53] = levels[55] = -100.0f; // bajo el piso
+    const auto peaks = findPeaks (levels, 4, 6.0f, -80.0f);
+    CHECK (peaks.size() == 3 && peaks[0] == 10 && peaks[1] == 30 && peaks[2] == 44);
+    CHECK (nearestPeak (peaks, 27.0, 5.0) == 1 && nearestPeak (peaks, 20.0, 5.0) == -1 && nearestPeak (peaks, 41.0, 5.0) == 2);
+    CHECK (findPeaks (std::vector<float> (50, -30.0f), 4, 6.0f, -80.0f).empty()); // todo plano: ninguno
+
+    // De punta a punta, como en el visor: un seno de 87.3 Hz (F2 de FL) + uno de 2.5 kHz más bajo, a 44.1 y 96 kHz.
+    for (const double sampleRate : { 44100.0, 96000.0 })
+    {
+        deepwater::dsp::SpectrumAnalyzer analyzer;
+        analyzer.prepare (fftOrder (2, sampleRate));
+        std::vector<float> signal (static_cast<size_t> (analyzer.getSize()));
+        for (size_t n = 0; n < signal.size(); ++n)
+        {
+            const double t = static_cast<double> (n) / sampleRate;
+            signal[n] = static_cast<float> (0.5 * std::sin (2.0 * pi * 87.31 * t) + 0.05 * std::sin (2.0 * pi * 2500.0 * t));
+        }
+        analyzer.analyze (signal.data());
+        // 380 puntos de 20 Hz a 20 kHz (un visor de ~760 px), cada uno con su tramo, con la inclinación de 4.5 dB/oct.
+        constexpr size_t points = 380;
+        const double ratio = std::pow (1000.0, 1.0 / static_cast<double> (points - 1));
+        std::vector<float> shown (points);
+        for (size_t i = 0; i < points; ++i)
+        {
+            const double centre = 20.0 * std::pow (ratio, static_cast<double> (i));
+            shown[i] = analyzer.levelDb (centre / std::sqrt (ratio), centre * std::sqrt (ratio), sampleRate) + tiltDb (centre, 4.5f);
+        }
+        const auto found = findPeaks (shown, 6, 6.0f, -90.0f);
+        CHECK (found.size() == 2);
+        if (found.size() == 2)
+        {
+            const double centre = 20.0 * std::pow (ratio, static_cast<double> (found[0]));
+            const auto peak = analyzer.peak (centre / ratio / ratio, centre * ratio * ratio, sampleRate);
+            CHECK (std::abs (peak.hz - 87.31) < 0.5);
+            const double high = 20.0 * std::pow (ratio, static_cast<double> (found[1]));
+            CHECK (std::abs (analyzer.peak (high / ratio / ratio, high * ratio * ratio, sampleRate).hz - 2500.0) < 0.5);
+        }
+    }
+}
 } // namespace
 
 int main()
@@ -593,6 +709,8 @@ int main()
     testUndoStack();
     testNodeDragging();
     testBandCreationAndNotes();
+    testAnalyzerView();
+    testSpectrumPeaks();
 
     if (failures > 0)
     {

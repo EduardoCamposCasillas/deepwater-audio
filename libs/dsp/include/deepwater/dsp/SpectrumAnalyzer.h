@@ -43,6 +43,18 @@ public:
     // entre dos píxeles), o, si la zona es más angosta que un bin (en graves), el nivel interpolado en su centro.
     [[nodiscard]] float levelDb (double lowHz, double highHz, double sampleRate) const noexcept;
 
+    // El pico más fuerte de la zona [lowHz, highHz] con más precisión que un bin: se ajusta una parábola (en dB) por el
+    // bin más fuerte y sus dos vecinos y se toma su vértice. Con Hann, un tono queda a menos de 0.05 bin de su
+    // frecuencia real (a 44.1 kHz y N = 4096, medio Hz) y su nivel a menos de 0.4 dB (sin interpolar, hasta 1.42 dB
+    // menos: el "scalloping"). Sirve para poner una banda
+    // justo encima de una resonancia. Sin bins en la zona devuelve el centro con el nivel interpolado.
+    struct Peak
+    {
+        double hz = 0.0;
+        float levelDb = floorDb;
+    };
+    [[nodiscard]] Peak peak (double lowHz, double highHz, double sampleRate) const noexcept;
+
     static constexpr float floorDb = -140.0f;
 
 private:

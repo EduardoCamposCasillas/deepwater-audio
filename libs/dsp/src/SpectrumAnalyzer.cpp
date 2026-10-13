@@ -66,4 +66,32 @@ float SpectrumAnalyzer::levelDb (double lowHz, double highHz, double sampleRate)
     return strongest;
 }
 
+SpectrumAnalyzer::Peak SpectrumAnalyzer::peak (double lowHz, double highHz, double sampleRate) const noexcept
+{
+    if (levels.empty() || sampleRate <= 0.0)
+        return {};
+    const double binHz = sampleRate / static_cast<double> (window.size());
+    const double last = static_cast<double> (levels.size() - 1);
+    const auto first = static_cast<size_t> (std::ceil (std::clamp (lowHz / binHz, 0.0, last)));
+    const auto end = static_cast<size_t> (std::floor (std::clamp (highHz / binHz, 0.0, last)));
+    if (first > end)
+        return { 0.5 * (lowHz + highHz), levelDb (lowHz, highHz, sampleRate) };
+
+    size_t strongest = first;
+    for (size_t k = first + 1; k <= end; ++k)
+        if (levels[k] > levels[strongest])
+            strongest = k;
+    if (strongest == 0 || strongest == levels.size() - 1)
+        return { static_cast<double> (strongest) * binHz, levels[strongest] };
+
+    // Parábola por (−1, a), (0, b), (+1, c): vértice en p = (a − c) / (2(a − 2b + c)), de −0.5 a 0.5 si b es el mayor.
+    // Si el más fuerte de la zona no es un máximo local (la zona corta una pendiente), se queda en el bin.
+    const double a = levels[strongest - 1], b = levels[strongest], c = levels[strongest + 1];
+    const double curvature = a - 2.0 * b + c;
+    if (b < a || b < c || curvature >= 0.0)
+        return { static_cast<double> (strongest) * binHz, levels[strongest] };
+    const double offset = 0.5 * (a - c) / curvature;
+    return { (static_cast<double> (strongest) + offset) * binHz, static_cast<float> (b - 0.25 * (a - c) * offset) };
+}
+
 } // namespace deepwater::dsp
