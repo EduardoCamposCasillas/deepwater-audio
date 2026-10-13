@@ -135,7 +135,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 4 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 4 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - Edición sobre el visor (`gui/EqDisplay.h`): doble clic en el vacío = crear en la primera banda LIBRE (apagada y con
   sus valores por defecto; `edit::freeBand`), campana con la ganancia de la altura del clic; bajo 25 Hz corte de graves,
   sobre 16 kHz corte de agudos (shelves y cortes nacen con Q 0.71). Doble clic en un nodo = apagar/encender. Supr =
@@ -215,4 +215,4 @@ Fase 4 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 5 (analizador profesional), cuando el usuario confirme la Fase 4 en FL.
+Siguiente: Fase 5 (analizador profesional).
