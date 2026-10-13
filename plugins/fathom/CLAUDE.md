@@ -140,7 +140,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 5 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
+Fase 5 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - `analysis/SpectrumView.h` (sin JUCE): inclinación k·log2(f / 1 kHz) con 0 / 3 / 4.5 / 6 dB/oct (4.5 por defecto);
   rango 48 / 72 / 96 / 120 dB (múltiplos de 8: la cuadrícula cae en números redondos; 96 por defecto); resolución =
   FFT de 2048 a 16384 a 44.1/48 kHz (el doble a 88.2/96: misma duración; media = 4096, la de antes); velocidad =
@@ -259,4 +259,4 @@ Fase 5 COMPLETADA (2026-10-12), pendiente de probar en FL Studio.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 6 (escuchar y comparar), cuando el usuario confirme la Fase 5 en FL.
+Siguiente: Fase 6 (escuchar y comparar).
