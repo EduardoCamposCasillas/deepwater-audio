@@ -1,4 +1,4 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass y las bandas), las cuentas de la edición (deshacer, arrastrar
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain y solo), las cuentas de la edición (deshacer, arrastrar
 // nodos) y las del analizador (inclinación, balística, retención y picos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
@@ -7,6 +7,7 @@
 #include <complex>
 #include <cstdint>
 #include <cstdio>
+#include <tuple>
 #include <vector>
 
 #include "analysis/SpectrumView.h"
@@ -690,6 +691,272 @@ void testSpectrumPeaks()
         }
     }
 }
+// --- Fase 6: escuchar y comparar ------------------------------------------------------------------------------------
+
+// Procesa un seno (el mismo en los dos canales) de una vez y devuelve el canal izquierdo.
+std::vector<float> processedSine (Engine& engine, double hz, double amplitude, double sampleRate, size_t numSamples)
+{
+    auto left = sine (hz, amplitude, sampleRate, numSamples);
+    auto right = left;
+    float* channels[] { left.data(), right.data() };
+    engine.process (channels, 2, static_cast<int> (left.size()));
+    return left;
+}
+
+// El nivel del tono en la segunda mitad de la señal (ya pasados los fundidos), en dB respecto de 'amplitude'.
+double toneDb (const std::vector<float>& signal, double hz, double amplitude, double sampleRate)
+{
+    return 20.0 * std::log10 (toneAmplitude (signal, hz, sampleRate, signal.size() / 2) / amplitude);
+}
+
+void testGainScale()
+{
+    std::printf ("Escala: 50 %% = la mitad de los dB (= la curva de la banda a la mitad); 0 %% = plano bit a bit\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const BandSettings band { true, 1000.0f, 12.0f, 1.0f };
+        BandSettings half = band;
+        half.gainDb = 6.0f;
+        Engine engine;
+        engine.setGainScale (0.5f);
+        engine.prepare (sampleRate, false, 0.0f, only (band));
+        const auto out = processedSine (engine, 1000.0, 0.25, sampleRate, 32768);
+        CHECK (std::abs (toneDb (out, 1000.0, 0.25, sampleRate) - Band::coefficientsFor (half, sampleRate).magnitudeDb (1000.0, sampleRate)) < 0.01);
+
+        Engine flat;
+        flat.setGainScale (0.0f);
+        flat.prepare (sampleRate, false, 0.0f, only (band));
+        StereoSignal signal (4096, sampleRate);
+        const StereoSignal original = signal;
+        processInBlocks (flat, signal, 512, [] (int) {});
+        CHECK (signal.left == original.left && signal.right == original.right);
+    }
+}
+
+void testPanAndPolarity()
+{
+    std::printf ("Salida: balance (el centro no cambia nada, al girar baja el lado contrario), polaridad y sin saltos\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const auto settledAfter = static_cast<size_t> (std::lround (Engine::gainRampSeconds * sampleRate));
+        const auto total = static_cast<size_t> (sampleRate * 0.1);
+        for (const auto& [pan, invert, wantLeft, wantRight] : { std::tuple { 0.5f, false, 0.5f, 1.0f }, std::tuple { -1.0f, false, 1.0f, 0.0f },
+                                                               std::tuple { 0.0f, true, -1.0f, -1.0f }, std::tuple { -0.25f, true, -1.0f, -0.75f } })
+        {
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f);
+            std::vector<float> left (total, 1.0f), right (total, 1.0f);
+            engine.setPan (pan);
+            engine.setPhaseInverted (invert);
+            float* channels[] { left.data(), right.data() };
+            engine.process (channels, 2, static_cast<int> (total));
+            CHECK (std::abs (left[settledAfter] - wantLeft) < 1.0e-6f && std::abs (right[settledAfter] - wantRight) < 1.0e-6f);
+            CHECK (std::abs (left.back() - wantLeft) < 1.0e-6f && std::abs (right.back() - wantRight) < 1.0e-6f);
+            float biggestStep = 0.0f;
+            for (size_t i = 1; i < total; ++i)
+                biggestStep = std::max ({ biggestStep, std::abs (left[i] - left[i - 1]), std::abs (right[i] - right[i - 1]) });
+            CHECK (biggestStep < 2.5f / static_cast<float> (settledAfter)); // de +1 a −1 repartido en 20 ms
+        }
+
+        // Ya en su sitio desde prepare (sin rampa); en mono el balance no hace nada.
+        Engine mono;
+        mono.setPan (1.0f);
+        mono.setPhaseInverted (true);
+        mono.prepare (sampleRate, false, 0.0f);
+        float one[] { 1.0f, 1.0f };
+        float* channel[] { one };
+        mono.process (channel, 1, 2);
+        CHECK (one[0] == -1.0f && one[1] == -1.0f);
+
+        // Invertida y vuelta a la normal = la señal original bit a bit.
+        Engine twice;
+        twice.prepare (sampleRate, false, 0.0f);
+        StereoSignal signal (static_cast<int> (sampleRate * 0.2), sampleRate);
+        const StereoSignal original = signal;
+        processInBlocks (twice, signal, 256, [&] (int start) { twice.setPhaseInverted (start < static_cast<int> (sampleRate * 0.05)); });
+        CHECK (signal.left[static_cast<size_t> (sampleRate * 0.03)] == -original.left[static_cast<size_t> (sampleRate * 0.03)]);
+        bool exact = true;
+        for (size_t i = static_cast<size_t> (sampleRate * 0.1); i < signal.left.size(); ++i)
+            exact = exact && signal.left[i] == original.left[i] && signal.right[i] == original.right[i];
+        CHECK (exact);
+    }
+}
+
+void testAutoGain()
+{
+    std::printf ("Auto gain: plano = 0 dB bit a bit, compensa lo ancho y casi nada lo angosto, y deja el tono al mismo nivel\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const auto compensation = [sampleRate] (const Engine::BandArray& bands) {
+            AutoGain autoGain;
+            autoGain.prepare (sampleRate);
+            for (int b = 0; b < Engine::numBands; ++b)
+                autoGain.setBand (b, bands[static_cast<size_t> (b)]);
+            return autoGain.compensationDb();
+        };
+        CHECK (compensation ({}) == 0.0f);
+        // Un shelf de graves sobre Nyquist sube TODO 6 dB: compensa −6.
+        const float everything = compensation (only ({ true, 30000.0f, 6.0f, 0.71f, Shape::lowShelf }));
+        CHECK (std::abs (everything + 6.0f) < 0.05f);
+        // Subir y bajar lo mismo compensa en sentidos opuestos (no exacto: en potencia, +6 pesa más que −6).
+        const float up = compensation (only ({ true, 2000.0f, 6.0f, 0.7f }));
+        const float down = compensation (only ({ true, 2000.0f, -6.0f, 0.7f }));
+        CHECK (up < -1.0f && down > 1.0f && up > -6.0f && down < 6.0f);
+        // Angosto o en los extremos: casi nada.
+        CHECK (std::abs (compensation (only ({ true, 1000.0f, 6.0f, 40.0f }))) < 0.2f);
+        CHECK (std::abs (compensation (only ({ true, 20.0f, 0.0f, 0.71f, Shape::lowCut }))) < 0.3f);
+        // El all-pass no cambia el volumen de nada: nada que compensar.
+        CHECK (std::abs (compensation (only ({ true, 1000.0f, 0.0f, 1.0f, Shape::allPass }))) < 1.0e-4f);
+        // Todo cortado: se limita.
+        Engine::BandArray cut {};
+        for (auto& band : cut)
+            band = { true, 15000.0f, 0.0f, 0.71f, Shape::highCut, 8 };
+        cut[0] = { true, 20.0f, 0.0f, 0.71f, Shape::highCut, 8 };
+        CHECK (compensation (cut) == AutoGain::maxCompensationDb);
+
+        // Recalcular solo la banda que cambió da lo mismo que calcular todo de cero.
+        AutoGain incremental;
+        incremental.prepare (sampleRate);
+        Engine::BandArray bands {};
+        bands[3] = { true, 120.0f, 4.0f, 0.71f, Shape::lowShelf };
+        bands[9] = { true, 5000.0f, -3.0f, 2.0f };
+        for (int b = 0; b < Engine::numBands; ++b)
+            incremental.setBand (b, bands[static_cast<size_t> (b)]);
+        (void) incremental.compensationDb();
+        bands[9].gainDb = 5.0f;
+        incremental.setBand (9, bands[9]);
+        CHECK (std::abs (incremental.compensationDb() - compensation (bands)) < 1.0e-6f);
+
+        // Con el EQ plano y auto gain, la señal pasa bit a bit.
+        Engine flat;
+        flat.setAutoGain (true);
+        flat.prepare (sampleRate, false, 0.0f);
+        StereoSignal signal (4096, sampleRate);
+        const StereoSignal original = signal;
+        processInBlocks (flat, signal, 512, [] (int) {});
+        CHECK (signal.left == original.left && signal.right == original.right);
+        CHECK (flat.getAutoGainDb() == 0.0f);
+
+        // De punta a punta: con todo +6 dB, un tono sale al mismo nivel con auto gain (y 6 dB arriba sin él).
+        for (const bool on : { false, true })
+        {
+            Engine engine;
+            engine.setAutoGain (on);
+            engine.prepare (sampleRate, false, 0.0f, only ({ true, 30000.0f, 6.0f, 0.71f, Shape::lowShelf }));
+            const double level = toneDb (processedSine (engine, 440.0, 0.25, sampleRate, 32768), 440.0, 0.25, sampleRate);
+            CHECK (std::abs (level - (on ? 0.0 : 6.0)) < 0.1);
+        }
+
+        // Encenderlo sonando (y mover la banda en cada bloque) no salta.
+        Engine moving;
+        moving.prepare (sampleRate, false, 0.0f, only ({ true, 1000.0f, 12.0f, 0.5f }));
+        auto left = sine (1000.0, 0.05, sampleRate, static_cast<size_t> (sampleRate * 0.5));
+        auto right = left;
+        BlockSizes sizes;
+        const int total = static_cast<int> (left.size());
+        for (int start = 0, block = 0; start < total; ++block)
+        {
+            const int count = std::min (sizes.next (256), total - start);
+            moving.setAutoGain (start > total / 4);
+            moving.setBand (0, { true, 1000.0f, block % 2 == 0 ? 12.0f : -12.0f, 0.5f });
+            float* channels[] { left.data() + start, right.data() + start };
+            moving.process (channels, 2, count);
+            start += count;
+        }
+        // Cota: el seno con +12 dB (×4) y la compensación de −12 dB al revés (×4 más), con margen.
+        const double steepest = 4.0 * 4.0 * 0.05 * std::pow (2.0 * std::sin (pi * 1000.0 / sampleRate), 2.0);
+        CHECK (biggestSecondDifference (left) < 1.5 * steepest);
+    }
+}
+
+void testSoloZones()
+{
+    std::printf ("Solo: zona de cada forma (0 dB en el centro, lejos muy abajo), tilts sin solo, bypass manda\n");
+    CHECK (! soloZoneFor ({ true, 1000.0f, 3.0f, 1.0f, Shape::tiltShelf }).has_value());
+    CHECK (! soloZoneFor ({ true, 1000.0f, 3.0f, 1.0f, Shape::flatTilt }).has_value());
+    CHECK (soloZoneFor ({ true, 300.0f, 0.0f, 0.71f, Shape::lowCut, 7 })->slopeIndex == 7);
+    for (const double sampleRate : sampleRates)
+    {
+        struct Case
+        {
+            BandSettings band;
+            double inside, outside;
+        };
+        for (const auto& c : { Case { { true, 1000.0f, -6.0f, 4.0f }, 1000.0, 100.0 },                     // campana
+                               Case { { true, 1000.0f, 0.0f, 8.0f, Shape::notch }, 1000.0, 8000.0 },        // notch
+                               Case { { false, 200.0f, 0.0f, 0.71f, Shape::lowCut, 3 }, 40.0, 2000.0 },     // corte apagado
+                               Case { { true, 6000.0f, 4.0f, 0.71f, Shape::highShelf }, 15000.0, 500.0 } }) // shelf agudos
+        {
+            const auto zone = Band::coefficientsFor (*soloZoneFor (c.band), sampleRate);
+            for (const double hz : { c.inside, c.outside })
+            {
+                Engine engine;
+                engine.prepare (sampleRate, false, 0.0f, only (c.band));
+                engine.setSolo (0);
+                const double level = toneDb (processedSine (engine, hz, 0.25, sampleRate, 32768), hz, 0.25, sampleRate);
+                CHECK (std::abs (level - zone.magnitudeDb (hz, sampleRate)) < 0.01);
+                if (hz == c.inside)
+                    CHECK (level > -1.0);
+                else
+                    CHECK (level < -24.0);
+            }
+        }
+
+        // Un tilt no tiene zona: se oye la mezcla tal cual.
+        Engine tilt;
+        tilt.prepare (sampleRate, false, 0.0f, only ({ true, 1000.0f, 0.0f, 1.0f, Shape::tiltShelf }));
+        tilt.setSolo (0);
+        StereoSignal signal (4096, sampleRate);
+        const StereoSignal original = signal;
+        processInBlocks (tilt, signal, 512, [] (int) {});
+        CHECK (signal.left == original.left && ! tilt.isSoloing());
+
+        // En bypass se oye la original aunque haya solo.
+        Engine bypassed;
+        bypassed.prepare (sampleRate, true, 0.0f, only ({ true, 1000.0f, 6.0f, 4.0f }));
+        bypassed.setSolo (0);
+        StereoSignal again (4096, sampleRate);
+        processInBlocks (bypassed, again, 512, [] (int) {});
+        CHECK (again.left == original.left && again.right == original.right);
+    }
+}
+
+void testSoloSwitchingHasNoClicks()
+{
+    std::printf ("Solo: encender, pasar de banda (y de clase de filtro), mover la banda y soltar no salta; al soltar, bit a bit\n");
+    for (const double sampleRate : sampleRates)
+    {
+        Engine::BandArray bands {};
+        bands[0] = { true, 1000.0f, 0.0f, 2.0f };                      // campana en 0 dB: sin solo, la señal intacta
+        bands[1] = { true, 150.0f, 0.0f, 0.71f, Shape::lowShelf };     // pasa bajos
+        bands[2] = { false, 5000.0f, 0.0f, 0.71f, Shape::highCut, 4 }; // pasa altos
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f, bands);
+        StereoSignal signal (static_cast<int> (sampleRate * 1.2), sampleRate);
+        const StereoSignal original = signal;
+        const int tenth = static_cast<int> (sampleRate * 0.1);
+        processInBlocks (engine, signal, 300, [&] (int start) {
+            const int step = start / tenth;
+            engine.setSolo (step < 1 ? -1 : step < 3 ? 0 : step < 5 ? 1 : step < 7 ? 2 : step < 8 ? 0 : -1);
+            // Mientras la banda 1 está en solo, su frecuencia salta entre bloques (sus rampas la suavizan).
+            bands[0].frequency = step == 2 && (start / 300) % 2 == 0 ? 3000.0f : 1000.0f;
+            engine.setBand (0, bands[0]);
+        });
+        // Cota: la pendiente máxima de la señal de prueba a 0 dB (los dos senos juntos); un salto de golpe entre la zona
+        // y la mezcla la supera.
+        const double steepest = 0.3 * 2.0 * pi * 3150.0 / sampleRate + 0.5 * 2.0 * pi * 220.0 / sampleRate;
+        float biggestStep = 0.0f;
+        for (size_t i = 1; i < signal.left.size(); ++i)
+            biggestStep = std::max ({ biggestStep, std::abs (signal.left[i] - signal.left[i - 1]), std::abs (signal.right[i] - signal.right[i - 1]) });
+        std::printf ("  %6.0f Hz: salto mayor %.4f (cota %.4f)\n", sampleRate, static_cast<double> (biggestStep), steepest);
+        CHECK (biggestStep < steepest);
+        CHECK (! engine.isSoloing());
+        bool exact = true;
+        for (size_t i = static_cast<size_t> (9 * tenth); i < signal.left.size(); ++i)
+            exact = exact && signal.left[i] == original.left[i] && signal.right[i] == original.right[i];
+        CHECK (exact);
+    }
+}
 } // namespace
 
 int main()
@@ -711,6 +978,11 @@ int main()
     testBandCreationAndNotes();
     testAnalyzerView();
     testSpectrumPeaks();
+    testGainScale();
+    testPanAndPolarity();
+    testAutoGain();
+    testSoloZones();
+    testSoloSwitchingHasNoClicks();
 
     if (failures > 0)
     {

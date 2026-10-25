@@ -64,23 +64,28 @@ build/plugins/fathom/Release/FathomTests.exe                    # tests del moto
 plugins/fathom/
   CMakeLists.txt           # plugin y tests; enlaza deepwater::dsp
   Source/
-    PluginProcessor.h/.cpp   # parámetros, estado (con la vista del analizador), processBlock, el bus de sidechain,
-                             # las tomas del analizador (entrada, salida, sidechain) y el historial de deshacer
+    PluginProcessor.h/.cpp   # parámetros, estado (con la vista del analizador y el otro lado del A/B), processBlock,
+                             # el bus de sidechain, las tomas del analizador, el historial de deshacer y el solo
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
-    dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie, ganancia de salida y bypass
+    dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie, escala de ganancia, salida,
+                             # auto gain, balance, polaridad, solo y bypass
+    dsp/AutoGain.h           # cuánto cambia la sonoridad la curva (ruido rosa con peso K de BS.1770), por banda
+    dsp/Solo.h               # la zona que se escucha en solo según la forma de la banda
     dsp/Band.h               # una banda: formas (Shape), pendientes, ajustes (BandSettings), parámetros suavizados,
                              # fundido de encendido/cambio de forma y coeficientes para la GUI
     edit/UndoStack.h         # pila de deshacer/rehacer (sin JUCE): pasos con solo los parámetros que cambiaron
-    edit/EditHistory.h       # deshacer con JUCE: escucha los gestos de los parámetros (no la automatización del host)
+    edit/EditHistory.h       # deshacer con JUCE: escucha los gestos de los parámetros (no la automatización del host);
+                             # fotos y carga de todos los parámetros para el A/B
     edit/NodeEditing.h       # cuentas de la edición sin JUCE: arrastrar nodos, rueda = Q, banda libre, notas
     analysis/SpectrumView.h  # cuentas del analizador sin JUCE: inclinación, rango, resolución, balística, retención
                              # de picos, ajustes de la vista (ViewSettings) y búsqueda de picos del espectro
     gui/                     # tema (con el color de cada banda), LookAndFeel, formato de valores, atajos (Keys),
                              # visor (EqDisplay: cuadrícula, analizador, curvas, nodos editables, teclado de piano,
                              # agarrar picos), BandEdits (cambiar parámetros con gestos), panel de la banda elegida
-                             # (BandPanel), ajustes del analizador (AnalyzerPanel)
-  tests/EngineTests.cpp    # tests del motor, de la edición y del analizador (sin JUCE)
+                             # (BandPanel, con SOLO), ajustes del analizador (AnalyzerPanel), columna de salida
+                             # (OutputPanel: escala, auto gain, balance, polaridad, ganancia)
+  tests/EngineTests.cpp    # tests del motor (con auto gain y solo), de la edición y del analizador (sin JUCE)
 ```
 
 ## Aprendizaje de mezcla (igual de importante que el código)
@@ -117,7 +122,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       selección múltiple, deshacer/rehacer y teclado de piano en el eje.
 - [x] Fase 5 — Analizador profesional: inclinación de 4.5 dB/oct, rango, resolución, velocidad, retención de picos,
       congelar; ver entrada/salida/sidechain; "agarrar" un pico del espectro para crear o mover una banda.
-- [ ] Fase 6 — Escuchar y comparar: solo de banda (escuchar la zona que toca), auto gain (volumen igualado al
+- [x] Fase 6 — Escuchar y comparar: solo de banda (escuchar la zona que toca), auto gain (volumen igualado al
       comparar), escala de ganancia global, ganancia y paneo de salida, invertir la fase, comparación A/B.
 - [ ] Fase 7 — Respuesta analógica: corregir el aplastamiento de campanas y shelves agudos cerca de Nyquist
       (bilineal "cramping") sin latencia. Opciones: sobremuestreo vs. diseño "matched" (Vicanek); medir contra el
@@ -140,7 +145,53 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 5 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
+Fase 6 COMPLETADA (2026-10-24), pendiente de probar en FL Studio.
+- `dsp/Engine.h`: después de las bandas, un multiplicador por canal = salida × auto gain × balance × polaridad, todo con
+  `LinearRamp` de 20 ms (si todo vale 1, bit a bit); después el solo (fundido de 20 ms entre la mezcla y la zona) y al
+  final el bypass. `setGainScale` (0–2: multiplica `gainDb` de cada banda en `setBand`, incluido el flat tilt; las bandas
+  ya suavizan los dB), `setPan` (balance: L = min(1, 1 − p), R = min(1, 1 + p); en mono no hace nada),
+  `setPhaseInverted` (rampa +1 → −1, pasa por 0), `setAutoGain`, `setSolo (banda o −1)`, `getAutoGainDb`, `isSoloing`.
+  Los ajustes pedidos antes de `prepare` arrancan sin rampa. La firma de `prepare` no cambió.
+- `dsp/AutoGain.h`: 60 puntos (cada 1/6 de octava desde 20 Hz, tope 0.45·fs), peso = |K|² del filtro K de BS.1770
+  (high-pass 2 polos 38.13 Hz Q 0.5 + shelf +4 dB 1681.97 Hz) normalizado; con puntos equiespaciados en octavas el ruido
+  rosa pesa igual en todos. Compensación = −10·log10(Σ w·Π|H_b|²), límite ±24 dB. Cada banda guarda su |H|² y solo se
+  recalcula si cambian sus ajustes (dos bandas apagadas = iguales); la suma solo si algo cambió. En el motor se actualiza
+  una vez por bloque y solo con el auto gain encendido. Valores (48 kHz): shelf agudos +3 dB 1 kHz → −2.25; shelf graves
+  +3 dB 200 Hz → −0.49; campana +2 dB 3 kHz Q 0.7 → −0.72; campana +6 dB Q 8 → −0.23; corte 30 Hz → +0.03; corte
+  100 Hz 24 dB/oct → +0.29. La curva del visor NO incluye el auto gain (se muestra el número en la columna de salida).
+- `dsp/Solo.h`: `soloZoneFor` = campana/notch/pasa banda/all-pass → pasa banda con su frecuencia y su Q; shelf y corte de
+  graves → pasa bajos (el corte con su misma pendiente, el shelf 12 dB/oct, Q 0.71); de agudos → pasa altos; tilts →
+  sin zona (`canSolo`). En el motor la zona es otra `Band` sobre la señal ORIGINAL (0 dB en el centro); la misma banda y
+  la misma clase de filtro = sus rampas; otra banda u otra clase = fundido a la mezcla, `prepare` de la zona nueva en
+  silencio y fundido al solo. Funciona aunque la banda esté apagada. El bypass manda sobre el solo.
+- Parámetros nuevos (versionHint 6): `gainScale` (0–200 %, 100), `outputPan` (−100…100, "C" / "L n" / "R n"),
+  `phaseInvert` (off), `autoGain` (off). Un proyecto de las Fases 1-5 suena igual.
+- Procesador: `setSoloBand`/`getSoloBand` (atómico, no es parámetro: no se guarda; el editor lo pone en −1 al cerrarse),
+  `getAutoGainDb` (atómico desde el audio). A/B: hijo `Compare` del estado del APVTS con `side` (0 = A, 1 = B) y un hijo
+  `Other` con un atributo por parámetro (ID = valor en sus unidades; lo que falta = valor por defecto). `switchCompareSide`
+  (solo sin ediciones a medias): foto del activo → `Other`, carga del otro (la primera vez, copia del activo) con
+  `EditHistory::load` (con gestos, sin paso de deshacer) y `swapStack` con `otherSideHistory`: cada lado tiene su propio
+  historial. `copyToOtherSide`. Cubre los mismos parámetros que el deshacer (todos menos el bypass).
+- GUI: ventana de 1082 px (antes 960): columna nueva `gui/OutputPanel.h` a la derecha del analizador (ESCALA, AUTO GAIN
+  con lo que compensa, BALANCE, Ø POLARIDAD, GANANCIA; la perilla de salida salió de la columna del analizador).
+  Cabecera: A / B / "A → B" (o "B → A") a la izquierda de DESHACER. Panel de la banda: SOLO (amarillo, `theme::solo`)
+  junto a ON; sigue a la banda del panel; atenuado en los tilts. Visor: "Escuchar su zona (SOLO)" en el menú del nodo,
+  aviso "SOLO: BANDA n" (o que el tilt no tiene zona); curvas y nodos con la escala aplicada; arrastrar y crear dividen
+  por la escala (mínimo 0.25) para que el nodo siga al mouse; la etiqueta muestra "+6.0 dB → +3.0 dB" con escala ≠ 100 %.
+- Tests nuevos `FathomTests`: escala (50 % = la curva a la mitad < 0.01 dB; 0 % bit a bit), balance y polaridad
+  (valores exactos, rampa sin saltos, mono, invertir y volver = bit a bit), auto gain (plano = 0 dB y bit a bit; todo
+  +6 dB → −6 ± 0.05; angosto y extremos ≈ 0; all-pass 0; todo cortado = límite; incremental = desde cero; tono al mismo
+  nivel ±0.1 dB de punta a punta; encenderlo con la banda saltando cada bloque sin clic), solo (zona medida = curva
+  < 0.01 dB, centro > −1 dB, lejos < −24 dB, tilt sin solo, bypass manda) y cambiar de solo entre bandas y clases de
+  filtro sin saltos (con el fundido en 10 µs el test falla: salto 0.5 contra cota 0.14) y bit a bit al soltarlo.
+- Revisada con clics automatizados en el Standalone (ON, AUTO GAIN, SOLO y su aviso, A → B con cambios en B y vuelta a
+  A, cada lado con su DESHACER). OJO capturas: PowerShell debe llamar a `SetProcessDPIAware` (si no, la ventana sale
+  recortada) y los clics necesitan una pausa entre bajar y soltar.
+- Sin cambios: las bandas, sus parámetros e IDs, el analizador, latencia 0.
+- Release con 0 warnings; ctest 8/8 (UndertowTests falló una vez por su test de CPU, 20.7 % contra 20 %, sin cambios en
+  Undertow; al repetirlo pasó: 19.2 %); pluginval strictness 10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 5
 - `analysis/SpectrumView.h` (sin JUCE): inclinación k·log2(f / 1 kHz) con 0 / 3 / 4.5 / 6 dB/oct (4.5 por defecto);
   rango 48 / 72 / 96 / 120 dB (múltiplos de 8: la cuadrícula cae en números redondos; 96 por defecto); resolución =
   FFT de 2048 a 16384 a 44.1/48 kHz (el doble a 88.2/96: misma duración; media = 4096, la de antes); velocidad =
@@ -259,4 +310,4 @@ Fase 5 COMPLETADA (2026-10-12). Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 6 (escuchar y comparar).
+Siguiente: Fase 7 (respuesta analógica), cuando el usuario confirme la Fase 6 en FL.

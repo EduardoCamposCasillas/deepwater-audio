@@ -5,7 +5,7 @@
 
 namespace
 {
-constexpr int editorWidth = 960;
+constexpr int editorWidth = 1082; // la columna de SALIDA (Fase 6) se sumó a la derecha
 constexpr int editorHeight = 640;
 constexpr int bandPanelHeight = 112;
 constexpr int headerHeight = 44;
@@ -16,7 +16,7 @@ constexpr int framesPerSecond = 30;
 } // namespace
 
 FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p), display (p), bandPanel (p)
+    : AudioProcessorEditor (p), processor (p), display (p), bandPanel (p), outputPanel (p)
 {
     setLookAndFeel (&lookAndFeel);
 
@@ -53,20 +53,29 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
     addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), fathom::params::bypass, bypassButton);
 
-    outputKnob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 90, 18);
-    outputKnob.getProperties().set ("bipolar", true);
-    outputKnob.setTooltip (juce::String::fromUTF8 ("Volumen de salida (\xc2\xb1" "24 dB). Sirve para compensar lo que suben o "
-                                                   "bajan las bandas: al comparar con el BYPASS, lo m\xc3\xa1s fuerte siempre "
-                                                   "parece mejor, as\xc3\xad que iguala el volumen antes de juzgar. Doble clic "
-                                                   "= 0 dB."));
-    addAndMakeVisible (outputKnob);
-    outputAttachment = std::make_unique<SliderAttachment> (processor.getParameters(), fathom::params::outputGain, outputKnob);
-    outputKnob.setDoubleClickReturnValue (true, 0.0);
-    outputLabel.setText ("SALIDA", juce::dontSendNotification);
-    outputLabel.setJustificationType (juce::Justification::centred);
-    outputLabel.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-    outputLabel.setColour (juce::Label::textColourId, fathom::gui::theme::dimText);
-    addAndMakeVisible (outputLabel);
+    addAndMakeVisible (outputPanel);
+
+    // Comparación A/B: dos versiones completas del EQ; un clic en la otra letra cambia (sin clic en el audio).
+    const auto compareTip = juce::String::fromUTF8 (
+        "Comparaci\xc3\xb3n A/B: dos versiones completas del EQ (todo menos el bypass). Haz una en A, pasa a B (nace como "
+        "copia de A), cambia lo que quieras y alterna para decidir, mejor con AUTO GAIN encendido. Cada lado tiene su "
+        "propio deshacer. Se guarda con el proyecto.");
+    for (auto* button : { &sideAButton, &sideBButton })
+    {
+        button->setColour (juce::TextButton::buttonOnColourId, fathom::gui::theme::accent.withAlpha (0.45f));
+        button->setTooltip (compareTip);
+        button->onClick = [this, button] {
+            if ((button == &sideBButton) != (processor.getCompareSide() == 1))
+                processor.switchCompareSide();
+            showCompareSide();
+        };
+        addAndMakeVisible (*button);
+    }
+    copySideButton.setTooltip (juce::String::fromUTF8 ("Copiar el lado activo al otro (los dos quedan iguales): para partir de "
+                                                       "lo que tienes y probar una variaci\xc3\xb3n."));
+    copySideButton.onClick = [this] { processor.copyToOtherSide(); };
+    addAndMakeVisible (copySideButton);
+    showCompareSide();
 
     setSize (editorWidth, editorHeight);
     processor.setAnalyzerActive (true);
@@ -77,6 +86,7 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
 FathomAudioProcessorEditor::~FathomAudioProcessorEditor()
 {
     processor.setAnalyzerActive (false);
+    processor.setSoloBand (-1); // sin la ventana no se ve que hay un solo: no se deja sonando
     setLookAndFeel (nullptr);
 }
 
@@ -94,6 +104,9 @@ void FathomAudioProcessorEditor::timerCallback()
     }
     display.update (elapsed);
     bandPanel.refresh();
+    outputPanel.refresh();
+    if ((processor.getCompareSide() == 1) != sideBButton.getToggleState()) // un proyecto cargado con la ventana abierta
+        showCompareSide();
     undoButton.setEnabled (processor.getEditHistory().canUndo());
     redoButton.setEnabled (processor.getEditHistory().canRedo());
 }
@@ -117,6 +130,14 @@ void FathomAudioProcessorEditor::selectBand (int band)
     display.setSelectedBand (band);
 }
 
+void FathomAudioProcessorEditor::showCompareSide()
+{
+    const bool onB = processor.getCompareSide() == 1;
+    sideAButton.setToggleState (! onB, juce::dontSendNotification);
+    sideBButton.setToggleState (onB, juce::dontSendNotification);
+    copySideButton.setButtonText (juce::String::fromUTF8 (onB ? "B \xe2\x86\x92 A" : "A \xe2\x86\x92 B"));
+}
+
 void FathomAudioProcessorEditor::showAnalyzerView (const fathom::analysis::ViewSettings& view)
 {
     shownView = view;
@@ -134,13 +155,13 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 5: analizador profesional"), header, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 6: escuchar y comparar"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
     g.drawText (juce::String::fromUTF8 ("Doble clic = crear banda  \xc2\xb7  arrastrar = frecuencia/ganancia (Shift fino, Alt un "
                                         "eje)  \xc2\xb7  rueda = Q  \xc2\xb7  Ctrl+clic o rect\xc3\xa1ngulo = varias  \xc2\xb7  "
-                                        "clic en un pico = banda  \xc2\xb7  clic derecho = men\xc3\xba  \xc2\xb7  Ctrl+Z = deshacer"),
+                                        "clic en un pico = banda  \xc2\xb7  clic derecho = men\xc3\xba (y SOLO)  \xc2\xb7  Ctrl+Z = deshacer"),
                 getLocalBounds().removeFromBottom (footerHeight), juce::Justification::centred);
 }
 
@@ -152,17 +173,21 @@ void FathomAudioProcessorEditor::resized()
     redoButton.setBounds (header.removeFromRight (84));
     header.removeFromRight (6);
     undoButton.setBounds (header.removeFromRight (90));
+    header.removeFromRight (24);
+    copySideButton.setBounds (header.removeFromRight (62));
+    header.removeFromRight (6);
+    sideBButton.setBounds (header.removeFromRight (34));
+    header.removeFromRight (2);
+    sideAButton.setBounds (header.removeFromRight (34));
 
     auto content = getLocalBounds().withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0);
+    outputPanel.setBounds (content.removeFromRight (controlsWidth));
+    content.removeFromRight (padding);
     auto controls = content.removeFromRight (controlsWidth);
     content.removeFromRight (padding);
     bandPanel.setBounds (content.removeFromBottom (bandPanelHeight));
     content.removeFromBottom (padding);
     display.setBounds (content);
 
-    // La salida abajo a la derecha, junto al final de la cadena (como en una consola); el analizador arriba.
-    auto knobArea = controls.removeFromBottom (130);
-    outputLabel.setBounds (knobArea.removeFromTop (18));
-    outputKnob.setBounds (knobArea);
     analyzerPanel.setBounds (controls.withTrimmedTop (8));
 }

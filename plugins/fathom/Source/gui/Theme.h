@@ -18,6 +18,7 @@ inline const juce::Colour text { 0xffe3e9ef };
 inline const juce::Colour dimText { 0xff8794a1 };
 inline const juce::Colour accent { 0xff4f9dff };
 inline const juce::Colour bypassOn { 0xffef5350 };
+inline const juce::Colour solo { 0xffffd54f }; // escuchar una banda sola (Fase 6): amarillo, como el solo de una consola
 
 // El visor: entrada = gris (referencia); salida = el acento, con relleno; sidechain = ámbar.
 inline const juce::Colour spectrumIn { 0xff9aa7b4 };

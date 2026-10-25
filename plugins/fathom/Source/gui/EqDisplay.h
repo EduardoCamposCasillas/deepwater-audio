@@ -13,6 +13,7 @@
 #include "PluginProcessor.h"
 #include "analysis/SpectrumView.h"
 #include "deepwater/dsp/SpectrumAnalyzer.h"
+#include "dsp/Solo.h"
 #include "edit/NodeEditing.h"
 #include "gui/BandEdits.h"
 #include "gui/Format.h"
@@ -69,6 +70,7 @@ public:
     explicit EqDisplay (FathomAudioProcessor& p) : processor (p), edits (p)
     {
         outputGain = processor.getParameters().getRawParameterValue (params::outputGain);
+        gainScale = processor.getParameters().getRawParameterValue (params::gainScale);
 
         rangeButton.setTooltip (juce::String::fromUTF8 ("Escala del EQ (n\xc3\xbameros de la derecha): cu\xc3\xa1nto sube o "
                                                         "baja la curva de arriba a abajo. \xc2\xb1" "6 dB para ajustes finos "
@@ -112,6 +114,9 @@ public:
         changed = updateTrace (output, processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
         changed = updateTrace (sidechain, processor.getSidechainTap(), sampleRate, elapsedSeconds) || changed;
         changed = updatePeaks() || changed;
+        const int solo = processor.getSoloBand();
+        changed = changed || solo != paintedSolo;
+        paintedSolo = solo;
         const bool connected = processor.isSidechainConnected();
         changed = changed || connected != sidechainConnected;
         sidechainConnected = connected;
@@ -394,7 +399,7 @@ public:
             if (selection.test (static_cast<size_t> (b)))
             {
                 const auto& start = dragStart[static_cast<size_t> (b)];
-                const auto moved = edit::dragged (start, octaves, db, minHz, maxHz);
+                const auto moved = edit::dragged (start, octaves, db / nodeScale(), minHz, maxHz);
                 edits.set (b, params::frequency, snap ? snappedHz (moved.frequency) : moved.frequency);
                 if (dsp::usesGain (start.shape))
                     edits.set (b, params::gain, moved.gainDb);
@@ -676,7 +681,7 @@ private:
         settings.frequency = juce::jlimit (minHz, maxHz, xToHz (position.x));
         if (dsp::usesGain (shape))
             settings.gainDb = juce::jlimit (dsp::BandSettings::minGainDb, dsp::BandSettings::maxGainDb,
-                                            (yToEqDb (position.y) - paintedGainDb) * edit::gainPerNodeDb (shape));
+                                            (yToEqDb (position.y) - paintedGainDb) * edit::gainPerNodeDb (shape) / nodeScale());
         if (shape == dsp::Shape::lowShelf || shape == dsp::Shape::highShelf || shape == dsp::Shape::lowCut
             || shape == dsp::Shape::highCut)
             settings.q = 0.71f; // sin rebote (Butterworth en los cortes)
@@ -757,6 +762,9 @@ private:
                               edits.set (b, params::frequency, edit::nearestNoteHz (s.frequency));
                           });
                       }));
+        const bool soloing = processor.getSoloBand() >= 0;
+        menu.addItem (juce::String::fromUTF8 ("Escuchar su zona (SOLO)"), dsp::canSolo (settings.shape), soloing,
+                      guarded ([this, soloing] { processor.setSoloBand (soloing ? -1 : focusedBand); }));
         menu.addSeparator();
         menu.addItem (several ? "Borrar las elegidas (Supr)" : "Borrar (Supr)", guarded ([this] { deleteSelection(); }));
         showMenu (menu);
@@ -795,9 +803,11 @@ private:
     bool refreshBands (double sampleRate)
     {
         const float gainDb = outputGain->load();
-        bool changed = gainDb != paintedGainDb || sampleRate != curveSampleRate;
-        const bool allBands = sampleRate != curveSampleRate;
+        const float scale = gainScale->load() * 0.01f;
+        const bool allBands = sampleRate != curveSampleRate || scale != paintedScale;
+        bool changed = gainDb != paintedGainDb || allBands;
         paintedGainDb = gainDb;
+        paintedScale = scale;
         curveSampleRate = sampleRate;
         for (int b = 0; b < dsp::Engine::numBands; ++b)
         {
@@ -1157,7 +1167,9 @@ private:
         if (curveSampleRate <= 0.0) // antes del primer update() no se sabe la frecuencia de muestreo
             return;
         const auto index = static_cast<size_t> (b);
-        const auto& settings = paintedBands[index];
+        // Con la escala de ganancia: la curva es la que suena, no la de los números de la banda.
+        auto settings = paintedBands[index];
+        settings.gainDb *= paintedScale;
         bandCascades[index] = dsp::Band::coefficientsFor (settings, curveSampleRate);
         // El nodo: sobre la curva de la banda en su frecuencia si la forma tiene ganancia (la campana en su pico, el
         // shelf en su punto medio, los tilts en su eje); los cortes, el notch, el pasa banda y el all-pass, en 0 dB.
@@ -1320,7 +1332,16 @@ private:
             note ("CONGELADO", theme::accent);
         if (view.showSidechain && ! sidechainConnected)
             note ("SIDECHAIN SIN CONECTAR", theme::spectrumSidechain);
+        if (paintedSolo >= 0)
+            note (dsp::canSolo (paintedBands[static_cast<size_t> (paintedSolo)].shape)
+                      ? "SOLO: BANDA " + juce::String (paintedSolo + 1)
+                      : "SOLO: LA BANDA " + juce::String (paintedSolo + 1) + " (TILT) NO TIENE ZONA",
+                  theme::solo);
     }
+
+    // Arrastrar un nodo 1 dB lo mueve 1 dB en pantalla aunque la escala de ganancia no esté en 100 % (la ganancia de la
+    // banda cambia 1 dB / escala). Con la escala muy baja no se multiplica más de 4 veces: sería imposible de controlar.
+    float nodeScale() const noexcept { return std::max (paintedScale, 0.25f); }
 
     // El pico bajo el mouse: un círculo sobre el espectro con su frecuencia y su nota (afinadas con los bins).
     void paintPeakMarker (juce::Graphics& g) const
@@ -1377,9 +1398,13 @@ private:
         auto second = format::hz (s.frequency) + (note.isEmpty() ? juce::String() : dot + note);
         juce::String third;
         if (dsp::usesGain (s.shape))
+        {
             third = s.shape == dsp::Shape::flatTilt
                         ? juce::String (s.gainDb * dsp::BandSettings::flatTiltDbPerOctavePerDb, 2) + " dB/oct"
                         : format::db (s.gainDb);
+            if (paintedScale != 1.0f && s.shape != dsp::Shape::flatTilt) // la escala la cambia: lo que de verdad suena
+                third << juce::String::fromUTF8 (" \xe2\x86\x92 ") << format::db (s.gainDb * paintedScale);
+        }
         if (dsp::usesSlope (s.shape))
             third = juce::String (dsp::slopes[static_cast<size_t> (s.slopeIndex)]) + " dB/oct";
         if (dsp::usesQ (s.shape, s.slopeIndex))
@@ -1438,6 +1463,7 @@ private:
     FathomAudioProcessor& processor;
     BandEdits edits;
     std::atomic<float>* outputGain = nullptr;
+    std::atomic<float>* gainScale = nullptr;
     juce::TextButton rangeButton;
     size_t rangeIndex = 1; // ±12 dB
     Trace input, output, sidechain;
@@ -1452,6 +1478,8 @@ private:
     bool grabbing = false;         // arrastrando la banda recién creada en un pico (el espectro se queda quieto)
     bool lastClickGrabbed = false; // el primer clic de un posible doble clic agarró un pico
     float paintedGainDb = 0.0f;
+    float paintedScale = 1.0f;  // la escala de ganancia (1 = 100 %)
+    int paintedSolo = -1;       // la banda en solo, o −1
     static constexpr float nodeRadius = 8.0f;
     std::array<dsp::BandSettings, dsp::Engine::numBands> paintedBands {};
     std::array<deepwater::dsp::EqCascade, dsp::Engine::numBands> bandCascades {};

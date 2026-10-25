@@ -555,3 +555,128 @@ la equivocada; compara siempre con el volumen igualado.
   lo que también molesta al oído, sobre todo lo que se queda quieto mientras las notas cambian.
 - **Dejar el sidechain conectado "por si acaso".** No cambia el sonido, pero es una ruta más en el proyecto; quítala
   cuando termines de comparar.
+
+## Fase 6 — Escuchar y comparar: que el oído decida (sin trampas)
+
+Hasta aquí Fathom servía para **cambiar** el sonido. Esta fase es para **decidir** si el cambio sirve. El oído se
+engaña fácil: lo más fuerte parece mejor, lo que acabas de tocar parece necesario, y después de diez minutos ya no
+recuerdas cómo sonaba antes. Las herramientas de esta fase quitan esas trampas: escuchar solo la zona que tocas,
+comparar a volumen igual, alternar entre dos versiones y bajar todo el EQ a la mitad para ver si te pasaste.
+
+### Conceptos aprendidos
+
+- **El sesgo del volumen, en serio.** Una diferencia de 0.5–1 dB no se oye como "más fuerte": se oye como "más claro",
+  "más grande", "mejor". Casi cualquier realce sube el volumen total, así que al comparar con el BYPASS el EQ siempre
+  "gana". Por eso Fathom tiene **AUTO GAIN**: compensa el volumen que mueve la curva para que la comparación sea justa.
+- **Cómo se calcula el auto gain (sin escuchar la música).** Medir la señal en vivo y corregirla bombearía con la
+  música. Fathom lo calcula de la **curva**: imagina una mezcla típica (la misma energía en cada octava, el *ruido
+  rosa*), le aplica la curva y mide cuánto cambia su sonoridad con el mismo filtro que usan los medidores de **LUFS**
+  (el filtro "K": casi no cuenta lo que hay bajo 40 Hz y pesa un poco más lo que hay sobre 2 kHz). Por eso:
+  - un shelf de agudos de +3 dB en 1 kHz compensa −2.3 dB (sube la mitad del espectro que el oído pesa más);
+  - un shelf de graves de +3 dB en 200 Hz compensa solo −0.5 dB (el oído pesa poco los graves);
+  - una campana angosta de +6 dB (Q 8) en 1 kHz compensa −0.2 dB (sube una franja que pesa poco en el total);
+  - un corte de graves en 30 Hz compensa +0.03 dB: nada (el oído casi no cuenta esa zona).
+  La compensación solo cambia cuando cambia la curva: no bombea ni cambia la dinámica.
+- **Escuchar la zona (SOLO).** Ver un pico en 340 Hz no te dice si es *eso* lo que suena feo. Con SOLO dejas de oír la
+  mezcla y escuchas solo la franja que toca la banda (un pasa banda con su frecuencia y su ancho). Es la técnica clásica
+  de "realzar y barrer" pero sin realzar: pones la banda angosta, barres la frecuencia y cuando el sonido "chilla" o
+  "zumba", la encontraste. En un corte de graves, SOLO te hace escuchar **lo que vas a quitar** (¿se va algo del bombo?).
+- **La escala de ganancia.** Después de un rato ecualizando, casi siempre hay de más. La ESCALA multiplica los dB de
+  todas las bandas: 50 % = la misma forma a la mitad. Si a 70 % suena igual de bien, quédate en 70 %: menos EQ = menos
+  efectos secundarios (fase, resonancias, sonido "procesado").
+- **Polaridad.** Invertir la polaridad pone la onda al revés (lo que subía, baja). Una pista sola suena idéntica
+  invertida; lo que cambia es **cómo se suma con otra parecida**. Dos micrófonos del mismo instrumento, un kick en
+  capas, un 808 con un sub aparte: si están "al revés" entre sí, los graves se cancelan y suenan flacos. Invertir uno
+  de los dos y escuchar cuál suena **más lleno** es la prueba.
+- **Balance.** En una pista estéreo, "panear" en realidad es balance: al girar a la derecha baja el lado izquierdo y el
+  derecho se queda igual. Fathom lo hace así (no sube el lado al que giras).
+- **Comparar A/B.** La memoria auditiva dura segundos. Para elegir entre dos ideas hay que poder saltar de una a la
+  otra al instante, con todo lo demás igual. A y B son dos EQ completos dentro del mismo plugin; cambiar no hace clic.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **SOLO** (panel de la banda, amarillo; también en el menú del clic derecho de un nodo: "Escuchar su zona"): escuchas
+  solo la zona de la banda del panel. Si eliges otra banda con el SOLO encendido, pasa a esa. Campana, notch, pasa
+  banda y all-pass = la franja de su frecuencia y su Q; shelf o corte de graves = todo lo de abajo; de agudos = todo lo
+  de arriba. Los tilts no tienen zona (el visor lo avisa). Arriba a la izquierda del visor dice "SOLO: BANDA n". No se
+  guarda con el proyecto y se apaga al cerrar la ventana (para que nunca te quede un EQ "en solo" sin saberlo).
+- **ESCALA** (columna SALIDA, 0–200 %, doble clic = 100 %): la intensidad de todas las bandas. La curva y los nodos se
+  mueven; la etiqueta de un nodo muestra su ganancia y, con la escala distinta de 100 %, lo que de verdad suena
+  ("+6.0 dB → +3.0 dB"). Arrastrar un nodo sigue al mouse igual.
+- **AUTO GAIN**: encendido, compensa el volumen; debajo dice cuánto ("−2.1 dB"). No mueve la curva del visor (la curva
+  sigue mostrando la forma del EQ).
+- **BALANCE** (C, L 1–100, R 1–100; doble clic = centro).
+- **Ø POLARIDAD**: invierte la salida, con un fundido de 20 ms (sin clic).
+- **GANANCIA**: la salida de siempre (±24 dB).
+- **A / B / A → B** (cabecera): clic en la letra apagada = pasar a ese lado. La primera vez, B nace como copia de A.
+  "A → B" copia el lado activo al otro. Cada lado tiene su propio DESHACER. El lado que no está activo se guarda con el
+  proyecto.
+
+### Ejercicio de escucha guiado en FL Studio
+
+1. **La trampa del volumen.** En el master de un beat, crea una campana ancha (Q 0.7) de +2 dB en 3 kHz. Alterna con
+   BYPASS: "suena mejor". Ahora enciende AUTO GAIN (dice −0.7 dB) y alterna otra vez. ¿Sigue sonando mejor,
+   o solo era más fuerte? Repite con los ojos cerrados (pídele a alguien que alterne por ti).
+2. **Barrer con SOLO.** En la voz: campana Q 8, ganancia 0 dB, SOLO encendido. Arrastra el nodo despacio de 200 Hz a
+   5 kHz escuchando solo esa franja. Vas a oír zonas "normales" y una o dos que suenan a caja, a nariz o que silban.
+   Detente en la peor, apaga el SOLO y bájala −3 dB. Compara con AUTO GAIN encendido.
+3. **¿Qué quita mi corte?** En el hi-hat, un corte de graves en 400 Hz a 24 dB/oct. SOLO: escuchas lo que se va. Si
+   oyes "nada" o solo un golpe sordo, el corte está bien; si oyes el cuerpo del hi-hat, bájalo.
+4. **La escala.** Después de ecualizar una pista con 4–5 bandas, baja la ESCALA a 0 % y súbela despacio. ¿En qué
+   punto deja de mejorar? Muchas veces es antes del 100 %.
+5. **Polaridad de las capas.** Si tu kick tiene dos capas (un golpe y un sub) en pistas distintas, pon Fathom en una
+   de ellas y alterna Ø POLARIDAD con las dos sonando: una de las dos posiciones suena con más pecho. Esa es la buena.
+
+### Receta: decidir entre dos EQ del 808 con A/B
+
+1. En el 808, con el kick sonando (sidechain al analizador, como en la Fase 5), en **A** haz la versión "hueco": una
+   campana de −3 dB y Q 3 justo donde vive el golpe del kick (por ejemplo 62 Hz, un B1 de FL).
+2. Pasa a **B** (nace igual que A). Apaga la campana y en su lugar sube un shelf de graves de +2 dB en 45 Hz y una
+   campana de +2 dB y Q 1.5 en 900 Hz (los armónicos que hacen que el 808 se oiga en un celular).
+3. Enciende **AUTO GAIN** en los dos lados (es un ajuste más de cada lado: si lo enciendes antes de pasar a B, B nace
+   con él).
+4. Pon el loop y alterna A y B cada 4 compases. Escucha el kick, no el 808: ¿en cuál pega más el kick sin que el 808
+   pierda peso?
+5. Quédate con la ganadora (si quieres empezar otra variación desde ella: "A → B" o "B → A").
+
+Por qué funciona: comparas dos ideas completas, al instante y al mismo volumen. Sin A/B, comparas una idea con el
+recuerdo de la otra, y el recuerdo siempre pierde.
+
+### Reto sin receta
+
+En el bus de la percusión del dembow (timbal, hi-hats, shakers), usa SOLO para encontrar **una sola zona** que, al
+bajarla −2 a −4 dB, haga que la voz se entienda mejor sin que la percusión pierda energía. Decide con A/B (A = sin la
+banda, B = con ella) y AUTO GAIN encendido. Pistas (si no sale): la voz se entiende por los 2–4 kHz; busca con SOLO qué
+instrumento de percusión tiene más energía justo ahí; Q entre 1.5 y 3, no más angosto; si al bajar la zona la
+percusión "se va para atrás", es demasiado: prueba −2 dB; compara siempre en el contexto de la mezcla completa, no con
+el bus solo.
+
+### Vocabulario
+
+- **Sesgo del volumen (loudness bias)**: preferir lo más fuerte creyendo que es lo mejor.
+- **Igualar el volumen (level matching / gain matching)**: comparar dos versiones a la misma sonoridad. Lo hacen los
+  ingenieros de mastering antes de cualquier decisión.
+- **LUFS**: unidad de sonoridad percibida (la que usan Spotify y YouTube para normalizar); el auto gain usa su mismo
+  filtro de peso.
+- **Solo / escuchar la banda**: oír solo la zona que toca un filtro.
+- **Realzar y barrer (boost and sweep)**: subir una banda angosta y moverla para encontrar resonancias.
+- **Polaridad**: el signo de la onda (+/−). Se confunde con "fase", pero invertir la polaridad es igual en todas las
+  frecuencias; la fase de un EQ cambia según la frecuencia.
+- **Balance**: el reparto entre izquierda y derecha de una pista estéreo.
+- **A/B**: comparar dos versiones saltando de una a otra.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Dejar el SOLO puesto al exportar.** Fathom lo apaga al cerrar la ventana justamente por eso, pero con la ventana
+  abierta suena en solo: mira el aviso amarillo del visor antes de renderizar.
+- **Ecualizar en solo.** El SOLO es para **encontrar**; la decisión se toma escuchando la mezcla. Una voz ecualizada en
+  solo suele quedar perfecta sola y perdida en la mezcla.
+- **Usar el AUTO GAIN como volumen final sin pensarlo.** Es para comparar. Cuando decidas, puedes dejarlo encendido o
+  apagarlo y ajustar la GANANCIA a mano según lo que pida la mezcla.
+- **Confiar en el auto gain con cortes extremos.** Es un cálculo para una mezcla "típica": en un bajo solo, cortar los
+  graves baja la sonoridad mucho más de lo que estima. Ahí iguala a oído (o con `scripts/level_match.py`).
+- **Invertir la polaridad "porque sí".** En una pista sola no hace nada; solo tiene sentido cuando se suma con otra
+  pista parecida.
+- **Comparar A/B con distinto volumen.** Sin AUTO GAIN (o sin igualar a mano), el lado más fuerte gana siempre.
+- **Balancear con el EQ en vez de con el mixer.** El BALANCE de Fathom es para corregir un desbalance de la propia
+  pista; la ubicación en la mezcla se hace con el paneo del mixer de FL.

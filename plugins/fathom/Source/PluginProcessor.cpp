@@ -8,6 +8,25 @@ namespace
 juce::String gainToText (float db, int /*maximumLength*/) { return fathom::gui::format::db (db); }
 juce::String hzToText (float hz, int /*maximumLength*/) { return fathom::gui::format::hz (hz); }
 juce::String qToText (float q, int /*maximumLength*/) { return juce::String (q, q < 10.0f ? 2 : 1); }
+juce::String percentToText (float percent, int /*maximumLength*/) { return juce::String (juce::roundToInt (percent)) + " %"; }
+
+// Balance: "C" en el centro, "L 30" / "R 30" a los lados (como el paneo del mixer de FL).
+juce::String panToText (float pan, int /*maximumLength*/)
+{
+    const int amount = juce::roundToInt (pan);
+    return amount == 0 ? juce::String ("C") : (amount < 0 ? "L " : "R ") + juce::String (std::abs (amount));
+}
+
+float textToPan (const juce::String& text)
+{
+    const auto trimmed = text.trim();
+    const float amount = std::abs (trimmed.retainCharacters ("0123456789.").getFloatValue());
+    if (trimmed.startsWithIgnoreCase ("L"))
+        return -amount;
+    if (trimmed.startsWithIgnoreCase ("R"))
+        return amount;
+    return trimmed.getFloatValue(); // "C" = 0; un número con signo, tal cual
+}
 
 // "2.5 kHz", "2.5k" o "2500" → 2500 Hz.
 float textToHz (const juce::String& text)
@@ -39,6 +58,10 @@ FathomAudioProcessor::FathomAudioProcessor()
     namespace id = fathom::params;
     bypassParam = parameters.getRawParameterValue (id::bypass);
     outputGainParam = parameters.getRawParameterValue (id::outputGain);
+    gainScaleParam = parameters.getRawParameterValue (id::gainScale);
+    outputPanParam = parameters.getRawParameterValue (id::outputPan);
+    phaseInvertParam = parameters.getRawParameterValue (id::phaseInvert);
+    autoGainParam = parameters.getRawParameterValue (id::autoGain);
     for (int b = 0; b < id::numBands; ++b)
     {
         auto& band = bandParams[static_cast<size_t> (b)];
@@ -86,6 +109,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
             .withLabel ("dB")
             .withStringFromValueFunction (gainToText)
             .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
+
+    // Fase 6. Escala: 0 % = plano, 100 % = las bandas tal cual, 200 % = el doble de dB. Balance: −100 a +100.
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::gainScale, id::versionHintPhase6 }, "Gain Scale",
+        juce::NormalisableRange<float> (0.0f, 100.0f * Engine::maxGainScale, 1.0f), 100.0f,
+        juce::AudioParameterFloatAttributes()
+            .withLabel ("%")
+            .withStringFromValueFunction (percentToText)
+            .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); })));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { id::outputPan, id::versionHintPhase6 }, "Output Pan", juce::NormalisableRange<float> (-100.0f, 100.0f, 1.0f), 0.0f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction (panToText).withValueFromStringFunction (textToPan)));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::phaseInvert, id::versionHintPhase6 }, "Phase Invert", false));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::autoGain, id::versionHintPhase6 }, "Auto Gain", false));
 
     // Las 24 bandas, apagadas. Rangos como los de un EQ profesional: 10 Hz-30 kHz (encima de Nyquist se limita),
     // ±30 dB y Q de 0.025 (casi 9 octavas de ancho) a 40 (un 1/36 de octava: para cazar una resonancia). Cada banda
@@ -156,6 +193,7 @@ fathom::dsp::Engine::BandArray FathomAudioProcessor::getAllBandSettings() const 
 void FathomAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
 {
     // Sin buffers propios: el motor procesa en el sitio y las tomas del analizador son de tamaño fijo.
+    setOutputSettings();
     engine.prepare (sampleRate, bypassParam->load() >= 0.5f, outputGainParam->load(), getAllBandSettings());
     analyzerSampleRate.store (sampleRate);
     setLatencySamples (0);
@@ -185,10 +223,73 @@ bool FathomAudioProcessor::isSidechainConnected() const
     return bus != nullptr && bus->isEnabled() && bus->getNumberOfChannels() > 0;
 }
 
+void FathomAudioProcessor::setOutputSettings() noexcept
+{
+    engine.setGainScale (gainScaleParam->load() * 0.01f);
+    engine.setPan (outputPanParam->load() * 0.01f);
+    engine.setPhaseInverted (phaseInvertParam->load() >= 0.5f);
+    engine.setAutoGain (autoGainParam->load() >= 0.5f);
+}
+
 namespace
 {
 constexpr const char* analyzerViewTag = "AnalyzerView";
+constexpr const char* compareTag = "Compare";  // hijo del estado: qué lado está activo y los valores del otro
+constexpr const char* otherSideTag = "Other"; // hijo de Compare: un atributo por parámetro (ID = valor en sus unidades)
 } // namespace
+
+int FathomAudioProcessor::getCompareSide() const
+{
+    return parameters.state.getChildWithName (compareTag).getProperty ("side", 0);
+}
+
+std::vector<float> FathomAudioProcessor::otherSideValues() const
+{
+    // El otro lado todavía no existe (la primera vez): nace como copia del activo. Si existe pero le falta un parámetro
+    // (guardado por una versión anterior), ese parámetro va a su valor por defecto, como en los presets.
+    const auto other = parameters.state.getChildWithName (compareTag).getChildWithName (otherSideTag);
+    if (! other.isValid())
+        return history.snapshot();
+    std::vector<float> values;
+    for (const auto* parameter : history.getTrackedParameters())
+    {
+        const juce::Identifier id { parameter->paramID };
+        values.push_back (other.hasProperty (id) ? parameter->convertTo0to1 (static_cast<float> (other.getProperty (id)))
+                                                 : parameter->getDefaultValue());
+    }
+    return values;
+}
+
+void FathomAudioProcessor::storeOtherSide (const std::vector<float>& values)
+{
+    // En las unidades de cada parámetro (Hz, dB...), no normalizados: si un rango cambia en una versión futura, el
+    // valor guardado sigue significando lo mismo.
+    auto compare = parameters.state.getOrCreateChildWithName (compareTag, nullptr);
+    compare.removeChild (compare.getChildWithName (otherSideTag), nullptr);
+    juce::ValueTree other { otherSideTag };
+    const auto& tracked = history.getTrackedParameters();
+    for (size_t i = 0; i < tracked.size() && i < values.size(); ++i)
+        other.setProperty (juce::Identifier { tracked[i]->paramID }, tracked[i]->convertFrom0to1 (values[i]), nullptr);
+    compare.appendChild (other, nullptr);
+}
+
+bool FathomAudioProcessor::switchCompareSide()
+{
+    if (! history.isIdle())
+        return false;
+    const auto current = history.snapshot();
+    const auto next = otherSideValues();
+    storeOtherSide (current);
+    parameters.state.getOrCreateChildWithName (compareTag, nullptr).setProperty ("side", 1 - getCompareSide(), nullptr);
+    history.swapStack (otherSideHistory);
+    history.load (next); // las bandas suavizan y funden: el cambio no hace clic
+    return true;
+}
+
+void FathomAudioProcessor::copyToOtherSide()
+{
+    storeOtherSide (history.snapshot());
+}
 
 fathom::analysis::ViewSettings FathomAudioProcessor::getAnalyzerView() const
 {
@@ -247,9 +348,12 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     engine.setBypassed (bypassParam->load() >= 0.5f);
     engine.setOutputDb (outputGainParam->load());
+    setOutputSettings(); // antes de las bandas: la escala de ganancia se aplica al pasarlas
     for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
         engine.setBand (b, getBandSettings (b));
+    engine.setSolo (soloBand.load (std::memory_order_relaxed));
     engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples);
+    autoGainDb.store (engine.getAutoGainDb(), std::memory_order_relaxed);
 
     if (feedAnalyzer)
         outputTap.push (buffer.getArrayOfReadPointers(), numChannels, numSamples);

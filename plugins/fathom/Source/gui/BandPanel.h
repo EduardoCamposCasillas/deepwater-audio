@@ -8,15 +8,17 @@
 
 #include "Parameters.h"
 #include "PluginProcessor.h"
+#include "dsp/Solo.h"
 #include "gui/Format.h"
 #include "gui/Theme.h"
 
 namespace fathom::gui
 {
 
-// El panel de la banda elegida: cuál de las 24 (el selector o un clic en su nodo del visor), encendido, FORMA,
+// El panel de la banda elegida: cuál de las 24 (el selector o un clic en su nodo del visor), encendido, SOLO, FORMA,
 // PENDIENTE (solo los cortes), FRECUENCIA, GANANCIA y Q, y debajo lo que esos números significan para la forma
 // elegida. Los controles que la forma no usa se atenúan. Lo mismo se edita arrastrando el nodo en el visor (Fase 4).
+// El SOLO sigue a la banda del panel: con él encendido, elegir otra banda escucha la zona de la nueva.
 class BandPanel final : public juce::Component
 {
 public:
@@ -39,6 +41,16 @@ public:
         enabledButton.setTooltip (juce::String::fromUTF8 ("Encender o apagar la banda, sin clic (se funde en 20 ms). Sirve "
                                                           "para comparar con y sin ella. Apagada no gasta CPU."));
         addAndMakeVisible (enabledButton);
+
+        soloButton.setClickingTogglesState (true);
+        soloButton.setColour (juce::TextButton::buttonOnColourId, theme::solo.withAlpha (0.45f));
+        soloButton.setTooltip (juce::String::fromUTF8 (
+            "Escuchar solo la zona de la banda (lo que llega, sin el EQ): campana, notch y pasa banda = la franja de su "
+            "frecuencia y su Q; shelf o corte de graves = lo de abajo; de agudos = lo de arriba. Sirve para encontrar "
+            "una resonancia (Q alto + barrer la frecuencia) y para o\xc3\xadr qu\xc3\xa9 quita un corte. Los tilts no tienen "
+            "zona. No se guarda: se apaga al cerrar la ventana."));
+        soloButton.onClick = [this] { processor.setSoloBand (soloButton.getToggleState() ? band : -1); };
+        addAndMakeVisible (soloButton);
 
         for (size_t s = 0; s < format::shapeNames.size(); ++s)
             shapeBox.addItem (juce::String::fromUTF8 (format::shapeNames[s]), static_cast<int> (s) + 1);
@@ -101,6 +113,8 @@ public:
     void showBand (int newBand)
     {
         band = newBand;
+        if (processor.getSoloBand() >= 0)
+            processor.setSoloBand (band); // el solo sigue a la banda del panel
         enabledAttachment.reset();
         shapeAttachment.reset();
         slopeAttachment.reset();
@@ -129,6 +143,9 @@ public:
     // Una vez por cuadro: el texto de ayuda, los controles que la forma no usa y las marcas del selector.
     void refresh()
     {
+        // El solo también se puede encender o apagar desde el menú del visor.
+        soloButton.setToggleState (processor.getSoloBand() >= 0, juce::dontSendNotification);
+
         for (int b = 0; b < params::numBands; ++b)
         {
             const bool on = processor.getBandSettings (b).enabled;
@@ -150,6 +167,7 @@ public:
         q.setUsed (dsp::usesQ (settings.shape, settings.slopeIndex));
         slopeBox.setEnabled (dsp::usesSlope (settings.shape));
         slopeLabel.setEnabled (slopeBox.isEnabled());
+        soloButton.setAlpha (dsp::canSolo (settings.shape) ? 1.0f : 0.35f); // un tilt no tiene zona: el solo no hace nada
         info.setText (describe (settings), juce::dontSendNotification);
     }
 
@@ -170,9 +188,11 @@ public:
         auto area = getLocalBounds().reduced (14, 8);
         auto left = area.removeFromLeft (200);
         auto top = left.removeFromTop (26);
-        bandSelector.setBounds (top.removeFromLeft (128));
-        top.removeFromLeft (8);
-        enabledButton.setBounds (top.removeFromLeft (52));
+        bandSelector.setBounds (top.removeFromLeft (104));
+        top.removeFromLeft (6);
+        enabledButton.setBounds (top.removeFromLeft (42));
+        top.removeFromLeft (6);
+        soloButton.setBounds (top.removeFromLeft (42));
         left.removeFromTop (8);
         info.setBounds (left);
 
@@ -307,6 +327,7 @@ private:
 
     juce::ComboBox bandSelector;
     juce::TextButton enabledButton { "ON" };
+    juce::TextButton soloButton { "SOLO" };
     std::unique_ptr<ButtonAttachment> enabledAttachment;
     juce::ComboBox shapeBox, slopeBox;
     juce::Label shapeLabel, slopeLabel;

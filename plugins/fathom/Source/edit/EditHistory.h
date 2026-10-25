@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <utility>
 #include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -60,9 +61,13 @@ public:
     [[nodiscard]] bool canUndo() const noexcept { return stack.canUndo(); }
     [[nodiscard]] bool canRedo() const noexcept { return stack.canRedo(); }
 
-private:
-    int open() const noexcept { return transactions + gestures; }
+    // True si no hay ninguna edición a medias (nadie arrastrando un nodo ni girando una perilla).
+    [[nodiscard]] bool isIdle() const noexcept { return open() == 0; }
 
+    // Los parámetros que cubre, en el orden de snapshot() y load().
+    [[nodiscard]] const std::vector<juce::RangedAudioParameter*>& getTrackedParameters() const noexcept { return parameters; }
+
+    // Los valores normalizados (0-1) de todos los parámetros que cubre.
     std::vector<float> snapshot() const
     {
         std::vector<float> values (parameters.size());
@@ -70,6 +75,31 @@ private:
             values[i] = parameters[i]->getValue();
         return values;
     }
+
+    // Pone todos los parámetros en esos valores SIN guardar un paso (la comparación A/B: cada lado tiene su historial).
+    // Con gestos, como deshacer: el host graba el cambio si está grabando automatización.
+    void load (const std::vector<float>& values)
+    {
+        applying = true;
+        for (size_t i = 0; i < parameters.size() && i < values.size(); ++i)
+            if (parameters[i]->getValue() != values[i])
+            {
+                parameters[i]->beginChangeGesture();
+                parameters[i]->setValueNotifyingHost (values[i]);
+                parameters[i]->endChangeGesture();
+            }
+        applying = false;
+    }
+
+    // Cambia el historial de deshacer por otro (el del otro lado de la comparación A/B). Solo sin ediciones a medias.
+    void swapStack (UndoStack& other) noexcept
+    {
+        jassert (isIdle());
+        std::swap (stack, other);
+    }
+
+private:
+    int open() const noexcept { return transactions + gestures; }
 
     void closeIfDone()
     {

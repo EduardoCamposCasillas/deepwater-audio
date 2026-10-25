@@ -6,12 +6,14 @@
 #include "gui/BandPanel.h"
 #include "gui/EqDisplay.h"
 #include "gui/FathomLookAndFeel.h"
+#include "gui/OutputPanel.h"
 
 class FathomAudioProcessor;
 
 // El visor (lienzo del EQ con el analizador, la curva y los nodos editables de las bandas), debajo el panel de la banda
-// elegida, en la cabecera deshacer/rehacer y el bypass, y a la derecha los ajustes del analizador y la perilla de salida.
-// Un temporizador a 30 cuadros por segundo actualiza el analizador, la curva, los paneles y los botones de deshacer.
+// elegida, en la cabecera la comparación A/B, deshacer/rehacer y el bypass, y a la derecha los ajustes del analizador y
+// la columna de SALIDA. Un temporizador a 30 cuadros por segundo actualiza el analizador, la curva, los paneles y los
+// botones.
 class FathomAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -24,11 +26,11 @@ public:
 
 private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
-    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
 
     void timerCallback() override;
     void selectBand (int band);
     void showAnalyzerView (const fathom::analysis::ViewSettings&);
+    void showCompareSide();
 
     FathomAudioProcessor& processor;
     fathom::gui::FathomLookAndFeel lookAndFeel;
@@ -37,14 +39,13 @@ private:
     fathom::gui::EqDisplay display;
     fathom::gui::BandPanel bandPanel;
     fathom::gui::AnalyzerPanel analyzerPanel;
+    fathom::gui::OutputPanel outputPanel;
     fathom::analysis::ViewSettings shownView; // la vista que muestran el panel y el visor (para notar un proyecto cargado)
+    juce::TextButton sideAButton { "A" }, sideBButton { "B" }, copySideButton;
     juce::TextButton undoButton { "DESHACER" };
     juce::TextButton redoButton { "REHACER" };
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<ButtonAttachment> bypassAttachment;
-    juce::Slider outputKnob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
-    juce::Label outputLabel;
-    std::unique_ptr<SliderAttachment> outputAttachment;
     double lastFrameSeconds = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FathomAudioProcessorEditor)

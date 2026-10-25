@@ -9,8 +9,9 @@
 
 // Efecto mono/estéreo: 24 bandas de EQ con todas las formas y la ganancia de salida (Fase 3), editables sobre el visor
 // con deshacer/rehacer (Fase 4). El audio deja una copia de lo que entra, de lo que sale y del sidechain (Fase 5) en tres
-// tomas lock-free (AnalyzerTap) para el analizador de la GUI. El audio está en fathom::dsp
-// (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
+// tomas lock-free (AnalyzerTap) para el analizador de la GUI. Para escuchar y comparar (Fase 6): solo de banda, auto
+// gain, escala de ganancia, balance, polaridad y comparación A/B. El audio está en fathom::dsp (sin JUCE); aquí solo se
+// conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor
 {
 public:
@@ -79,12 +80,31 @@ public:
     // Hilo de la GUI: true mientras haya un editor abierto (sin él, el audio no copia muestras a las tomas).
     void setAnalyzerActive (bool active) noexcept { analyzerActive.store (active, std::memory_order_relaxed); }
 
+    // Solo de banda: la banda (0-23) cuya zona se escucha, o −1. No es un parámetro (no se guarda ni se automatiza: es
+    // para escuchar mientras se edita); el editor lo apaga al cerrarse.
+    void setSoloBand (int band) noexcept { soloBand.store (band, std::memory_order_relaxed); }
+    int getSoloBand() const noexcept { return soloBand.load (std::memory_order_relaxed); }
+
+    // Lo que está compensando el auto gain ahora (0 dB si está apagado), para mostrarlo.
+    float getAutoGainDb() const noexcept { return autoGainDb.load (std::memory_order_relaxed); }
+
+    // Comparación A/B (hilo de la GUI). Dos estados completos (todos los parámetros menos el bypass): los parámetros son
+    // el lado activo y el otro se guarda aparte (en el proyecto, como hijo "Compare" del estado). Cada lado tiene su
+    // propio historial de deshacer. switchCompareSide devuelve false si hay una edición a medias.
+    int getCompareSide() const; // 0 = A, 1 = B
+    bool switchCompareSide();
+    void copyToOtherSide();     // el lado activo pasa a ser también el otro (A → B o B → A)
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* bypassParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
+    std::atomic<float>* gainScaleParam = nullptr;
+    std::atomic<float>* outputPanParam = nullptr;
+    std::atomic<float>* phaseInvertParam = nullptr;
+    std::atomic<float>* autoGainParam = nullptr;
     struct BandParameters
     {
         std::atomic<float>* enabled = nullptr;
@@ -102,7 +122,14 @@ private:
     AnalyzerTap inputTap, outputTap, sidechainTap;
     std::atomic<double> analyzerSampleRate { 44100.0 };
     std::atomic<bool> analyzerActive { false };
+    std::atomic<int> soloBand { -1 };
+    std::atomic<float> autoGainDb { 0.0f };
     fathom::edit::EditHistory history; // después de 'parameters': se destruye antes (deja de escucharlos)
+    fathom::edit::UndoStack otherSideHistory; // el historial del lado de la comparación que no está activo
+
+    void setOutputSettings() noexcept; // pasa al motor la escala, el balance, la polaridad y el auto gain
+    std::vector<float> otherSideValues() const;
+    void storeOtherSide (const std::vector<float>& values);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FathomAudioProcessor)
 };
