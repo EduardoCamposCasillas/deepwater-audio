@@ -680,3 +680,116 @@ el bus solo.
 - **Comparar A/B con distinto volumen.** Sin AUTO GAIN (o sin igualar a mano), el lado más fuerte gana siempre.
 - **Balancear con el EQ en vez de con el mixer.** El BALANCE de Fathom es para corregir un desbalance de la propia
   pista; la ubicación en la mezcla se hace con el paneo del mixer de FL.
+
+## Fase 7 — Respuesta analógica: que los agudos no se "aplasten"
+
+Un EQ digital trabaja con muestras: a 44.1 kHz solo existen las frecuencias hasta 22.05 kHz (**Nyquist**, la mitad
+de la frecuencia de muestreo). El analógico no tiene ese techo. La forma clásica de pasar un filtro analógico a
+digital (la **bilineal**, la que usaba Fathom hasta la Fase 6) mete *todo* el eje analógico, de 0 a infinito, entre 0 y
+Nyquist: abajo casi no se nota, pero arriba todo se aprieta. Esta fase agrega la **respuesta analógica**: las bandas
+suenan como su prototipo analógico también cerca de Nyquist, sin latencia. El botón ANALÓGICA (cabecera) alterna
+entre las dos para que lo veas y lo oigas.
+
+### Conceptos aprendidos
+
+- **El "aplastamiento" (cramping) de la bilineal.** La bilineal "dobla" el eje de frecuencias: lo que en el analógico
+  está en el infinito, en el digital cae justo en Nyquist. Consecuencias que se ven en el visor con ANALÓGICA apagado:
+  - una **campana aguda** (12 kHz a 44.1) sale más angosta que la que pediste y su lado de arriba se cae a 0 dB justo
+    en 22 kHz (en el analógico seguiría arriba): suena menos "aire" del que esperabas;
+  - un **shelf de agudos** aprieta su subida: empieza más tarde (debajo de su frecuencia sube menos que el analógico)
+    y llega antes a la meseta (encima sube más), así que la subida es más brusca de lo que dibujaste;
+  - un **corte de agudos** se hunde a −∞ en Nyquist (más empinado de lo pedido en la última octava).
+  Con 96 kHz el efecto es mucho menor (Nyquist está en 48 kHz, lejos de lo audible); con 44.1/48 kHz, que es lo normal
+  en FL, se nota de ~8 kHz para arriba.
+- **Dos soluciones.** (1) **Sobremuestrear** (procesar a ×2 o ×4 para alejar Nyquist): funciona, pero cuesta ×4 de
+  CPU en 24 bandas y los filtros del sobremuestreo agregan latencia o desfase. (2) **Diseñar el filtro "igualado"
+  (matched)**: a la misma frecuencia de muestreo, elegir los números del filtro para que su volumen en cada frecuencia
+  sea el del analógico. Fathom usa (2), la idea de Martin Vicanek ("Matched Second Order Digital Filters", 2016):
+  - las **resonancias** (los polos) se copian tal cual del analógico (z = e^(s·T): la misma frecuencia y el mismo
+    amortiguamiento, sin doblar el eje);
+  - el resto (los ceros) se elige para que el volumen coincida con el analógico en unos puntos clave: en DC, en la
+    frecuencia de la banda y en Nyquist. La campana usa "DC, el pico y que el pico no se corra".
+  Lo demás no cambia: es el mismo filtro (el SVF) con otros números, así que sigue siendo estable al moverlo, sin
+  clics, y la curva del visor sigue siendo la respuesta REAL del audio.
+- **Cuánto mejora (medido contra el analógico, de 20 Hz a 20 kHz).** A 96 kHz, una campana se equivoca 0.06 dB en
+  vez de 2.4 dB, y un shelf 0.3 dB en vez de 3 dB. A 44.1 kHz con la banda en 15–20 kHz (lo más difícil: Nyquist queda a
+  menos de media octava) el error baja de 13–17 dB a unos 2.5 dB. Un corte de agudos de 96 dB/oct en 15 kHz ya no se
+  hunde 120 dB de más al llegar a Nyquist.
+- **Lo que no se puede.** Encima de Nyquist no hay nada: una banda en 25 kHz a 44.1 kHz se queda en el tope (0.49·fs),
+  igual que antes. Y la fase es la de un filtro "de fase mínima" con ese volumen: casi la del analógico, no idéntica
+  arriba (la fase "natural" es la Fase 10).
+- **En graves no cambia nada.** Bajo ~2–5 kHz la bilineal ya era casi exacta: las dos respuestas suenan igual. Por eso
+  la diferencia está en las bandas agudas, el aire y los cortes de agudos.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **ANALÓGICA** (cabecera, a la izquierda de A/B; encendido por defecto): encendido = respuesta analógica; apagado = la
+  bilineal clásica de las Fases 2-6. Cambia las 24 bandas a la vez, con un fundido de 20 ms entre los dos diseños (sin
+  clic, sin hueco). Es un parámetro: entra al DESHACER, al A/B y a la automatización, y se guarda con el proyecto.
+  Un proyecto de las Fases 1-6 se abre con ANALÓGICA encendido (suena distinto solo en las bandas agudas); para oírlo
+  como antes, apágalo.
+- **La curva** del visor cambia con el botón: con una campana de +12 dB en 12 kHz vas a ver que la bilineal "dobla" su
+  lado de arriba hacia 0 dB y la analógica lo deja seguir.
+
+### Ejercicio de escucha guiado en FL Studio
+
+Pon el proyecto en 44.1 o 48 kHz (Opciones → Audio: la frecuencia de muestreo).
+1. **Ver el aplastamiento.** En una pista vacía (sin audio) crea una campana de +12 dB, Q 1, en 12 kHz. Alterna
+   ANALÓGICA mirando la curva: el lado derecho de la campana cambia; el izquierdo, casi nada. Repite con la campana en
+   3 kHz: casi no cambia (por eso solo importa arriba).
+2. **Oír el aire.** En una voz o en el bus de los platillos: shelf de agudos +4 dB en 10 kHz, Q 0.71. Con A/B: A con
+   ANALÓGICA encendido, B apagado (todo lo demás igual) y AUTO GAIN encendido en los dos. Alterna: con la analógica la
+   subida es gradual (ya se nota un poco en 7–9 kHz, como en un EQ de consola); con la bilineal se concentra más
+   arriba, más brusca. Es sutil: escúchalo con audífonos, no en las bocinas de la laptop.
+3. **El corte de agudos.** En el master de un beat: corte de agudos de 48 dB/oct en 16 kHz. Mira el analizador de
+   salida con ANALÓGICA encendido y apagado: con la bilineal, lo último del espectro se desploma; con la analógica cae
+   con la pendiente pedida.
+4. **El control.** Mismo ejercicio 2 pero con el shelf en 300 Hz (de graves): no deberías oír ninguna diferencia. Si la
+   "oyes", es tu expectativa (por eso conviene alternar a ciegas).
+
+### Receta: aire en la voz sin que se vuelva áspera
+
+1. En la voz (después del autotune), shelf de agudos +3 dB en 12 kHz, Q 0.71, con ANALÓGICA encendido.
+2. Si suena áspera, el problema casi nunca es el aire (12 kHz+), sino los 5–8 kHz (las "eses"): baja una campana de
+   −2 dB, Q 2, donde el analizador marque las eses (agarra el pico con el mouse, Fase 5).
+3. Compara con AUTO GAIN y A/B contra la voz sin EQ.
+
+Por qué funciona: el "aire" de una voz se oye como una subida suave y ancha. Con la respuesta analógica el shelf
+tiene la forma que dibujaste (gradual, empieza a sumar desde varios kHz antes); con la bilineal la subida se aprieta
+contra Nyquist y suele hacer falta más ganancia para el mismo efecto, y más ganancia arriba es más aspereza. Y la
+aspereza real casi siempre vive más abajo (las eses): se corrige ahí, no quitando el aire.
+
+### Reto sin receta
+
+En el bus de los hi-hats del dembow, logra que brillen más **sin subir los 6–8 kHz** (donde ya están fuertes), usando
+solo bandas por encima de 10 kHz. Compara tu resultado con ANALÓGICA encendido y apagado: ¿con cuál necesitaste menos
+ganancia para el mismo brillo? Pistas (si no sale): una campana ancha (Q 0.5–0.7) en 14–16 kHz o un shelf en 12 kHz;
+mira en el visor dónde empieza a subir la curva en cada modo; con la bilineal la subida empieza más tarde y es más
+angosta; iguala el volumen con AUTO GAIN antes de decidir.
+
+### Vocabulario
+
+- **Nyquist**: la mitad de la frecuencia de muestreo; la frecuencia más alta que existe en un audio digital (22.05 kHz
+  a 44.1 kHz).
+- **Transformada bilineal**: la forma clásica de convertir un filtro analógico a digital; exacta en graves, aprieta los
+  agudos.
+- **Cramping ("aplastamiento")**: la deformación de la bilineal cerca de Nyquist (campanas más angostas, que caen a
+  0 dB en Nyquist).
+- **Filtro igualado (matched)**: un filtro digital diseñado para que su volumen coincida con el del analógico.
+- **Polos y ceros**: los "números" de un filtro; los polos dicen dónde resuena y cuánto, los ceros dónde tira hacia
+  abajo o empuja hacia arriba.
+- **Sobremuestreo (oversampling)**: procesar a una frecuencia de muestreo más alta (Riptide lo usa para la
+  saturación).
+- **"Analog-matched", "zero latency"**: así llaman muchos EQ profesionales a esta respuesta (por ejemplo, el modo de
+  latencia cero de los EQ de FabFilter apunta a lo mismo).
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Esperar que cambie el sonido en graves o medios.** Ahí las dos respuestas son iguales: si suena distinto, es el
+  volumen o la expectativa.
+- **Juzgar la diferencia sin igualar el volumen.** Con la bilineal, una campana aguda sube un poco menos de energía:
+  la analógica puede parecer "mejor" solo por estar más fuerte. Compara con AUTO GAIN y A/B.
+- **Usarlo para "arreglar" agudos que no existen.** Si la grabación no tiene nada sobre 16 kHz (un MP3, un sample
+  viejo), ninguna respuesta va a crear aire: un shelf solo sube el ruido.
+- **Cuándo apagarlo:** casi nunca. Tiene sentido si quieres que un proyecto viejo (Fases 1-6) suene exactamente como
+  sonaba, o para comparar y aprender qué hace la bilineal.

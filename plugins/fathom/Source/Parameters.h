@@ -16,6 +16,9 @@ inline constexpr const char* outputPan = "outputPan";     // balance de salida, 
 inline constexpr const char* phaseInvert = "phaseInvert"; // invertir la polaridad de la salida
 inline constexpr const char* autoGain = "autoGain";       // compensar el volumen que cambia el EQ
 
+// Fase 7: respuesta analógica (la magnitud del prototipo analógico también cerca de Nyquist) o bilineal clásica.
+inline constexpr const char* analogResponse = "analogResponse";
+
 // Las 24 bandas: "band<N><Ajuste>", con N de 1 a 24 (band1Frequency, band12Shape...). Los cuatro primeros ajustes
 // nacieron en la Fase 2 con la banda 1; forma y pendiente, en la Fase 3.
 inline constexpr int numBands = 24;
@@ -37,4 +40,5 @@ inline constexpr int versionHintPhase1 = 1;
 inline constexpr int versionHintPhase2 = 2; // band1Enabled, band1Frequency, band1Gain, band1Q
 inline constexpr int versionHintPhase3 = 3; // las bandas 2-24 y la forma y la pendiente de todas
 inline constexpr int versionHintPhase6 = 6; // escala, balance, polaridad y auto gain
+inline constexpr int versionHintPhase7 = 7; // respuesta analógica
 } // namespace fathom::params

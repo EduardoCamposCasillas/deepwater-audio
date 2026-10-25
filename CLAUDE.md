@@ -53,7 +53,9 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 
 ## Librería compartida (`libs/dsp`, namespace `deepwater::dsp`)
 - Contiene: oversampling halfband ×2 (`Halfband.h`) y en cascada ×2–×16 alrededor de una curva, con latencia entera
-  (`Oversampler.h`; los dos con versión en bloque, idéntica bit a bit y unas 2 veces más rápida), filtro DC (`DcBlocker.h`), SVF TPT/ZDF (`Svf.h`), filtros de EQ sobre el SVF con su respuesta en frecuencia exacta (`EqFilter.h`, de Fathom: campana, shelves, tilt, notch, pasa banda, all-pass, cortes Butterworth de 1 a 16 polos con resonancia y flat tilt, en cascadas de hasta 8 etapas), crossover Linkwitz-Riley y divisor multibanda
+  (`Oversampler.h`; los dos con versión en bloque, idéntica bit a bit y unas 2 veces más rápida), filtro DC (`DcBlocker.h`), SVF TPT/ZDF (`Svf.h`), filtros de EQ sobre el SVF con su respuesta en frecuencia exacta (`EqFilter.h`, de Fathom: campana, shelves, tilt, notch, pasa banda, all-pass, cortes Butterworth de 1 a 16 polos con resonancia y flat tilt, en cascadas de hasta 8 etapas), las mismas formas con la magnitud del
+  prototipo analógico también cerca de Nyquist y sin latencia (`MatchedEq.h`, de Fathom: diseño "matched" a la Vicanek sobre el mismo SVF, con los
+  prototipos `AnalogBiquad`/`AnalogCascade` para medir), crossover Linkwitz-Riley y divisor multibanda
   (`Crossover.h`), filtro de 1 polo TPT y tilt EQ (`OnePole.h`), suavizado de parámetros y fundidos
   (`Smoothing.h`), línea de retardo con lectura lineal, cúbica y Lagrange (`DelayLine.h`), SIMD SSE2 (`Simd.h`),
   `fastTanh` (`FastMath.h`), FFT (`Fft.h`), toma de señal lock-free audio → GUI (`AnalyzerTap.h`), buzón del último valor audio → GUI (`TripleBuffer.h`, venía de Ebb), analizador de

@@ -35,8 +35,8 @@ namespace deepwater::dsp
 //
 // Como el SVF es TPT (bilineal), la respuesta digital es la analógica evaluada en s = j·tan(π·f/fs)/g: response()
 // la calcula con ESOS MISMOS coeficientes (float), así la curva que dibuja la GUI es la del audio, no una aproximación.
-// (El precio de la bilineal: cerca de Nyquist la campana se "aplasta" respecto de la analógica. Fathom lo corrige en
-// su Fase 7.)
+// (El precio de la bilineal: cerca de Nyquist la campana se "aplasta" respecto de la analógica. MatchedEq.h da las
+// mismas formas con la respuesta analógica, sobre este mismo SVF.)
 struct EqCoefficients
 {
     SvfStage::Coefficients svf;
@@ -137,6 +137,16 @@ struct EqCoefficients
         return { svf, dry * gain, bandPass * gain, lowPass * gain, highPass * gain };
     }
 
+    // Un punto intermedio entre dos juegos de coeficientes (t = 0 → 'from', 1 → 'to'): se interpolan g, k y la mezcla.
+    // El SVF es estable con cualquier g > 0 y k > 0, así que el camino también lo es; sirve para pasar de un diseño a
+    // otro (bilineal ↔ analógico) en unos milisegundos sin clic.
+    static EqCoefficients blend (const EqCoefficients& from, const EqCoefficients& to, float t) noexcept
+    {
+        const auto mix = [t] (float a, float b) { return a + (b - a) * t; };
+        return { SvfStage::Coefficients::make (mix (from.svf.g, to.svf.g), mix (from.svf.k, to.svf.k)), mix (from.dry, to.dry),
+                 mix (from.bandPass, to.bandPass), mix (from.lowPass, to.lowPass), mix (from.highPass, to.highPass) };
+    }
+
     // Respuesta en frecuencia (compleja: magnitud y fase) en 'hz'. Exacta para estos coeficientes.
     [[nodiscard]] std::complex<double> response (double hz, double sampleRate) const noexcept
     {
@@ -209,6 +219,26 @@ struct EqCascade
         return butterworth (hz, order, q, sampleRate, false);
     }
 
+    // El Q de la etapa de 2 polos 'i' (1..order/2) de un Butterworth de 'order' polos, con la resonancia 'q' aplicada a
+    // la primera (ver abajo).
+    static double butterworthStageQ (int order, int i, double q) noexcept
+    {
+        double stageQ = 1.0 / (2.0 * std::sin ((2.0 * i - 1.0) * std::numbers::pi / (2.0 * order)));
+        if (i == 1)
+            stageQ *= q * std::numbers::sqrt2;
+        return stageQ;
+    }
+
+    // Etapa por etapa (las dos cascadas tienen que tener la misma estructura). Ver EqCoefficients::blend.
+    static EqCascade blend (const EqCascade& from, const EqCascade& to, float t) noexcept
+    {
+        EqCascade cascade;
+        cascade.numStages = std::max (from.numStages, to.numStages);
+        for (size_t i = 0; i < cascade.stages.size(); ++i)
+            cascade.stages[i] = EqCoefficients::blend (from.stages[i], to.stages[i], t);
+        return cascade;
+    }
+
     [[nodiscard]] std::complex<double> response (double hz, double sampleRate) const noexcept
     {
         std::complex<double> total { 1.0, 0.0 };
@@ -233,9 +263,7 @@ private:
             cascade.stages[static_cast<size_t> (cascade.numStages++)] = highPass ? EqCoefficients::highPass1 (g) : EqCoefficients::lowPass1 (g);
         for (int i = 1; i <= order / 2; ++i)
         {
-            double stageQ = 1.0 / (2.0 * std::sin ((2.0 * i - 1.0) * std::numbers::pi / (2.0 * order)));
-            if (i == 1)
-                stageQ *= q * std::numbers::sqrt2;
+            const double stageQ = butterworthStageQ (order, i, q);
             cascade.stages[static_cast<size_t> (cascade.numStages++)] = highPass ? EqCoefficients::highPass2 (g, stageQ)
                                                                                  : EqCoefficients::lowPass2 (g, stageQ);
         }

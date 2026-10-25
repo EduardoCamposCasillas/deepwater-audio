@@ -12,6 +12,7 @@
 
 #include "analysis/SpectrumView.h"
 #include "deepwater/dsp/Decibels.h"
+#include "deepwater/dsp/MatchedEq.h"
 #include "deepwater/dsp/SpectrumAnalyzer.h"
 #include "dsp/Engine.h"
 #include "edit/NodeEditing.h"
@@ -795,8 +796,11 @@ void testAutoGain()
             return autoGain.compensationDb();
         };
         CHECK (compensation ({}) == 0.0f);
-        // Un shelf de graves sobre Nyquist sube TODO 6 dB: compensa −6.
-        const float everything = compensation (only ({ true, 30000.0f, 6.0f, 0.71f, Shape::lowShelf }));
+        // Un shelf de graves sobre Nyquist con la BILINEAL sube TODO 6 dB (aprieta la subida contra Nyquist): compensa −6.
+        // (Con la respuesta analógica no: el shelf vale la mitad en su frecuencia, y los últimos kHz suben menos.)
+        BandSettings allUp { true, 30000.0f, 6.0f, 0.71f, Shape::lowShelf };
+        allUp.analog = false;
+        const float everything = compensation (only (allUp));
         CHECK (std::abs (everything + 6.0f) < 0.05f);
         // Subir y bajar lo mismo compensa en sentidos opuestos (no exacto: en potencia, +6 pesa más que −6).
         const float up = compensation (only ({ true, 2000.0f, 6.0f, 0.7f }));
@@ -842,7 +846,7 @@ void testAutoGain()
         {
             Engine engine;
             engine.setAutoGain (on);
-            engine.prepare (sampleRate, false, 0.0f, only ({ true, 30000.0f, 6.0f, 0.71f, Shape::lowShelf }));
+            engine.prepare (sampleRate, false, 0.0f, only (allUp));
             const double level = toneDb (processedSine (engine, 440.0, 0.25, sampleRate, 32768), 440.0, 0.25, sampleRate);
             CHECK (std::abs (level - (on ? 0.0 : 6.0)) < 0.1);
         }
@@ -957,6 +961,121 @@ void testSoloSwitchingHasNoClicks()
         CHECK (exact);
     }
 }
+// --- Fase 7: respuesta analógica --------------------------------------------------------------------------------------
+
+void testAnalogResponse()
+{
+    std::printf ("Respuesta analogica: una campana y un shelf agudos suenan como el prototipo analogico (la bilineal no) y como su curva\n");
+    for (const double sampleRate : sampleRates)
+    {
+        // Campana de +12 dB en 10 kHz con Q 1 y shelf de agudos de −9 dB en 6 kHz: medidos en el audio, arriba.
+        const BandSettings bell { true, 10000.0f, 12.0f, 1.0f, Shape::bell };
+        const BandSettings shelf { true, 6000.0f, -9.0f, 0.71f, Shape::highShelf };
+        const auto analogBell = deepwater::dsp::AnalogBiquad::bell (10000.0, 1.0, 12.0);
+        const auto analogShelf = deepwater::dsp::AnalogBiquad::highShelf (6000.0, 0.71, -9.0);
+        double worstAnalog = 0.0, worstBilinear = 0.0, worstCurve = 0.0;
+        for (const bool analog : { true, false })
+        {
+            auto bands = only (bell);
+            bands[0].analog = analog;
+            bands[1] = shelf;
+            bands[1].analog = analog;
+            for (const double hz : { 1000.0, 8000.0, 12000.0, 16000.0, 19000.0 })
+            {
+                Engine engine;
+                engine.prepare (sampleRate, false, 0.0f, bands);
+                auto left = sine (hz, 0.1, sampleRate, 32768);
+                auto right = left;
+                float* channels[] { left.data(), right.data() };
+                engine.process (channels, 2, static_cast<int> (left.size()));
+                const double measured = 20.0 * std::log10 (toneAmplitude (left, hz, sampleRate, 16384) / 0.1);
+                const double target = 10.0 * std::log10 (analogBell.power (hz) * analogShelf.power (hz));
+                (analog ? worstAnalog : worstBilinear) = std::max (analog ? worstAnalog : worstBilinear, std::abs (measured - target));
+                worstCurve = std::max (worstCurve, std::abs (measured - curveDb (bands, 0.0f, hz, sampleRate)));
+            }
+        }
+        std::printf ("  %6.0f Hz: contra el analogico %.3f dB (bilineal %.2f dB); audio contra la curva %.5f dB\n", sampleRate, worstAnalog,
+                     worstBilinear, worstCurve);
+        CHECK (worstAnalog < 1.0); // lo peor, en 19 kHz a 44.1 kHz (0.63 dB)
+        CHECK (worstBilinear > 2.0 * worstAnalog);
+        CHECK (worstCurve < 0.01);
+    }
+
+    // En graves no cambia nada que se oiga: una campana de 200 Hz suena igual con las dos respuestas.
+    BandSettings low { true, 200.0f, 9.0f, 2.0f };
+    const auto analogCurve = Band::coefficientsFor (low, 48000.0);
+    low.analog = false;
+    const auto bilinearCurve = Band::coefficientsFor (low, 48000.0);
+    double worstLow = 0.0;
+    for (double hz = 20.0; hz < 2000.0; hz *= 1.05)
+        worstLow = std::max (worstLow, std::abs (analogCurve.magnitudeDb (hz, 48000.0) - bilinearCurve.magnitudeDb (hz, 48000.0)));
+    CHECK (worstLow < 0.01);
+
+    // Lo que no tenga el ajuste (un proyecto de las Fases 1-6) suena con la respuesta analógica; en 0 dB, bit a bit igual.
+    CHECK (BandSettings {}.analog);
+}
+
+void testAnalogSwitchHasNoClicks()
+{
+    std::printf ("Respuesta analogica: alternar analogica/bilineal en cada bloque (con bandas agudas fuertes) no hace clic\n");
+    for (const double sampleRate : sampleRates)
+    {
+        Engine::BandArray bands {};
+        bands[0] = { true, 8000.0f, 24.0f, 2.0f, Shape::bell };
+        bands[1] = { true, 12000.0f, -18.0f, 0.71f, Shape::highShelf };
+        bands[2] = { true, 9000.0f, 0.0f, 2.0f, Shape::highCut, 6 };
+        bands[3] = { true, 3000.0f, 18.0f, 0.5f, Shape::lowShelf };
+        // Dos senos (1 y 5 kHz) por las mismas bandas: una vez alternando cada bloque, otra con la respuesta analógica fija.
+        const auto run = [&] (bool toggle) {
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, bands);
+            auto left = sine (1000.0, 0.05, sampleRate, static_cast<size_t> (sampleRate));
+            const auto high = sine (5000.0, 0.02, sampleRate, left.size());
+            for (size_t i = 0; i < left.size(); ++i)
+                left[i] += high[i];
+            auto right = left;
+            BlockSizes sizes;
+            std::uint32_t seed = 7;
+            auto settings = bands;
+            const int total = static_cast<int> (left.size());
+            for (int start = 0; start < total;)
+            {
+                const int count = std::min (sizes.next (256), total - start);
+                seed = seed * 1664525u + 1013904223u;
+                for (int b = 0; b < 4; ++b)
+                {
+                    settings[static_cast<size_t> (b)].analog = ! toggle || (seed >> 16) % 2 == 0;
+                    engine.setBand (b, settings[static_cast<size_t> (b)]);
+                }
+                float* channels[] { left.data() + start, right.data() + start };
+                engine.process (channels, 2, count);
+                start += count;
+            }
+            CHECK (left == right);
+            return left;
+        };
+        // Un clic es un salto: energía en TODAS las frecuencias. La entrada no tiene nada encima de 5 kHz, así que se
+        // mira lo que sale encima de 14 kHz (pasa altos de 96 dB/oct). Cambiar los coeficientes despacio solo agrega
+        // bandas laterales angostas junto a los senos; de golpe, ruido de banda ancha. Medido: con la rampa de 20 ms,
+    // 0.000005; cambiando de golpe (rampa de 1 µs), 0.0054 (mil veces más: el test falla).
+        const auto above = [sampleRate] (const std::vector<float>& signal) {
+            const auto highPass = deepwater::dsp::EqCascade::butterworthHighPass (14000.0, 16, 0.71, sampleRate);
+            deepwater::dsp::EqCascadeFilter filter;
+            float peak = 0.0f;
+            for (size_t i = 0; i < signal.size(); ++i)
+            {
+                const float y = filter.process (signal[i], highPass);
+                if (i > signal.size() / 10) // después de que el pasa altos se asienta
+                    peak = std::max (peak, std::abs (y));
+            }
+            return peak;
+        };
+        const float clicks = above (run (true)), still = above (run (false));
+        std::printf ("  %6.0f Hz: encima de 14 kHz, alternando %.6f, fija %.6f\n", sampleRate, static_cast<double> (clicks),
+                     static_cast<double> (still));
+        CHECK (clicks < 2.0e-4f);
+    }
+}
 } // namespace
 
 int main()
@@ -983,6 +1102,8 @@ int main()
     testAutoGain();
     testSoloZones();
     testSoloSwitchingHasNoClicks();
+    testAnalogResponse();
+    testAnalogSwitchHasNoClicks();
 
     if (failures > 0)
     {

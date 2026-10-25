@@ -29,6 +29,7 @@
 #include "deepwater/dsp/Halfband.h"
 #include "deepwater/dsp/LevelMeter.h"
 #include "deepwater/dsp/Lfo.h"
+#include "deepwater/dsp/MatchedEq.h"
 #include "deepwater/dsp/OnePole.h"
 #include "deepwater/dsp/Oversampler.h"
 #include "deepwater/dsp/Pitch.h"
@@ -1013,6 +1014,260 @@ void testEqShapesAreStableWhenModulated()
     }
 }
 
+// --- EQ con respuesta analógica (MatchedEq.h) -----------------------------------------------------------------------
+
+// El peor error en dB contra el prototipo analógico de 20 Hz a 20 kHz (o hasta 0.49·fs), donde el analógico está sobre
+// −60 dB (más abajo, en un corte, ya no importa cuánto exactamente).
+template <typename Analog>
+double worstAgainstAnalog (const dw::EqCascade& digital, Analog&& analogDb, double sr)
+{
+    double worst = 0.0;
+    for (double hz = 20.0; hz <= std::min (20000.0, 0.49 * sr); hz *= 1.02)
+        if (const double target = analogDb (hz); target > -60.0)
+            worst = std::max (worst, std::abs (digital.magnitudeDb (hz, sr) - target));
+    return worst;
+}
+
+double analogDb (const dw::AnalogBiquad& analog, double hz)
+{
+    return 10.0 * std::log10 (std::max (analog.power (hz), 1.0e-24));
+}
+
+void testMatchedEqAgainstAnalog()
+{
+    std::printf ("EQ analógico (matched): igual al prototipo analógico también cerca de Nyquist; la bilineal no\n");
+
+    // Las formas de un EQ, con Q y ganancias "de mezcla" (Q 0.3-2, ±3 a ±24 dB) y la banda hasta 20 kHz. Se separa la
+    // banda grave (≤ 5 kHz), la aguda y el peor caso (la banda en 20 kHz a 44.1 kHz, donde Nyquist está a 1/6 de octava).
+    struct Worst
+    {
+        double matched = 0.0, bilinear = 0.0;
+    };
+    std::array<Worst, 3> bells {}, shelves {}, others {};
+    for (const double sr : sampleRates)
+        for (const double centre : { 100.0, 1000.0, 5000.0, 10000.0, 15000.0, 20000.0 })
+        {
+            const size_t zone = centre <= 5000.0 ? 0 : (centre >= 15000.0 && sr < 50000.0 ? 2 : 1);
+            for (const double q : { 0.3, 0.71, 2.0 })
+            {
+                for (const double gainDb : { -24.0, -3.0, 3.0, 24.0 })
+                {
+                    const auto bell = dw::AnalogBiquad::bell (centre, q, gainDb);
+                    const auto low = dw::AnalogBiquad::lowShelf (centre, q, gainDb);
+                    const auto high = dw::AnalogBiquad::highShelf (centre, q, gainDb);
+                    const auto tilt = dw::AnalogBiquad::tiltShelf (centre, q, gainDb);
+                    const auto against = [sr] (const dw::EqCoefficients& c, const dw::AnalogBiquad& a) {
+                        return worstAgainstAnalog (dw::EqCascade::single (c), [&a] (double hz) { return analogDb (a, hz); }, sr);
+                    };
+                    bells[zone].matched = std::max (bells[zone].matched, against (dw::MatchedEq::bell (centre, q, gainDb, sr), bell));
+                    bells[zone].bilinear = std::max (bells[zone].bilinear, against (dw::EqCoefficients::bell (centre, q, gainDb, sr), bell));
+                    shelves[zone].matched = std::max ({ shelves[zone].matched, against (dw::MatchedEq::lowShelf (centre, q, gainDb, sr), low),
+                                                        against (dw::MatchedEq::highShelf (centre, q, gainDb, sr), high),
+                                                        against (dw::MatchedEq::tiltShelf (centre, q, gainDb, sr), tilt) });
+                    shelves[zone].bilinear = std::max ({ shelves[zone].bilinear, against (dw::EqCoefficients::lowShelf (centre, q, gainDb, sr), low),
+                                                         against (dw::EqCoefficients::highShelf (centre, q, gainDb, sr), high),
+                                                         against (dw::EqCoefficients::tiltShelf (centre, q, gainDb, sr), tilt) });
+                }
+                // Notch, pasa banda y los cortes de 12 y 48 dB/oct.
+                const auto against = [sr] (const dw::EqCascade& c, auto&& a) { return worstAgainstAnalog (c, a, sr); };
+                const auto notch = dw::AnalogBiquad::notch (centre, q), bandPass = dw::AnalogBiquad::bandPass (centre, q);
+                const auto notchDb = [&notch] (double hz) { return std::max (analogDb (notch, hz), -40.0); };
+                const auto clampedDb = [] (const dw::EqCascade& c, double hz, double sr2) { return std::max (c.magnitudeDb (hz, sr2), -40.0); };
+                double matched = 0.0, bilinear = 0.0;
+                for (double hz = 20.0; hz <= std::min (20000.0, 0.49 * sr); hz *= 1.02) // el hueco del notch, hasta −40 dB
+                {
+                    matched = std::max (matched, std::abs (clampedDb (dw::EqCascade::single (dw::MatchedEq::notch (centre, q, sr)), hz, sr) - notchDb (hz)));
+                    bilinear = std::max (bilinear, std::abs (clampedDb (dw::EqCascade::single (dw::EqCoefficients::notch (centre, q, sr)), hz, sr) - notchDb (hz)));
+                }
+                const auto bandPassDb = [&bandPass] (double hz) { return analogDb (bandPass, hz); };
+                matched = std::max (matched, against (dw::EqCascade::single (dw::MatchedEq::bandPassFilter (centre, q, sr)), bandPassDb));
+                bilinear = std::max (bilinear, against (dw::EqCascade::single (dw::EqCoefficients::bandPassFilter (centre, q, sr)), bandPassDb));
+                for (const int order : { 2, 8 })
+                    for (const bool highPass : { true, false })
+                    {
+                        const double resonance = q * std::sqrt (2.0) * 0.5 + 0.35; // 0.56-1.76: alrededor de Butterworth
+                        const auto analog = dw::AnalogCascade::butterworth (centre, order, resonance, highPass);
+                        const auto cutDb = [&analog] (double hz) { return analog.magnitudeDb (hz); };
+                        matched = std::max (matched, against (highPass ? dw::MatchedEq::butterworthHighPass (centre, order, resonance, sr)
+                                                                       : dw::MatchedEq::butterworthLowPass (centre, order, resonance, sr),
+                                                              cutDb));
+                        bilinear = std::max (bilinear, against (highPass ? dw::EqCascade::butterworthHighPass (centre, order, resonance, sr)
+                                                                         : dw::EqCascade::butterworthLowPass (centre, order, resonance, sr),
+                                                                cutDb));
+                    }
+                others[zone].matched = std::max (others[zone].matched, matched);
+                others[zone].bilinear = std::max (others[zone].bilinear, bilinear);
+            }
+        }
+    const char* zones[] = { "banda <= 5 kHz", "banda aguda", "banda 15-20 kHz a 44.1/48" };
+    for (size_t z = 0; z < 3; ++z)
+        std::printf ("  %-26s campana %.3f (bilineal %.2f) | shelves %.3f (%.2f) | notch/pasa banda/cortes %.3f (%.2f) dB\n", zones[z],
+                     bells[z].matched, bells[z].bilinear, shelves[z].matched, shelves[z].bilinear, others[z].matched, others[z].bilinear);
+    // El peor punto de cada zona está casi siempre en los últimos kHz antes de Nyquist a 44.1/48 kHz (medido: campana
+    // 1.2 / 1.2 / 2.3 dB, shelves 0.7 / 0.6 / 2.6 dB, notch/pasa banda/cortes 1.3 / 4.5 / 8.3 dB, este último en la zona
+    // ya cortada de un corte de 48 dB/oct, entre −40 y −60 dB).
+    CHECK (bells[0].matched < 1.5 && shelves[0].matched < 1.0 && others[0].matched < 2.0);
+    CHECK (bells[1].matched < 1.5 && shelves[1].matched < 1.0 && others[1].matched < 6.0);
+    CHECK (bells[2].matched < 3.0 && shelves[2].matched < 3.5 && others[2].matched < 10.0);
+    for (size_t z = 0; z < 3; ++z) // siempre bastante mejor que la bilineal
+        CHECK (bells[z].matched < 0.3 * bells[z].bilinear && shelves[z].matched < 0.5 * shelves[z].bilinear
+               && others[z].matched < 0.5 * others[z].bilinear);
+}
+
+void testMatchedEqExactPoints()
+{
+    std::printf ("EQ analógico: pico de la campana, mesetas, -3 dB de los cortes, +x/-x = identidad, 0 dB bit a bit\n");
+
+    double worstPeak = 0.0, worstPlateau = 0.0, worstCut = 0.0, worstInverse = 0.0, worstAllPass = 0.0, worstNotch = -300.0;
+    for (const double sr : sampleRates)
+        for (const double hz : { 30.0, 400.0, 3000.0, 12000.0, 19000.0 })
+            for (const double q : { 0.1, 0.71, 4.0, 40.0 })
+            {
+                for (const double gainDb : { -30.0, -6.0, 0.5, 12.0, 30.0 })
+                {
+                    // El pico de la campana: en su frecuencia y con la ganancia pedida, a cualquier altura.
+                    const auto bell = dw::MatchedEq::bell (hz, q, gainDb, sr);
+                    worstPeak = std::max (worstPeak, std::abs (bell.magnitudeDb (hz, sr) - gainDb));
+                    // Mesetas en DC: el shelf de graves, la ganancia; el de agudos y la campana, 0 dB.
+                    const auto low = dw::MatchedEq::lowShelf (hz, q, gainDb, sr), high = dw::MatchedEq::highShelf (hz, q, gainDb, sr);
+                    worstPlateau = std::max ({ worstPlateau, std::abs (low.magnitudeDb (0.01, sr) - gainDb), std::abs (high.magnitudeDb (0.01, sr)),
+                                               std::abs (bell.magnitudeDb (0.01, sr)) });
+                    // +x seguido de −x = nada (el que baja es la inversa exacta del que sube).
+                    const auto bellDown = dw::MatchedEq::bell (hz, q, -gainDb, sr);
+                    const auto lowDown = dw::MatchedEq::lowShelf (hz, q, -gainDb, sr), highDown = dw::MatchedEq::highShelf (hz, q, -gainDb, sr);
+                    for (const double f : { 20.0, hz * 0.7, hz, std::min (hz * 1.4, 0.49 * sr), 0.49 * sr })
+                        worstInverse = std::max ({ worstInverse, std::abs (bell.magnitudeDb (f, sr) + bellDown.magnitudeDb (f, sr)),
+                                                   std::abs (low.magnitudeDb (f, sr) + lowDown.magnitudeDb (f, sr)),
+                                                   std::abs (high.magnitudeDb (f, sr) + highDown.magnitudeDb (f, sr)) });
+                }
+                // Los cortes: −3 dB justo en el corte con cualquier orden (cada etapa se iguala ahí).
+                for (const int order : { 1, 2, 3, 8, 16 })
+                    worstCut = std::max ({ worstCut, std::abs (dw::MatchedEq::butterworthHighPass (hz, order, std::sqrt (0.5), sr).magnitudeDb (hz, sr) + 3.0103),
+                                           std::abs (dw::MatchedEq::butterworthLowPass (hz, order, std::sqrt (0.5), sr).magnitudeDb (hz, sr) + 3.0103) });
+                const auto allPass = dw::MatchedEq::allPass (hz, q, sr);
+                for (double f = 20.0; f < 0.49 * sr; f *= 1.1)
+                    worstAllPass = std::max (worstAllPass, std::abs (allPass.magnitudeDb (f, sr)));
+                worstNotch = std::max (worstNotch, dw::MatchedEq::notch (hz, q, sr).magnitudeDb (hz, sr));
+            }
+    std::printf ("  peor: pico %.5f dB, mesetas %.5f dB, cortes -3 dB %.5f dB, +x/-x %.6f dB, all-pass %.6f dB, notch %.0f dB\n",
+                 worstPeak, worstPlateau, worstCut, worstInverse, worstAllPass, worstNotch);
+    CHECK (worstPeak < 0.001);
+    CHECK (worstPlateau < 0.005); // los coeficientes en float
+    CHECK (worstCut < 0.001);
+    CHECK (worstInverse < 0.001);
+    CHECK (worstAllPass < 1.0e-4);
+    CHECK (worstNotch < -60.0);
+
+    // Q 0.71: el punto medio del shelf, exacto (Q bajo: los tres puntos, uno de ellos ahí).
+    for (const double sr : sampleRates)
+        for (const double hz : { 200.0, 8000.0 })
+        {
+            CHECK (std::abs (dw::MatchedEq::lowShelf (hz, 0.71, 12.0, sr).magnitudeDb (hz, sr) - 6.0) < 0.001);
+            CHECK (std::abs (dw::MatchedEq::highShelf (hz, 0.71, -12.0, sr).magnitudeDb (hz, sr) + 6.0) < 0.001);
+            CHECK (std::abs (dw::MatchedEq::tiltShelf (hz, 0.71, 12.0, sr).magnitudeDb (hz, sr)) < 0.001);
+        }
+
+    // En graves la bilineal ya era analógica: los dos diseños coinciden (también con Q 40 en 10 Hz a 96 kHz, donde
+    // 1 + a1 + a2 es del orden de 10^-7 y una resta descuidada perdería la precisión).
+    double worstLow = 0.0;
+    for (const double sr : sampleRates)
+        for (const double q : { 0.3, 2.0, 40.0 })
+            for (const double hz : { 10.0, 100.0 })
+                for (double f = 5.0; f < 4.0 * hz; f *= 1.05)
+                    worstLow = std::max ({ worstLow, std::abs (dw::MatchedEq::bell (hz, q, 15.0, sr).magnitudeDb (f, sr)
+                                                               - dw::EqCoefficients::bell (hz, q, 15.0, sr).magnitudeDb (f, sr)),
+                                           std::abs (dw::MatchedEq::lowShelf (hz, q, -15.0, sr).magnitudeDb (f, sr)
+                                                     - dw::EqCoefficients::lowShelf (hz, q, -15.0, sr).magnitudeDb (f, sr)) });
+    std::printf ("  graves: matched = bilineal con %.5f dB\n", worstLow);
+    CHECK (worstLow < 0.01);
+
+    // 0 dB: los mismos coeficientes que la bilineal (dry = 1, el resto 0): la entrada intacta, bit a bit.
+    for (const auto& flat : { dw::MatchedEq::bell (12000.0, 2.0, 0.0, 44100.0), dw::MatchedEq::lowShelf (300.0, 1.0, 0.0, 44100.0),
+                              dw::MatchedEq::highShelf (12000.0, 1.0, 0.0, 44100.0), dw::MatchedEq::tiltShelf (1000.0, 1.0, 0.0, 44100.0) })
+        CHECK (flat.dry == 1.0f && flat.bandPass == 0.0f && flat.lowPass == 0.0f && flat.highPass == 0.0f);
+}
+
+void testMatchedEqOnTheSvf()
+{
+    std::printf ("EQ analógico: el biquad escrito sobre el SVF suena igual (response() y medida) y es estable al modularlo\n");
+
+    // fromBiquad: la respuesta del SVF con la mezcla = la del biquad directo (en double, antes de pasar a float).
+    double worstMapping = 0.0;
+    for (const double sr : sampleRates)
+        for (const double hz : { 50.0, 2000.0, 16000.0 })
+        {
+            const auto bell = dw::AnalogBiquad::bell (hz, 1.5, 9.0);
+            const auto poles = dw::MatchedEq::Poles::second (2.0 * pi * hz / sr, bell.d1);
+            const dw::MatchedEq::Biquad biquad { dw::MatchedEq::peak (poles, 2.0 * pi * hz / sr, bell.power (hz)), poles.a };
+            const auto svf = dw::MatchedEq::fromBiquad (biquad, 1.0);
+            for (double f = 20.0; f < 0.49 * sr; f *= 1.3)
+                worstMapping = std::max (worstMapping, std::abs (toDb (std::abs (biquad.response (f, sr))) - svf.magnitudeDb (f, sr)));
+        }
+    std::printf ("  SVF contra el biquad directo: %.6f dB\n", worstMapping);
+    CHECK (worstMapping < 0.001);
+
+    // El audio = la curva, también arriba (una campana en 15 kHz y un corte de agudos de 48 dB/oct en 12 kHz).
+    double worstMeasured = 0.0;
+    for (const double sr : { 44100.0, 96000.0 })
+    {
+        const auto bell = dw::EqCascade::single (dw::MatchedEq::bell (15000.0, 1.0, 9.0, sr));
+        const auto cut = dw::MatchedEq::butterworthLowPass (12000.0, 8, std::sqrt (0.5), sr);
+        for (const double hz : { 1000.0, 9000.0, 15000.0, 19000.0 })
+            worstMeasured = std::max ({ worstMeasured, std::abs (measureCascadeDb (bell, hz, sr) - bell.magnitudeDb (hz, sr)),
+                                        cut.magnitudeDb (hz, sr) > -60.0 ? std::abs (measureCascadeDb (cut, hz, sr) - cut.magnitudeDb (hz, sr)) : 0.0 });
+    }
+    std::printf ("  medida contra la curva: %.5f dB\n", worstMeasured);
+    CHECK (worstMeasured < 0.01);
+
+    // Todo saltando en cada muestra (como al automatizar): estable con todas las formas.
+    for (const double sr : sampleRates)
+    {
+        dw::EqCascadeFilter filter;
+        unsigned seed = 2718;
+        auto random = [&seed] {
+            seed = seed * 1664525u + 1013904223u;
+            return static_cast<double> (seed >> 8) / 16777216.0;
+        };
+        float peak = 0.0f;
+        bool valid = true;
+        for (int i = 0; i < 100000; ++i)
+        {
+            const double hz = 10.0 * std::pow (3000.0, random());
+            const double q = 0.025 * std::pow (1600.0, random());
+            const double gainDb = -30.0 + 60.0 * random();
+            dw::EqCascade cascade;
+            switch ((i / 500) % 9)
+            {
+                case 0: cascade = dw::EqCascade::single (dw::MatchedEq::bell (hz, q, gainDb, sr)); break;
+                case 1: cascade = dw::EqCascade::single (dw::MatchedEq::lowShelf (hz, q, gainDb, sr)); break;
+                case 2: cascade = dw::EqCascade::single (dw::MatchedEq::highShelf (hz, q, gainDb, sr)); break;
+                case 3: cascade = dw::EqCascade::single (dw::MatchedEq::tiltShelf (hz, q, gainDb, sr)); break;
+                case 4: cascade = dw::EqCascade::single (dw::MatchedEq::notch (hz, q, sr)); break;
+                case 5: cascade = dw::EqCascade::single (dw::MatchedEq::bandPassFilter (hz, q, sr)); break;
+                case 6: cascade = dw::EqCascade::single (dw::MatchedEq::allPass (hz, q, sr)); break;
+                case 7: cascade = dw::MatchedEq::butterworthHighPass (hz, 1 + (i % 16), q, sr); break;
+                default: cascade = dw::MatchedEq::butterworthLowPass (hz, 1 + (i % 16), q, sr); break;
+            }
+            for (int s = 0; s < cascade.numStages; ++s)
+            {
+                const auto& c = cascade.stages[static_cast<size_t> (s)];
+                valid = valid && c.svf.g > 0.0f && c.svf.k > 0.0f && std::isfinite (c.dry + c.bandPass + c.lowPass + c.highPass);
+            }
+            const float x = (i / 37) % 2 == 0 ? 0.5f : -0.5f;
+            peak = std::max (peak, std::abs (filter.process (x, cascade)));
+        }
+        CHECK (valid);
+        CHECK (std::isfinite (peak));
+        CHECK (peak < 1.0e5f);
+    }
+
+    // Pasar de un diseño al otro interpolando los coeficientes (EqCascade::blend): en los extremos, cada uno exacto.
+    const auto from = dw::EqCascade::single (dw::EqCoefficients::bell (12000.0, 1.0, 12.0, 44100.0));
+    const auto to = dw::EqCascade::single (dw::MatchedEq::bell (12000.0, 1.0, 12.0, 44100.0));
+    CHECK (dw::EqCascade::blend (from, to, 0.0f).magnitudeDb (15000.0, 44100.0) == from.magnitudeDb (15000.0, 44100.0));
+    CHECK (dw::EqCascade::blend (from, to, 1.0f).magnitudeDb (15000.0, 44100.0) == to.magnitudeDb (15000.0, 44100.0));
+}
+
 // --- Suavizado ------------------------------------------------------------------------------------------------------
 
 void testSmoothedParameter()
@@ -1753,6 +2008,9 @@ int main()
     testButterworthCuts();
     testFlatTilt();
     testEqShapesAreStableWhenModulated();
+    testMatchedEqAgainstAnalog();
+    testMatchedEqExactPoints();
+    testMatchedEqOnTheSvf();
     testLinkwitzRileySplit();
     testMultibandSplitterSumsFlat();
     testSmoothedParameter();

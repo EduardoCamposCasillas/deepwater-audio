@@ -21,6 +21,7 @@ inline std::optional<BandSettings> soloZoneFor (const BandSettings& band) noexce
 {
     BandSettings zone;
     zone.enabled = true;
+    zone.analog = band.analog;
     zone.frequency = band.frequency;
     zone.q = 0.71f;
     zone.slopeIndex = 1; // 12 dB/oct

@@ -105,6 +105,7 @@ private:
     std::atomic<float>* outputPanParam = nullptr;
     std::atomic<float>* phaseInvertParam = nullptr;
     std::atomic<float>* autoGainParam = nullptr;
+    std::atomic<float>* analogResponseParam = nullptr;
     struct BandParameters
     {
         std::atomic<float>* enabled = nullptr;

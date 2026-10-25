@@ -46,6 +46,8 @@ private:
     juce::TextButton redoButton { "REHACER" };
     juce::TextButton bypassButton { "BYPASS" };
     std::unique_ptr<ButtonAttachment> bypassAttachment;
+    juce::TextButton analogButton { juce::String::fromUTF8 ("ANAL\xc3\x93GICA") };
+    std::unique_ptr<ButtonAttachment> analogAttachment;
     double lastFrameSeconds = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FathomAudioProcessorEditor)

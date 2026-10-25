@@ -55,6 +55,18 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
 
     addAndMakeVisible (outputPanel);
 
+    // Fase 7: respuesta analógica o bilineal (para escuchar y ver qué corrige; con A/B se comparan a volumen igual).
+    analogButton.setClickingTogglesState (true);
+    analogButton.setColour (juce::TextButton::buttonOnColourId, fathom::gui::theme::accent.withAlpha (0.45f));
+    analogButton.setTooltip (juce::String::fromUTF8 (
+        "Encendido: las bandas tienen la respuesta de un EQ anal\xc3\xb3gico tambi\xc3\xa9n cerca de Nyquist (la mitad de "
+        "la frecuencia de muestreo: 22 kHz a 44.1). Apagado: la bilineal cl\xc3\xa1sica, que \"aplasta\" lo que est\xc3\xa1 "
+        "arriba: una campana en 12 kHz sale m\xc3\xa1s angosta y su lado de arriba cae a 0 dB en 22 kHz; un corte de agudos "
+        "se hunde de golpe al llegar a Nyquist. Los dos sin latencia. Mira la curva al alternar: abajo de ~5 kHz casi no "
+        "cambia. Con A/B y AUTO GAIN se comparan a o\xc3\xad" "do."));
+    addAndMakeVisible (analogButton);
+    analogAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), fathom::params::analogResponse, analogButton);
+
     // Comparación A/B: dos versiones completas del EQ; un clic en la otra letra cambia (sin clic en el audio).
     const auto compareTip = juce::String::fromUTF8 (
         "Comparaci\xc3\xb3n A/B: dos versiones completas del EQ (todo menos el bypass). Haz una en A, pasa a B (nace como "
@@ -179,6 +191,8 @@ void FathomAudioProcessorEditor::resized()
     sideBButton.setBounds (header.removeFromRight (34));
     header.removeFromRight (2);
     sideAButton.setBounds (header.removeFromRight (34));
+    header.removeFromRight (24);
+    analogButton.setBounds (header.removeFromRight (96));
 
     auto content = getLocalBounds().withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0);
     outputPanel.setBounds (content.removeFromRight (controlsWidth));

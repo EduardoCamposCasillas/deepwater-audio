@@ -108,7 +108,7 @@ private:
         if (! a.enabled && ! b.enabled)
             return true;
         return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.shape == b.shape
-               && a.slopeIndex == b.slopeIndex;
+               && a.slopeIndex == b.slopeIndex && a.analog == b.analog;
     }
 
     double sampleRate = 44100.0;

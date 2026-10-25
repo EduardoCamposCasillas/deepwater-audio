@@ -1131,7 +1131,7 @@ private:
     static bool sameSettings (const dsp::BandSettings& a, const dsp::BandSettings& b) noexcept
     {
         return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.shape == b.shape
-               && a.slopeIndex == b.slopeIndex;
+               && a.slopeIndex == b.slopeIndex && a.analog == b.analog;
     }
 
     // Una banda está "en uso" si está encendida o si se tocó algo (apagada con ajustes propios: su nodo se ve hueco).

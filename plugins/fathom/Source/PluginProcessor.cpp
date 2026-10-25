@@ -62,6 +62,7 @@ FathomAudioProcessor::FathomAudioProcessor()
     outputPanParam = parameters.getRawParameterValue (id::outputPan);
     phaseInvertParam = parameters.getRawParameterValue (id::phaseInvert);
     autoGainParam = parameters.getRawParameterValue (id::autoGain);
+    analogResponseParam = parameters.getRawParameterValue (id::analogResponse);
     for (int b = 0; b < id::numBands; ++b)
     {
         auto& band = bandParams[static_cast<size_t> (b)];
@@ -123,6 +124,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
         juce::AudioParameterFloatAttributes().withStringFromValueFunction (panToText).withValueFromStringFunction (textToPan)));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::phaseInvert, id::versionHintPhase6 }, "Phase Invert", false));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::autoGain, id::versionHintPhase6 }, "Auto Gain", false));
+    // Fase 7. Encendida por defecto: un proyecto de las Fases 1-6 (que no la tiene) pasa a sonar con la respuesta
+    // analógica; la diferencia está en las bandas agudas (con 44.1/48 kHz, sobre todo encima de ~8 kHz).
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::analogResponse, id::versionHintPhase7 },
+                                                            "Analog Response", true));
 
     // Las 24 bandas, apagadas. Rangos como los de un EQ profesional: 10 Hz-30 kHz (encima de Nyquist se limita),
     // ±30 dB y Q de 0.025 (casi 9 octavas de ancho) a 40 (un 1/36 de octava: para cazar una resonancia). Cada banda
@@ -179,7 +184,8 @@ fathom::dsp::BandSettings FathomAudioProcessor::getBandSettings (int band) const
              p.gain->load(),
              p.q->load(),
              static_cast<fathom::dsp::Shape> (juce::jlimit (0, fathom::dsp::numShapes - 1, juce::roundToInt (p.shape->load()))),
-             juce::jlimit (0, static_cast<int> (fathom::dsp::slopes.size()) - 1, juce::roundToInt (p.slope->load())) };
+             juce::jlimit (0, static_cast<int> (fathom::dsp::slopes.size()) - 1, juce::roundToInt (p.slope->load())),
+             analogResponseParam->load() >= 0.5f };
 }
 
 fathom::dsp::Engine::BandArray FathomAudioProcessor::getAllBandSettings() const noexcept

@@ -37,6 +37,9 @@ Lo que Fathom va a usar de `libs/dsp` (`deepwater::dsp`):
   LP/BP/HP del SVF: campana, shelves, tilt shelf, notch, pasa banda, all-pass, LP/HP de 1 y 2 polos) con
   `response()`/`magnitudeDb()` exactas para esos coeficientes; `EqCascade` (hasta 8 etapas en serie: Butterworth de
   1–16 polos con resonancia) y `FlatTiltDesign` (pendiente constante en dB/oct); `EqFilter` y `EqCascadeFilter`.
+- `MatchedEq.h` (nació en la Fase 7): las mismas formas con la magnitud del prototipo analógico cerca de Nyquist
+  (`MatchedEq`, misma interfaz que `EqCoefficients`/`EqCascade`), los prototipos `AnalogBiquad`/`AnalogCascade` y
+  `EqCascade::blend` (pasar de un diseño al otro sin clic).
 - `SpectrumAnalyzer.h` + `AnalyzerTap.h` (vienen de Riptide): el analizador y la toma audio → GUI. En la Fase 5
   ganó `peak()` (el pico de una zona afinado con una parábola por los bins: < 0.05 bin).
 - `Smoothing.h` (`LinearRamp`, `EffectSwitch`), `Decibels.h`, `Pitch.h`, `LevelMeter.h`.
@@ -73,7 +76,8 @@ plugins/fathom/
     dsp/AutoGain.h           # cuánto cambia la sonoridad la curva (ruido rosa con peso K de BS.1770), por banda
     dsp/Solo.h               # la zona que se escucha en solo según la forma de la banda
     dsp/Band.h               # una banda: formas (Shape), pendientes, ajustes (BandSettings), parámetros suavizados,
-                             # fundido de encendido/cambio de forma y coeficientes para la GUI
+                             # fundido de encendido/cambio de forma, respuesta analógica o bilineal (con su rampa) y
+                             # coeficientes para la GUI
     edit/UndoStack.h         # pila de deshacer/rehacer (sin JUCE): pasos con solo los parámetros que cambiaron
     edit/EditHistory.h       # deshacer con JUCE: escucha los gestos de los parámetros (no la automatización del host);
                              # fotos y carga de todos los parámetros para el A/B
@@ -124,7 +128,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       congelar; ver entrada/salida/sidechain; "agarrar" un pico del espectro para crear o mover una banda.
 - [x] Fase 6 — Escuchar y comparar: solo de banda (escuchar la zona que toca), auto gain (volumen igualado al
       comparar), escala de ganancia global, ganancia y paneo de salida, invertir la fase, comparación A/B.
-- [ ] Fase 7 — Respuesta analógica: corregir el aplastamiento de campanas y shelves agudos cerca de Nyquist
+- [x] Fase 7 — Respuesta analógica: corregir el aplastamiento de campanas y shelves agudos cerca de Nyquist
       (bilineal "cramping") sin latencia. Opciones: sobremuestreo vs. diseño "matched" (Vicanek); medir contra el
       prototipo analógico.
 - [ ] Fase 8 — Estéreo por banda: Estéreo / L / R / Mid / Side; analizador M/S.
@@ -145,7 +149,54 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 6 COMPLETADA (2026-10-24). Probada por el usuario en FL Studio: funciona.
+Fase 7 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
+- Opciones consideradas: sobremuestrear (×4 de CPU en 24 bandas y latencia o fase de los filtros del sobremuestreo) vs.
+  diseño "matched" (M. Vicanek, "Matched Second Order Digital Filters", 2016) a la frecuencia de muestreo original. Se
+  eligió el matched: latencia 0, mismo costo por muestra quieto. También se probó un ajuste libre de polos y ceros en 5
+  puntos: frágil (denominadores no realizables) e impreciso en graves; descartado.
+- Librería: `MatchedEq.h` (nuevo) con la misma interfaz que las formas de `EqCoefficients` y los cortes de `EqCascade`.
+  Polos por invarianza al impulso (`Poles::second/first`, con 1 − r, a(1), a(−1) y 1 − a2 por expm1: precisos con polos
+  pegados a z = 1); |B|² = B0·φ0 + B1·φ1 + B2·φ2 y `numerator` (la raíz de fase mínima; si no hay numerador real, B2 se
+  limita a −W²); `fromBiquad` escribe cualquier biquad estable sobre el SVF (g² = a(1)/a(−1), k·g = 2(1 − a2)/a(−1),
+  lp = H(DC) − dry, hp = H(Nyquist) − dry, bp de b0 − b2): la curva sigue saliendo de `EqCoefficients::response()`.
+  Por forma: campana = DC, pico y derivada 0 en el pico (Vicanek), la que baja = inversa exacta de la que sube; shelves
+  = la versión con los polos abajo (graves que sube, agudos que baja) con DC, la frecuencia y Nyquist, y la otra es su
+  inversa; con Q alto los ceros también por invarianza al impulso (matched-Z), mezclados entre Q 1 y 2 y apagados si los
+  ceros pasan de 0.35–0.45·fs (la mezcla de dos numeradores de fase mínima con los mismos polos es de fase mínima: las
+  condiciones de Jury de 2º orden son lineales); tilt = shelf de agudos × 1/A; notch = ceros en el círculo y DC exacto;
+  pasa banda = DC (cero), centro y Nyquist; all-pass = ceros espejo (|H| = 1 exacto); cortes de graves = cero doble en
+  DC (o simple en 6 dB) e igual en el corte; etapas de los cortes de agudos = DC, x_c/4 y x_c (igualar Nyquist dejaba
+  ±1 dB por etapa en la banda que pasa, que en 8 etapas suma +8 dB). 0 dB = los coeficientes de la bilineal (bit a bit).
+  `AnalogBiquad`/`AnalogCascade`: los prototipos en Hz absolutos. `EqFilter.h` ganó `EqCoefficients::blend`,
+  `EqCascade::blend` y `EqCascade::butterworthStageQ` (la cuenta de antes, sin cambios).
+- Error máximo contra el analógico (`DeepwaterDspTests`, 4 sample rates, 20 Hz–20 kHz, Q 0.3–2, ±3 a ±24 dB; lo peor
+  siempre en los últimos kHz antes de Nyquist a 44.1/48): banda ≤ 5 kHz campana 1.2 dB (bilineal 8.9), shelves 0.7
+  (4.2), notch/pasa banda/cortes 1.3 (24.8); banda 10 kHz campana 1.2 (11.1), shelves 0.6 (7.2), resto 4.5 (86, en la
+  zona ya cortada); banda 15–20 kHz a 44.1/48 campana 2.3 (14.2), shelves 2.6 (14.8), resto 8.3 (99). A 96 kHz la
+  campana queda en 0.06 dB. Medido en el audio (`FathomTests`, campana +12 dB 10 kHz + shelf −9 dB 6 kHz): 0.63 dB a
+  44.1 (bilineal 3.9), 0.015 dB a 96 (0.86). Alternar en cada bloque: lo que sale sobre 14 kHz = 0.000005 (de golpe,
+  0.0054).
+- `dsp/Band.h`: `BandSettings::analog` (true por defecto); `makeCascade` elige `MatchedEq` o la bilineal (`single<>`);
+  el flat tilt es igual en los dos. Cambiar de diseño = rampa `analogMix` de 20 ms durante la que se calculan los dos y
+  se interpolan los coeficientes (sin fundido a silencio). `Solo.h` copia `analog` a la zona; `AutoGain` lo compara.
+- Parámetro nuevo (versionHint 7): `analogResponse` (bool, ON por defecto). Un proyecto de las Fases 1-6 se abre con la
+  respuesta analógica (cambia arriba de ~5 kHz). Entra al deshacer, al A/B y a la automatización. El procesador lo
+  copia a las 24 bandas en `getBandSettings`.
+- GUI: botón ANALÓGICA en la cabecera (a la izquierda de A/B) con su explicación en el tooltip; la curva del visor
+  cambia con él (`EqDisplay::sameSettings` compara `analog`).
+- Tests nuevos: `DeepwaterDspTests` (contra el prototipo analógico por zona y contra la bilineal; pico, mesetas, −3 dB
+  de los cortes, +x/−x, all-pass, notch, punto medio con Q 0.71, graves = bilineal con Q 40 en 10 Hz a 96 kHz, 0 dB =
+  coeficientes de identidad; `fromBiquad` = biquad directo; audio = curva arriba; todas las formas con todo saltando en
+  cada muestra; `blend` en los extremos); `FathomTests` (campana + shelf agudos medidos en el audio contra el analógico y
+  contra la curva a 4 sample rates, la bilineal más lejos; graves iguales; alternar analógica/bilineal en cada bloque
+  con bandas agudas de ±24 dB sin clic).
+- Tests de la Fase 6 ajustados: "un shelf de graves sobre Nyquist sube todo 6 dB" solo es cierto con la bilineal (el
+  test fija `analog = false`).
+- Sin cambios: los IDs de las bandas, el analizador, latencia 0. `EqFilter.h` solo lo usa Fathom.
+- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS. El botón ANALÓGICA NO se revisó con
+  capturas del Standalone: revisarlo en FL.
+
+### Lo que quedó de la Fase 6
 - `dsp/Engine.h`: después de las bandas, un multiplicador por canal = salida × auto gain × balance × polaridad, todo con
   `LinearRamp` de 20 ms (si todo vale 1, bit a bit); después el solo (fundido de 20 ms entre la mezcla y la zona) y al
   final el bypass. `setGainScale` (0–2: multiplica `gainDb` de cada banda en `setBand`, incluido el flat tilt; las bandas
@@ -310,4 +361,4 @@ Fase 6 COMPLETADA (2026-10-24). Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 7 (respuesta analógica).
+Siguiente: probar la Fase 7 en FL Studio; después, Fase 8 (estéreo por banda).
