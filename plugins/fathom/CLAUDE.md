@@ -149,7 +149,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 7 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
+Fase 7 COMPLETADA (2026-10-25). Probada por el usuario en FL Studio: funciona.
 - Opciones consideradas: sobremuestrear (×4 de CPU en 24 bandas y latencia o fase de los filtros del sobremuestreo) vs.
   diseño "matched" (M. Vicanek, "Matched Second Order Digital Filters", 2016) a la frecuencia de muestreo original. Se
   eligió el matched: latencia 0, mismo costo por muestra quieto. También se probó un ajuste libre de polos y ceros en 5
@@ -193,8 +193,8 @@ Fase 7 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
 - Tests de la Fase 6 ajustados: "un shelf de graves sobre Nyquist sube todo 6 dB" solo es cierto con la bilineal (el
   test fija `analog = false`).
 - Sin cambios: los IDs de las bandas, el analizador, latencia 0. `EqFilter.h` solo lo usa Fathom.
-- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS. El botón ANALÓGICA NO se revisó con
-  capturas del Standalone: revisarlo en FL.
+- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS. El botón ANALÓGICA no se revisó con
+  capturas del Standalone; se revisó en FL.
 
 ### Lo que quedó de la Fase 6
 - `dsp/Engine.h`: después de las bandas, un multiplicador por canal = salida × auto gain × balance × polaridad, todo con
@@ -361,4 +361,4 @@ Fase 7 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 7 en FL Studio; después, Fase 8 (estéreo por banda).
+Siguiente: Fase 8 (estéreo por banda).
