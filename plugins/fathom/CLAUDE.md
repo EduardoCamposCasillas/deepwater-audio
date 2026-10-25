@@ -145,7 +145,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 6 COMPLETADA (2026-10-24), pendiente de probar en FL Studio.
+Fase 6 COMPLETADA (2026-10-24). Probada por el usuario en FL Studio: funciona.
 - `dsp/Engine.h`: después de las bandas, un multiplicador por canal = salida × auto gain × balance × polaridad, todo con
   `LinearRamp` de 20 ms (si todo vale 1, bit a bit); después el solo (fundido de 20 ms entre la mezcla y la zona) y al
   final el bypass. `setGainScale` (0–2: multiplica `gainDb` de cada banda en `setBand`, incluido el flat tilt; las bandas
@@ -310,4 +310,4 @@ Fase 6 COMPLETADA (2026-10-24), pendiente de probar en FL Studio.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 7 (respuesta analógica), cuando el usuario confirme la Fase 6 en FL.
+Siguiente: Fase 7 (respuesta analógica).
