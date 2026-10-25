@@ -152,7 +152,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 8 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
+Fase 8 COMPLETADA (2026-10-25). Probada por el usuario en FL Studio: funciona.
 - Cada banda actúa en estéreo, L, R, mid o side (`Placement` en `Band.h`, `BandSettings::placement`). Mid/side sin ida
   y vuelta: se filtra M = (L + R)/2 (o S = (L − R)/2) y a L y R se les suma solo el cambio d = filtrada − M (side: L + d,
   R − d): con la banda en 0 dB, d = 0 y la salida es bit a bit. L y R usan el filtro de su canal; mid y side, el del
@@ -188,9 +188,8 @@ Fase 8 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
   auto gain (orden estéreo < mid < izquierda < side < 0, mid + side = estéreo, L + R = estéreo, mono); solo side (centro
   = 0 exacto, nivel = zona) y solo izquierda (derecha = 0 exacto). `DeepwaterDspTests`: `pushSide`.
 - Sin cambios: latencia 0, los IDs de antes, el sonido con todas las bandas en estéreo.
-- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS. La GUI NO se revisó con capturas del
-  Standalone (la captura de pantalla falló): revisarla en FL (columna CANAL, letras de los nodos, curvas por canal,
-  CANALES del analizador).
+- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS. La GUI no se revisó con capturas del
+  Standalone (la captura de pantalla falló); el usuario la revisó en FL.
 
 ### Lo que quedó de la Fase 7
 Probada por el usuario en FL Studio: funciona.
@@ -405,4 +404,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 8 en FL Studio; después, Fase 9 (EQ dinámico).
+Siguiente: Fase 9 (EQ dinámico).
