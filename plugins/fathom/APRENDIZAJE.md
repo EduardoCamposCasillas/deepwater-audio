@@ -896,3 +896,132 @@ una campana en Mid sobre el pad y deja el Side intacto; escucha con SOLO dónde 
 - **Usar L / R para "arreglar" un paneo**: si algo está corrido, se arregla con el paneo. L / R sirve para tomas
   realmente distintas de cada lado (dos micrófonos, una guitarra doblada con un lado más oscuro).
 - **Juzgar sin igualar el volumen**: un side más brillante suena "mejor" por ser más fuerte; usa AUTO GAIN y A/B.
+
+## Fase 9 — EQ dinámico: bandas que se mueven solas
+
+Un EQ normal es una foto: si cortas 4 dB en 3 kHz, corta 4 dB **siempre**, aunque la voz solo se ponga chillona en
+las notas altas. Lo demás del tiempo le estás quitando presencia sin necesidad. Un EQ dinámico corta (o sube) **solo
+cuando hace falta**: cada banda escucha su propia zona y se mueve según cuánto suena. Es un compresor que mira y toca
+una sola franja del espectro.
+
+### Conceptos aprendidos
+
+- **Estático vs. dinámico vs. compresor multibanda.** El EQ estático cambia el tono siempre igual. El compresor
+  multibanda parte la señal en bandas fijas (con crossovers) y comprime cada una: bandas anchas, pensado para controlar
+  el nivel. El EQ dinámico es una **campana (o un shelf) con detector**: la forma, el ancho y la frecuencia son los de
+  un EQ, sin partir la señal; ideal para un problema puntual (una resonancia, las eses, un grave que se acumula).
+- **El detector.** Cada banda dinámica escucha su **zona**: la misma que oyes con SOLO (un pasa banda con su frecuencia
+  y su Q en una campana; lo de abajo en un shelf de graves; lo de arriba en uno de agudos; los tilts escuchan todo).
+  Mide el nivel de esa zona con un **RMS corto** (dos ciclos de lo más grave de la zona, de 1 a 20 ms: lo justo para que
+  no ondule con cada vuelta del seno) más 3 dB, para que un seno lea su pico, como el medidor de FL.
+- **Umbral y rango.** Con la zona debajo del **UMBRAL**, la banda queda en su **GANANCIA** (lo normal: 0 dB). Cuando la
+  zona lo pasa, la banda se aleja hacia el **RANGO**, **1 dB por cada dB que la zona pasa el umbral**, hasta llegar al
+  rango. Con rango −6 la zona queda "pegada" al umbral hasta que hace falta cortar más de 6 dB. Alrededor del umbral hay
+  una **rodilla suave** de 6 dB: la banda entra de a poco, no salta al cruzarlo. Un rango positivo **sube** la zona
+  cuando suena fuerte (que algo aparezca solo en los golpes).
+- **Ataque y liberación sobre la ganancia.** El ataque es lo que tarda la **banda** en llegar al 63 % de su corte; la
+  liberación, lo que tarda en volver. Se aplican a la ganancia en dB, no al nivel. Se probó primero el seguidor de
+  envolvente de la librería (que suaviza el nivel en lineal) y apareció un problema que vale la pena entender: con el
+  umbral muy por debajo de la señal, el nivel lo cruza casi al instante y una banda con 10 ms de ataque cortaba 12 dB
+  en menos de 1 ms (un clic). Suavizando la ganancia, "10 ms" significa 10 ms siempre, esté el umbral a 3 o a 30 dB.
+- **Umbral automático.** El umbral se pone solo 3 dB por encima del **nivel típico** de la zona (el promedio de los
+  últimos ~1.5 s, sin contar los silencios). Lo sostenido no se toca; solo actúan los momentos en que la zona suena más
+  fuerte que de costumbre. Si toda la pista sube (el coro más fuerte que la estrofa), el umbral la sigue.
+- **Sidechain.** El detector puede escuchar **otra pista** (el sidechain) en vez de la propia. Así una banda de la pista
+  A se mueve cuando suena la pista B: tallar espacio solo cuando hace falta.
+- **Cómo se mueve el filtro sin clics.** La ganancia nueva llega cada 16 muestras (0.36 ms a 44.1 kHz). Recalcular el
+  diseño del filtro en cada muestra para 24 bandas costaría mucho; en cambio se calcula en ese punto y en las 16
+  muestras siguientes se interpolan los coeficientes desde los de antes. Los tests muestran la diferencia: aplicando cada
+  valor de golpe, la señal sale entre 7 y 15 veces más "puntiaguda".
+- **Lo que NO se mueve**: el auto gain compensa la ganancia propia de la banda, no la dinámica (compensar cada
+  movimiento haría "respirar" el volumen), y el SOLO escucha la zona de siempre.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+La fila nueva del panel de la banda (debajo de la de siempre):
+
+- **DINÁMICO**: enciende la dinámica de la banda. Solo las formas con ganancia (campana, shelves, tilts); en los cortes,
+  el notch, el pasa banda y el all-pass se atenúa. También está en el menú del nodo (clic derecho → "EQ dinámico",
+  para varias bandas elegidas a la vez).
+- **El medidor** (debajo de DINÁMICO): la barra es el nivel de la zona ahora (de −60 a +6 dB); gris debajo del umbral,
+  del color de la banda lo que lo pasa. La raya blanca es el umbral (con AUTO, el que calculó: "auto −17.2 dB"). A la
+  derecha, cuánto se está moviendo la banda en este momento.
+- **DETECTOR**: Banda (escucha la propia pista) o Sidechain (otra pista; en FL, "Sidechain to this track" y el puerto en
+  Processing). Sin sidechain conectado aparece el aviso "DINÁMICA CON SIDECHAIN: SIN CONECTAR" y la banda no se mueve.
+- **AUTO** (debajo de UMBRAL): el umbral automático. La perilla UMBRAL se atenúa: no se usa.
+- **RANGO** (−30 a +30 dB, −6 por defecto): hasta dónde se mueve, sumado a la GANANCIA. La escala de ganancia de la
+  salida también lo escala (al 50 %, la mitad).
+- **UMBRAL** (−60 a +6 dB, −20 por defecto), **ATAQUE** (0.5–300 ms, 10 por defecto) y **LIBERACIÓN** (5 ms–3 s, 150
+  por defecto).
+- **En el visor**: el nodo se queda donde descansa la banda (su ganancia) y una **línea vertical** baja (o sube) hasta
+  donde la lleva el rango, con una raya al final. Cuando se mueve, la curva y el relleno de la banda son los de
+  **ahora** (lo que suena), la curva en reposo queda **punteada** y un **punto blanco** sobre la línea marca dónde está.
+  La etiqueta del nodo dice "din −6.0 dB (ahora −2.3 dB)".
+- Todo entra al DESHACER, al A/B y a la automatización. Un proyecto de las Fases 1-8 suena igual (la dinámica nace
+  apagada). Latencia: 0.
+
+### Ejercicio de escucha guiado en FL Studio
+
+Usa una voz con autotune que tenga eses marcadas (o un hi-hat brillante) y AUTO GAIN encendido.
+1. **Encontrar el problema.** Campana en 7 kHz, Q 4, SOLO, y barre la frecuencia entre 5 y 10 kHz hasta que las eses
+   suenen más fuertes. Apaga SOLO.
+2. **Corte estático.** GANANCIA −6 dB, sin dinámica. Las eses bajan, pero escucha las vocales: la voz entera perdió
+   brillo y suena más apagada.
+3. **Corte dinámico.** GANANCIA 0 dB, DINÁMICO encendido, RANGO −6, ATAQUE 1 ms, LIBERACIÓN 60 ms. Baja el UMBRAL hasta
+   que el medidor se pinte de color solo en las eses. Mira la línea del nodo y el punto blanco: se mueve solo en cada
+   "s". Compara con el paso 2 (A/B): las eses bajan igual, pero las vocales conservan su brillo.
+4. **Ataque.** Sube el ATAQUE a 30 ms: el principio de cada "s" se escapa antes de que la banda corte. Ahí está la
+   diferencia entre agarrar un golpe y domar lo que sigue.
+5. **AUTO.** Enciende AUTO y canta (o pon) una parte más fuerte y una más suave: el umbral sigue al nivel y la banda
+   actúa parecido en las dos.
+
+### Receta: el 808 y el kick del dembow sin pelearse
+
+El kick y el 808 viven en los mismos 50–100 Hz. Cortar ese grave del 808 todo el tiempo lo deja flaco; cortarlo solo
+cuando pega el kick deja que cada uno tenga su momento.
+1. En la pista del 808, Fathom; en FL, manda el kick como sidechain a esa pista ("Sidechain to this track") y elige el
+   puerto del sidechain en Processing.
+2. Analizador con SIDECHAIN visible: busca el pico del kick (normalmente 50–70 Hz). Campana en esa frecuencia, Q 1.5.
+3. DINÁMICO, DETECTOR = Sidechain, RANGO −6, ATAQUE 2 ms, LIBERACIÓN 80 ms (lo que dura el golpe del kick).
+4. UMBRAL: bájalo hasta que el medidor se pinte en cada golpe del kick.
+5. Compara con BYPASS: el kick atraviesa el 808 en cada golpe y el 808 conserva todo su peso entre golpes.
+
+Por qué funciona: en vez de dejarle al kick un hueco permanente (que el oído nota como un 808 sin cuerpo), el hueco
+aparece solo los ~80 ms en que el kick lo necesita. Es la misma idea del sidechain de volumen de Ebb, pero solo en la
+zona donde chocan: el resto del 808 (sus armónicos, lo que se oye en el celular) no se agacha.
+
+### Reto sin receta
+
+Un 808 largo resuena de más en una sola nota de la melodía (una nota retumba y las otras no). Haz que esa nota quede
+pareja con las demás **sin bajarle los graves a las otras notas**. Pistas (si no sale): ¿en qué frecuencia retumba?
+(agarra el pico en el analizador mientras suena esa nota y mira su nota de FL). ¿Qué pasa si la campana es estática?
+¿Y si es dinámica con el umbral justo encima del nivel de las otras notas? Prueba AUTO: ¿la nota que retumba pasa el
+nivel típico?
+
+### Vocabulario
+
+- **EQ dinámico**: una banda de EQ cuya ganancia depende del nivel de su zona.
+- **Umbral (threshold)**: el nivel desde el que empieza a actuar.
+- **Rango (range)**: cuánto puede moverse como máximo.
+- **Rodilla (knee)**: la zona alrededor del umbral donde la acción entra de a poco.
+- **Ataque / liberación (attack / release)**: lo que tarda en actuar y en soltar.
+- **RMS**: el nivel "promedio" de una señal (la raíz del promedio de los cuadrados); se parece más a lo que oímos que el
+  pico.
+- **De-esser**: un EQ dinámico (o compresor) que solo mira las eses (5–9 kHz) de una voz.
+- **Sidechain**: usar una señal para controlar el procesamiento de otra.
+- **Ejemplo real**: en las voces de reggaetón con autotune casi siempre hay un de-esser (las eses se vuelven ásperas
+  con la compresión y el autotune); en el master, los ingenieros usan bandas dinámicas en 200–400 Hz para que el barro
+  que se acumula en los coros no se quede todo el tema.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Umbral demasiado bajo**: la banda actúa todo el tiempo y es un EQ estático con más pasos (y que "respira"). El
+  medidor debería pintarse de color solo en los momentos problema.
+- **Ataque y liberación muy cortos en graves**: con 0.5 ms y 5 ms en 60 Hz, la banda sigue cada ciclo del 808 y lo
+  distorsiona. En graves, ataques de 5–20 ms y liberaciones de 100 ms o más.
+- **Rango enorme**: −20 dB en una campana angosta deja un hueco que suena a "filtro" cuando entra. Empieza con −3 a −6.
+- **Usarlo para lo que está mal siempre**: si una resonancia suena en todas las notas, un corte estático es más simple y
+  más transparente.
+- **Juzgar sin igualar el volumen**: el corte dinámico baja el nivel en los momentos fuertes y "suena más suave"; usa
+  A/B con AUTO GAIN y escucha el detalle, no el volumen.
+- **Sidechain sin conectar**: la banda no se mueve (mira el aviso en el visor).

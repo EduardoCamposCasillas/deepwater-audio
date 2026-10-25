@@ -787,6 +787,14 @@ private:
                                     });
                                 }));
         menu.addSubMenu ("Canal", placements);
+        // Fase 9: encender o apagar la dinámica de las elegidas (las que no tienen ganancia no cambian).
+        menu.addItem (juce::String::fromUTF8 ("EQ din\xc3\xa1mico"), dsp::canBeDynamic (settings.shape), settings.dynamics.enabled,
+                      guarded ([this, on = ! settings.dynamics.enabled] {
+                          editSelection ([this, on] (int b, const dsp::BandSettings& s) {
+                              if (dsp::canBeDynamic (s.shape))
+                                  edits.set (b, params::dynamic, on ? 1.0f : 0.0f);
+                          });
+                      }));
         menu.addItem (juce::String::fromUTF8 ("Afinar a la nota m\xc3\xa1s cercana (") + format::noteName (edit::nearestNoteHz (settings.frequency))
                           + ")",
                       guarded ([this] {
@@ -843,10 +851,16 @@ private:
         curveSampleRate = sampleRate;
         for (int b = 0; b < dsp::Engine::numBands; ++b)
         {
+            const auto index = static_cast<size_t> (b);
             const auto settings = processor.getBandSettings (b);
-            if (allBands || ! sameSettings (settings, paintedBands[static_cast<size_t> (b)]))
+            // Fase 9: lo que la dinámica le suma ahora (0 si no es dinámica). Cambios de menos de 0.05 dB no se ven.
+            const bool dynamic = settings.enabled && settings.dynamics.enabled && dsp::canBeDynamic (settings.shape);
+            const float live = dynamic ? processor.getDynamicState (b).gainDb : 0.0f;
+            const bool moved = std::abs (live - liveDb[index]) >= 0.05f || (live == 0.0f) != (liveDb[index] == 0.0f);
+            if (allBands || moved || ! sameSettings (settings, paintedBands[index]))
             {
-                paintedBands[static_cast<size_t> (b)] = settings;
+                paintedBands[index] = settings;
+                liveDb[index] = live;
                 updateBandCurve (b);
                 changed = true;
             }
@@ -1163,7 +1177,16 @@ private:
     static bool sameSettings (const dsp::BandSettings& a, const dsp::BandSettings& b) noexcept
     {
         return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.shape == b.shape
-               && a.slopeIndex == b.slopeIndex && a.analog == b.analog && a.placement == b.placement;
+               && a.slopeIndex == b.slopeIndex && a.analog == b.analog && a.placement == b.placement
+               && a.dynamics.enabled == b.dynamics.enabled && a.dynamics.rangeDb == b.dynamics.rangeDb
+               && a.dynamics.external == b.dynamics.external;
+    }
+
+    // Fase 9: una banda que se mueve sola (encendida, dinámica y con una forma que tiene ganancia).
+    bool isDynamic (int b) const noexcept
+    {
+        const auto& s = paintedBands[static_cast<size_t> (b)];
+        return s.enabled && s.dynamics.enabled && dsp::canBeDynamic (s.shape);
     }
 
     // Una banda está "en uso" si está encendida o si se tocó algo (apagada con ajustes propios: su nodo se ve hueco).
@@ -1223,22 +1246,36 @@ private:
         // Con la escala de ganancia: la curva es la que suena, no la de los números de la banda.
         auto settings = paintedBands[index];
         settings.gainDb *= paintedScale;
-        bandCascades[index] = dsp::Band::coefficientsFor (settings, curveSampleRate);
+        // Fase 9: la curva (y la lectura de arriba) es la que suena AHORA, con la ganancia dinámica; el nodo se queda en
+        // la ganancia propia (donde descansa la banda) y una línea marca hasta dónde la lleva el rango.
+        bandCascades[index] = dsp::Band::coefficientsFor (settings, curveSampleRate, liveDb[index]);
+        const auto restingCascade = liveDb[index] == 0.0f ? bandCascades[index] : dsp::Band::coefficientsFor (settings, curveSampleRate);
         // El nodo: sobre la curva de la banda en su frecuencia si la forma tiene ganancia (la campana en su pico, el
         // shelf en su punto medio, los tilts en su eje); los cortes, el notch, el pasa banda y el all-pass, en 0 dB.
         // Apagada, donde estaría encendida (hueco): se puede seguir editando.
         auto active = settings;
         active.enabled = true;
         nodeDb[index] = dsp::usesGain (settings.shape)
-                            ? static_cast<float> ((settings.enabled ? bandCascades[index] : dsp::Band::coefficientsFor (active, curveSampleRate))
+                            ? static_cast<float> ((settings.enabled ? restingCascade : dsp::Band::coefficientsFor (active, curveSampleRate))
                                                       .magnitudeDb (settings.frequency, curveSampleRate))
                             : 0.0f;
+        rangeDb[index] = isDynamic (b) ? static_cast<float> (dsp::Band::coefficientsFor (settings, curveSampleRate,
+                                                                                          settings.dynamics.rangeDb * paintedScale)
+                                                                 .magnitudeDb (settings.frequency, curveSampleRate))
+                                       : nodeDb[index];
         auto& curve = bandCurveDb[index];
+        auto& resting = restingCurveDb[index];
         const auto points = curve.size();
         if (points < 2)
             return;
+        resting.assign (liveDb[index] != 0.0f ? points : 0, 0.0f);
         for (size_t i = 0; i < points; ++i)
-            curve[i] = settings.enabled ? static_cast<float> (bandCascades[index].magnitudeDb (pointHz (i, points), curveSampleRate)) : 0.0f;
+        {
+            const double hz = pointHz (i, points);
+            curve[i] = settings.enabled ? static_cast<float> (bandCascades[index].magnitudeDb (hz, curveSampleRate)) : 0.0f;
+            if (! resting.empty())
+                resting[i] = static_cast<float> (restingCascade.magnitudeDb (hz, curveSampleRate));
+        }
     }
 
     void updateTotalCurve()
@@ -1345,6 +1382,16 @@ private:
             path.closeSubPath();
             g.setColour (colour.withAlpha (focused ? 0.22f : selected ? 0.16f : 0.10f));
             g.fillPath (path);
+            // Fase 9: mientras la dinámica la mueve, la curva donde descansa queda punteada (cuánto se movió = la
+            // distancia entre las dos).
+            if (const auto& resting = restingCurveDb[static_cast<size_t> (b)]; resting.size() == curveDb.size())
+            {
+                juce::Path dashed;
+                const float dashes[] { 3.0f, 3.0f };
+                juce::PathStrokeType (1.0f).createDashedStroke (dashed, curvePath (resting, paintedGainDb), dashes, 2);
+                g.setColour (colour.withAlpha (0.55f));
+                g.fillPath (dashed);
+            }
         }
         const juce::PathStrokeType curveStroke (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
         if (! splitCurves())
@@ -1388,6 +1435,25 @@ private:
                 const auto colour = theme::bandColour (b);
                 const float radius = nodeRadius + (b == hoveredNode ? 1.5f : 0.0f);
                 const auto node = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (nodePosition (b));
+                // Fase 9: la banda dinámica lleva una línea desde el nodo hasta donde la lleva el rango, con una marca
+                // al final y un punto donde está ahora.
+                if (isDynamic (b))
+                {
+                    const auto centre = node.getCentre();
+                    const float rangeY = juce::jlimit (plot.getY() + 2.0f, plot.getBottom() - 2.0f, eqDbToY (paintedGainDb + rangeDb[static_cast<size_t> (b)]));
+                    g.setColour (colour.withAlpha (0.85f));
+                    g.drawLine (centre.x, centre.y, centre.x, rangeY, 2.0f);
+                    g.drawLine (centre.x - 5.0f, rangeY, centre.x + 5.0f, rangeY, 2.0f);
+                    if (liveDb[static_cast<size_t> (b)] != 0.0f)
+                    {
+                        auto settings = paintedBands[static_cast<size_t> (b)];
+                        settings.gainDb *= paintedScale;
+                        const float nowY = eqDbToY (paintedGainDb + static_cast<float> (bandCascades[static_cast<size_t> (b)].magnitudeDb (
+                                                                        settings.frequency, curveSampleRate)));
+                        g.setColour (theme::text);
+                        g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ centre.x, juce::jlimit (plot.getY() + 2.0f, plot.getBottom() - 2.0f, nowY) }));
+                    }
+                }
                 if (enabled)
                 {
                     g.setColour (colour);
@@ -1442,6 +1508,13 @@ private:
             note ("ANALIZADOR: MID + SIDE (VIOLETA)", theme::spectrumSide);
         if (view.showSidechain && ! sidechainConnected)
             note ("SIDECHAIN SIN CONECTAR", theme::spectrumSidechain);
+        else if (! sidechainConnected)
+            for (int b = 0; b < dsp::Engine::numBands; ++b)
+                if (isDynamic (b) && paintedBands[static_cast<size_t> (b)].dynamics.external)
+                {
+                    note (juce::String::fromUTF8 ("DIN\xc3\x81MICA CON SIDECHAIN: SIN CONECTAR"), theme::spectrumSidechain);
+                    break;
+                }
         if (paintedSolo >= 0)
             note (dsp::canSolo (paintedBands[static_cast<size_t> (paintedSolo)].shape)
                       ? "SOLO: BANDA " + juce::String (paintedSolo + 1)
@@ -1521,6 +1594,9 @@ private:
             third = juce::String (dsp::slopes[static_cast<size_t> (s.slopeIndex)]) + " dB/oct";
         if (dsp::usesQ (s.shape, s.slopeIndex))
             third << (third.isEmpty() ? "" : dot) << "Q " << juce::String (s.q, s.q < 10.0f ? 2 : 1);
+        if (isDynamic (b)) // Fase 9: el rango y lo que se mueve ahora
+            third << dot << juce::String::fromUTF8 ("din ") << format::db (s.dynamics.rangeDb * paintedScale) << juce::String::fromUTF8 (" (ahora ")
+                  << format::db (liveDb[static_cast<size_t> (b)]) << ")";
 
         const juce::Font font { juce::FontOptions (11.0f) };
         const float width = 12.0f + juce::jmax (juce::GlyphArrangement::getStringWidth (font, first),
@@ -1607,6 +1683,10 @@ private:
     std::array<deepwater::dsp::EqCascade, dsp::Engine::numBands> bandCascades {};
     std::array<std::vector<float>, dsp::Engine::numBands> bandCurveDb; // la curva propia de cada banda, en dB
     std::array<float, dsp::Engine::numBands> nodeDb {};
+    // Fase 9: la ganancia dinámica que se está dibujando, la curva de cada banda en reposo (solo mientras se mueve) y
+    // hasta dónde la lleva el rango (en dB, en su frecuencia).
+    std::array<float, dsp::Engine::numBands> liveDb {}, rangeDb {};
+    std::array<std::vector<float>, dsp::Engine::numBands> restingCurveDb;
     double curveSampleRate = 0.0; // 0 = todavía sin calcular
     std::vector<float> curveDb; // la respuesta total en dB, un valor por punto
     std::array<std::vector<float>, 4> channelCurveDb; // Fase 8: la de L, R, M y S (si hay bandas en un solo canal)

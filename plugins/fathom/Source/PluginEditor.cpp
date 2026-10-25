@@ -6,8 +6,8 @@
 namespace
 {
 constexpr int editorWidth = 1082; // la columna de SALIDA (Fase 6) se sumó a la derecha
-constexpr int editorHeight = 640;
-constexpr int bandPanelHeight = 112;
+constexpr int editorHeight = 714; // Fase 9: la fila de la dinámica en el panel de la banda
+constexpr int bandPanelHeight = fathom::gui::BandPanel::preferredHeight;
 constexpr int headerHeight = 44;
 constexpr int footerHeight = 26;
 constexpr int controlsWidth = 110;
@@ -167,7 +167,7 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 6: escuchar y comparar"), header, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 9: EQ din\xc3\xa1mico"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));

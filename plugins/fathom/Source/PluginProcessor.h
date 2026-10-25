@@ -11,8 +11,8 @@
 // con deshacer/rehacer (Fase 4). El audio deja una copia de lo que entra, de lo que sale y del sidechain (Fase 5) en tres
 // tomas lock-free (AnalyzerTap) para el analizador de la GUI. Para escuchar y comparar (Fase 6): solo de banda, auto
 // gain, escala de ganancia, balance, polaridad y comparación A/B. Cada banda en estéreo, L, R, mid o side y el
-// analizador también del side (Fase 8). El audio está en fathom::dsp (sin JUCE); aquí solo se
-// conectan los parámetros, el estado y la GUI.
+// analizador también del side (Fase 8). EQ dinámico por banda, con el detector en la banda o en el sidechain (Fase 9).
+// El audio está en fathom::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor
 {
 public:
@@ -93,6 +93,19 @@ public:
     // Lo que está compensando el auto gain ahora (0 dB si está apagado), para mostrarlo.
     float getAutoGainDb() const noexcept { return autoGainDb.load (std::memory_order_relaxed); }
 
+    // Fase 9, hilo de la GUI: lo que la dinámica le suma ahora a una banda (dB, con la escala: la curva en vivo), el
+    // nivel de su zona y el umbral que usa (con el automático, el que calculó). Sin audio se quedan en lo último.
+    struct DynamicState
+    {
+        float gainDb = 0.0f, levelDb = -120.0f, thresholdDb = 0.0f;
+    };
+    DynamicState getDynamicState (int band) const noexcept
+    {
+        const auto& live = dynamicStates[static_cast<size_t> (band)];
+        return { live.gainDb.load (std::memory_order_relaxed), live.levelDb.load (std::memory_order_relaxed),
+                 live.thresholdDb.load (std::memory_order_relaxed) };
+    }
+
     // Comparación A/B (hilo de la GUI). Dos estados completos (todos los parámetros menos el bypass): los parámetros son
     // el lado activo y el otro se guarda aparte (en el proyecto, como hijo "Compare" del estado). Cada lado tiene su
     // propio historial de deshacer. switchCompareSide devuelve false si hay una edición a medias.
@@ -120,6 +133,13 @@ private:
         std::atomic<float>* shape = nullptr;
         std::atomic<float>* slope = nullptr;
         std::atomic<float>* stereo = nullptr;
+        std::atomic<float>* dynamic = nullptr; // Fase 9
+        std::atomic<float>* dynamicRange = nullptr;
+        std::atomic<float>* threshold = nullptr;
+        std::atomic<float>* attack = nullptr;
+        std::atomic<float>* release = nullptr;
+        std::atomic<float>* autoThreshold = nullptr;
+        std::atomic<float>* dynamicSource = nullptr;
     };
     std::array<BandParameters, fathom::dsp::Engine::numBands> bandParams;
     juce::AudioParameterBool* bypassParameter = nullptr;
@@ -132,6 +152,11 @@ private:
     std::atomic<bool> analyzerActive { false };
     std::atomic<int> soloBand { -1 };
     std::atomic<float> autoGainDb { 0.0f };
+    struct LiveDynamics
+    {
+        std::atomic<float> gainDb { 0.0f }, levelDb { -120.0f }, thresholdDb { 0.0f };
+    };
+    std::array<LiveDynamics, fathom::dsp::Engine::numBands> dynamicStates;
     fathom::edit::EditHistory history; // después de 'parameters': se destruye antes (deja de escucharlos)
     fathom::edit::UndoStack otherSideHistory; // el historial del lado de la comparación que no está activo
 

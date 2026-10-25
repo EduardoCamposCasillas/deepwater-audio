@@ -10,6 +10,24 @@ juce::String hzToText (float hz, int /*maximumLength*/) { return fathom::gui::fo
 juce::String qToText (float q, int /*maximumLength*/) { return juce::String (q, q < 10.0f ? 2 : 1); }
 juce::String percentToText (float percent, int /*maximumLength*/) { return juce::String (juce::roundToInt (percent)) + " %"; }
 
+// "0.5 ms", "10 ms", "1.50 s".
+juce::String msToText (float ms, int /*maximumLength*/)
+{
+    if (ms < 9.95f)
+        return juce::String (ms, 1) + " ms";
+    if (ms < 999.5f)
+        return juce::String (juce::roundToInt (ms)) + " ms";
+    return juce::String (ms / 1000.0f, 2) + " s";
+}
+
+// "1.5 s" = 1500 ms; "10" o "10 ms" = 10 ms.
+float textToMs (const juce::String& text)
+{
+    const float value = text.getFloatValue();
+    const auto trimmed = text.trim();
+    return trimmed.endsWithIgnoreCase ("s") && ! trimmed.endsWithIgnoreCase ("ms") ? value * 1000.0f : value;
+}
+
 // Balance: "C" en el centro, "L 30" / "R 30" a los lados (como el paneo del mixer de FL).
 juce::String panToText (float pan, int /*maximumLength*/)
 {
@@ -73,11 +91,19 @@ FathomAudioProcessor::FathomAudioProcessor()
         band.shape = parameters.getRawParameterValue (id::band (b, id::shape));
         band.slope = parameters.getRawParameterValue (id::band (b, id::slope));
         band.stereo = parameters.getRawParameterValue (id::band (b, id::stereo));
+        band.dynamic = parameters.getRawParameterValue (id::band (b, id::dynamic));
+        band.dynamicRange = parameters.getRawParameterValue (id::band (b, id::dynamicRange));
+        band.threshold = parameters.getRawParameterValue (id::band (b, id::threshold));
+        band.attack = parameters.getRawParameterValue (id::band (b, id::attack));
+        band.release = parameters.getRawParameterValue (id::band (b, id::release));
+        band.autoThreshold = parameters.getRawParameterValue (id::band (b, id::autoThreshold));
+        band.dynamicSource = parameters.getRawParameterValue (id::band (b, id::dynamicSource));
     }
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
 
-    // Los valores por defecto, leídos de los propios parámetros (convertidos igual que cualquier valor).
+    // Los valores por defecto, leídos de los propios parámetros (convertidos igual que cualquier valor). Los de la
+    // dinámica (Fase 9) son los de DynamicSettings: el layout los toma de ahí.
     const auto defaultOf = [this] (int b, const char* setting) {
         auto* parameter = parameters.getParameter (id::band (b, setting));
         return parameter->convertFrom0to1 (parameter->getDefaultValue());
@@ -184,20 +210,62 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
     for (int b = 0; b < id::numBands; ++b)
         layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::band (b, id::stereo), id::versionHintPhase8 },
                                                                   "Band " + juce::String (b + 1) + " Stereo", placements, 0));
+
+    // Fase 9: la dinámica de cada banda, apagada (un proyecto de las Fases 1-8 suena igual). Ataque y liberación en
+    // escala log (de 0.5 a 5 ms recorre lo mismo que de 30 a 300).
+    using Dynamics = fathom::dsp::DynamicSettings;
+    const Dynamics dynamics;
+    const auto dbAttributes = juce::AudioParameterFloatAttributes()
+                                  .withLabel ("dB")
+                                  .withStringFromValueFunction (gainToText)
+                                  .withValueFromStringFunction ([] (const juce::String& text) { return text.getFloatValue(); });
+    const auto msAttributes =
+        juce::AudioParameterFloatAttributes().withLabel ("ms").withStringFromValueFunction (msToText).withValueFromStringFunction (textToMs);
+    for (int b = 0; b < id::numBands; ++b)
+    {
+        const auto name = "Band " + juce::String (b + 1) + " ";
+        const auto parameterId = [b] (const char* setting) { return juce::ParameterID { id::band (b, setting), id::versionHintPhase9 }; };
+        layout.add (std::make_unique<juce::AudioParameterBool> (parameterId (id::dynamic), name + "Dynamic", dynamics.enabled));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            parameterId (id::dynamicRange), name + "Dyn Range", juce::NormalisableRange<float> (Dynamics::minRangeDb, Dynamics::maxRangeDb, 0.01f),
+            dynamics.rangeDb, dbAttributes));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            parameterId (id::threshold), name + "Threshold",
+            juce::NormalisableRange<float> (Dynamics::minThresholdDb, Dynamics::maxThresholdDb, 0.1f), dynamics.thresholdDb, dbAttributes));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (parameterId (id::attack), name + "Attack",
+                                                                 logRange (Dynamics::minAttackMs, Dynamics::maxAttackMs), dynamics.attackMs,
+                                                                 msAttributes));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (parameterId (id::release), name + "Release",
+                                                                 logRange (Dynamics::minReleaseMs, Dynamics::maxReleaseMs),
+                                                                 dynamics.releaseMs, msAttributes));
+        layout.add (std::make_unique<juce::AudioParameterBool> (parameterId (id::autoThreshold), name + "Auto Threshold", dynamics.autoThreshold));
+        layout.add (std::make_unique<juce::AudioParameterChoice> (parameterId (id::dynamicSource), name + "Dyn Source",
+                                                                  juce::StringArray { "Band", "Sidechain" }, dynamics.external ? 1 : 0));
+    }
     return layout;
 }
 
 fathom::dsp::BandSettings FathomAudioProcessor::getBandSettings (int band) const noexcept
 {
     const auto& p = bandParams[static_cast<size_t> (band)];
-    return { p.enabled->load() >= 0.5f,
-             p.frequency->load(),
-             p.gain->load(),
-             p.q->load(),
-             static_cast<fathom::dsp::Shape> (juce::jlimit (0, fathom::dsp::numShapes - 1, juce::roundToInt (p.shape->load()))),
-             juce::jlimit (0, static_cast<int> (fathom::dsp::slopes.size()) - 1, juce::roundToInt (p.slope->load())),
-             analogResponseParam->load() >= 0.5f,
-             static_cast<fathom::dsp::Placement> (juce::jlimit (0, fathom::dsp::numPlacements - 1, juce::roundToInt (p.stereo->load()))) };
+    fathom::dsp::BandSettings settings { p.enabled->load() >= 0.5f,
+                                         p.frequency->load(),
+                                         p.gain->load(),
+                                         p.q->load(),
+                                         static_cast<fathom::dsp::Shape> (juce::jlimit (0, fathom::dsp::numShapes - 1, juce::roundToInt (p.shape->load()))),
+                                         juce::jlimit (0, static_cast<int> (fathom::dsp::slopes.size()) - 1, juce::roundToInt (p.slope->load())),
+                                         analogResponseParam->load() >= 0.5f,
+                                         static_cast<fathom::dsp::Placement> (
+                                             juce::jlimit (0, fathom::dsp::numPlacements - 1, juce::roundToInt (p.stereo->load()))) };
+    auto& d = settings.dynamics;
+    d.enabled = p.dynamic->load() >= 0.5f;
+    d.rangeDb = p.dynamicRange->load();
+    d.thresholdDb = p.threshold->load();
+    d.attackMs = p.attack->load();
+    d.releaseMs = p.release->load();
+    d.autoThreshold = p.autoThreshold->load() >= 0.5f;
+    d.external = p.dynamicSource->load() >= 0.5f;
+    return settings;
 }
 
 fathom::dsp::Engine::BandArray FathomAudioProcessor::getAllBandSettings() const noexcept
@@ -354,6 +422,12 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     for (int ch = mainChannels; ch < juce::jmin (buffer.getNumChannels(), getMainBusNumOutputChannels()); ++ch)
         buffer.clear (ch, 0, numSamples);
 
+    // El sidechain (Fase 5 para el analizador; Fase 9, también para las bandas dinámicas con el detector externo). La
+    // vista del bus apunta a los canales del propio buffer: no reserva memoria.
+    const auto* sidechainBus = getBus (true, 1);
+    const auto sidechain = sidechainBus != nullptr && sidechainBus->isEnabled() ? getBusBuffer (buffer, true, 1) : juce::AudioBuffer<float>();
+    const int sidechainChannels = juce::jmin (sidechain.getNumChannels(), 2);
+
     // Para la GUI: la entrada tal cual llega (el motor procesa en el sitio, así que antes de procesar). Sin editor
     // abierto no hay quien la lea: no se copia.
     const bool feedAnalyzer = analyzerActive.load (std::memory_order_relaxed);
@@ -361,9 +435,8 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         pushTaps (inputTap, inputSideTap, buffer.getArrayOfReadPointers(), numChannels, numSamples);
         // Sin bus conectado no se escribe: la GUI ve que no llega audio y ese espectro cae a silencio.
-        if (const auto* bus = getBus (true, 1); bus != nullptr && bus->isEnabled())
-            if (const auto sidechain = getBusBuffer (buffer, true, 1); sidechain.getNumChannels() > 0)
-                pushTaps (sidechainTap, sidechainSideTap, sidechain.getArrayOfReadPointers(), sidechain.getNumChannels(), numSamples);
+        if (sidechainChannels > 0)
+            pushTaps (sidechainTap, sidechainSideTap, sidechain.getArrayOfReadPointers(), sidechainChannels, numSamples);
     }
 
     engine.setBypassed (bypassParam->load() >= 0.5f);
@@ -372,8 +445,17 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
         engine.setBand (b, getBandSettings (b));
     engine.setSolo (soloBand.load (std::memory_order_relaxed));
-    engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples);
+    engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples,
+                    sidechainChannels > 0 ? sidechain.getArrayOfReadPointers() : nullptr, sidechainChannels);
     autoGainDb.store (engine.getAutoGainDb(), std::memory_order_relaxed);
+    for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
+    {
+        const auto& dynamics = engine.getDynamics (b);
+        auto& live = dynamicStates[static_cast<size_t> (b)];
+        live.gainDb.store (dynamics.getGainDb(), std::memory_order_relaxed);
+        live.levelDb.store (dynamics.getLevelDb(), std::memory_order_relaxed);
+        live.thresholdDb.store (dynamics.getThresholdDb(), std::memory_order_relaxed);
+    }
 
     if (feedAnalyzer)
         pushTaps (outputTap, outputSideTap, buffer.getArrayOfReadPointers(), numChannels, numSamples);

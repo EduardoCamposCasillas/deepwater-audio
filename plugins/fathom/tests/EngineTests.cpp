@@ -1,4 +1,4 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo y estéreo por banda), las cuentas de la edición (deshacer, arrastrar
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda y EQ dinámico), las cuentas de la edición (deshacer, arrastrar
 // nodos) y las del analizador (inclinación, balística, retención y picos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
@@ -1290,6 +1290,337 @@ void testStereoAutoGainAndSolo()
         }
     }
 }
+
+// Fase 9: una campana dinámica (Q 2: la zona es un pasa banda de ~0.7 octavas).
+BandSettings dynamicBell (float hz, float gainDb, float rangeDb, float thresholdDb)
+{
+    BandSettings band { true, hz, gainDb, 2.0f };
+    band.dynamics.enabled = true;
+    band.dynamics.rangeDb = rangeDb;
+    band.dynamics.thresholdDb = thresholdDb;
+    return band;
+}
+
+// Procesa un par estéreo en bloques de tamaño variable, con un sidechain opcional (el mismo en los dos canales).
+void runStereo (Engine& engine, std::vector<float>& left, std::vector<float>& right, const std::vector<float>* sidechain = nullptr)
+{
+    BlockSizes sizes;
+    const int total = static_cast<int> (left.size());
+    for (int start = 0; start < total;)
+    {
+        const int count = std::min (sizes.next (512), total - start);
+        float* channels[] { left.data() + start, right.data() + start };
+        if (sidechain != nullptr)
+        {
+            const float* key[] { sidechain->data() + start, sidechain->data() + start };
+            engine.process (channels, 2, count, key, 2);
+        }
+        else
+            engine.process (channels, 2, count);
+        start += count;
+    }
+}
+
+double levelDb (double amplitude) { return 20.0 * std::log10 (amplitude); }
+
+void testDynamicGainCurve()
+{
+    std::printf ("Dinamica: la curva de ganancia (rodilla de 6 dB, 1 dB por dB hasta el rango)\n");
+    const auto change = [] (float level, float threshold, float range) { return BandDynamics::gainChangeDb (level, threshold, range); };
+    CHECK (change (-30.0f, -20.0f, -6.0f) == 0.0f);
+    CHECK (change (-23.0f, -20.0f, -6.0f) == 0.0f);                    // el borde de abajo de la rodilla
+    CHECK (std::abs (change (-20.0f, -20.0f, -6.0f) + 0.75f) < 1.0e-6f); // en el umbral: rodilla / 8
+    CHECK (std::abs (change (-17.0f, -20.0f, -6.0f) + 3.0f) < 1.0e-6f);  // el borde de arriba: ya 1 dB por dB
+    CHECK (std::abs (change (-16.0f, -20.0f, -12.0f) + 4.0f) < 1.0e-6f);
+    CHECK (change (-10.0f, -20.0f, -6.0f) == -6.0f); // hasta el rango
+    CHECK (change (-10.0f, -20.0f, 6.0f) == 6.0f);   // un rango positivo sube
+    CHECK (change (0.0f, -20.0f, 0.0f) == 0.0f);
+    // Sin saltos: de a 0.01 dB por la rodilla, la ganancia nunca cambia más de 0.01 dB.
+    float previous = change (-30.0f, -20.0f, -30.0f), worst = 0.0f;
+    for (float level = -30.0f; level < 20.0f; level += 0.01f)
+    {
+        const float now = change (level, -20.0f, -30.0f);
+        worst = std::max (worst, std::abs (now - previous));
+        previous = now;
+    }
+    CHECK (worst <= 0.0101f);
+}
+
+void testDynamicActsOnlyWhenTheZoneIsLoud()
+{
+    std::printf ("Dinamica: corta su zona cuando suena fuerte (= la curva con la ganancia dinamica) y no toca lo demas\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const auto numSamples = static_cast<size_t> (sampleRate);
+        const auto band = dynamicBell (3000.0f, 0.0f, -6.0f, -24.0f);
+
+        // Fuerte en su zona: −6 dBFS, 18 dB sobre el umbral → todo el rango.
+        {
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (band));
+            auto left = sine (3000.0, 0.5, sampleRate, numSamples), right = left;
+            runStereo (engine, left, right);
+            CHECK (engine.getDynamics (0).getGainDb() == -6.0f);
+            const double expected = Band::coefficientsFor (band, sampleRate, -6.0f).magnitudeDb (3000.0, sampleRate);
+            const double measured = levelDb (toneAmplitude (left, 3000.0, sampleRate, numSamples / 2) / 0.5);
+            CHECK (std::abs (expected + 6.0) < 0.05);
+            CHECK (std::abs (measured - expected) < 0.01);
+            CHECK (left == right);
+        }
+        // Suave en su zona (−40 dBFS): no hace nada, bit a bit.
+        {
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (band));
+            auto left = sine (3000.0, 0.01, sampleRate, numSamples), right = left;
+            const auto original = left;
+            runStereo (engine, left, right);
+            CHECK (left == original);
+            CHECK (engine.getDynamics (0).getGainDb() == 0.0f);
+        }
+        // Fuerte pero lejos de su zona (300 Hz): el pasa banda del detector lo baja ~26 dB, debajo del umbral.
+        {
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (band));
+            auto left = sine (300.0, 0.5, sampleRate, numSamples), right = left;
+            const auto original = left;
+            runStereo (engine, left, right);
+            CHECK (engine.getDynamics (0).getGainDb() == 0.0f);
+            CHECK (biggestDifference (std::vector<float> (left.begin() + static_cast<long> (numSamples / 2), left.end()),
+                                      std::vector<float> (original.begin() + static_cast<long> (numSamples / 2), original.end()))
+                   == 0.0f);
+        }
+    }
+}
+
+void testDynamicThresholdAndBoost()
+{
+    std::printf ("Dinamica: el nivel (RMS + 3 dB) de un seno es su pico; 6 dB sobre el umbral = 6 dB de cambio (cortando o subiendo)\n");
+    for (const double sampleRate : sampleRates)
+        for (const float range : { -12.0f, 12.0f })
+        {
+            const double amplitude = 0.25;
+            const auto threshold = static_cast<float> (levelDb (amplitude) - 6.0);
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (dynamicBell (3000.0f, 0.0f, range, threshold)));
+            auto left = sine (3000.0, amplitude, sampleRate, static_cast<size_t> (sampleRate / 2)), right = left;
+            runStereo (engine, left, right);
+            const auto& dynamics = engine.getDynamics (0);
+            CHECK (std::abs (static_cast<double> (dynamics.getLevelDb()) - levelDb (amplitude)) < 0.2); // la ventana de 1 ms ondula ±0.1 dB
+            CHECK (std::abs (std::abs (dynamics.getGainDb()) - 6.0f) < 0.1f);
+            CHECK ((dynamics.getGainDb() > 0.0f) == (range > 0.0f));
+        }
+}
+
+void testDynamicAttackAndRelease()
+{
+    std::printf ("Dinamica: ataque y liberacion son el tiempo de la ganancia (la mitad del cambio en ln 2 = 0.69 veces), sin importar el umbral\n");
+    const double sampleRate = 48000.0;
+    // Cuánto tarda la ganancia en cruzar −6 dB (bajando con el tono, o subiendo después de él).
+    const auto crossing = [sampleRate] (float attackMs, float releaseMs, bool measureRelease) {
+        auto band = dynamicBell (1000.0f, 0.0f, -12.0f, -40.0f);
+        band.dynamics.attackMs = attackMs;
+        band.dynamics.releaseMs = releaseMs;
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f, only (band));
+        const auto tone = sine (1000.0, 0.5, sampleRate, static_cast<size_t> (sampleRate * 0.5));
+        std::array<float, 16> left {}, right {};
+        for (size_t at = 0; at < static_cast<size_t> (sampleRate * 4.0); at += left.size())
+        {
+            for (size_t i = 0; i < left.size(); ++i)
+                left[i] = right[i] = at + i < tone.size() ? tone[at + i] : 0.0f;
+            float* channels[] { left.data(), right.data() };
+            engine.process (channels, 2, static_cast<int> (left.size()));
+            const float gain = engine.getDynamics (0).getGainDb();
+            if (! measureRelease && gain <= -6.0f)
+                return static_cast<double> (at) / sampleRate;
+            if (measureRelease && at >= tone.size() && gain > -6.0f)
+                return static_cast<double> (at - tone.size()) / sampleRate;
+        }
+        return 100.0;
+    };
+    const double fastAttack = crossing (1.0f, 150.0f, false), slowAttack = crossing (50.0f, 150.0f, false);
+    const double fastRelease = crossing (10.0f, 50.0f, true), slowRelease = crossing (10.0f, 500.0f, true);
+    std::printf ("  ataque 1 ms: %.1f ms, 50 ms: %.1f ms; liberacion 50 ms: %.0f ms, 500 ms: %.0f ms\n", 1000.0 * fastAttack,
+                 1000.0 * slowAttack, 1000.0 * fastRelease, 1000.0 * slowRelease);
+    // La mitad del cambio de un filtro de 1 polo tarda ln 2 · τ. El ataque, eso aunque el umbral esté 34 dB debajo de la
+    // señal (con el nivel suavizado en lineal llegaba en 2.7 ms en vez de 35). La liberación empieza unos 10 ms tarde: lo
+    // que tarda el nivel en bajar los 22 dB que estaba por encima del umbral + el rango.
+    CHECK (fastAttack < 0.004);
+    CHECK (std::abs (slowAttack - 0.05 * std::log (2.0)) < 0.003);
+    CHECK (fastRelease > 0.05 * std::log (2.0) && fastRelease < 0.05 * std::log (2.0) + 0.015);
+    CHECK (slowRelease > 0.5 * std::log (2.0) && slowRelease < 0.5 * std::log (2.0) + 0.015);
+}
+
+void testAutoThreshold()
+{
+    std::printf ("Dinamica: con el umbral automatico, lo de siempre no se toca y lo que sube de golpe si\n");
+    const double sampleRate = 44100.0;
+    auto band = dynamicBell (3000.0f, 0.0f, -6.0f, -60.0f); // el umbral manual (−60) no cuenta
+    band.dynamics.autoThreshold = true;
+    Engine engine;
+    engine.prepare (sampleRate, false, 0.0f, only (band));
+    const auto& dynamics = engine.getDynamics (0);
+    const auto play = [&] (double amplitude, double seconds) {
+        auto left = sine (3000.0, amplitude, sampleRate, static_cast<size_t> (sampleRate * seconds)), right = left;
+        runStereo (engine, left, right);
+    };
+    play (0.1, 6.0); // −20 dBFS sostenido: se vuelve el nivel típico
+    std::printf ("  sostenido: umbral %.2f dB, ganancia %.2f dB\n", static_cast<double> (dynamics.getThresholdDb()),
+                 static_cast<double> (dynamics.getGainDb()));
+    CHECK (std::abs (dynamics.getThresholdDb() - (-20.0f + BandDynamics::autoMarginDb)) < 0.75f); // 3 dB sobre lo típico
+    CHECK (dynamics.getGainDb() > -0.5f);
+    play (0.4, 0.05); // +12 dB de golpe: corta todo el rango
+    std::printf ("  de golpe +12 dB: ganancia %.2f dB\n", static_cast<double> (dynamics.getGainDb()));
+    CHECK (dynamics.getGainDb() < -5.5f);
+    play (0.4, 8.0); // si se queda así, pasa a ser lo normal
+    std::printf ("  sostenido otra vez: umbral %.2f dB, ganancia %.2f dB\n", static_cast<double> (dynamics.getThresholdDb()),
+                 static_cast<double> (dynamics.getGainDb()));
+    CHECK (dynamics.getGainDb() > -1.0f);
+}
+
+void testDynamicSidechain()
+{
+    std::printf ("Dinamica: con el detector externo escucha el sidechain (sin sidechain, nada)\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const auto numSamples = static_cast<size_t> (sampleRate);
+        auto band = dynamicBell (3000.0f, 0.0f, -6.0f, -24.0f);
+        const auto quiet = sine (3000.0, 0.02, sampleRate, numSamples); // la pista: debajo del umbral
+        const auto key = sine (3000.0, 0.5, sampleRate, numSamples);    // el sidechain: fuerte
+        for (const bool external : { true, false })
+            for (const bool connected : { true, false })
+            {
+                band.dynamics.external = external;
+                Engine engine;
+                engine.prepare (sampleRate, false, 0.0f, only (band));
+                auto left = quiet, right = quiet;
+                runStereo (engine, left, right, connected ? &key : nullptr);
+                if (external && connected)
+                    CHECK (std::abs (levelDb (toneAmplitude (left, 3000.0, sampleRate, numSamples / 2) / 0.02) + 6.0) < 0.05);
+                else
+                    CHECK (left == quiet);
+            }
+    }
+}
+
+void testDynamicStereoScaleAndAutoGain()
+{
+    std::printf ("Dinamica: una banda side no ve el centro; la escala escala el rango; el auto gain mira la ganancia propia\n");
+    const double sampleRate = 48000.0;
+    const auto numSamples = static_cast<size_t> (sampleRate);
+    const auto tone = sine (3000.0, 0.5, sampleRate, numSamples);
+    {
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f, only (placed (dynamicBell (3000.0f, 0.0f, -6.0f, -40.0f), Placement::side)));
+        auto left = tone, right = tone; // todo al centro: el side es silencio
+        runStereo (engine, left, right);
+        CHECK (left == tone && right == tone);
+    }
+    {
+        Engine engine;
+        engine.setGainScale (0.5f);
+        engine.prepare (sampleRate, false, 0.0f, only (dynamicBell (3000.0f, 0.0f, -6.0f, -40.0f)));
+        auto left = tone, right = tone;
+        runStereo (engine, left, right);
+        CHECK (engine.getDynamics (0).getGainDb() == -3.0f);
+    }
+    {
+        Engine engine;
+        engine.setAutoGain (true);
+        engine.prepare (sampleRate, false, 0.0f, only (dynamicBell (3000.0f, 0.0f, -12.0f, -40.0f)));
+        auto left = tone, right = tone;
+        runStereo (engine, left, right);
+        CHECK (engine.getDynamics (0).getGainDb() == -12.0f);
+        CHECK (std::abs (engine.getAutoGainDb()) < 1.0e-6f); // la banda está en 0 dB: nada que compensar aunque se mueva
+    }
+}
+
+void testDynamicOffIsBitExact()
+{
+    std::printf ("Dinamica: apagarla suelta la ganancia sin clic y despues la senal pasa bit a bit\n");
+    for (const double sampleRate : sampleRates)
+    {
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f, only (dynamicBell (1000.0f, 0.0f, -12.0f, -40.0f)));
+        auto left = sine (1000.0, 0.5, sampleRate, static_cast<size_t> (sampleRate * 0.6)), right = left;
+        const auto original = left;
+        const auto switchAt = static_cast<size_t> (sampleRate * 0.3);
+        BlockSizes sizes;
+        for (size_t start = 0; start < left.size();)
+        {
+            const auto count = std::min (static_cast<size_t> (sizes.next (256)), left.size() - start);
+            auto band = dynamicBell (1000.0f, 0.0f, -12.0f, -40.0f);
+            band.dynamics.enabled = start < switchAt;
+            engine.setBand (0, band);
+            float* channels[] { left.data() + start, right.data() + start };
+            engine.process (channels, 2, static_cast<int> (count));
+            start += count;
+        }
+        CHECK (left[switchAt / 2] != original[switchAt / 2]); // antes, cortaba
+        const auto settled = switchAt + static_cast<size_t> (sampleRate * Band::rampSeconds) + 256 + 2 * Band::dynamicInterval;
+        CHECK (std::vector<float> (left.begin() + static_cast<long> (settled), left.end())
+               == std::vector<float> (original.begin() + static_cast<long> (settled), original.end()));
+        const double steepest = 0.5 * std::pow (2.0 * std::sin (pi * 1000.0 / sampleRate), 2.0);
+        CHECK (biggestSecondDifference (left) < 1.5 * steepest);
+    }
+}
+
+void testDynamicChangesHaveNoClicks()
+{
+    std::printf ("Dinamica: todo al azar en cada bloque (con un sidechain a golpes) no hace clic\n");
+    for (const double sampleRate : sampleRates)
+    {
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f, only (dynamicBell (1000.0f, 0.0f, -12.0f, -30.0f)));
+        const auto numSamples = static_cast<size_t> (sampleRate);
+        auto left = sine (1000.0, 0.05, sampleRate, numSamples), right = left;
+        // El sidechain: el mismo tono, fuerte, entrando y saliendo cada 10 ms (de golpe).
+        auto key = sine (1000.0, 0.5, sampleRate, numSamples);
+        for (size_t i = 0; i < numSamples; ++i)
+            if ((i / static_cast<size_t> (sampleRate * 0.01)) % 2 == 1)
+                key[i] = 0.0f;
+        BlockSizes sizes;
+        std::uint32_t seed = 909;
+        auto random = [&seed] (std::uint32_t range) {
+            seed = seed * 1664525u + 1013904223u;
+            return (seed >> 16) % range;
+        };
+        static constexpr std::array<Shape, 5> shapes { Shape::bell, Shape::lowShelf, Shape::highShelf, Shape::tiltShelf, Shape::lowCut };
+        const int total = static_cast<int> (numSamples);
+        for (int start = 0; start < total;)
+        {
+            const int count = std::min (sizes.next (256), total - start);
+            for (int b = 0; b < 3; ++b)
+            {
+                BandSettings band { random (8) != 0, random (2) == 0 ? 700.0f : 1400.0f, random (2) == 0 ? -6.0f : 6.0f,
+                                    random (2) == 0 ? 0.7f : 2.0f, shapes[random (static_cast<std::uint32_t> (shapes.size()))] };
+                band.placement = random (4) == 0 ? Placement::mid : Placement::stereo;
+                auto& d = band.dynamics;
+                d.enabled = random (6) != 0;
+                d.rangeDb = random (2) == 0 ? -24.0f : 24.0f;
+                d.thresholdDb = random (2) == 0 ? -50.0f : -20.0f;
+                d.attackMs = random (2) == 0 ? 0.5f : 30.0f;
+                d.releaseMs = random (2) == 0 ? 5.0f : 300.0f;
+                d.autoThreshold = random (5) == 0;
+                d.external = random (2) == 0;
+                engine.setBand (b, band);
+            }
+            float* channels[] { left.data() + start, right.data() + start };
+            const float* sidechain[] { key.data() + start, key.data() + start };
+            engine.process (channels, 2, count, sidechain, 2);
+            start += count;
+        }
+        // Cota: un cuarto de lo que daría el tono subido al máximo que pueden sumar la banda y su rango (+30 dB ≈ ×32).
+        // Con la ganancia dinámica aplicada de golpe cada 16 muestras (sin interpolar los coeficientes) sale entre 0.3
+        // y 0.9 de esa cota; con la interpolación, menos de 0.08.
+        const double steepest = 32.0 * 0.05 * std::pow (2.0 * std::sin (pi * 1000.0 / sampleRate), 2.0);
+        const float measured = biggestSecondDifference (left);
+        std::printf ("  %6.0f Hz: segunda diferencia %.4f (cota %.4f)\n", sampleRate, static_cast<double> (measured), 0.25 * steepest);
+        CHECK (std::isfinite (measured));
+        CHECK (measured < 0.25 * steepest);
+        CHECK (left == right);
+    }
+}
 } // namespace
 
 int main()
@@ -1321,6 +1652,15 @@ int main()
     testStereoPlacements();
     testPlacementChangesHaveNoClicks();
     testStereoAutoGainAndSolo();
+    testDynamicGainCurve();
+    testDynamicActsOnlyWhenTheZoneIsLoud();
+    testDynamicThresholdAndBoost();
+    testDynamicAttackAndRelease();
+    testAutoThreshold();
+    testDynamicSidechain();
+    testDynamicStereoScaleAndAutoGain();
+    testDynamicOffIsBitExact();
+    testDynamicChangesHaveNoClicks();
 
     if (failures > 0)
     {

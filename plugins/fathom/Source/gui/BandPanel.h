@@ -19,6 +19,8 @@ namespace fathom::gui
 // PENDIENTE (solo los cortes), CANAL (estéreo, L, R, mid o side: Fase 8), FRECUENCIA, GANANCIA y Q, y debajo lo que esos números significan para la forma
 // elegida. Los controles que la forma no usa se atenúan. Lo mismo se edita arrastrando el nodo en el visor (Fase 4).
 // El SOLO sigue a la banda del panel: con él encendido, elegir otra banda escucha la zona de la nueva.
+// Abajo, la dinámica (Fase 9): DINÁMICO, un medidor (nivel de la zona, umbral y cuánto se mueve la banda ahora),
+// DETECTOR (la banda o el sidechain), umbral AUTO, RANGO, UMBRAL, ATAQUE y LIBERACIÓN.
 class BandPanel final : public juce::Component
 {
 public:
@@ -114,6 +116,53 @@ public:
                                            "suave sin rebote (Butterworth en los cortes); m\xc3\xa1s alto = un pico de "
                                            "resonancia justo antes del corte. Doble clic = 1."));
 
+        // Fase 9: la dinámica.
+        dynamicButton.setClickingTogglesState (true);
+        dynamicButton.setTooltip (juce::String::fromUTF8 ("EQ din\xc3\xa1mico: la banda se mueve sola seg\xc3\xban cu\xc3\xa1nto suena su zona (la misma que "
+                                      "escuchas en SOLO). Con la zona debajo del UMBRAL queda en su GANANCIA; cuando la "
+                                      "pasa, se aleja hasta el RANGO: 1 dB por cada dB que la pasa. Sirve para lo que "
+                                      "molesta solo a ratos: las eses de una voz, la resonancia de una nota del 808, el "
+                                      "grave que se acumula en un acorde. Solo las campanas, shelves y tilts."));
+        addAndMakeVisible (dynamicButton);
+
+        autoButton.setClickingTogglesState (true);
+        autoButton.setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.45f));
+        autoButton.setTooltip (juce::String::fromUTF8 ("Umbral autom\xc3\xa1tico: el umbral queda 3 dB sobre el nivel T\xc3\x8dPICO de la zona (el "
+                                   "promedio de los \xc3\xbaltimos ~1.5 s). Lo de siempre no se toca y solo act\xc3\xba" "an los momentos "
+                                   "en que la zona suena m\xc3\xa1s fuerte que de costumbre, aunque la pista suba o baje. La "
+                                   "perilla UMBRAL no se usa; el RANGO dice cu\xc3\xa1nto."));
+        addAndMakeVisible (autoButton);
+
+        sourceBox.addItem ("Banda", 1);
+        sourceBox.addItem ("Sidechain", 2);
+        sourceBox.setTooltip (juce::String::fromUTF8 ("Qu\xc3\xa9 escucha el detector:\n"
+                                  "- Banda: la zona en la propia pista (lo normal: cortar lo que sobra).\n"
+                                  "- Sidechain: la zona en otra pista (en FL, \"Sidechain to this track\" y el puerto "
+                                  "en Processing). Para tallar espacio solo cuando el otro suena: bajar 60-100 Hz del "
+                                  "808 cuando pega el kick, o 2-4 kHz de los acordes cuando canta la voz."));
+        addAndMakeVisible (sourceBox);
+
+        for (auto* label : { &sourceLabel, &autoLabel })
+            setUpLabel (*label);
+        sourceLabel.setText ("DETECTOR", juce::dontSendNotification);
+        autoLabel.setText ("UMBRAL", juce::dontSendNotification);
+
+        setUpKnob (range, "RANGO", true,
+                   juce::String::fromUTF8 ("Hasta d\xc3\xb3nde se mueve la banda con la zona fuerte, sumado a su GANANCIA: \xe2\x88\x92" "6 = corta hasta 6 dB "
+                       "(lo t\xc3\xadpico); + sube (que algo aparezca solo cuando suena fuerte). La l\xc3\xadnea vertical en el nodo "
+                       "del visor marca hasta d\xc3\xb3nde llega. Doble clic = \xe2\x88\x92" "6 dB."));
+        setUpKnob (threshold, "UMBRAL", false,
+                   juce::String::fromUTF8 ("Desde qu\xc3\xa9 nivel de la zona act\xc3\xba" "a (pico de un seno; el medidor de la izquierda muestra el nivel "
+                       "y el umbral). B\xc3\xa1jalo hasta que la banda se mueva solo en los momentos que molestan. Doble clic "
+                       "= \xe2\x88\x92" "20 dB."));
+        setUpKnob (attack, "ATAQUE", false,
+                   juce::String::fromUTF8 ("Cu\xc3\xa1nto tarda la banda en llegar (63 %) a su corte cuando la zona pasa el umbral. Corto (0.5-5 "
+                       "ms) = agarra eses y golpes; largo (20-100 ms) = deja pasar el ataque y doma lo que sigue. "
+                       "Doble clic = 10 ms."));
+        setUpKnob (release, juce::String::fromUTF8 ("LIBERACI\xc3\x93N"), false,
+                   juce::String::fromUTF8 ("Cu\xc3\xa1nto tarda en volver a su ganancia cuando la zona baja. Corto = sigue cada s\xc3\xadlaba (puede "
+                       "sonar nervioso); largo = m\xc3\xa1s suave, pero tarda en soltar. Doble clic = 150 ms."));
+
         info.setJustificationType (juce::Justification::topLeft);
         info.setFont (juce::FontOptions (12.0f));
         info.setColour (juce::Label::textColourId, theme::dimText);
@@ -135,7 +184,10 @@ public:
         shapeAttachment.reset();
         slopeAttachment.reset();
         placementAttachment.reset();
-        for (auto* knob : { &frequency, &gain, &q })
+        dynamicAttachment.reset();
+        autoAttachment.reset();
+        sourceAttachment.reset();
+        for (auto* knob : { &frequency, &gain, &q, &range, &threshold, &attack, &release })
             knob->attachment.reset();
 
         enabledAttachment = std::make_unique<ButtonAttachment> (parameters, params::band (band, params::enabled), enabledButton);
@@ -145,10 +197,18 @@ public:
         attachKnob (frequency, params::band (band, params::frequency));
         attachKnob (gain, params::band (band, params::gain));
         attachKnob (q, params::band (band, params::q));
+        dynamicAttachment = std::make_unique<ButtonAttachment> (parameters, params::band (band, params::dynamic), dynamicButton);
+        autoAttachment = std::make_unique<ButtonAttachment> (parameters, params::band (band, params::autoThreshold), autoButton);
+        sourceAttachment = std::make_unique<ComboBoxAttachment> (parameters, params::band (band, params::dynamicSource), sourceBox);
+        attachKnob (range, params::band (band, params::dynamicRange));
+        attachKnob (threshold, params::band (band, params::threshold));
+        attachKnob (attack, params::band (band, params::attack));
+        attachKnob (release, params::band (band, params::release));
 
         const auto colour = theme::bandColour (band);
         enabledButton.setColour (juce::TextButton::buttonOnColourId, colour.withAlpha (0.45f));
-        for (auto* knob : { &frequency, &gain, &q })
+        dynamicButton.setColour (juce::TextButton::buttonOnColourId, colour.withAlpha (0.45f));
+        for (auto* knob : { &frequency, &gain, &q, &range, &threshold, &attack, &release })
             knob->slider.setColour (juce::Slider::rotarySliderFillColourId, colour);
         bandSelector.setSelectedId (band + 1, juce::dontSendNotification);
         describeAgain = true;
@@ -177,6 +237,17 @@ public:
         }
 
         const auto settings = processor.getBandSettings (band);
+
+        // El medidor de la dinámica se mueve con el audio: se repinta solo si cambió de forma visible.
+        const auto live = processor.getDynamicState (band);
+        const auto movedDb = [] (float a, float b) { return std::abs (a - b) >= 0.1f; };
+        if (movedDb (live.gainDb, shownDynamics.gainDb) || movedDb (live.levelDb, shownDynamics.levelDb)
+            || movedDb (live.thresholdDb, shownDynamics.thresholdDb) || settings.dynamics.enabled != shown.dynamics.enabled)
+        {
+            shownDynamics = live;
+            repaint (meterArea.expanded (2).getSmallestIntegerContainer());
+        }
+
         if (sameSettings (settings, shown) && ! describeAgain)
             return;
         shown = settings;
@@ -186,7 +257,18 @@ public:
         slopeBox.setEnabled (dsp::usesSlope (settings.shape));
         slopeLabel.setEnabled (slopeBox.isEnabled());
         soloButton.setAlpha (dsp::canSolo (settings.shape) ? 1.0f : 0.35f); // un tilt no tiene zona: el solo no hace nada
+
+        // La dinámica: atenuada entera si la forma no tiene ganancia; sus ajustes, si está apagada; el umbral, en AUTO.
+        const bool canMove = dsp::canBeDynamic (settings.shape);
+        const bool moving = canMove && settings.dynamics.enabled;
+        dynamicButton.setAlpha (canMove ? 1.0f : 0.35f);
+        for (auto* component : std::initializer_list<juce::Component*> { &autoButton, &sourceBox, &sourceLabel, &autoLabel })
+            component->setAlpha (moving ? 1.0f : 0.45f);
+        for (auto* knob : { &range, &attack, &release })
+            knob->setUsed (moving);
+        threshold.setUsed (moving && ! settings.dynamics.autoThreshold);
         info.setText (describe (settings), juce::dontSendNotification);
+        repaint (meterArea.expanded (2).getSmallestIntegerContainer());
     }
 
     void paint (juce::Graphics& g) override
@@ -199,11 +281,17 @@ public:
         // Una franja del color de la banda a la izquierda: el mismo del nodo en el visor.
         g.setColour (theme::bandColour (band));
         g.fillRoundedRectangle (bounds.removeFromLeft (4.0f).reduced (0.0f, 10.0f), 2.0f);
+        // La línea que separa la fila de la dinámica.
+        g.setColour (theme::panelOutline);
+        g.fillRect (juce::Rectangle<float> (14.0f, dividerY, static_cast<float> (getWidth()) - 28.0f, 1.0f));
+        paintMeter (g);
     }
 
     void resized() override
     {
         auto area = getLocalBounds().reduced (14, 8);
+        dynamicsRow = area.removeFromBottom (72);
+        area.removeFromBottom (10);
         auto left = area.removeFromLeft (200);
         auto top = left.removeFromTop (26);
         bandSelector.setBounds (top.removeFromLeft (104));
@@ -234,7 +322,33 @@ public:
             knob->label.setBounds (column.removeFromTop (16));
             knob->slider.setBounds (column);
         }
+
+        // La fila de la dinámica, con las mismas columnas que la de arriba.
+        dividerY = static_cast<float> (dynamicsRow.getY()) - 5.0f;
+        auto row = dynamicsRow;
+        auto dynamicLeft = row.removeFromLeft (200);
+        dynamicButton.setBounds (dynamicLeft.removeFromTop (26).removeFromLeft (104));
+        dynamicLeft.removeFromTop (6);
+        meterArea = dynamicLeft.removeFromTop (34).toFloat();
+        row.removeFromLeft (12);
+        auto source = row.removeFromLeft (140);
+        sourceLabel.setBounds (source.removeFromTop (16));
+        sourceBox.setBounds (source.removeFromTop (26));
+        row.removeFromLeft (12);
+        auto automatic = row.removeFromLeft (92);
+        autoLabel.setBounds (automatic.removeFromTop (16));
+        autoButton.setBounds (automatic.removeFromTop (26));
+        row.removeFromLeft (12);
+        for (auto* knob : { &range, &threshold, &attack, &release })
+        {
+            auto column = row.removeFromLeft (75);
+            knob->label.setBounds (column.removeFromTop (16));
+            knob->slider.setBounds (column);
+        }
     }
+
+    // La altura que necesita el panel: la fila de la banda y la de la dinámica.
+    static constexpr int preferredHeight = 186;
 
 private:
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -266,7 +380,57 @@ private:
     static bool sameSettings (const dsp::BandSettings& a, const dsp::BandSettings& b) noexcept
     {
         return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.shape == b.shape
-               && a.slopeIndex == b.slopeIndex && a.placement == b.placement;
+               && a.slopeIndex == b.slopeIndex && a.placement == b.placement && a.dynamics.enabled == b.dynamics.enabled
+               && a.dynamics.rangeDb == b.dynamics.rangeDb && a.dynamics.autoThreshold == b.dynamics.autoThreshold
+               && a.dynamics.external == b.dynamics.external;
+    }
+
+    // El medidor de la dinámica: una barra con el nivel de la zona (de −60 a +6 dB), una marca en el umbral y, a la
+    // derecha, cuánto se está moviendo la banda ahora. Apagada o con una forma sin ganancia: un texto que lo dice.
+    void paintMeter (juce::Graphics& g) const
+    {
+        if (meterArea.isEmpty())
+            return;
+        const auto settings = processor.getBandSettings (band);
+        auto area = meterArea;
+        g.setFont (juce::FontOptions (11.0f));
+        if (! dsp::canBeDynamic (settings.shape) || ! settings.dynamics.enabled)
+        {
+            g.setColour (theme::dimText.withAlpha (0.8f));
+            g.drawText (dsp::canBeDynamic (settings.shape) ? juce::String::fromUTF8 ("Est\xc3\xa1tica (sin din\xc3\xa1mica)")
+                                                            : juce::String::fromUTF8 ("Esta forma no tiene ganancia que mover"),
+                        area, juce::Justification::centredLeft);
+            return;
+        }
+        const auto colour = theme::bandColour (band);
+        auto readout = area.removeFromRight (64.0f);
+        g.setColour (std::abs (shownDynamics.gainDb) >= 0.05f ? colour : theme::dimText);
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.drawText (format::db (shownDynamics.gainDb), readout, juce::Justification::centredRight);
+
+        auto bar = area.withSizeKeepingCentre (area.getWidth(), 8.0f).withTrimmedRight (6.0f);
+        const auto xFor = [&bar] (float db) {
+            const float t = juce::jlimit (0.0f, 1.0f, (db - meterBottomDb) / (meterTopDb - meterBottomDb));
+            return bar.getX() + t * bar.getWidth();
+        };
+        g.setColour (theme::track);
+        g.fillRoundedRectangle (bar, 2.0f);
+        const float levelX = xFor (shownDynamics.levelDb);
+        const float thresholdX = xFor (shownDynamics.thresholdDb);
+        // Debajo del umbral, gris; lo que lo pasa, del color de la banda (lo que la hace moverse).
+        g.setColour (theme::dimText.withAlpha (0.7f));
+        g.fillRoundedRectangle (bar.withRight (std::min (levelX, thresholdX)), 2.0f);
+        if (levelX > thresholdX)
+        {
+            g.setColour (colour);
+            g.fillRect (bar.withLeft (thresholdX).withRight (levelX));
+        }
+        g.setColour (theme::text);
+        g.fillRect (juce::Rectangle<float> (thresholdX - 1.0f, bar.getY() - 4.0f, 2.0f, bar.getHeight() + 8.0f));
+        g.setColour (theme::dimText);
+        g.setFont (juce::FontOptions (10.0f));
+        g.drawText ((settings.dynamics.autoThreshold ? "auto " : "umbral ") + format::db (shownDynamics.thresholdDb),
+                    juce::Rectangle<float> (bar.getX(), bar.getBottom() + 3.0f, bar.getWidth(), 11.0f), juce::Justification::centredLeft);
     }
 
     void setUpLabel (juce::Label& label)
@@ -277,7 +441,7 @@ private:
         addAndMakeVisible (label);
     }
 
-    void setUpKnob (Knob& knob, const char* name, bool bipolar, const juce::String& tooltip)
+    void setUpKnob (Knob& knob, const juce::String& name, bool bipolar, const juce::String& tooltip)
     {
         knob.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 90, 18);
         knob.slider.getProperties().set ("bipolar", bipolar);
@@ -339,6 +503,8 @@ private:
         static constexpr std::array<const char*, dsp::numPlacements> placedText { "", "\nSolo el lado izquierdo", "\nSolo el lado derecho",
                                                                                   "\nSolo el centro (mid)", "\nSolo el ancho (side)" };
         text << placedText[static_cast<size_t> (s.placement)];
+        if (s.dynamics.enabled && dsp::canBeDynamic (s.shape))
+            text << juce::String::fromUTF8 ("\nDin\xc3\xa1mica: ") << format::db (s.dynamics.rangeDb) << (s.dynamics.external ? " con el sidechain" : "");
         if (! s.enabled)
             text << "\n(apagada)";
         return text;
@@ -362,6 +528,20 @@ private:
     std::unique_ptr<ComboBoxAttachment> shapeAttachment, slopeAttachment, placementAttachment;
     Knob frequency, gain, q;
     juce::Label info;
+
+    // Fase 9.
+    static constexpr float meterBottomDb = -60.0f, meterTopDb = 6.0f;
+    juce::TextButton dynamicButton { juce::String::fromUTF8 ("DIN\xc3\x81MICO") };
+    juce::TextButton autoButton { "AUTO" };
+    juce::ComboBox sourceBox;
+    juce::Label sourceLabel, autoLabel;
+    std::unique_ptr<ButtonAttachment> dynamicAttachment, autoAttachment;
+    std::unique_ptr<ComboBoxAttachment> sourceAttachment;
+    Knob range, threshold, attack, release;
+    juce::Rectangle<int> dynamicsRow;
+    juce::Rectangle<float> meterArea;
+    float dividerY = 0.0f;
+    FathomAudioProcessor::DynamicState shownDynamics;
 };
 
 } // namespace fathom::gui

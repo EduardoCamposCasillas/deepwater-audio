@@ -45,7 +45,10 @@ Lo que Fathom va a usar de `libs/dsp` (`deepwater::dsp`):
 - `AnalyzerTap.h` ganó `pushSide` en la Fase 8 (escribe el side, (L − R) / 2, para el analizador M/S).
 - `Smoothing.h` (`LinearRamp`, `EffectSwitch`), `Decibels.h`, `Pitch.h`, `LevelMeter.h`.
 - `Fft.h`: fase lineal y dinámica espectral (Fases 10–11).
-- `EnvelopeFollower.h`: detector del EQ dinámico (Fase 9).
+- `EnvelopeFollower.h`: se probó para el detector del EQ dinámico (Fase 9) y se descartó: suaviza el nivel en lineal y,
+  con el umbral muy por debajo de la señal, el ataque efectivo se volvía casi instantáneo. El detector de la Fase 9
+  (RMS corto + ataque/liberación sobre la ganancia en dB) vive en `Source/dsp/Dynamics.h`; si el compresor (plugin 5)
+  lo necesita, se mueve a la librería entonces.
 - `Oversampler.h`, `FastMath.h`: el color analógico (Fase 13).
 - `libs/presets` (`deepwater::presets`): presets, navegador y panel de guardar (Fase 15).
 
@@ -73,14 +76,17 @@ plugins/fathom/
                              # y el solo
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
-    dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie, escala de ganancia, salida,
-                             # auto gain, balance, polaridad, solo y bypass
+    dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie (con su dinámica), escala de
+                             # ganancia, salida, auto gain, balance, polaridad, solo y bypass
+    dsp/Dynamics.h           # EQ dinámico: el detector de una banda (zona del solo, RMS corto, rodilla, rango,
+                             # ataque/liberación sobre la ganancia, umbral automático)
     dsp/AutoGain.h           # cuánto cambia la sonoridad la curva (ruido rosa con peso K de BS.1770), por banda;
                              # con bandas de un solo canal, matrices 2×2 sobre una mezcla típica (side −6 dB)
     dsp/Solo.h               # la zona que se escucha en solo según la forma (y el canal) de la banda
     dsp/Band.h               # una banda: formas (Shape), pendientes, canal (Placement: estéreo/L/R/mid/side), ajustes
                              # (BandSettings), parámetros suavizados, fundido de encendido/cambio de forma o de canal,
-                             # respuesta analógica o bilineal (con su rampa) y coeficientes para la GUI
+                             # respuesta analógica o bilineal (con su rampa), ganancia dinámica (con los coeficientes
+                             # interpolados) y coeficientes para la GUI
     edit/UndoStack.h         # pila de deshacer/rehacer (sin JUCE): pasos con solo los parámetros que cambiaron
     edit/EditHistory.h       # deshacer con JUCE: escucha los gestos de los parámetros (no la automatización del host);
                              # fotos y carga de todos los parámetros para el A/B
@@ -90,9 +96,11 @@ plugins/fathom/
     gui/                     # tema (con el color de cada banda), LookAndFeel, formato de valores, atajos (Keys),
                              # visor (EqDisplay: cuadrícula, analizador, curvas, nodos editables, teclado de piano,
                              # agarrar picos, curvas por canal), BandEdits (cambiar parámetros con gestos), panel de
-                             # la banda elegida (BandPanel, con SOLO y CANAL), ajustes del analizador (AnalyzerPanel), columna de salida
+                             # la banda elegida (BandPanel, con SOLO, CANAL y la fila de la dinámica), ajustes del
+                             # analizador (AnalyzerPanel), columna de salida
                              # (OutputPanel: escala, auto gain, balance, polaridad, ganancia)
-  tests/EngineTests.cpp    # tests del motor (con auto gain, solo y estéreo por banda), de la edición y del analizador (sin JUCE)
+  tests/EngineTests.cpp    # tests del motor (con auto gain, solo, estéreo por banda y EQ dinámico), de la edición y del
+                           # analizador (sin JUCE)
 ```
 
 ## Aprendizaje de mezcla (igual de importante que el código)
@@ -135,7 +143,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       (bilineal "cramping") sin latencia. Opciones: sobremuestreo vs. diseño "matched" (Vicanek); medir contra el
       prototipo analógico.
 - [x] Fase 8 — Estéreo por banda: Estéreo / L / R / Mid / Side; analizador M/S.
-- [ ] Fase 9 — EQ dinámico: por banda umbral, rango (corta o sube), ataque/liberación y umbral automático; detector
+- [x] Fase 9 — EQ dinámico: por banda umbral, rango (corta o sube), ataque/liberación y umbral automático; detector
       con la forma de la banda o con el sidechain externo; la curva se mueve en vivo en el visor.
 - [ ] Fase 10 — Modos de fase: fase lineal (convolución por FFT particionada, varias calidades, latencia informada)
       y fase "natural" propia (magnitud y fase del analógico); cambio de modo sin clics.
@@ -152,7 +160,53 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 8 COMPLETADA (2026-10-25). Probada por el usuario en FL Studio: funciona.
+Fase 9 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
+- Cada banda con ganancia (campana, shelves, tilts) puede ser dinámica: `DynamicSettings` en `BandSettings::dynamics`
+  (encendido, rango, umbral, ataque, liberación, umbral automático, detector externo) y `canBeDynamic(shape)`.
+- Detector (`dsp/Dynamics.h`, `BandDynamics`): la zona de `soloZoneFor` (con el canal de la banda; los tilts escuchan su
+  canal entero) sobre lo que llega a la banda o sobre el sidechain; nivel RMS (1 polo sobre x², en double) con ventana
+  de 2 ciclos de lo más grave de la zona (1-20 ms; campana 2/(f·min(Q, 1)), shelf de agudos 2/f, el resto 20 ms) + 3 dB
+  (un seno lee su pico); en estéreo, el lado más fuerte (los dos canales se tocan igual). Curva: 1 dB por dB sobre el
+  umbral hasta el rango, rodilla suave de 6 dB (`gainChangeDb`). Ataque/liberación = 1 polo sobre la GANANCIA en dB
+  (ataque si tiene que actuar más; a 0.001 dB del objetivo se copia: vuelve bit a bit). Umbral automático = promedio en
+  dB del nivel en 1.5 s (sin contar lo que está bajo −70 dB) + 3 dB. Todo eso cada 16 muestras (`Band::dynamicInterval`);
+  rango, umbral, AUTO y encendido con rampas de 20 ms a ese ritmo.
+- Primera versión con el `EnvelopeFollower` de la librería (pico con ataque en lineal): con el umbral 34 dB debajo, una
+  banda con 10 ms de ataque cortaba 12 dB en < 1 ms (el test de clics lo marcó). Reemplazado por lo de arriba.
+- `Band::setDynamicGain(db)`: rampa de 16 muestras; si nada más se mueve, se calculan los coeficientes del destino y se
+  interpolan con `EqCascade::blend` (si otra rampa se mueve, se recalcula todo en cada muestra como siempre). La
+  ganancia + la dinámica se limita a ±30 dB. `Band::coefficientsFor(settings, sr, dynamicDb)` para la curva en vivo.
+- Motor: `processDynamic` alimenta el detector con la muestra que entra a la banda (o la del sidechain: uno mono va a los
+  dos lados; con la pista mono, el promedio) antes de procesarla. `Engine::process(..., sidechain, sidechainChannels)`;
+  `getDynamics(b)`. La escala de ganancia también escala el rango. Auto gain y solo usan la ganancia propia (no la
+  dinámica). Una banda que se apaga del todo suelta su dinámica (`stop`).
+- Parámetros nuevos por banda (versionHint 9, al final del layout): `band<N>Dynamic` (off), `band<N>DynRange` (−30 a
+  +30, −6), `band<N>Threshold` (−60 a +6, −20), `band<N>Attack` (0.5-300 ms log, 10), `band<N>Release` (5-3000 ms log,
+  150), `band<N>AutoThreshold` (off), `band<N>DynSource` (Band/Sidechain). Un proyecto de las Fases 1-8 suena igual.
+  Entran al deshacer, al A/B y a la automatización.
+- Procesador: el sidechain se lee siempre (antes, solo con el editor abierto, para el analizador) y va al motor;
+  `getDynamicState(b)` (ganancia en vivo, nivel, umbral usado) en atómicos para la GUI.
+- GUI: el panel de la banda creció a 186 px (ventana 1082 × 714) con una fila nueva: DINÁMICO, medidor (nivel de la zona
+  de −60 a +6, raya del umbral, ganancia ahora), DETECTOR, AUTO (bajo "UMBRAL"), RANGO, UMBRAL, ATAQUE, LIBERACIÓN;
+  atenuados según la forma, el encendido y AUTO. Visor: la curva y el relleno de la banda son los de AHORA (se mueven en
+  vivo), la curva en reposo punteada mientras se mueve, línea vertical del nodo hasta el rango con una raya y un punto
+  blanco donde está; "din ... (ahora ...)" en la etiqueta; "EQ dinámico" en el menú del nodo; aviso "DINÁMICA CON
+  SIDECHAIN: SIN CONECTAR". La cabecera dice "Fase 9: EQ dinámico" (decía Fase 6).
+- Tests nuevos `FathomTests`: curva de ganancia (rodilla, rango, continuidad); zona fuerte = la curva con la ganancia
+  dinámica (< 0.01 dB), zona suave y fuera de la zona = bit a bit; nivel de un seno = su pico, 6 dB sobre el umbral = 6
+  dB (corte y subida); ataque y liberación = ln 2·τ para la mitad del cambio con el umbral 34 dB abajo; umbral automático
+  (sostenido no se toca, +12 dB de golpe = todo el rango, si se queda pasa a ser lo normal); sidechain (y sin él, bit a
+  bit); side no ve el centro, escala del rango, auto gain sin cambios; apagarla sin clic y después bit a bit; todo al
+  azar cada bloque con un sidechain a golpes sin clic (cota a 1/4 de la de antes: sin interpolar los coeficientes sale
+  entre 0.3 y 0.9 de la cota, con la interpolación < 0.08).
+- GUI revisada con una captura del Standalone (`PrintWindow`: `CopyFromScreen` falla en esta sesión) solo en reposo: los
+  clics simulados no llegan a la ventana. Lo interactivo (medidor, curva en vivo, línea del rango) falta verlo en FL.
+- Release con 0 warnings; FathomTests: todos pasan; ctest 7/8: UndertowTests falló en su test de CPU (21.0 % y 22.1 %
+  contra 20 %, con Docker y el navegador abiertos; ni Undertow ni `libs/` cambiaron en esta fase); pluginval strictness
+  10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 8
+Probada por el usuario en FL Studio: funciona.
 - Cada banda actúa en estéreo, L, R, mid o side (`Placement` en `Band.h`, `BandSettings::placement`). Mid/side sin ida
   y vuelta: se filtra M = (L + R)/2 (o S = (L − R)/2) y a L y R se les suma solo el cambio d = filtrada − M (side: L + d,
   R − d): con la banda en 0 dB, d = 0 y la salida es bit a bit. L y R usan el filtro de su canal; mid y side, el del
@@ -404,4 +458,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 9 (EQ dinámico).
+Siguiente: probar la Fase 9 en FL Studio; después, Fase 10 (modos de fase).

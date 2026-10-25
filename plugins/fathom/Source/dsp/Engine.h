@@ -8,6 +8,7 @@
 #include "deepwater/dsp/Smoothing.h"
 #include "dsp/AutoGain.h"
 #include "dsp/Band.h"
+#include "dsp/Dynamics.h"
 #include "dsp/Solo.h"
 
 namespace fathom::dsp
@@ -28,6 +29,10 @@ namespace fathom::dsp
 //
 // Cada banda actúa en su canal (Fase 8: estéreo, L, R, mid o side; ver Band.h). Siguen en serie: una banda mid después
 // de una izquierda filtra el centro de lo que ya dejó la izquierda.
+//
+// Las bandas dinámicas (Fase 9) tienen además su detector (Dynamics.h), que escucha lo que llega a la banda (lo que ya
+// dejaron las anteriores) o el sidechain, y le mueve la ganancia. El auto gain y el solo miran la ganancia propia de cada
+// banda, no la dinámica: compensar cada movimiento de la banda haría "respirar" el volumen.
 class Engine
 {
 public:
@@ -51,6 +56,7 @@ public:
         {
             sounding[b] = scaled (bandSettings[b]);
             bands[b].prepare (sampleRate, sounding[b]);
+            dynamics[b].prepare (sampleRate, sounding[b]);
         }
         bypassFade.setTime (bypassFadeSeconds, sampleRate);
         processing = ! bypassed;
@@ -77,6 +83,7 @@ public:
         const auto b = static_cast<size_t> (index);
         sounding[b] = scaled (settings);
         bands[b].setSettings (sounding[b]);
+        dynamics[b].setSettings (sounding[b]);
     }
 
     // 1 = las ganancias tal cual, 0.5 = la mitad de los dB, 0 = plano, 2 = el doble. Se aplica en la siguiente llamada a
@@ -108,9 +115,13 @@ public:
     // Lo último que compensó el auto gain (0 si está apagado). Para mostrarlo en la GUI.
     [[nodiscard]] float getAutoGainDb() const noexcept { return autoGainOn ? autoGainDb : 0.0f; }
 
-    // Procesa en el sitio. Con más de maxChannels canales, los de más se dejan intactos.
-    void process (float* const* channels, int numChannels, int numSamples) noexcept
+    // Procesa en el sitio. Con más de maxChannels canales, los de más se dejan intactos. 'sidechain' (opcional, solo se
+    // lee) es lo que escuchan las bandas dinámicas con el detector externo; sin él, escuchan silencio.
+    void process (float* const* channels, int numChannels, int numSamples, const float* const* sidechain = nullptr,
+                  int sidechainChannels = 0) noexcept
     {
+        if (sidechain == nullptr)
+            sidechainChannels = 0;
         numChannels = std::min (numChannels, maxChannels);
         prepareBlock (numChannels);
 
@@ -123,11 +134,22 @@ public:
             for (int ch = 0; ch < numChannels; ++ch)
                 std::copy_n (channels[ch] + start, count, dry[static_cast<size_t> (ch)].begin());
 
-            for (auto& band : bands)
+            for (size_t b = 0; b < bands.size(); ++b)
             {
+                auto& band = bands[b];
+                auto& dynamic = dynamics[b];
                 if (band.isIdle())
+                {
+                    if (dynamic.isRunning())
+                    {
+                        dynamic.stop();
+                        band.setDynamicGain (0.0f);
+                    }
                     continue;
-                if (numChannels == 2)
+                }
+                if (dynamic.isRunning())
+                    processDynamic (band, dynamic, channels, numChannels, start, count, sidechain, sidechainChannels);
+                else if (numChannels == 2)
                     for (int i = start; i < start + count; ++i)
                     {
                         band.advance();
@@ -181,16 +203,60 @@ public:
 
     [[nodiscard]] const Band& getBand (int index) const noexcept { return bands[static_cast<size_t> (index)]; }
 
+    // Fase 9, para la GUI: lo que la dinámica le suma ahora a la ganancia de una banda (dB, ya con la escala), el nivel
+    // de su zona y el umbral que usa (con el automático, el nivel típico).
+    [[nodiscard]] const BandDynamics& getDynamics (int index) const noexcept { return dynamics[static_cast<size_t> (index)]; }
+
     // True mientras se oye (o se está fundiendo) la zona de una banda.
     [[nodiscard]] bool isSoloing() const noexcept { return ! soloFade.isSilent (soloOn); }
 
 private:
     static constexpr int chunkSize = 64;
 
+    // La escala de ganancia también escala el rango dinámico: al 50 % la banda se mueve la mitad.
     [[nodiscard]] BandSettings scaled (BandSettings settings) const noexcept
     {
         settings.gainDb *= gainScale;
+        settings.dynamics.rangeDb *= gainScale;
         return settings;
+    }
+
+    // Una banda dinámica en un tramo: el detector escucha la muestra que llega a la banda (o la del sidechain) ANTES de
+    // que la banda la procese, y cada controlInterval muestras le pasa la ganancia nueva.
+    static void processDynamic (Band& band, BandDynamics& dynamic, float* const* channels, int numChannels, int start, int count,
+                                const float* const* sidechain, int sidechainChannels) noexcept
+    {
+        const bool external = dynamic.listensToSidechain();
+        const int lastSidechain = std::max (0, sidechainChannels - 1);
+        for (int i = start; i < start + count; ++i)
+        {
+            band.advance();
+            bool ready = false;
+            if (numChannels == 2)
+            {
+                if (! external)
+                    ready = dynamic.feedStereo (channels[0][i], channels[1][i]);
+                else if (sidechainChannels > 0)
+                    ready = dynamic.feedStereo (sidechain[0][i], sidechain[lastSidechain][i]); // un sidechain mono, a los dos lados
+                else
+                    ready = dynamic.feedStereo (0.0f, 0.0f);
+            }
+            else
+            {
+                if (! external)
+                    ready = dynamic.feedMono (channels[0][i]);
+                else
+                    ready = dynamic.feedMono (sidechainChannels == 0   ? 0.0f
+                                              : sidechainChannels == 1 ? sidechain[0][i]
+                                                                       : 0.5f * (sidechain[0][i] + sidechain[1][i]));
+            }
+            if (ready)
+                band.setDynamicGain (dynamic.getGainDb());
+            if (numChannels == 2)
+                band.processStereo (channels[0][i], channels[1][i]);
+            else
+                band.processMono (channels[0][i]);
+        }
     }
 
     [[nodiscard]] float autoGainTarget() noexcept
@@ -247,6 +313,7 @@ private:
 
     double sampleRate = 44100.0;
     std::array<Band, numBands> bands;
+    std::array<BandDynamics, numBands> dynamics; // Fase 9: el detector de cada banda (quieto si no es dinámica)
     BandArray sounding {}; // los ajustes con que suena cada banda (con la escala de ganancia)
     std::array<std::array<float, chunkSize>, maxChannels> dry {};
     deepwater::dsp::EffectSwitch bypassFade;
