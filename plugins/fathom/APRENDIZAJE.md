@@ -793,3 +793,106 @@ angosta; iguala el volumen con AUTO GAIN antes de decidir.
   viejo), ninguna respuesta va a crear aire: un shelf solo sube el ruido.
 - **Cuándo apagarlo:** casi nunca. Tiene sentido si quieres que un proyecto viejo (Fases 1-6) suene exactamente como
   sonaba, o para comparar y aprender qué hace la bilineal.
+
+## Fase 8 — Estéreo por banda: ecualizar el centro y el ancho por separado
+
+Hasta ahora cada banda tocaba los dos lados igual. Pero una mezcla estéreo son dos cosas a la vez: lo que está en el
+**centro** (voz, kick, 808, caja: suena igual en los dos parlantes) y lo que está **a los lados** (reverbs, dobles,
+pads, guitarras abiertas: suena distinto en cada uno). Esta fase deja elegir, banda por banda, dónde actúa: en los
+dos lados (**Estéreo**), en uno (**Izquierda** / **Derecha**), solo en el centro (**Mid**) o solo en el ancho
+(**Side**). Y el analizador puede medir el centro, el ancho o los dos.
+
+### Conceptos aprendidos
+
+- **Mid y side.** Con los dos canales L y R se arman otras dos señales: M = (L + R) / 2 (lo que tienen en común) y
+  S = (L − R) / 2 (en lo que difieren). Se vuelve atrás sin perder nada: L = M + S, R = M − S. Un sonido paneado al
+  centro (L = R) tiene S = 0: el side no lo "ve". Un sonido solo en un lado aparece mitad en M y mitad en S. Una
+  reverb ancha vive sobre todo en S.
+- **Cómo lo hace Fathom.** Una banda mid filtra M y le suma a los dos lados lo que CAMBIÓ (d = M filtrada − M):
+  L + d, R + d. Una side hace lo mismo con S pero al revés en R: L + d, R − d. Es exactamente lo mismo que convertir a
+  M/S, filtrar y volver, pero si la banda no cambia nada (0 dB), d = 0 y el audio pasa intacto, bit a bit. Las bandas
+  siguen en serie: puedes tener una mid y una side en la misma frecuencia, una subiendo y la otra bajando.
+- **Cambiar de canal sonando** es como cambiar de forma: el filtro pasa a ver otra señal, así que la banda se funde a
+  silencio en 20 ms, cambia y vuelve (sin clic).
+- **Auto gain en estéreo.** Una banda side cambia menos la sonoridad que una estéreo (en una mezcla típica el side
+  tiene unos 6 dB menos de energía que el centro). Fathom lo calcula con la respuesta real de cada canal sobre una
+  "mezcla típica" (el side 6 dB por debajo del mid). Por eso una campana ancha de +6 dB en 2 kHz compensa −2.8 dB en
+  estéreo, −2.4 en mid, −1.6 en un solo lado y solo −0.7 en el side.
+- **En mono** no hay side: una banda side no hace nada, y izquierda, derecha y mid tocan el único canal.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **CANAL** (panel de la banda, y "Canal" en el menú del nodo con clic derecho, también para varias bandas elegidas):
+  Estéreo / Izquierda / Derecha / Mid / Side. El nodo lleva su letra arriba a la derecha (L, R, M, S; estéreo, sin
+  letra). Entra al DESHACER, al A/B y a la automatización.
+- **Las curvas.** Si todas las bandas son estéreo, la curva blanca de siempre. Si hay bandas en un solo canal, una
+  curva por canal con su letra al borde derecho: **M** blanca y **S** violeta (si hay bandas mid o side), **L** celeste
+  y **R** rosada (si hay bandas izquierda o derecha). Cada una son las bandas estéreo más las de ese canal. La lectura
+  de arriba muestra el valor de cada una bajo el mouse. (Si mezclas L/R con M/S, las curvas son una guía: una banda
+  izquierda también mueve un poco el mid).
+- **SOLO** de una banda mid o side se escucha en su canal: la zona del centro (en los dos lados) o la del ancho (sin
+  nada en el centro). Una izquierda se escucha solo a la izquierda.
+- **CANALES** (columna del analizador, arriba de INCLINACIÓN): **Mid (L+R)** = lo de siempre; **Side (L−R)** = la
+  entrada, la salida y el sidechain medidos en el side (aviso violeta "ANALIZADOR: SIDE"); **Mid + Side** = todo en mid
+  y además el side de la salida en una línea violeta encima. Se guarda con el proyecto.
+
+### Ejercicio de escucha guiado en FL Studio
+
+Usa una mezcla o un beat con reverb y algo abierto (pads, coros, una guitarra doblada).
+1. **Ver dónde está el ancho.** Analizador en Mid + Side. Mira la línea violeta: ¿dónde está por debajo del relleno
+   azul y dónde se acerca? En los graves debería estar muy abajo (el 808 y el kick van al centro); en los agudos, más
+   cerca (reverb, hi-hats abiertos, platillos).
+2. **Oír solo el ancho.** Crea una campana ancha (Q 0.5) en 3 kHz, CANAL = Side y SOLO: escuchas solo lo que es
+   distinto entre los lados en esa zona: reverb, dobles, el ambiente. Cambia a Mid con SOLO: ahora el centro (la voz
+   principal, la caja).
+3. **Abrir sin tocar la voz.** Shelf de agudos +3 dB en 8 kHz en Side, con AUTO GAIN. Alterna con BYPASS: la mezcla se
+   abre (más ancha y brillante a los lados), pero la voz del centro queda igual. Ahora el mismo shelf en Estéreo: la voz
+   también se vuelve más brillante (y quizá más áspera).
+4. **Firmeza en mono.** Corte de graves de 12 dB/oct en 150 Hz en Side. En FL, pon el master en mono (el botón de mono
+   del mixer) y compara con y sin la banda: sin ella, los graves "anchos" se cancelan en mono y cambian de volumen; con
+   ella, el bajo es el mismo en mono y en estéreo.
+
+### Receta: el bus de la música del reggaetón (sin la voz)
+
+1. **Graves al centro:** corte de graves en Side, 120–150 Hz, 12 dB/oct. El 808 y el kick quedan firmes en cualquier
+   sistema (club, celular, mono).
+2. **Barro del ancho:** si los pads o la reverb ensucian 250–400 Hz, una campana −2 dB, Q 1, en Side (no en el centro:
+   ahí está el cuerpo de la caja).
+3. **Espacio para la voz:** campana −1.5 a −2 dB, Q 1, en 2–4 kHz en Mid: abre un hueco en el centro, justo donde va a
+   ir la voz, sin quitarle brillo a lo que está a los lados.
+4. **Aire a los lados:** shelf de agudos +2 dB en 10 kHz en Side.
+5. Compara con AUTO GAIN y A/B; mira el analizador en Mid + Side antes y después.
+
+Por qué funciona: la voz principal y el bajo van al centro y necesitan su espacio ahí; lo que da sensación de tamaño
+está a los lados. Ecualizar cada parte por separado deja hacer cambios grandes en una sin dañar la otra.
+
+### Reto sin receta
+
+Tienes un pad estéreo que suena ancho y bonito solo, pero en la mezcla tapa la voz. Haz que deje de tapar la voz
+**sin que el pad pierda su ancho** (no vale bajarle el volumen al pad). Pistas (si no sale): ¿la voz está en el centro
+o a los lados? Mira el pad con el analizador en Mid y en Side: ¿cuánto del pad está en el centro en 1–4 kHz? Prueba
+una campana en Mid sobre el pad y deja el Side intacto; escucha con SOLO dónde vive lo que molesta.
+
+### Vocabulario
+
+- **Mid / Side (M/S)**: el centro (L + R) / 2 y el ancho (L − R) / 2 de una señal estéreo.
+- **Imagen estéreo / ancho**: qué tan abierto suena algo entre los dos parlantes. Más side = más ancho.
+- **Compatibilidad mono**: que la mezcla suene bien sumada a un solo canal (celulares, algunos clubes). Lo que está
+  solo en el side desaparece en mono.
+- **Cancelación de fase**: dos señales iguales con polaridad opuesta se anulan; es lo que le pasa al side al sumar en
+  mono (L + R: el side se cancela).
+- **Ejemplo real**: en el reggaetón comercial el 808, el kick y la voz principal están casi 100 % en el mid; los coros,
+  las reverbs y los sintes de fondo le dan el ancho. En mastering es común cortar los graves del side (debajo de
+  100–200 Hz) para que los clubes y el mono funcionen.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Subir mucho el side** para "ensanchar": suena grande en audífonos, pero en mono (celular) esa parte desaparece y
+  la mezcla cambia de balance. Revisa siempre en mono.
+- **Ecualizar en M/S una pista mono** (una voz, un kick sin estéreo): no tiene side; una banda side no hace nada y una
+  mid es lo mismo que una estéreo.
+- **Cortes profundos en el side de una voz doblada**: los dobles viven en el side; quitarlos ahí cambia el arreglo, no
+  solo el tono.
+- **Usar L / R para "arreglar" un paneo**: si algo está corrido, se arregla con el paneo. L / R sirve para tomas
+  realmente distintas de cada lado (dos micrófonos, una guitarra doblada con un lado más oscuro).
+- **Juzgar sin igualar el volumen**: un side más brillante suena "mejor" por ser más fuerte; usa AUTO GAIN y A/B.

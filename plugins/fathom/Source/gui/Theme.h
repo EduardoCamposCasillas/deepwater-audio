@@ -25,6 +25,13 @@ inline const juce::Colour spectrumIn { 0xff9aa7b4 };
 inline const juce::Colour spectrumSidechain { 0xffe0a458 }; // otra pista (Fase 5): ámbar
 inline const juce::Colour grid { 0xff1c232b };
 
+// Fase 8: el side en el analizador (violeta) y la curva de cada canal cuando hay bandas en un solo canal (el mid es la
+// curva blanca de siempre).
+inline const juce::Colour spectrumSide { 0xffb48cff };
+inline const juce::Colour curveLeft { 0xff6ec6ff };
+inline const juce::Colour curveRight { 0xffff8a80 };
+inline const juce::Colour curveSide { 0xffc6a6ff };
+
 // Cada banda tiene su color (el nodo, su relleno y las perillas cuando está elegida). Ocho tonos que se repiten: con
 // 24 bandas, la 1, la 9 y la 17 comparten color, pero rara vez se usan todas.
 inline juce::Colour bandColour (int band)

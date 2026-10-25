@@ -42,6 +42,7 @@ Lo que Fathom va a usar de `libs/dsp` (`deepwater::dsp`):
   `EqCascade::blend` (pasar de un diseño al otro sin clic).
 - `SpectrumAnalyzer.h` + `AnalyzerTap.h` (vienen de Riptide): el analizador y la toma audio → GUI. En la Fase 5
   ganó `peak()` (el pico de una zona afinado con una parábola por los bins: < 0.05 bin).
+- `AnalyzerTap.h` ganó `pushSide` en la Fase 8 (escribe el side, (L − R) / 2, para el analizador M/S).
 - `Smoothing.h` (`LinearRamp`, `EffectSwitch`), `Decibels.h`, `Pitch.h`, `LevelMeter.h`.
 - `Fft.h`: fase lineal y dinámica espectral (Fases 10–11).
 - `EnvelopeFollower.h`: detector del EQ dinámico (Fase 9).
@@ -68,28 +69,30 @@ plugins/fathom/
   CMakeLists.txt           # plugin y tests; enlaza deepwater::dsp
   Source/
     PluginProcessor.h/.cpp   # parámetros, estado (con la vista del analizador y el otro lado del A/B), processBlock,
-                             # el bus de sidechain, las tomas del analizador, el historial de deshacer y el solo
+                             # el bus de sidechain, las tomas del analizador (mid y side), el historial de deshacer
+                             # y el solo
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie, escala de ganancia, salida,
                              # auto gain, balance, polaridad, solo y bypass
-    dsp/AutoGain.h           # cuánto cambia la sonoridad la curva (ruido rosa con peso K de BS.1770), por banda
-    dsp/Solo.h               # la zona que se escucha en solo según la forma de la banda
-    dsp/Band.h               # una banda: formas (Shape), pendientes, ajustes (BandSettings), parámetros suavizados,
-                             # fundido de encendido/cambio de forma, respuesta analógica o bilineal (con su rampa) y
-                             # coeficientes para la GUI
+    dsp/AutoGain.h           # cuánto cambia la sonoridad la curva (ruido rosa con peso K de BS.1770), por banda;
+                             # con bandas de un solo canal, matrices 2×2 sobre una mezcla típica (side −6 dB)
+    dsp/Solo.h               # la zona que se escucha en solo según la forma (y el canal) de la banda
+    dsp/Band.h               # una banda: formas (Shape), pendientes, canal (Placement: estéreo/L/R/mid/side), ajustes
+                             # (BandSettings), parámetros suavizados, fundido de encendido/cambio de forma o de canal,
+                             # respuesta analógica o bilineal (con su rampa) y coeficientes para la GUI
     edit/UndoStack.h         # pila de deshacer/rehacer (sin JUCE): pasos con solo los parámetros que cambiaron
     edit/EditHistory.h       # deshacer con JUCE: escucha los gestos de los parámetros (no la automatización del host);
                              # fotos y carga de todos los parámetros para el A/B
     edit/NodeEditing.h       # cuentas de la edición sin JUCE: arrastrar nodos, rueda = Q, banda libre, notas
     analysis/SpectrumView.h  # cuentas del analizador sin JUCE: inclinación, rango, resolución, balística, retención
-                             # de picos, ajustes de la vista (ViewSettings) y búsqueda de picos del espectro
+                             # de picos, canales (mid/side), ajustes de la vista (ViewSettings) y búsqueda de picos
     gui/                     # tema (con el color de cada banda), LookAndFeel, formato de valores, atajos (Keys),
                              # visor (EqDisplay: cuadrícula, analizador, curvas, nodos editables, teclado de piano,
-                             # agarrar picos), BandEdits (cambiar parámetros con gestos), panel de la banda elegida
-                             # (BandPanel, con SOLO), ajustes del analizador (AnalyzerPanel), columna de salida
+                             # agarrar picos, curvas por canal), BandEdits (cambiar parámetros con gestos), panel de
+                             # la banda elegida (BandPanel, con SOLO y CANAL), ajustes del analizador (AnalyzerPanel), columna de salida
                              # (OutputPanel: escala, auto gain, balance, polaridad, ganancia)
-  tests/EngineTests.cpp    # tests del motor (con auto gain y solo), de la edición y del analizador (sin JUCE)
+  tests/EngineTests.cpp    # tests del motor (con auto gain, solo y estéreo por banda), de la edición y del analizador (sin JUCE)
 ```
 
 ## Aprendizaje de mezcla (igual de importante que el código)
@@ -131,7 +134,7 @@ fábrica incluyen notas de para qué sirven y por qué.
 - [x] Fase 7 — Respuesta analógica: corregir el aplastamiento de campanas y shelves agudos cerca de Nyquist
       (bilineal "cramping") sin latencia. Opciones: sobremuestreo vs. diseño "matched" (Vicanek); medir contra el
       prototipo analógico.
-- [ ] Fase 8 — Estéreo por banda: Estéreo / L / R / Mid / Side; analizador M/S.
+- [x] Fase 8 — Estéreo por banda: Estéreo / L / R / Mid / Side; analizador M/S.
 - [ ] Fase 9 — EQ dinámico: por banda umbral, rango (corta o sube), ataque/liberación y umbral automático; detector
       con la forma de la banda o con el sidechain externo; la curva se mueve en vivo en el visor.
 - [ ] Fase 10 — Modos de fase: fase lineal (convolución por FFT particionada, varias calidades, latencia informada)
@@ -149,7 +152,48 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 7 COMPLETADA (2026-10-25). Probada por el usuario en FL Studio: funciona.
+Fase 8 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
+- Cada banda actúa en estéreo, L, R, mid o side (`Placement` en `Band.h`, `BandSettings::placement`). Mid/side sin ida
+  y vuelta: se filtra M = (L + R)/2 (o S = (L − R)/2) y a L y R se les suma solo el cambio d = filtrada − M (side: L + d,
+  R − d): con la banda en 0 dB, d = 0 y la salida es bit a bit. L y R usan el filtro de su canal; mid y side, el del
+  canal 0. En mono: side no hace nada, el resto procesa el canal. Cambiar de canal = el mismo fundido que cambiar de
+  forma (`needsSwitch` compara el canal; `startShape` lo cambia en silencio con el filtro en limpio).
+- Motor: `Band::processStereo/processMono` en el bucle de bandas (por tramos de 64, igual que antes). Solo:
+  `Band::zoneStereo/zoneMono` = lo que deja pasar el filtro SOLO en su canal (izquierda = la zona en L y R en silencio;
+  mid = la zona en los dos; side = L = z, R = −z); `soloZoneFor` copia el canal y el motor lo trata como otra clase de
+  filtro (fundido a la mezcla y vuelta).
+- Auto gain: si alguna banda encendida no es estéreo, en cada punto la respuesta es una matriz 2×2 sobre (L, R)
+  (estéreo h·I, izquierda diag(h, 1), mid I + (h − 1)·P_M, side I + (h − 1)·P_S), producto en orden de las bandas, y la
+  potencia es traza(T·C·Tᴴ)/traza(C) con C = mid de potencia 1 y side 0.25 (−6 dB) sin correlación. Todo estéreo = la
+  cuenta de antes (|Π h|²). Mono (`setMono`, el motor lo pone en cada bloque): producto de las bandas que no son side.
+  Cada banda guarda su H compleja por punto. Valores (campana +6 dB, 2 kHz, Q 0.5): estéreo −2.80, mid −2.37,
+  izquierda −1.62, side −0.72; mid + side iguales = estéreo; izquierda + derecha = estéreo.
+- Parámetro nuevo por banda (versionHint 8): `band<N>Stereo` (lista Stereo/Left/Right/Mid/Side, Stereo por defecto:
+  un proyecto de las Fases 1-7 suena igual). Los 24 van al final del layout. Entran al deshacer, al A/B y a la
+  automatización.
+- Analizador M/S: tres tomas más en el procesador (side de entrada, salida y sidechain, con `AnalyzerTap::pushSide`;
+  en mono no se escriben). `ViewSettings::channelsIndex` (Mid (L+R) / Side (L−R) / Mid + Side), guardado como
+  "channels" en `AnalyzerView`. Side = las tres trazas leen las tomas del side; Mid + Side = las de siempre y una traza
+  más (`outputSide`, línea violeta `theme::spectrumSide`) que solo se analiza en esa vista. Cambiar de vista reinicia
+  las trazas y los picos retenidos.
+- GUI: CANAL en el panel de la banda (columna nueva entre PENDIENTE y las perillas, que pasaron de 108 a 100 px) y en
+  la descripción; "Canal" en el menú del nodo (actúa sobre las elegidas); letra L/R/M/S arriba a la derecha del nodo y
+  en la etiqueta. Curvas: si hay bandas L/R se dibujan las curvas L (celeste) y R (rosada); si hay M/S, M (blanca) y S
+  (violeta); cada una = bandas estéreo + las de ese canal (exacta con una sola clase; con L/R y M/S mezcladas es una
+  guía). La lectura de arriba da el valor de cada curva. Aviso "ANALIZADOR: SIDE" / "MID + SIDE (VIOLETA)". CANALES en
+  la columna del analizador, arriba de INCLINACIÓN.
+- Tests nuevos `FathomTests`: L/R tocan solo su canal (el otro bit a bit); mid/side cambian solo su parte (la otra
+  < 1e-6) con la ganancia de la curva; 0 dB en mid/side = bit a bit; una side no toca un sonido al centro y una mid uno
+  en contrafase (bit a bit); mono (side = bit a bit, el resto = estéreo); canal al azar en 3 bandas cada bloque sin clic;
+  auto gain (orden estéreo < mid < izquierda < side < 0, mid + side = estéreo, L + R = estéreo, mono); solo side (centro
+  = 0 exacto, nivel = zona) y solo izquierda (derecha = 0 exacto). `DeepwaterDspTests`: `pushSide`.
+- Sin cambios: latencia 0, los IDs de antes, el sonido con todas las bandas en estéreo.
+- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS. La GUI NO se revisó con capturas del
+  Standalone (la captura de pantalla falló): revisarla en FL (columna CANAL, letras de los nodos, curvas por canal,
+  CANALES del analizador).
+
+### Lo que quedó de la Fase 7
+Probada por el usuario en FL Studio: funciona.
 - Opciones consideradas: sobremuestrear (×4 de CPU en 24 bandas y latencia o fase de los filtros del sobremuestreo) vs.
   diseño "matched" (M. Vicanek, "Matched Second Order Digital Filters", 2016) a la frecuencia de muestreo original. Se
   eligió el matched: latencia 0, mismo costo por muestra quieto. También se probó un ajuste libre de polos y ceros en 5
@@ -361,4 +405,4 @@ Fase 7 COMPLETADA (2026-10-25). Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 8 (estéreo por banda).
+Siguiente: probar la Fase 8 en FL Studio; después, Fase 9 (EQ dinámico).

@@ -72,6 +72,7 @@ FathomAudioProcessor::FathomAudioProcessor()
         band.q = parameters.getRawParameterValue (id::band (b, id::q));
         band.shape = parameters.getRawParameterValue (id::band (b, id::shape));
         band.slope = parameters.getRawParameterValue (id::band (b, id::slope));
+        band.stereo = parameters.getRawParameterValue (id::band (b, id::stereo));
     }
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
@@ -87,7 +88,9 @@ FathomAudioProcessor::FathomAudioProcessor()
                                                   defaultOf (b, id::gain),
                                                   defaultOf (b, id::q),
                                                   static_cast<fathom::dsp::Shape> (juce::roundToInt (defaultOf (b, id::shape))),
-                                                  juce::roundToInt (defaultOf (b, id::slope)) };
+                                                  juce::roundToInt (defaultOf (b, id::slope)),
+                                                  true,
+                                                  static_cast<fathom::dsp::Placement> (juce::roundToInt (defaultOf (b, id::stereo))) };
 
     std::vector<juce::RangedAudioParameter*> undoable;
     for (auto* parameter : juce::AudioProcessor::getParameters())
@@ -145,6 +148,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
     juce::StringArray slopes;
     for (const int slope : fathom::dsp::slopes)
         slopes.add (juce::String (slope) + " dB/oct");
+    // El orden de fathom::dsp::Placement.
+    const juce::StringArray placements { "Stereo", "Left", "Right", "Mid", "Side" };
+    jassert (placements.size() == fathom::dsp::numPlacements);
 
     for (int b = 0; b < id::numBands; ++b)
     {
@@ -173,6 +179,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
         layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::band (b, id::slope), id::versionHintPhase3 },
                                                                   name + "Slope", slopes, 1));
     }
+    // Fase 8, después de todo lo anterior (el orden de los parámetros es el que ve el host). Estéreo por defecto: un
+    // proyecto de las Fases 1-7 suena igual.
+    for (int b = 0; b < id::numBands; ++b)
+        layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::band (b, id::stereo), id::versionHintPhase8 },
+                                                                  "Band " + juce::String (b + 1) + " Stereo", placements, 0));
     return layout;
 }
 
@@ -185,7 +196,8 @@ fathom::dsp::BandSettings FathomAudioProcessor::getBandSettings (int band) const
              p.q->load(),
              static_cast<fathom::dsp::Shape> (juce::jlimit (0, fathom::dsp::numShapes - 1, juce::roundToInt (p.shape->load()))),
              juce::jlimit (0, static_cast<int> (fathom::dsp::slopes.size()) - 1, juce::roundToInt (p.slope->load())),
-             analogResponseParam->load() >= 0.5f };
+             analogResponseParam->load() >= 0.5f,
+             static_cast<fathom::dsp::Placement> (juce::jlimit (0, fathom::dsp::numPlacements - 1, juce::roundToInt (p.stereo->load()))) };
 }
 
 fathom::dsp::Engine::BandArray FathomAudioProcessor::getAllBandSettings() const noexcept
@@ -308,6 +320,7 @@ fathom::analysis::ViewSettings FathomAudioProcessor::getAnalyzerView() const
     view.resolutionIndex = tree.getProperty ("resolution", defaults.resolutionIndex);
     view.speedIndex = tree.getProperty ("speed", defaults.speedIndex);
     view.holdIndex = tree.getProperty ("hold", defaults.holdIndex);
+    view.channelsIndex = tree.getProperty ("channels", defaults.channelsIndex);
     view.showInput = tree.getProperty ("showInput", defaults.showInput);
     view.showOutput = tree.getProperty ("showOutput", defaults.showOutput);
     view.showSidechain = tree.getProperty ("showSidechain", defaults.showSidechain);
@@ -323,6 +336,7 @@ void FathomAudioProcessor::setAnalyzerView (const fathom::analysis::ViewSettings
     tree.setProperty ("resolution", view.resolutionIndex, nullptr);
     tree.setProperty ("speed", view.speedIndex, nullptr);
     tree.setProperty ("hold", view.holdIndex, nullptr);
+    tree.setProperty ("channels", view.channelsIndex, nullptr);
     tree.setProperty ("showInput", view.showInput, nullptr);
     tree.setProperty ("showOutput", view.showOutput, nullptr);
     tree.setProperty ("showSidechain", view.showSidechain, nullptr);
@@ -345,11 +359,11 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const bool feedAnalyzer = analyzerActive.load (std::memory_order_relaxed);
     if (feedAnalyzer)
     {
-        inputTap.push (buffer.getArrayOfReadPointers(), numChannels, numSamples);
+        pushTaps (inputTap, inputSideTap, buffer.getArrayOfReadPointers(), numChannels, numSamples);
         // Sin bus conectado no se escribe: la GUI ve que no llega audio y ese espectro cae a silencio.
         if (const auto* bus = getBus (true, 1); bus != nullptr && bus->isEnabled())
             if (const auto sidechain = getBusBuffer (buffer, true, 1); sidechain.getNumChannels() > 0)
-                sidechainTap.push (sidechain.getArrayOfReadPointers(), sidechain.getNumChannels(), numSamples);
+                pushTaps (sidechainTap, sidechainSideTap, sidechain.getArrayOfReadPointers(), sidechain.getNumChannels(), numSamples);
     }
 
     engine.setBypassed (bypassParam->load() >= 0.5f);
@@ -362,7 +376,14 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     autoGainDb.store (engine.getAutoGainDb(), std::memory_order_relaxed);
 
     if (feedAnalyzer)
-        outputTap.push (buffer.getArrayOfReadPointers(), numChannels, numSamples);
+        pushTaps (outputTap, outputSideTap, buffer.getArrayOfReadPointers(), numChannels, numSamples);
+}
+
+void FathomAudioProcessor::pushTaps (AnalyzerTap& mid, AnalyzerTap& side, const float* const* channels, int numChannels, int numSamples) noexcept
+{
+    mid.push (channels, numChannels, numSamples); // (L + R) / 2: el mid
+    if (numChannels >= 2)
+        side.pushSide (channels[0], channels[1], numSamples);
 }
 
 void FathomAudioProcessor::getStateInformation (juce::MemoryBlock& destData)

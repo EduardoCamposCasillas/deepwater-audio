@@ -103,6 +103,18 @@ inline void hold (HeldPoint& point, float shown, double elapsed, Hold mode) noex
         point.db = std::max (shown, point.db - holdFallDbPerSecond * static_cast<float> (elapsed));
 }
 
+// ---- Canales (Fase 8) -------------------------------------------------------------------------------------------------------
+// Qué parte de la señal estéreo mide el analizador. Mid = (L + R) / 2, lo de las Fases 1-7: lo que está en el centro (y
+// en mono, todo). Side = (L − R) / 2: solo lo que es distinto entre los lados (el ancho). Mid + side = cada espectro en
+// mid y además el side de la salida en otra línea, para ver cuánto ancho hay en cada zona (¿hay graves en el side?).
+enum class Channels
+{
+    mid,
+    side,
+    midAndSide,
+};
+inline constexpr std::array<const char*, 3> channelsNames { "Mid (L+R)", "Side (L\xe2\x88\x92R)", "Mid + Side" };
+
 // ---- Ajustes de la vista (se guardan con el proyecto) ---------------------------------------------------------------------
 struct ViewSettings
 {
@@ -111,6 +123,7 @@ struct ViewSettings
     int resolutionIndex = 1; // media: ~93 ms (la de las Fases 1-4)
     int speedIndex = 2;      // media
     int holdIndex = 0;       // sin retención
+    int channelsIndex = 0;   // mid (el de las Fases 1-7)
     bool showInput = true;
     bool showOutput = true;
     bool showSidechain = false;
@@ -119,6 +132,10 @@ struct ViewSettings
     float range() const noexcept { return ranges[static_cast<size_t> (std::clamp (rangeIndex, 0, static_cast<int> (ranges.size()) - 1))]; }
     const Speed& speed() const noexcept { return speeds[static_cast<size_t> (std::clamp (speedIndex, 0, static_cast<int> (speeds.size()) - 1))]; }
     Hold holdMode() const noexcept { return static_cast<Hold> (std::clamp (holdIndex, 0, static_cast<int> (holdNames.size()) - 1)); }
+    Channels channels() const noexcept
+    {
+        return static_cast<Channels> (std::clamp (channelsIndex, 0, static_cast<int> (channelsNames.size()) - 1));
+    }
 
     bool operator== (const ViewSettings&) const = default;
 };

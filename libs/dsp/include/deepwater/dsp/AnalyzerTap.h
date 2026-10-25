@@ -50,6 +50,22 @@ public:
         written.store (start + count, std::memory_order_release);
     }
 
+    // Hilo de audio. El side de un par estéreo, (L − R) / 2: lo que es distinto entre los lados (un sonido en el centro
+    // da 0). Con push() en otra toma (el mid, (L + R) / 2) se analizan las dos partes por separado.
+    void pushSide (const float* left, const float* right, int numSamples) noexcept
+    {
+        if (numSamples <= 0)
+            return;
+        const std::uint64_t start = written.load (std::memory_order_relaxed);
+        const auto count = static_cast<std::uint64_t> (numSamples);
+        claimed.store (start + count, std::memory_order_relaxed);
+        std::atomic_thread_fence (std::memory_order_release);
+        for (int i = 0; i < numSamples; ++i)
+            samples[static_cast<size_t> (start + static_cast<std::uint64_t> (i)) & mask].store (0.5f * (left[i] - right[i]),
+                                                                                                 std::memory_order_relaxed);
+        written.store (start + count, std::memory_order_release);
+    }
+
     // Cualquier otro hilo. Copia las últimas 'count' muestras en orden (la más vieja primero). Devuelve false si aún
     // no se escribieron tantas o si el audio pisó la zona mientras se copiaba (destination queda a medias: no usarla).
     [[nodiscard]] bool copyLatest (float* destination, size_t count) const noexcept

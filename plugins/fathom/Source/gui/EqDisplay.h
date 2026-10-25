@@ -34,6 +34,10 @@ namespace fathom::gui
 //    color y su nodo numerado marca su frecuencia.
 //  - Analizador (Fase 5): ENTRADA (línea gris), SALIDA (relleno azul) y SIDECHAIN (línea ámbar: otra pista), con
 //    inclinación, rango, resolución, velocidad y retención de picos (línea fina) a elección (AnalyzerPanel) y CONGELAR.
+//    Fase 8: del mid, del side o los dos (el side de la salida en una línea violeta).
+//  - Estéreo por banda (Fase 8): con bandas en un solo canal, en vez de la curva blanca hay una por canal (L, R, M, S:
+//    las bandas estéreo más las de ese canal) y cada nodo lleva su letra. Con solo L/R o solo M/S es la respuesta exacta
+//    de cada canal; si se mezclan las dos clases, cada curva es una guía (una banda izquierda también mueve el mid).
 //  - Agarrar un pico: con el mouse cerca de un pico del espectro aparece su marca (Hz y nota); clic y arrastrar = una
 //    campana nueva justo en ese pico (arrastrar hacia abajo = cortarlo). Ctrl mientras se arrastra un nodo = imán a los
 //    picos.
@@ -110,9 +114,13 @@ public:
         // Solo se repinta si algo cambió de forma visible: sin audio, las curvas terminan de caer al piso y el visor
         // queda quieto (no gasta CPU).
         bool changed = refreshBands (sampleRate);
-        changed = updateTrace (input, processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
-        changed = updateTrace (output, processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
-        changed = updateTrace (sidechain, processor.getSidechainTap(), sampleRate, elapsedSeconds) || changed;
+        const bool side = view.channels() == analysis::Channels::side;
+        changed = updateTrace (input, side ? processor.getInputSideTap() : processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
+        changed = updateTrace (output, side ? processor.getOutputSideTap() : processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
+        changed = updateTrace (sidechain, side ? processor.getSidechainSideTap() : processor.getSidechainTap(), sampleRate, elapsedSeconds)
+                  || changed;
+        if (view.channels() == analysis::Channels::midAndSide) // el side de la salida, aparte (una FFT más solo si se ve)
+            changed = updateTrace (outputSide, processor.getOutputSideTap(), sampleRate, elapsedSeconds) || changed;
         changed = updatePeaks() || changed;
         const int solo = processor.getSoloBand();
         changed = changed || solo != paintedSolo;
@@ -129,8 +137,16 @@ public:
     {
         if (newView == view)
             return;
-        const bool restartHold = newView.holdIndex != view.holdIndex || newView.tiltIndex != view.tiltIndex;
+        const bool newChannels = newView.channelsIndex != view.channelsIndex;
+        const bool restartHold = newView.holdIndex != view.holdIndex || newView.tiltIndex != view.tiltIndex || newChannels;
         view = newView;
+        if (newChannels)
+            for (auto* trace : traces())
+            {
+                // Otra toma: se analiza de nuevo en el siguiente cuadro y lo dibujado arranca desde el piso.
+                trace->lastWritten = 0;
+                std::fill (trace->shown.begin(), trace->shown.end(), deepwater::dsp::SpectrumAnalyzer::floorDb);
+            }
         if (restartHold)
             clearPeakHold();
         hoveredPeak = -1;
@@ -232,6 +248,13 @@ public:
                 g.strokePath (tracePath (output.shown, false), juce::PathStrokeType (1.3f));
                 if (holding)
                     paintHeld (g, output, theme::accent.brighter (0.4f));
+                if (view.channels() == analysis::Channels::midAndSide)
+                {
+                    g.setColour (theme::spectrumSide.withAlpha (0.85f));
+                    g.strokePath (tracePath (outputSide.shown, false), juce::PathStrokeType (1.3f));
+                    if (holding)
+                        paintHeld (g, outputSide, theme::spectrumSide);
+                }
             }
             paintAnalyzerStatus (g);
             paintCurve (g);
@@ -507,7 +530,7 @@ private:
         double secondsWithoutAudio = 0.0;
     };
 
-    std::array<Trace*, 3> traces() noexcept { return { &input, &output, &sidechain }; }
+    std::array<Trace*, 4> traces() noexcept { return { &input, &output, &sidechain, &outputSide }; }
 
     enum class Drag
     {
@@ -755,6 +778,15 @@ private:
                 });
             }));
         menu.addSubMenu ("Pendiente", slopes, dsp::usesSlope (settings.shape));
+        juce::PopupMenu placements;
+        for (int p = 0; p < dsp::numPlacements; ++p)
+            placements.addItem (juce::String::fromUTF8 (format::placementNames[static_cast<size_t> (p)]), true,
+                                static_cast<int> (settings.placement) == p, guarded ([this, p] {
+                                    editSelection ([this, p] (int b, const dsp::BandSettings&) {
+                                        edits.set (b, params::stereo, static_cast<float> (p));
+                                    });
+                                }));
+        menu.addSubMenu ("Canal", placements);
         menu.addItem (juce::String::fromUTF8 ("Afinar a la nota m\xc3\xa1s cercana (") + format::noteName (edit::nearestNoteHz (settings.frequency))
                           + ")",
                       guarded ([this] {
@@ -1131,7 +1163,7 @@ private:
     static bool sameSettings (const dsp::BandSettings& a, const dsp::BandSettings& b) noexcept
     {
         return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.shape == b.shape
-               && a.slopeIndex == b.slopeIndex && a.analog == b.analog;
+               && a.slopeIndex == b.slopeIndex && a.analog == b.analog && a.placement == b.placement;
     }
 
     // Una banda está "en uso" si está encendida o si se tocó algo (apagada con ajustes propios: su nodo se ve hueco).
@@ -1142,7 +1174,7 @@ private:
         const auto& d = processor.getDefaultBandSettings (b);
         const auto near = [] (float x, float y) { return std::abs (x - y) <= 1.0e-4f * std::max (1.0f, std::abs (y)); };
         return s.enabled || ! (near (s.frequency, d.frequency) && near (s.gainDb, d.gainDb) && near (s.q, d.q) && s.shape == d.shape
-                               && s.slopeIndex == d.slopeIndex);
+                               && s.slopeIndex == d.slopeIndex && s.placement == d.placement);
     }
 
     // La respuesta total en dB en una frecuencia: las bandas (con sus coeficientes reales) más la ganancia de salida.
@@ -1152,6 +1184,27 @@ private:
         for (int b = 0; b < dsp::Engine::numBands; ++b)
             if (paintedBands[static_cast<size_t> (b)].enabled)
                 total += bandCascades[static_cast<size_t> (b)].magnitudeDb (hz, curveSampleRate);
+        return static_cast<float> (total);
+    }
+
+    // Las curvas por canal (Fase 8): L, R, M y S, cada una con las bandas estéreo y las de ese canal.
+    static constexpr std::array<dsp::Placement, 4> curveChannels { dsp::Placement::left, dsp::Placement::right, dsp::Placement::mid,
+                                                                   dsp::Placement::side };
+
+    static bool actsOn (dsp::Placement band, size_t channel) noexcept
+    {
+        return band == dsp::Placement::stereo || band == curveChannels[channel];
+    }
+
+    bool splitCurves() const noexcept { return channelShown[0] || channelShown[2]; }
+
+    // La respuesta de un canal en dB en una frecuencia (como totalDb).
+    float channelDb (float hz, size_t channel) const noexcept
+    {
+        double total = static_cast<double> (paintedGainDb);
+        for (size_t b = 0; b < paintedBands.size(); ++b)
+            if (paintedBands[b].enabled && actsOn (paintedBands[b].placement, channel))
+                total += bandCascades[b].magnitudeDb (hz, curveSampleRate);
         return static_cast<float> (total);
     }
 
@@ -1197,6 +1250,26 @@ private:
             for (const auto& curve : bandCurveDb)
                 total += curve[i];
             curveDb[i] = total;
+        }
+
+        // Con bandas en un solo canal: las curvas de L y R (si hay bandas L o R) y las de M y S (si hay bandas M o S).
+        bool leftRight = false, midSide = false;
+        for (const auto& band : paintedBands)
+        {
+            leftRight = leftRight || (band.enabled && (band.placement == dsp::Placement::left || band.placement == dsp::Placement::right));
+            midSide = midSide || (band.enabled && (band.placement == dsp::Placement::mid || band.placement == dsp::Placement::side));
+        }
+        channelShown = { leftRight, leftRight, midSide, midSide };
+        for (size_t c = 0; c < curveChannels.size(); ++c)
+        {
+            auto& curve = channelCurveDb[c];
+            curve.assign (points, paintedGainDb);
+            if (! channelShown[c])
+                continue;
+            for (size_t b = 0; b < paintedBands.size(); ++b)
+                if (paintedBands[b].enabled && actsOn (paintedBands[b].placement, c))
+                    for (size_t i = 0; i < points; ++i)
+                        curve[i] += bandCurveDb[b][i];
         }
     }
 
@@ -1273,8 +1346,33 @@ private:
             g.setColour (colour.withAlpha (focused ? 0.22f : selected ? 0.16f : 0.10f));
             g.fillPath (path);
         }
-        g.setColour (theme::text.withAlpha (0.9f));
-        g.strokePath (curvePath (curveDb, 0.0f), juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        const juce::PathStrokeType curveStroke (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+        if (! splitCurves())
+        {
+            g.setColour (theme::text.withAlpha (0.9f));
+            g.strokePath (curvePath (curveDb, 0.0f), curveStroke);
+        }
+        else
+        {
+            // Una curva por canal, con su letra en el borde derecho (corrida si dos quedan a la misma altura).
+            static constexpr std::array<const char*, 4> letters { "L", "R", "M", "S" };
+            const std::array<juce::Colour, 4> colours { theme::curveLeft, theme::curveRight, theme::text, theme::curveSide };
+            g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+            float lastLabelY = -100.0f;
+            for (size_t c = 0; c < curveChannels.size(); ++c)
+            {
+                if (! channelShown[c])
+                    continue;
+                g.setColour (colours[c].withAlpha (0.9f));
+                g.strokePath (curvePath (channelCurveDb[c], 0.0f), curveStroke);
+                float y = juce::jlimit (plot.getY() + 14.0f, plot.getBottom() - 6.0f, eqDbToY (channelCurveDb[c].back()) - 8.0f);
+                if (std::abs (y - lastLabelY) < 11.0f)
+                    y = lastLabelY + 11.0f;
+                lastLabelY = y;
+                g.drawText (letters[c], juce::Rectangle<float> (12.0f, 12.0f).withCentre ({ plot.getRight() - 9.0f, y }),
+                            juce::Justification::centred);
+            }
+        }
 
         const auto lasso = drag == Drag::lasso && lassoMoved ? lassoRectangle (mouse) : juce::Rectangle<float>();
         g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
@@ -1304,6 +1402,14 @@ private:
                 g.drawEllipse (node, focused ? 2.2f : selected ? 1.6f : 1.2f);
                 g.setColour (enabled ? juce::Colours::black.withAlpha (0.8f) : colour);
                 g.drawText (juce::String (b + 1), node, juce::Justification::centred);
+                // Fase 8: la letra del canal (L, R, M, S) arriba a la derecha del nodo; estéreo, sin letra.
+                if (const auto placement = paintedBands[static_cast<size_t> (b)].placement; placement != dsp::Placement::stereo)
+                {
+                    g.setColour (colour);
+                    g.drawText (format::placementLetters[static_cast<size_t> (placement)],
+                                juce::Rectangle<float> (10.0f, 10.0f).withCentre (node.getTopRight().translated (1.0f, -1.0f)),
+                                juce::Justification::centred);
+                }
             }
     }
 
@@ -1330,6 +1436,10 @@ private:
         };
         if (frozen)
             note ("CONGELADO", theme::accent);
+        if (view.channels() == analysis::Channels::side)
+            note ("ANALIZADOR: SIDE", theme::spectrumSide);
+        else if (view.channels() == analysis::Channels::midAndSide)
+            note ("ANALIZADOR: MID + SIDE (VIOLETA)", theme::spectrumSide);
         if (view.showSidechain && ! sidechainConnected)
             note ("SIDECHAIN SIN CONECTAR", theme::spectrumSidechain);
         if (paintedSolo >= 0)
@@ -1392,6 +1502,8 @@ private:
         const auto& s = paintedBands[static_cast<size_t> (b)];
         const auto dot = juce::String::fromUTF8 (" \xc2\xb7 ");
         auto first = juce::String (b + 1) + dot + juce::String::fromUTF8 (format::shapeNames[static_cast<size_t> (s.shape)]);
+        if (s.placement != dsp::Placement::stereo)
+            first << dot << juce::String::fromUTF8 (format::placementNames[static_cast<size_t> (s.placement)]);
         if (! s.enabled)
             first << " (apagada)";
         const auto note = format::noteName (s.frequency);
@@ -1454,7 +1566,16 @@ private:
         if (! plot.contains (mouse))
             return;
         const float hz = xToHz (mouse.x);
-        g.drawText (format::hz (hz) + dot + format::noteName (hz) + dot + "curva " + format::db (totalDb (hz)) + dot
+        juce::String curve = "curva " + format::db (totalDb (hz));
+        if (splitCurves())
+        {
+            static constexpr std::array<const char*, 4> letters { "L ", "R ", "M ", "S " };
+            curve = "curva";
+            for (size_t c = 0; c < curveChannels.size(); ++c)
+                if (channelShown[c])
+                    curve << " " << letters[c] << format::db (channelDb (hz, c));
+        }
+        g.drawText (format::hz (hz) + dot + format::noteName (hz) + dot + curve + dot
                         + "EQ " + format::db (yToEqDb (mouse.y)) + dot
                         + juce::String::fromUTF8 ("analizador ") + juce::String (juce::roundToInt (yToAnalyzerDb (mouse.y))) + " dB",
                     area, juce::Justification::centred);
@@ -1467,6 +1588,7 @@ private:
     juce::TextButton rangeButton;
     size_t rangeIndex = 1; // ±12 dB
     Trace input, output, sidechain;
+    Trace outputSide; // Fase 8: el side de la salida en la vista Mid + Side
     std::vector<float> scratch;
     analysis::ViewSettings view;
     bool frozen = false;
@@ -1487,6 +1609,8 @@ private:
     std::array<float, dsp::Engine::numBands> nodeDb {};
     double curveSampleRate = 0.0; // 0 = todavía sin calcular
     std::vector<float> curveDb; // la respuesta total en dB, un valor por punto
+    std::array<std::vector<float>, 4> channelCurveDb; // Fase 8: la de L, R, M y S (si hay bandas en un solo canal)
+    std::array<bool, 4> channelShown {};
     juce::Rectangle<float> plot, titleArea, pianoArea, zoneArea;
     juce::Point<float> mouse { -1.0f, -1.0f };
 

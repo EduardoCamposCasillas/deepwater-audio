@@ -17,11 +17,14 @@ namespace fathom::dsp
 //   - shelf de agudos y corte de agudos: un pasa altos;
 //   - tilt shelf y flat tilt: no marcan una zona (inclinan todo), así que no tienen solo.
 // Los cortes usan su misma pendiente (se oye justo lo que quitan); los shelves, 12 dB/oct sin rebote (Q 0.71).
+// La zona está en el mismo canal que la banda: la de una banda izquierda suena solo a la izquierda, la de una mid en el
+// centro y la de una side en el side (Band::zoneStereo).
 inline std::optional<BandSettings> soloZoneFor (const BandSettings& band) noexcept
 {
     BandSettings zone;
     zone.enabled = true;
     zone.analog = band.analog;
+    zone.placement = band.placement; // Fase 8: la zona de una banda side es la del side
     zone.frequency = band.frequency;
     zone.q = 0.71f;
     zone.slopeIndex = 1; // 12 dB/oct

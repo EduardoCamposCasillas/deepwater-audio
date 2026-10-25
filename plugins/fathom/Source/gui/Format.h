@@ -31,6 +31,10 @@ inline juce::String db (float value)
 inline constexpr std::array<const char*, 10> shapeNames { "Campana",      "Shelf graves", "Shelf agudos", "Tilt shelf", "Flat tilt",
                                                           "Corte graves", "Corte agudos", "Notch",        "Pasa banda", "All-pass" };
 
+// Dónde actúa cada banda (Fase 8), en el orden de fathom::dsp::Placement, y su letra junto al nodo (estéreo, ninguna).
+inline constexpr std::array<const char*, 5> placementNames { "Est\xc3\xa9reo", "Izquierda", "Derecha", "Mid", "Side" };
+inline constexpr std::array<const char*, 5> placementLetters { "", "L", "R", "M", "S" };
+
 // Ancho en octavas de un Q (definición del Cookbook): el de la campana a la mitad de su ganancia en dB, y también el
 // del notch y el pasa banda a −3 dB.
 inline double octavesForQ (double q)

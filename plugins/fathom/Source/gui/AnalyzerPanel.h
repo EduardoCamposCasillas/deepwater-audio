@@ -12,7 +12,7 @@ namespace fathom::gui
 {
 
 // Los ajustes del analizador (Fase 5), en la columna de la derecha: qué espectros se ven (entrada, salida, sidechain) y
-// cómo (inclinación, rango, resolución, velocidad, retención de picos), más CONGELAR. Nada de esto cambia el sonido.
+// cómo (canales mid/side de la Fase 8, inclinación, rango, resolución, velocidad, retención de picos), más CONGELAR. Nada de esto cambia el sonido.
 // El editor guarda los ajustes en el proyecto (onViewChanged) y se los pasa al visor.
 class AnalyzerPanel final : public juce::Component
 {
@@ -36,6 +36,16 @@ public:
                                              "chocan. En FL: en la pista del kick, clic derecho en la pista de Fathom > "
                                              "\"Sidechain to this track\"; despu\xc3\xa9s, en Fathom, el engranaje > "
                                              "Processing > el puerto de entrada del sidechain."));
+
+        addChoice (channelsBox, channelsLabel, "CANALES",
+                   juce::String::fromUTF8 ("Qu\xc3\xa9 parte del est\xc3\xa9reo se mide. Mid (L+R) = lo del centro (voz, "
+                                           "kick, bajo; en mono, todo). Side (L\xe2\x88\x92R) = solo lo que es distinto entre "
+                                           "los lados: el ancho (reverbs, dobles, pads abiertos); un sonido en el centro no "
+                                           "aparece. Mid + Side = cada espectro en mid y adem\xc3\xa1s el side de la SALIDA "
+                                           "(l\xc3\xadnea violeta): cu\xc3\xa1nto ancho hay en cada zona. Los graves casi "
+                                           "siempre deber\xc3\xad" "an estar en el mid."));
+        for (const auto* name : analysis::channelsNames)
+            channelsBox.addItem (juce::String::fromUTF8 (name), channelsBox.getNumItems() + 1);
 
         addChoice (tiltBox, tiltLabel, juce::String::fromUTF8 ("INCLINACI\xc3\x93N"),
                    juce::String::fromUTF8 ("Endereza el espectro: suma esos dB por octava hacia los agudos (1 kHz no se "
@@ -113,6 +123,7 @@ public:
         resolutionBox.setSelectedItemIndex (view.resolutionIndex, juce::dontSendNotification);
         speedBox.setSelectedItemIndex (view.speedIndex, juce::dontSendNotification);
         holdBox.setSelectedItemIndex (view.holdIndex, juce::dontSendNotification);
+        channelsBox.setSelectedItemIndex (view.channelsIndex, juce::dontSendNotification);
         clearButton.setEnabled (view.holdMode() != analysis::Hold::off);
     }
 
@@ -127,6 +138,7 @@ public:
         view.resolutionIndex = juce::jmax (0, resolutionBox.getSelectedItemIndex());
         view.speedIndex = juce::jmax (0, speedBox.getSelectedItemIndex());
         view.holdIndex = juce::jmax (0, holdBox.getSelectedItemIndex());
+        view.channelsIndex = juce::jmax (0, channelsBox.getSelectedItemIndex());
         return view;
     }
 
@@ -143,7 +155,8 @@ public:
             area.removeFromTop (4);
         }
         area.removeFromTop (6);
-        const std::array<std::pair<juce::Label*, juce::ComboBox*>, 5> choices { { { &tiltLabel, &tiltBox },
+        const std::array<std::pair<juce::Label*, juce::ComboBox*>, 6> choices { { { &channelsLabel, &channelsBox },
+                                                                                  { &tiltLabel, &tiltBox },
                                                                                   { &rangeLabel, &rangeBox },
                                                                                   { &resolutionLabel, &resolutionBox },
                                                                                   { &speedLabel, &speedBox },
@@ -192,8 +205,8 @@ private:
     juce::TextButton inputButton { "ENTRADA" };
     juce::TextButton outputButton { "SALIDA" };
     juce::TextButton sidechainButton { "SIDECHAIN" };
-    juce::ComboBox tiltBox, rangeBox, resolutionBox, speedBox, holdBox;
-    juce::Label tiltLabel, rangeLabel, resolutionLabel, speedLabel, holdLabel;
+    juce::ComboBox channelsBox, tiltBox, rangeBox, resolutionBox, speedBox, holdBox;
+    juce::Label channelsLabel, tiltLabel, rangeLabel, resolutionLabel, speedLabel, holdLabel;
     juce::TextButton clearButton { "BORRAR PICOS" };
     juce::TextButton freezeButton { "CONGELAR" };
 };

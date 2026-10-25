@@ -31,6 +31,23 @@ inline constexpr int numShapes = 10;
 // Pendientes de los cortes en dB/oct (6 por polo). También es el orden del parámetro "Slope".
 inline constexpr std::array<int, 9> slopes { 6, 12, 18, 24, 30, 36, 48, 72, 96 };
 
+// Dónde actúa una banda en una señal estéreo (Fase 8). El orden es el del parámetro "Stereo" (se guarda el índice:
+// agregar al final, nunca reordenar).
+//   - estéreo: los dos canales igual (lo de las Fases 1-7);
+//   - izquierda / derecha: un solo canal;
+//   - mid: lo que está en el CENTRO, M = (L + R) / 2 (voz, kick, bajo: lo que suena igual en los dos lados);
+//   - side: lo que es DISTINTO entre los lados, S = (L − R) / 2 (el ancho: reverbs, dobles, pads abiertos).
+// Como L = M + S y R = M − S, cambiar M cambia los dos lados igual y cambiar S los cambia al revés.
+enum class Placement
+{
+    stereo,
+    left,
+    right,
+    mid,
+    side,
+};
+inline constexpr int numPlacements = 5;
+
 // Qué ajustes usa cada forma (los demás no cambian el sonido; la GUI los atenúa).
 constexpr bool usesGain (Shape shape) noexcept
 {
@@ -56,6 +73,7 @@ struct BandSettings
     // false, la bilineal clásica (la de las Fases 2-6, con la campana "aplastada" arriba). Es un ajuste global del EQ:
     // el procesador lo pone igual en las 24 bandas.
     bool analog = true;
+    Placement placement = Placement::stereo; // Fase 8
 
     static constexpr float minFrequency = 10.0f;
     static constexpr float maxFrequency = 30000.0f; // encima de Nyquist el filtro se limita a 0.49·fs
@@ -85,6 +103,11 @@ struct BandSettings
 // Pasar de la respuesta bilineal a la analógica (o al revés) tampoco es una rampa de un parámetro: son dos diseños
 // distintos de la MISMA forma. Ahí no hace falta silenciar la banda (las dos respuestas se parecen; cambian arriba):
 // durante 20 ms se calculan las dos y se interpolan sus coeficientes (EqCascade::blend), que el SVF sigue sin clic.
+//
+// Mid y side (Fase 8) no convierten la señal ida y vuelta: la banda filtra M (o S) y le suma a L y a R solo lo que
+// CAMBIÓ, d = filtrada − M (L += d, R += d; en side, L += d, R −= d). Es la misma cuenta (L' = M' + S = L + d) pero si
+// la banda no cambia nada, d = 0 exacto y los canales pasan bit a bit. Cambiar de canal (estéreo → mid) es como
+// cambiar de forma: el filtro pasa a ver otra señal, así que se funde a 0, se cambia en limpio y vuelve.
 class Band
 {
 public:
@@ -96,7 +119,8 @@ public:
         sampleRate = newSampleRate;
         flatTilt.prepare (sampleRate);
         for (auto* ramp : { &octaves, &gainDb, &logQ, &mix, &analogMix })
-            ramp->setTime (rampSeconds, sampleRate);        pending = settings;
+            ramp->setTime (rampSeconds, sampleRate);
+        pending = settings;
         mix.snap (settings.enabled ? 1.0f : 0.0f);
         startShape();
     }
@@ -142,6 +166,68 @@ public:
         updateCoefficients();
     }
 
+    // Una muestra estéreo en el sitio, en el canal donde actúa la banda.
+    void processStereo (float& left, float& right) noexcept
+    {
+        switch (placement)
+        {
+            case Placement::stereo:
+                left = process (0, left);
+                right = process (1, right);
+                return;
+            case Placement::left: left = process (0, left); return;
+            case Placement::right: right = process (1, right); return;
+            case Placement::mid:
+            {
+                const float mid = 0.5f * (left + right);
+                const float change = process (0, mid) - mid;
+                left += change;
+                right += change;
+                return;
+            }
+            case Placement::side:
+            {
+                const float side = 0.5f * (left - right);
+                const float change = process (0, side) - side;
+                left += change;
+                right -= change;
+                return;
+            }
+        }
+    }
+
+    // En mono L = R = M y S = 0: estéreo, izquierda, derecha y mid procesan el canal; side no tiene nada que tocar.
+    void processMono (float& x) noexcept
+    {
+        if (placement != Placement::side)
+            x = process (0, x);
+    }
+
+    // Solo de banda (Fase 8): lo que deja pasar el filtro SOLO en su canal, de vuelta en L/R (lo demás, silencio).
+    // Izquierda = la zona en L y R callado; mid = la zona del centro en los dos lados; side = la del side (L = z, R = −z).
+    [[nodiscard]] std::array<float, 2> zoneStereo (float left, float right) noexcept
+    {
+        switch (placement)
+        {
+            case Placement::stereo: return { process (0, left), process (1, right) };
+            case Placement::left: return { process (0, left), 0.0f };
+            case Placement::right: return { 0.0f, process (1, right) };
+            case Placement::mid:
+            {
+                const float zone = process (0, 0.5f * (left + right));
+                return { zone, zone };
+            }
+            case Placement::side:
+            {
+                const float zone = process (0, 0.5f * (left - right));
+                return { zone, -zone };
+            }
+        }
+        return { left, right };
+    }
+
+    [[nodiscard]] float zoneMono (float x) noexcept { return placement == Placement::side ? 0.0f : process (0, x); }
+
     [[nodiscard]] float process (int channel, float x) noexcept
     {
         const float wet = filters[static_cast<size_t> (channel)].process (x, cascade);
@@ -165,6 +251,7 @@ public:
 
     [[nodiscard]] const deepwater::dsp::EqCascade& getCascade() const noexcept { return cascade; }
     [[nodiscard]] Shape getShape() const noexcept { return shape; }
+    [[nodiscard]] Placement getPlacement() const noexcept { return placement; }
 
 private:
     // {octavas, dB, log2 Q}.
@@ -229,10 +316,11 @@ private:
         return Design::bell (hz, q, gain, sampleRate);
     }
 
-    // ¿La forma (o la pendiente de un corte) pedida es distinta de la que suena?
+    // ¿La forma (o la pendiente de un corte, o el canal) pedida es distinta de la que suena?
     [[nodiscard]] bool needsSwitch() const noexcept
     {
-        return pending.shape != shape || (usesSlope (shape) && clampSlope (pending.slopeIndex) != slopeIndex);
+        return pending.shape != shape || (usesSlope (shape) && clampSlope (pending.slopeIndex) != slopeIndex)
+               || pending.placement != placement;
     }
 
     // Empieza a sonar la forma pedida, con los ajustes ya en su sitio (sin rampas) y el filtro en limpio. Solo se llama
@@ -241,6 +329,7 @@ private:
     {
         shape = pending.shape;
         slopeIndex = clampSlope (pending.slopeIndex);
+        placement = pending.placement;
         const auto targets = targetsFor (pending);
         octaves.snap (targets[0]);
         gainDb.snap (targets[1]);
@@ -266,6 +355,7 @@ private:
     BandSettings pending;           // lo último que pidieron los parámetros
     Shape shape = Shape::bell;      // la forma que suena ahora
     int slopeIndex = 1;
+    Placement placement = Placement::stereo; // el canal donde suena ahora
     deepwater::dsp::LinearRamp octaves, gainDb, logQ, mix;
     deepwater::dsp::LinearRamp analogMix; // 0 = bilineal, 1 = analógica (entre medio, los coeficientes interpolados)
     deepwater::dsp::FlatTiltDesign flatTilt;

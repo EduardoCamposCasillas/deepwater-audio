@@ -25,6 +25,9 @@ namespace fathom::dsp
 // (que ya la suavizan en dB). Todo lo que va después de las bandas es un solo multiplicador por canal hecho de rampas
 // lineales de 20 ms (LinearRamp llega exacto: si todas valen 1, la señal pasa bit a bit). El solo y el bypass se funden
 // en 20 ms: con bandas que suben o bajan 12 dB, conmutar de golpe sería un clic.
+//
+// Cada banda actúa en su canal (Fase 8: estéreo, L, R, mid o side; ver Band.h). Siguen en serie: una banda mid después
+// de una izquierda filtra el centro de lo que ya dejó la izquierda.
 class Engine
 {
 public:
@@ -109,7 +112,7 @@ public:
     void process (float* const* channels, int numChannels, int numSamples) noexcept
     {
         numChannels = std::min (numChannels, maxChannels);
-        prepareBlock();
+        prepareBlock (numChannels);
 
         // Por tramos de 'chunkSize' muestras: cada banda recorre el tramo entero antes de pasar a la siguiente (sus
         // coeficientes y su estado se quedan "a mano" en la caché), y la copia de la señal original cabe en un buffer
@@ -124,15 +127,18 @@ public:
             {
                 if (band.isIdle())
                     continue;
-                for (int i = 0; i < count; ++i)
-                {
-                    band.advance();
-                    for (int ch = 0; ch < numChannels; ++ch)
+                if (numChannels == 2)
+                    for (int i = start; i < start + count; ++i)
                     {
-                        float& sample = channels[ch][start + i];
-                        sample = band.process (ch, sample);
+                        band.advance();
+                        band.processStereo (channels[0][i], channels[1][i]);
                     }
-                }
+                else
+                    for (int i = start; i < start + count; ++i)
+                    {
+                        band.advance();
+                        band.processMono (channels[0][i]);
+                    }
             }
 
             for (int i = 0; i < count; ++i)
@@ -142,16 +148,26 @@ public:
                                                              numChannels == 2 ? common * panRight.next() : common };
                 const float solo = advanceSolo();
                 const float wet = bypassFade.next (processing); // 1 = procesado, 0 = original
+                const auto at = static_cast<size_t> (i);
+                // La zona del solo, en el canal de la banda (una banda side se escucha solo en el side).
+                std::array<float, maxChannels> zone {};
+                if (solo > 0.0f)
+                {
+                    if (numChannels == 2)
+                        zone = soloBand.zoneStereo (dry[0][at], dry[1][at]);
+                    else
+                        zone[0] = soloBand.zoneMono (dry[0][at]);
+                }
                 for (int ch = 0; ch < numChannels; ++ch)
                 {
                     float& sample = channels[ch][start + i];
-                    const float original = dry[static_cast<size_t> (ch)][static_cast<size_t> (i)];
+                    const float original = dry[static_cast<size_t> (ch)][at];
                     const float gain = gains[static_cast<size_t> (ch)];
                     float processed = gain == 1.0f ? sample : sample * gain;
                     if (solo > 0.0f)
                     {
-                        const float zone = soloBand.process (ch, original);
-                        processed = solo == 1.0f ? zone : processed + (zone - processed) * solo;
+                        const float z = zone[static_cast<size_t> (ch)];
+                        processed = solo == 1.0f ? z : processed + (z - processed) * solo;
                     }
 
                     // Fuera del fundido se copia la señal tal cual: con o sin bypass, con las bandas en 0 dB (o
@@ -188,16 +204,18 @@ private:
     }
 
     // Una vez por bloque: el auto gain con los ajustes nuevos y qué zona debería sonar en solo.
-    void prepareBlock() noexcept
+    void prepareBlock (int numChannels) noexcept
     {
+        autoGain.setMono (numChannels == 1);
         autoGainRamp.setTarget (autoGainTarget());
 
         soloNext.reset();
         if (soloRequest >= 0)
             soloNext = soloZoneFor (sounding[static_cast<size_t> (soloRequest)]);
         // La misma banda y la misma clase de filtro: sus ajustes se suavizan solos (la banda del solo tiene sus rampas).
-        // Otra banda u otra clase (pasa banda → pasa bajos): fundido a la mezcla, cambio en silencio y fundido al solo.
-        if (soloNext && soloPlaying == soloRequest && soloNext->shape == soloShape && soloNext->slopeIndex == soloSlope)
+        // Otra banda, otra clase (pasa banda → pasa bajos) u otro canal: fundido a la mezcla, cambio en silencio y fundido al solo.
+        if (soloNext && soloPlaying == soloRequest && soloNext->shape == soloShape && soloNext->slopeIndex == soloSlope
+            && soloNext->placement == soloPlacement)
         {
             soloBand.setSettings (*soloNext);
             soloOn = true;
@@ -216,6 +234,7 @@ private:
             soloPlaying = soloRequest;
             soloShape = soloNext->shape;
             soloSlope = soloNext->slopeIndex;
+            soloPlacement = soloNext->placement;
             soloOn = true;
         }
         const float amount = soloFade.next (soloOn);
@@ -246,6 +265,7 @@ private:
     int soloRequest = -1, soloPlaying = -1;
     Shape soloShape = Shape::bandPass;
     int soloSlope = 1;
+    Placement soloPlacement = Placement::stereo;
     bool soloOn = false;
 };
 

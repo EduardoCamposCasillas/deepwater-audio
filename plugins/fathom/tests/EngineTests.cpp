@@ -1,4 +1,4 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain y solo), las cuentas de la edición (deshacer, arrastrar
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo y estéreo por banda), las cuentas de la edición (deshacer, arrastrar
 // nodos) y las del analizador (inclinación, balística, retención y picos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
@@ -1076,6 +1076,220 @@ void testAnalogSwitchHasNoClicks()
         CHECK (clicks < 2.0e-4f);
     }
 }
+// Fase 8: el mid y el side de un par estéreo.
+std::vector<float> midOf (const std::vector<float>& left, const std::vector<float>& right)
+{
+    std::vector<float> mid (left.size());
+    for (size_t i = 0; i < mid.size(); ++i)
+        mid[i] = 0.5f * (left[i] + right[i]);
+    return mid;
+}
+
+std::vector<float> sideOf (const std::vector<float>& left, const std::vector<float>& right)
+{
+    std::vector<float> side (left.size());
+    for (size_t i = 0; i < side.size(); ++i)
+        side[i] = 0.5f * (left[i] - right[i]);
+    return side;
+}
+
+float biggestDifference (const std::vector<float>& a, const std::vector<float>& b)
+{
+    float biggest = 0.0f;
+    for (size_t i = 0; i < a.size(); ++i)
+        biggest = std::max (biggest, std::abs (a[i] - b[i]));
+    return biggest;
+}
+
+BandSettings placed (BandSettings band, Placement placement)
+{
+    band.placement = placement;
+    return band;
+}
+
+void testStereoPlacements()
+{
+    std::printf ("Estereo por banda: L y R tocan solo su canal (el otro bit a bit), mid y side solo su parte, en mono el side no hace nada\n");
+    for (const double sampleRate : sampleRates)
+    {
+        // El mismo tono con distinto nivel a cada lado: mid = 0.3, side = 0.1 (los dos con contenido).
+        constexpr double hz = 1000.0;
+        const auto numSamples = static_cast<size_t> (32768);
+        const auto inLeft = sine (hz, 0.4, sampleRate, numSamples), inRight = sine (hz, 0.2, sampleRate, numSamples);
+        const BandSettings bell { true, 1000.0f, 12.0f, 1.0f };
+        const double gain = std::abs (Band::coefficientsFor (bell, sampleRate).response (hz, sampleRate));
+        const auto run = [&] (Placement placement, std::vector<float>& left, std::vector<float>& right) {
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (placed (bell, placement)));
+            left = inLeft;
+            right = inRight;
+            float* channels[] { left.data(), right.data() };
+            engine.process (channels, 2, static_cast<int> (numSamples));
+        };
+        const auto level = [&] (const std::vector<float>& signal, double amplitude) {
+            return toneAmplitude (signal, hz, sampleRate, numSamples / 2) / amplitude;
+        };
+        std::vector<float> left, right;
+
+        run (Placement::left, left, right);
+        CHECK (right == inRight && std::abs (level (left, 0.4) / gain - 1.0) < 1.0e-3);
+        run (Placement::right, left, right);
+        CHECK (left == inLeft && std::abs (level (right, 0.2) / gain - 1.0) < 1.0e-3);
+
+        // Mid: el centro sube y el side queda igual (salvo redondeo); side: al revés.
+        run (Placement::mid, left, right);
+        CHECK (std::abs (level (midOf (left, right), 0.3) / gain - 1.0) < 1.0e-3);
+        CHECK (biggestDifference (sideOf (left, right), sideOf (inLeft, inRight)) < 1.0e-6f);
+        run (Placement::side, left, right);
+        CHECK (std::abs (level (sideOf (left, right), 0.1) / gain - 1.0) < 1.0e-3);
+        CHECK (biggestDifference (midOf (left, right), midOf (inLeft, inRight)) < 1.0e-6f);
+
+        run (Placement::stereo, left, right);
+        CHECK (std::abs (level (left, 0.4) / gain - 1.0) < 1.0e-3 && std::abs (level (right, 0.2) / gain - 1.0) < 1.0e-3);
+
+        // Bit a bit: una banda mid o side en 0 dB no toca nada; una side, por fuerte que sea, no toca un sonido al
+        // centro (L = R: el side es 0 exacto); una mid no toca un sonido "fuera de fase" (L = −R).
+        for (const auto placement : { Placement::mid, Placement::side })
+        {
+            Engine flat;
+            flat.prepare (sampleRate, false, 0.0f, only (placed ({ true, 1000.0f, 0.0f, 1.0f }, placement)));
+            StereoSignal signal (4096, sampleRate);
+            const StereoSignal original = signal;
+            processInBlocks (flat, signal, 512, [] (int) {});
+            CHECK (signal.left == original.left && signal.right == original.right);
+        }
+        {
+            Engine side;
+            side.prepare (sampleRate, false, 0.0f, only (placed (bell, Placement::side)));
+            auto centreLeft = inLeft, centreRight = inLeft;
+            float* channels[] { centreLeft.data(), centreRight.data() };
+            side.process (channels, 2, static_cast<int> (numSamples));
+            CHECK (centreLeft == inLeft && centreRight == inLeft);
+
+            Engine mid;
+            mid.prepare (sampleRate, false, 0.0f, only (placed (bell, Placement::mid)));
+            auto wideLeft = inLeft;
+            std::vector<float> wideRight (numSamples);
+            for (size_t i = 0; i < numSamples; ++i)
+                wideRight[i] = -inLeft[i];
+            const auto originalRight = wideRight;
+            float* wide[] { wideLeft.data(), wideRight.data() };
+            mid.process (wide, 2, static_cast<int> (numSamples));
+            CHECK (wideLeft == inLeft && wideRight == originalRight);
+        }
+
+        // Mono: el side no hace nada (bit a bit); izquierda, derecha y mid procesan el canal como una estéreo.
+        for (const auto placement : { Placement::stereo, Placement::left, Placement::right, Placement::mid, Placement::side })
+        {
+            Engine mono;
+            mono.prepare (sampleRate, false, 0.0f, only (placed (bell, placement)));
+            auto signal = inLeft;
+            float* channel[] { signal.data() };
+            mono.process (channel, 1, static_cast<int> (numSamples));
+            if (placement == Placement::side)
+                CHECK (signal == inLeft);
+            else
+                CHECK (std::abs (level (signal, 0.4) / gain - 1.0) < 1.0e-3);
+        }
+    }
+}
+
+void testPlacementChangesHaveNoClicks()
+{
+    std::printf ("Estereo por banda: cambiar el canal de tres bandas al azar en cada bloque no hace clic\n");
+    for (const double sampleRate : sampleRates)
+    {
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f, only ({ true, 1000.0f, 12.0f, 1.0f }));
+        auto left = sine (1000.0, 0.05, sampleRate, static_cast<size_t> (sampleRate));
+        auto right = sine (1000.0, 0.02, sampleRate, static_cast<size_t> (sampleRate));
+        BlockSizes sizes;
+        std::uint32_t seed = 77;
+        auto random = [&seed] (std::uint32_t range) {
+            seed = seed * 1664525u + 1013904223u;
+            return (seed >> 16) % range;
+        };
+        const int total = static_cast<int> (left.size());
+        for (int start = 0; start < total;)
+        {
+            const int count = std::min (sizes.next (256), total - start);
+            for (int b = 0; b < 3; ++b)
+                engine.setBand (b, placed ({ true, b == 1 ? 3000.0f : 1000.0f, random (2) == 0 ? -24.0f : 24.0f, 1.0f },
+                                           static_cast<Placement> (random (numPlacements))));
+            float* channels[] { left.data() + start, right.data() + start };
+            engine.process (channels, 2, count);
+            start += count;
+        }
+        // La cota de una banda de +24 dB sobre el canal más fuerte (con margen): ×16 de 0.05.
+        const double steepest = 16.0 * 0.05 * std::pow (2.0 * std::sin (pi * 1000.0 / sampleRate), 2.0);
+        const float measured = std::max (biggestSecondDifference (left), biggestSecondDifference (right));
+        std::printf ("  %6.0f Hz: segunda diferencia %.4f (cota %.4f)\n", sampleRate, static_cast<double> (measured), 1.5 * steepest);
+        CHECK (measured < 1.5 * steepest && std::isfinite (measured));
+    }
+}
+
+void testStereoAutoGainAndSolo()
+{
+    std::printf ("Estereo por banda: auto gain (side < estereo, mid + side = estereo, mono sin side) y solo en el canal de la banda\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const auto compensation = [sampleRate] (const Engine::BandArray& bands, bool mono = false) {
+            AutoGain autoGain;
+            autoGain.prepare (sampleRate);
+            autoGain.setMono (mono);
+            for (int b = 0; b < Engine::numBands; ++b)
+                autoGain.setBand (b, bands[static_cast<size_t> (b)]);
+            return autoGain.compensationDb();
+        };
+        const BandSettings wide { true, 2000.0f, 6.0f, 0.5f };
+        const float stereo = compensation (only (wide));
+        const float mid = compensation (only (placed (wide, Placement::mid)));
+        const float side = compensation (only (placed (wide, Placement::side)));
+        const float left = compensation (only (placed (wide, Placement::left)));
+        std::printf ("  %6.0f Hz: estereo %.2f, mid %.2f, izquierda %.2f, side %.2f dB\n", sampleRate, static_cast<double> (stereo),
+                     static_cast<double> (mid), static_cast<double> (left), static_cast<double> (side));
+        // El side de una mezcla típica tiene menos energía que el mid: subirlo cambia menos la sonoridad.
+        CHECK (stereo < mid && mid < left && left < side && side < 0.0f);
+        // Mid + side con la misma banda = estéreo; izquierda + derecha, también.
+        Engine::BandArray split {};
+        split[0] = placed (wide, Placement::mid);
+        split[1] = placed (wide, Placement::side);
+        CHECK (std::abs (compensation (split) - stereo) < 1.0e-4f);
+        split[0] = placed (wide, Placement::left);
+        split[1] = placed (wide, Placement::right);
+        CHECK (std::abs (compensation (split) - stereo) < 1.0e-4f);
+        // En mono el side no existe y el mid es todo.
+        CHECK (std::abs (compensation (only (placed (wide, Placement::side)), true)) < 1.0e-6f);
+        CHECK (std::abs (compensation (only (placed (wide, Placement::mid)), true) - stereo) < 1.0e-4f);
+
+        // Solo de una banda side: se oye la zona del side (L = z, R = −z: nada en el centro); de una izquierda, nada a
+        // la derecha. Se mira la segunda mitad (pasado el fundido del solo).
+        const auto numSamples = static_cast<size_t> (32768);
+        const auto inLeft = sine (1000.0, 0.4, sampleRate, numSamples), inRight = sine (1000.0, 0.2, sampleRate, numSamples);
+        const BandSettings bell { true, 1000.0f, 6.0f, 4.0f };
+        const double zone = std::abs (Band::coefficientsFor (*soloZoneFor (bell), sampleRate).response (1000.0, sampleRate));
+        for (const auto placement : { Placement::side, Placement::left })
+        {
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (placed (bell, placement)));
+            engine.setSolo (0);
+            auto outLeft = inLeft, outRight = inRight;
+            float* channels[] { outLeft.data(), outRight.data() };
+            engine.process (channels, 2, static_cast<int> (numSamples));
+            if (placement == Placement::side)
+            {
+                const auto centre = midOf (outLeft, outRight);
+                CHECK (biggestDifference (std::vector<float> (centre.begin() + numSamples / 2, centre.end()), std::vector<float> (numSamples / 2, 0.0f)) == 0.0f);
+                CHECK (std::abs (toneAmplitude (outLeft, 1000.0, sampleRate, numSamples / 2) / (0.1 * zone) - 1.0) < 1.0e-3);
+            }
+            else
+            {
+                CHECK (std::vector<float> (outRight.begin() + numSamples / 2, outRight.end()) == std::vector<float> (numSamples / 2, 0.0f));
+                CHECK (std::abs (toneAmplitude (outLeft, 1000.0, sampleRate, numSamples / 2) / (0.4 * zone) - 1.0) < 1.0e-3);
+            }
+        }
+    }
+}
 } // namespace
 
 int main()
@@ -1104,6 +1318,9 @@ int main()
     testSoloSwitchingHasNoClicks();
     testAnalogResponse();
     testAnalogSwitchHasNoClicks();
+    testStereoPlacements();
+    testPlacementChangesHaveNoClicks();
+    testStereoAutoGainAndSolo();
 
     if (failures > 0)
     {

@@ -1828,7 +1828,7 @@ void testLfoDivisions()
 
 void testAnalyzerTap()
 {
-    std::printf ("AnalyzerTap: mezcla a mono, ultimas N en orden (tambien al dar la vuelta), sin datos = false\n");
+    std::printf ("AnalyzerTap: mezcla a mono, side, ultimas N en orden (tambien al dar la vuelta), sin datos = false\n");
 
     static dw::AnalyzerTap<16> tap; // static: 16 atómicos + contadores, nada grande, pero así no vive en la pila
     std::array<float, 64> buffer {};
@@ -1864,6 +1864,17 @@ void testAnalyzerTap()
         ordered = ordered && buffer[i] == static_cast<float> (i - 3);
     CHECK (ordered);
     CHECK (tap.copyLatest (buffer.data(), 5) && buffer[0] == 8.0f && buffer[4] == 12.0f);
+
+    // El side, (L − R) / 2: con L = n y R = 2 − n da n − 1; un par idéntico (sonido al centro) da 0.
+    static dw::AnalyzerTap<16> side;
+    side.pushSide (left.data(), right.data(), 10);
+    CHECK (side.getWritten() == 10 && side.copyLatest (buffer.data(), 10));
+    bool difference = true;
+    for (size_t i = 0; i < 10; ++i)
+        difference = difference && buffer[i] == static_cast<float> (i) - 1.0f;
+    CHECK (difference);
+    side.pushSide (left.data(), left.data(), 4);
+    CHECK (side.copyLatest (buffer.data(), 4) && buffer[0] == 0.0f && buffer[3] == 0.0f);
 }
 
 void testSpectrumAnalyzer()

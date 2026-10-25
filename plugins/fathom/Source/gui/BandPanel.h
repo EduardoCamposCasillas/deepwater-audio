@@ -16,7 +16,7 @@ namespace fathom::gui
 {
 
 // El panel de la banda elegida: cuál de las 24 (el selector o un clic en su nodo del visor), encendido, SOLO, FORMA,
-// PENDIENTE (solo los cortes), FRECUENCIA, GANANCIA y Q, y debajo lo que esos números significan para la forma
+// PENDIENTE (solo los cortes), CANAL (estéreo, L, R, mid o side: Fase 8), FRECUENCIA, GANANCIA y Q, y debajo lo que esos números significan para la forma
 // elegida. Los controles que la forma no usa se atenúan. Lo mismo se edita arrastrando el nodo en el visor (Fase 4).
 // El SOLO sigue a la banda del panel: con él encendido, elegir otra banda escucha la zona de la nueva.
 class BandPanel final : public juce::Component
@@ -77,10 +77,26 @@ public:
             "suena m\xc3\xa1s a \"filtro\" y gira m\xc3\xa1s la fase cerca del corte."));
         addAndMakeVisible (slopeBox);
 
-        for (auto* label : { &shapeLabel, &slopeLabel })
+        static_assert (format::placementNames.size() == dsp::numPlacements);
+        for (size_t i = 0; i < format::placementNames.size(); ++i)
+            placementBox.addItem (juce::String::fromUTF8 (format::placementNames[i]), static_cast<int> (i) + 1);
+        placementBox.setTooltip (juce::String::fromUTF8 (
+            "D\xc3\xb3nde act\xc3\xba" "a la banda en el est\xc3\xa9reo:\n"
+            "- Est\xc3\xa9reo: los dos lados igual.\n"
+            "- Izquierda / Derecha: un solo lado (corregir una toma que suena distinta de un lado).\n"
+            "- Mid: solo lo del CENTRO (lo que suena igual en los dos lados: voz, kick, bajo, caja).\n"
+            "- Side: solo lo que es DISTINTO entre los lados: el ancho (reverbs, dobles, pads, guitarras abiertas). "
+            "Subir agudos en el side abre la mezcla sin tocar la voz; cortar graves en el side la deja firme en "
+            "mono.\n"
+            "Con el analizador en Side ves lo que tocas. En una pista mono el side no hace nada. Cambiar sonando no "
+            "hace clic: la banda se funde."));
+        addAndMakeVisible (placementBox);
+
+        for (auto* label : { &shapeLabel, &slopeLabel, &placementLabel })
             setUpLabel (*label);
         shapeLabel.setText ("FORMA", juce::dontSendNotification);
         slopeLabel.setText ("PENDIENTE", juce::dontSendNotification);
+        placementLabel.setText ("CANAL", juce::dontSendNotification);
 
         setUpKnob (frequency, "FRECUENCIA", false,
                    juce::String::fromUTF8 ("D\xc3\xb3nde act\xc3\xba" "a la banda: el centro de la campana, el punto medio "
@@ -118,12 +134,14 @@ public:
         enabledAttachment.reset();
         shapeAttachment.reset();
         slopeAttachment.reset();
+        placementAttachment.reset();
         for (auto* knob : { &frequency, &gain, &q })
             knob->attachment.reset();
 
         enabledAttachment = std::make_unique<ButtonAttachment> (parameters, params::band (band, params::enabled), enabledButton);
         shapeAttachment = std::make_unique<ComboBoxAttachment> (parameters, params::band (band, params::shape), shapeBox);
         slopeAttachment = std::make_unique<ComboBoxAttachment> (parameters, params::band (band, params::slope), slopeBox);
+        placementAttachment = std::make_unique<ComboBoxAttachment> (parameters, params::band (band, params::stereo), placementBox);
         attachKnob (frequency, params::band (band, params::frequency));
         attachKnob (gain, params::band (band, params::gain));
         attachKnob (q, params::band (band, params::q));
@@ -205,9 +223,14 @@ public:
         slopeBox.setBounds (choices.removeFromTop (26));
 
         area.removeFromLeft (12);
+        auto channel = area.removeFromLeft (92);
+        placementLabel.setBounds (channel.removeFromTop (16));
+        placementBox.setBounds (channel.removeFromTop (26));
+
+        area.removeFromLeft (12);
         for (auto* knob : { &frequency, &gain, &q })
         {
-            auto column = area.removeFromLeft (108);
+            auto column = area.removeFromLeft (100);
             knob->label.setBounds (column.removeFromTop (16));
             knob->slider.setBounds (column);
         }
@@ -243,7 +266,7 @@ private:
     static bool sameSettings (const dsp::BandSettings& a, const dsp::BandSettings& b) noexcept
     {
         return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.shape == b.shape
-               && a.slopeIndex == b.slopeIndex;
+               && a.slopeIndex == b.slopeIndex && a.placement == b.placement;
     }
 
     void setUpLabel (juce::Label& label)
@@ -313,6 +336,9 @@ private:
                 text = juce::String::fromUTF8 ("Fase girada 180\xc2\xb0 en: ") + where + "\nEl volumen no cambia";
                 break;
         }
+        static constexpr std::array<const char*, dsp::numPlacements> placedText { "", "\nSolo el lado izquierdo", "\nSolo el lado derecho",
+                                                                                  "\nSolo el centro (mid)", "\nSolo el ancho (side)" };
+        text << placedText[static_cast<size_t> (s.placement)];
         if (! s.enabled)
             text << "\n(apagada)";
         return text;
@@ -331,7 +357,9 @@ private:
     std::unique_ptr<ButtonAttachment> enabledAttachment;
     juce::ComboBox shapeBox, slopeBox;
     juce::Label shapeLabel, slopeLabel;
-    std::unique_ptr<ComboBoxAttachment> shapeAttachment, slopeAttachment;
+    juce::ComboBox placementBox;
+    juce::Label placementLabel;
+    std::unique_ptr<ComboBoxAttachment> shapeAttachment, slopeAttachment, placementAttachment;
     Knob frequency, gain, q;
     juce::Label info;
 };

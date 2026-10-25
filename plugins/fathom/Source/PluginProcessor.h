@@ -10,7 +10,8 @@
 // Efecto mono/estéreo: 24 bandas de EQ con todas las formas y la ganancia de salida (Fase 3), editables sobre el visor
 // con deshacer/rehacer (Fase 4). El audio deja una copia de lo que entra, de lo que sale y del sidechain (Fase 5) en tres
 // tomas lock-free (AnalyzerTap) para el analizador de la GUI. Para escuchar y comparar (Fase 6): solo de banda, auto
-// gain, escala de ganancia, balance, polaridad y comparación A/B. El audio está en fathom::dsp (sin JUCE); aquí solo se
+// gain, escala de ganancia, balance, polaridad y comparación A/B. Cada banda en estéreo, L, R, mid o side y el
+// analizador también del side (Fase 8). El audio está en fathom::dsp (sin JUCE); aquí solo se
 // conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor
 {
@@ -67,6 +68,10 @@ public:
     const AnalyzerTap& getInputTap() const noexcept { return inputTap; }
     const AnalyzerTap& getOutputTap() const noexcept { return outputTap; }
     const AnalyzerTap& getSidechainTap() const noexcept { return sidechainTap; }
+    // Fase 8: lo mismo pero del side, (L − R) / 2 (las de arriba son el mid, (L + R) / 2). En mono no se escriben.
+    const AnalyzerTap& getInputSideTap() const noexcept { return inputSideTap; }
+    const AnalyzerTap& getOutputSideTap() const noexcept { return outputSideTap; }
+    const AnalyzerTap& getSidechainSideTap() const noexcept { return sidechainSideTap; }
 
     // Hilo de la GUI: si el host conectó el bus de sidechain (en FL: "Sidechain to this track" y el puerto en Processing).
     bool isSidechainConnected() const;
@@ -114,6 +119,7 @@ private:
         std::atomic<float>* q = nullptr;
         std::atomic<float>* shape = nullptr;
         std::atomic<float>* slope = nullptr;
+        std::atomic<float>* stereo = nullptr;
     };
     std::array<BandParameters, fathom::dsp::Engine::numBands> bandParams;
     juce::AudioParameterBool* bypassParameter = nullptr;
@@ -121,6 +127,7 @@ private:
 
     fathom::dsp::Engine engine;
     AnalyzerTap inputTap, outputTap, sidechainTap;
+    AnalyzerTap inputSideTap, outputSideTap, sidechainSideTap;
     std::atomic<double> analyzerSampleRate { 44100.0 };
     std::atomic<bool> analyzerActive { false };
     std::atomic<int> soloBand { -1 };
@@ -128,6 +135,8 @@ private:
     fathom::edit::EditHistory history; // después de 'parameters': se destruye antes (deja de escucharlos)
     fathom::edit::UndoStack otherSideHistory; // el historial del lado de la comparación que no está activo
 
+    // Hilo de audio: el mid y el side de unos canales a sus tomas.
+    static void pushTaps (AnalyzerTap& mid, AnalyzerTap& side, const float* const* channels, int numChannels, int numSamples) noexcept;
     void setOutputSettings() noexcept; // pasa al motor la escala, el balance, la polaridad y el auto gain
     std::vector<float> otherSideValues() const;
     void storeOtherSide (const std::vector<float>& values);
