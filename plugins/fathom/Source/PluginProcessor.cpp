@@ -100,6 +100,7 @@ FathomAudioProcessor::FathomAudioProcessor()
         band.release = parameters.getRawParameterValue (id::band (b, id::release));
         band.autoThreshold = parameters.getRawParameterValue (id::band (b, id::autoThreshold));
         band.dynamicSource = parameters.getRawParameterValue (id::band (b, id::dynamicSource));
+        band.spectral = parameters.getRawParameterValue (id::band (b, id::spectral));
     }
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (id::bypass));
     jassert (bypassParameter != nullptr);
@@ -149,14 +150,19 @@ int FathomAudioProcessor::getLinearQuality() const noexcept
 double FathomAudioProcessor::getTailLengthSeconds() const
 {
     // Después de la latencia todavía queda la segunda mitad del FIR (la cola del filtro).
+    // Fase 11: con alguna banda espectral, también el largo de un tramo de la STFT.
     const double sampleRate = preparedSampleRate.load (std::memory_order_relaxed);
+    double tail = 0.0;
     switch (getPhaseMode())
     {
-        case fathom::dsp::PhaseMode::linear: return fathom::dsp::PhaseSizes::linearLength (getLinearQuality(), sampleRate) / sampleRate;
-        case fathom::dsp::PhaseMode::natural: return fathom::dsp::PhaseSizes::naturalLength (sampleRate) / sampleRate;
+        case fathom::dsp::PhaseMode::linear: tail = fathom::dsp::PhaseSizes::linearLength (getLinearQuality(), sampleRate) / sampleRate; break;
+        case fathom::dsp::PhaseMode::natural: tail = fathom::dsp::PhaseSizes::naturalLength (sampleRate) / sampleRate; break;
         case fathom::dsp::PhaseMode::zeroLatency: break;
     }
-    return 0.0;
+    for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
+        if (fathom::dsp::isSpectral (getBandSettings (b)))
+            return tail + fathom::dsp::SpectralSizes::frameLength (sampleRate) / sampleRate;
+    return tail;
 }
 
 void FathomAudioProcessor::timerCallback()
@@ -291,6 +297,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
         layout.add (std::make_unique<juce::AudioParameterChoice> (parameterId (id::dynamicSource), name + "Dyn Source",
                                                                   juce::StringArray { "Band", "Sidechain" }, dynamics.external ? 1 : 0));
     }
+
+    // Fase 11: la dinámica espectral, apagada (un proyecto de las Fases 1-10 suena igual).
+    for (int b = 0; b < id::numBands; ++b)
+        layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::band (b, id::spectral), id::versionHintPhase11 },
+                                                                "Band " + juce::String (b + 1) + " Spectral", dynamics.spectral));
     return layout;
 }
 
@@ -315,6 +326,7 @@ fathom::dsp::BandSettings FathomAudioProcessor::getBandSettings (int band) const
     d.releaseMs = p.release->load();
     d.autoThreshold = p.autoThreshold->load() >= 0.5f;
     d.external = p.dynamicSource->load() >= 0.5f;
+    d.spectral = p.spectral->load() >= 0.5f;
     return settings;
 }
 
@@ -507,11 +519,11 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     engineLatency.store (engine.getLatencySamples(), std::memory_order_relaxed);
     for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
     {
-        const auto& dynamics = engine.getDynamics (b);
+        const auto readout = engine.getDynamicReadout (b); // Fase 11: de la dinámica normal o de la espectral
         auto& live = dynamicStates[static_cast<size_t> (b)];
-        live.gainDb.store (dynamics.getGainDb(), std::memory_order_relaxed);
-        live.levelDb.store (dynamics.getLevelDb(), std::memory_order_relaxed);
-        live.thresholdDb.store (dynamics.getThresholdDb(), std::memory_order_relaxed);
+        live.gainDb.store (readout.gainDb, std::memory_order_relaxed);
+        live.levelDb.store (readout.levelDb, std::memory_order_relaxed);
+        live.thresholdDb.store (readout.thresholdDb, std::memory_order_relaxed);
     }
 
     if (feedAnalyzer)

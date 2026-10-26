@@ -12,7 +12,8 @@
 // tomas lock-free (AnalyzerTap) para el analizador de la GUI. Para escuchar y comparar (Fase 6): solo de banda, auto
 // gain, escala de ganancia, balance, polaridad y comparación A/B. Cada banda en estéreo, L, R, mid o side y el
 // analizador también del side (Fase 8). EQ dinámico por banda, con el detector en la banda o en el sidechain (Fase 9).
-// Modos de fase cero latencia / natural / lineal, con la latencia informada al host (Fase 10).
+// Modos de fase cero latencia / natural / lineal, con la latencia informada al host (Fase 10). Dinámica espectral por banda
+// (Fase 11).
 // El audio está en fathom::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
@@ -100,6 +101,7 @@ public:
 
     // Fase 9, hilo de la GUI: lo que la dinámica le suma ahora a una banda (dB, con la escala: la curva en vivo), el
     // nivel de su zona y el umbral que usa (con el automático, el que calculó). Sin audio se quedan en lo último.
+    // Fase 11, con una banda espectral: el bin que más se mueve, el nivel del más fuerte del centro de la zona y el umbral.
     struct DynamicState
     {
         float gainDb = 0.0f, levelDb = -120.0f, thresholdDb = 0.0f;
@@ -114,6 +116,10 @@ public:
     // Comparación A/B (hilo de la GUI). Dos estados completos (todos los parámetros menos el bypass): los parámetros son
     // el lado activo y el otro se guarda aparte (en el proyecto, como hijo "Compare" del estado). Cada lado tiene su
     // propio historial de deshacer. switchCompareSide devuelve false si hay una edición a medias.
+    // Fase 11, hilo de la GUI (un solo lector: el visor): lo que mueve ahora cada banda espectral, en la grilla de
+    // SpectralStage. Devuelve true si llegó algo nuevo.
+    bool readSpectralSnapshot (fathom::dsp::SpectralStage::Snapshot& out) noexcept { return engine.readSpectralSnapshot (out); }
+
     int getCompareSide() const; // 0 = A, 1 = B
     bool switchCompareSide();
     void copyToOtherSide();     // el lado activo pasa a ser también el otro (A → B o B → A)
@@ -147,6 +153,7 @@ private:
         std::atomic<float>* release = nullptr;
         std::atomic<float>* autoThreshold = nullptr;
         std::atomic<float>* dynamicSource = nullptr;
+        std::atomic<float>* spectral = nullptr; // Fase 11
     };
     std::array<BandParameters, fathom::dsp::Engine::numBands> bandParams;
     juce::AudioParameterBool* bypassParameter = nullptr;

@@ -42,6 +42,8 @@ namespace fathom::gui
 //    de cada canal; si se mezclan las dos clases, cada curva es una guía (una banda izquierda también mueve el mid).
 //  - Modos de fase (Fase 10): con fase lineal o natural la curva total es la del FIR que suena de verdad (la GUI diseña
 //    el mismo filtro): con poca calidad se ve cómo una campana angosta en los graves no llega a su ganancia.
+//  - Dinámica espectral (Fase 11): la curva de una banda espectral muestra lo que mueve AHORA cada frecuencia (los
+//    "dientes" donde corta), con la curva en reposo punteada; llega del audio en una grilla fija (SpectralStage).
 //  - Agarrar un pico: con el mouse cerca de un pico del espectro aparece su marca (Hz y nota); clic y arrastrar = una
 //    campana nueva justo en ese pico (arrastrar hacia abajo = cortarlo). Ctrl mientras se arrastra un nodo = imán a los
 //    picos.
@@ -118,6 +120,7 @@ public:
         // Solo se repinta si algo cambió de forma visible: sin audio, las curvas terminan de caer al piso y el visor
         // queda quieto (no gasta CPU).
         bool changed = refreshBands (sampleRate);
+        changed = refreshSpectral() || changed;
         changed = refreshPhaseCurve (sampleRate) || changed;
         const bool side = view.channels() == analysis::Channels::side;
         changed = updateTrace (input, side ? processor.getInputSideTap() : processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
@@ -205,6 +208,8 @@ public:
             bandCurveDb[static_cast<size_t> (b)].assign (points, 0.0f);
             updateBandCurve (b);
         }
+        for (auto& curve : spectralCurveDb)
+            curve.clear(); // ídem: llega con el próximo tramo
         phaseDb.clear(); // otra cantidad de puntos: se recalcula en el próximo cuadro
         phaseDirty = true;
         updateTotalCurve();
@@ -802,6 +807,17 @@ private:
                                   edits.set (b, params::dynamic, on ? 1.0f : 0.0f);
                           });
                       }));
+        // Fase 11: la dinámica espectral (enciende también la dinámica; solo campanas y shelves).
+        menu.addItem (juce::String::fromUTF8 ("Din\xc3\xa1mica espectral"), dsp::canBeSpectral (settings.shape),
+                      settings.dynamics.enabled && settings.dynamics.spectral, guarded ([this, on = ! (settings.dynamics.enabled && settings.dynamics.spectral)] {
+                          editSelection ([this, on] (int b, const dsp::BandSettings& s) {
+                              if (! dsp::canBeSpectral (s.shape))
+                                  return;
+                              edits.set (b, params::spectral, on ? 1.0f : 0.0f);
+                              if (on)
+                                  edits.set (b, params::dynamic, 1.0f);
+                          });
+                      }));
         menu.addItem (juce::String::fromUTF8 ("Afinar a la nota m\xc3\xa1s cercana (") + format::noteName (edit::nearestNoteHz (settings.frequency))
                           + ")",
                       guarded ([this] {
@@ -861,7 +877,8 @@ private:
             const auto index = static_cast<size_t> (b);
             const auto settings = processor.getBandSettings (b);
             // Fase 9: lo que la dinámica le suma ahora (0 si no es dinámica). Cambios de menos de 0.05 dB no se ven.
-            const bool dynamic = settings.enabled && settings.dynamics.enabled && dsp::canBeDynamic (settings.shape);
+            // Las espectrales (Fase 11) no mueven la banda entera: su curva en vivo es la de refreshSpectral.
+            const bool dynamic = settings.enabled && settings.dynamics.enabled && dsp::canBeDynamic (settings.shape) && ! dsp::isSpectral (settings);
             const float live = dynamic ? processor.getDynamicState (b).gainDb : 0.0f;
             const bool moved = std::abs (live - liveDb[index]) >= 0.05f || (live == 0.0f) != (liveDb[index] == 0.0f);
             if (allBands || moved || ! sameSettings (settings, paintedBands[index]))
@@ -887,6 +904,63 @@ private:
             updateTotalCurve();
         }
         return changed;
+    }
+
+    // Fase 11: lo que mueve ahora cada banda espectral (de la grilla del audio a los puntos de la curva, interpolando en
+    // log). Una banda que no mueve nada queda sin curva espectral. Devuelve true si algo cambió.
+    bool refreshSpectral()
+    {
+        if (! processor.readSpectralSnapshot (spectralSnapshot))
+            return false;
+        const auto points = curveDb.size();
+        if (points < 2)
+            return false;
+        bool changed = false;
+        constexpr int last = dsp::SpectralStage::gridPoints - 1;
+        const double span = std::log (dsp::SpectralStage::gridMaxHz / dsp::SpectralStage::gridMinHz);
+        for (size_t b = 0; b < spectralCurveDb.size(); ++b)
+        {
+            const auto& grid = spectralSnapshot.db[b];
+            auto& curve = spectralCurveDb[b];
+            const float now = isSpectralBand (static_cast<int> (b)) ? processor.getDynamicState (static_cast<int> (b)).gainDb : 0.0f;
+            changed = changed || now != spectralNowDb[b];
+            spectralNowDb[b] = now;
+            const bool moving = isSpectralBand (static_cast<int> (b)) && std::any_of (grid.begin(), grid.end(), [] (float db) { return db != 0.0f; });
+            if (! moving)
+            {
+                changed = changed || ! curve.empty();
+                curve.clear();
+                continue;
+            }
+            curve.resize (points);
+            for (size_t i = 0; i < points; ++i)
+            {
+                const double position = std::clamp (std::log (pointHz (i, points) / dsp::SpectralStage::gridMinHz) / span * last, 0.0,
+                                                    static_cast<double> (last));
+                const auto below = static_cast<size_t> (position);
+                const auto above = std::min (below + 1, static_cast<size_t> (last));
+                const auto t = static_cast<float> (position - static_cast<double> (below));
+                curve[i] = grid[below] + (grid[above] - grid[below]) * t;
+            }
+            changed = true;
+        }
+        if (changed)
+            updateTotalCurve();
+        return changed;
+    }
+
+    // Lo que mueve ahora una banda espectral en una frecuencia (para la lectura de arriba).
+    float spectralDbAt (size_t b, float hz) const noexcept
+    {
+        const auto& curve = spectralCurveDb[b];
+        if (curve.size() != curveDb.size() || curve.size() < 2)
+            return 0.0f;
+        const double position = std::clamp (std::log (static_cast<double> (hz / minHz)) / std::log (static_cast<double> (maxHz / minHz))
+                                                * static_cast<double> (curve.size() - 1),
+                                            0.0, static_cast<double> (curve.size() - 1));
+        const auto below = static_cast<size_t> (position);
+        const auto above = std::min (below + 1, curve.size() - 1);
+        return curve[below] + (curve[above] - curve[below]) * static_cast<float> (position - static_cast<double> (below));
     }
 
     // Fase 10: con fase lineal o natural, la diferencia entre la curva de las bandas y la del FIR que suena (en dB por
@@ -927,7 +1001,7 @@ private:
         phaseDb.assign (points, 0.0f);
         for (size_t i = 0; i < points; ++i)
         {
-            float bands = 0.0f;
+            float bands = 0.0f; // sin la parte espectral (Fase 11): esa se suma aparte, después del FIR
             for (const auto& curve : bandCurveDb)
                 bands += curve[i];
             phaseDb[i] = phaseCorrectionDb (pointHz (i, points), bands);
@@ -1256,7 +1330,7 @@ private:
         return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.shape == b.shape
                && a.slopeIndex == b.slopeIndex && a.analog == b.analog && a.placement == b.placement
                && a.dynamics.enabled == b.dynamics.enabled && a.dynamics.rangeDb == b.dynamics.rangeDb
-               && a.dynamics.external == b.dynamics.external;
+               && a.dynamics.external == b.dynamics.external && a.dynamics.spectral == b.dynamics.spectral;
     }
 
     // Fase 9: una banda que se mueve sola (encendida, dinámica y con una forma que tiene ganancia).
@@ -1264,6 +1338,19 @@ private:
     {
         const auto& s = paintedBands[static_cast<size_t> (b)];
         return s.enabled && s.dynamics.enabled && dsp::canBeDynamic (s.shape);
+    }
+
+    // Fase 11: una banda dinámica espectral.
+    bool isSpectralBand (int b) const noexcept { return dsp::isSpectral (paintedBands[static_cast<size_t> (b)]); }
+
+    // La curva propia de una banda más lo que mueve ahora su parte espectral (si mueve algo).
+    std::vector<float> liveBandCurve (size_t b) const
+    {
+        auto curve = bandCurveDb[b];
+        if (const auto& spectral = spectralCurveDb[b]; spectral.size() == curve.size())
+            for (size_t i = 0; i < curve.size(); ++i)
+                curve[i] += spectral[i];
+        return curve;
     }
 
     // Una banda está "en uso" si está encendida o si se tocó algo (apagada con ajustes propios: su nodo se ve hueco).
@@ -1286,6 +1373,8 @@ private:
                 bands += bandCascades[static_cast<size_t> (b)].magnitudeDb (hz, curveSampleRate);
         if (phaseCurveShown()) // Fase 10: la del FIR
             bands += static_cast<double> (phaseCorrectionDb (hz, static_cast<float> (bands)));
+        for (size_t b = 0; b < spectralCurveDb.size(); ++b) // Fase 11: lo que mueven ahora las espectrales
+            bands += static_cast<double> (spectralDbAt (b, hz));
         return static_cast<float> (bands) + paintedGainDb;
     }
 
@@ -1306,7 +1395,7 @@ private:
         double total = static_cast<double> (paintedGainDb);
         for (size_t b = 0; b < paintedBands.size(); ++b)
             if (paintedBands[b].enabled && actsOn (paintedBands[b].placement, channel))
-                total += bandCascades[b].magnitudeDb (hz, curveSampleRate);
+                total += bandCascades[b].magnitudeDb (hz, curveSampleRate) + static_cast<double> (spectralDbAt (b, hz));
         return static_cast<float> (total);
     }
 
@@ -1375,6 +1464,9 @@ private:
             float total = paintedGainDb;
             for (const auto& curve : bandCurveDb)
                 total += curve[i];
+            for (const auto& curve : spectralCurveDb) // Fase 11
+                if (curve.size() == points)
+                    total += curve[i];
             curveDb[i] = phase ? total + phaseDb[i] : total;
         }
 
@@ -1386,8 +1478,11 @@ private:
                 continue;
             for (size_t b = 0; b < paintedBands.size(); ++b)
                 if (paintedBands[b].enabled && actsOn (paintedBands[b].placement, c))
+                {
+                    const bool moving = spectralCurveDb[b].size() == points;
                     for (size_t i = 0; i < points; ++i)
-                        curve[i] += bandCurveDb[b][i];
+                        curve[i] += bandCurveDb[b][i] + (moving ? spectralCurveDb[b][i] : 0.0f);
+                }
         }
     }
 
@@ -1451,7 +1546,8 @@ private:
                 continue;
             const bool focused = b == focusedBand;
             const bool selected = selection.test (static_cast<size_t> (b));
-            auto path = curvePath (bandCurveDb[static_cast<size_t> (b)], paintedGainDb);
+            const bool spectralMoving = spectralCurveDb[static_cast<size_t> (b)].size() == curveDb.size(); // Fase 11
+            auto path = curvePath (spectralMoving ? liveBandCurve (static_cast<size_t> (b)) : bandCurveDb[static_cast<size_t> (b)], paintedGainDb);
             const auto colour = theme::bandColour (b);
             if (selected)
             {
@@ -1465,7 +1561,9 @@ private:
             g.fillPath (path);
             // Fase 9: mientras la dinámica la mueve, la curva donde descansa queda punteada (cuánto se movió = la
             // distancia entre las dos).
-            if (const auto& resting = restingCurveDb[static_cast<size_t> (b)]; resting.size() == curveDb.size())
+            // Fase 11: con la espectral, la curva en reposo es la de la banda (sin lo que mueve cada frecuencia).
+            if (const auto& resting = spectralMoving ? bandCurveDb[static_cast<size_t> (b)] : restingCurveDb[static_cast<size_t> (b)];
+                resting.size() == curveDb.size())
             {
                 juce::Path dashed;
                 const float dashes[] { 3.0f, 3.0f };
@@ -1525,7 +1623,17 @@ private:
                     g.setColour (colour.withAlpha (0.85f));
                     g.drawLine (centre.x, centre.y, centre.x, rangeY, 2.0f);
                     g.drawLine (centre.x - 5.0f, rangeY, centre.x + 5.0f, rangeY, 2.0f);
-                    if (liveDb[static_cast<size_t> (b)] != 0.0f)
+                    if (isSpectralBand (b))
+                    {
+                        // Fase 11: en la espectral, el punto marca lo que más se mueve ahora alguna frecuencia de la zona.
+                        if (const float now = spectralNowDb[static_cast<size_t> (b)]; now != 0.0f)
+                        {
+                            const float nowY = eqDbToY (paintedGainDb + nodeDb[static_cast<size_t> (b)] + now);
+                            g.setColour (theme::text);
+                            g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ centre.x, juce::jlimit (plot.getY() + 2.0f, plot.getBottom() - 2.0f, nowY) }));
+                        }
+                    }
+                    else if (liveDb[static_cast<size_t> (b)] != 0.0f)
                     {
                         auto settings = paintedBands[static_cast<size_t> (b)];
                         settings.gainDb *= paintedScale;
@@ -1680,9 +1788,10 @@ private:
             third = juce::String (dsp::slopes[static_cast<size_t> (s.slopeIndex)]) + " dB/oct";
         if (dsp::usesQ (s.shape, s.slopeIndex))
             third << (third.isEmpty() ? "" : dot) << "Q " << juce::String (s.q, s.q < 10.0f ? 2 : 1);
-        if (isDynamic (b)) // Fase 9: el rango y lo que se mueve ahora
-            third << dot << juce::String::fromUTF8 ("din ") << format::db (s.dynamics.rangeDb * paintedScale) << juce::String::fromUTF8 (" (ahora ")
-                  << format::db (liveDb[static_cast<size_t> (b)]) << ")";
+        if (isDynamic (b)) // Fase 9: el rango y lo que se mueve ahora (Fase 11: espectral, lo que más se mueve una frecuencia)
+            third << dot << (isSpectralBand (b) ? "espectral " : "din ") << format::db (s.dynamics.rangeDb * paintedScale)
+                  << juce::String::fromUTF8 (" (ahora ")
+                  << format::db (isSpectralBand (b) ? spectralNowDb[static_cast<size_t> (b)] : liveDb[static_cast<size_t> (b)]) << ")";
 
         const juce::Font font { juce::FontOptions (11.0f) };
         const float width = 12.0f + juce::jmax (juce::GlyphArrangement::getStringWidth (font, first),
@@ -1773,6 +1882,11 @@ private:
     // hasta dónde la lleva el rango (en dB, en su frecuencia).
     std::array<float, dsp::Engine::numBands> liveDb {}, rangeDb {};
     std::array<std::vector<float>, dsp::Engine::numBands> restingCurveDb;
+    // Fase 11: lo que mueve ahora cada banda espectral, por punto (vacío si no mueve nada), lo que más se mueve alguna
+    // de sus frecuencias y lo último que llegó del audio.
+    std::array<std::vector<float>, dsp::Engine::numBands> spectralCurveDb;
+    std::array<float, dsp::Engine::numBands> spectralNowDb {};
+    dsp::SpectralStage::Snapshot spectralSnapshot;
     double curveSampleRate = 0.0; // 0 = todavía sin calcular
     // Fase 10: el modo de fase dibujado y la corrección del FIR por punto (vacía con cero latencia).
     dsp::PhaseMode paintedMode = dsp::PhaseMode::zeroLatency;

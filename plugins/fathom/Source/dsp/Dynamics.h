@@ -176,7 +176,7 @@ private:
     void apply (const BandSettings& s) noexcept
     {
         const auto& d = s.dynamics;
-        active = s.enabled && d.enabled && canBeDynamic (s.shape);
+        active = s.enabled && d.enabled && canBeDynamic (s.shape) && ! isSpectral (s); // la espectral es de la Fase 11
         external = d.external;
         placement = s.placement;
         fade.setTarget (active ? 1.0f : 0.0f);

@@ -71,6 +71,7 @@ struct DynamicSettings
     float releaseMs = 150.0f;
     bool autoThreshold = false; // el umbral sigue al nivel típico de la zona (no usa thresholdDb)
     bool external = false;      // el detector escucha el sidechain en vez de la señal de la banda
+    bool spectral = false;      // Fase 11: actúa por frecuencia (bin de la FFT) en vez de mover la banda entera
 
     static constexpr float minRangeDb = -30.0f;
     static constexpr float maxRangeDb = 30.0f;
@@ -84,6 +85,13 @@ struct DynamicSettings
 
 // Solo las formas con ganancia pueden ser dinámicas (lo que se mueve es la ganancia).
 constexpr bool canBeDynamic (Shape shape) noexcept { return usesGain (shape); }
+
+// Dinámica espectral (Fase 11, SpectralDynamics.h): las formas que marcan una zona con ganancia. Los tilts inclinan
+// todo el espectro (una mitad sube lo que la otra baja): "cortar solo donde sobra" no tiene una zona que mirar.
+constexpr bool canBeSpectral (Shape shape) noexcept
+{
+    return shape == Shape::bell || shape == Shape::lowShelf || shape == Shape::highShelf;
+}
 
 // Los ajustes de una banda tal como llegan de los parámetros.
 struct BandSettings
@@ -111,6 +119,13 @@ struct BandSettings
     // ganancia es, más o menos, cuánto cambia de un extremo al otro).
     static constexpr float flatTiltDbPerOctavePerDb = 0.1f;
 };
+
+// Fase 11: una banda cuya dinámica es espectral (encendida, dinámica, espectral y con una forma que lo admite). Su
+// detector de la Fase 9 queda quieto: la dinámica la hace la etapa espectral.
+constexpr bool isSpectral (const BandSettings& s) noexcept
+{
+    return s.enabled && s.dynamics.enabled && s.dynamics.spectral && canBeSpectral (s.shape);
+}
 
 // Una banda del EQ, estéreo, con los parámetros suavizados.
 //

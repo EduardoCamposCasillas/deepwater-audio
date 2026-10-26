@@ -1154,3 +1154,124 @@ cada modo?
 - **Automatizar el modo de fase**: cada cambio mueve la latencia y FL tiene que reacomodarse; elige el modo y déjalo.
 - **Esperar "mejor sonido" de la fase natural en graves**: cambia la fase solo en los agudos; en una pista de 808 suena
   igual que cero latencia (y está bien: el analógico y el digital ya coinciden ahí).
+
+## Fase 11 — Dinámica espectral: cortar solo la frecuencia que sobra
+
+El EQ dinámico de la Fase 9 mueve la banda **entera**: si una campana en 3 kHz baja porque una nota de la voz silba en
+3.4 kHz, baja toda su zona, también lo que estaba bien. Una banda **espectral** decide frecuencia por frecuencia: la
+campana marca DÓNDE mirar y hasta cuánto puede cortar (el RANGO); cada frecuencia corta según **su propio** exceso sobre
+el UMBRAL. Es la herramienta para lo que cambia con las notas: la resonancia que aparece en una sola nota del 808, el
+armónico que chilla en una vocal con autotune, la "o" de una voz que se llena de 400 Hz y la "i" que no.
+
+### Conceptos aprendidos
+
+- **STFT (transformada de Fourier de tiempo corto).** La señal se corta en tramos de 2048 muestras (46 ms a 44.1 kHz)
+  que se solapan un 75 %: uno nuevo cada 512 muestras (11.6 ms, el "hop"). Cada tramo pasa por una ventana de Hann y una
+  FFT: 1025 **bins**, cada uno una franja de 21.5 Hz. Es lo mismo que hace el analizador, pero aquí además se **toca**
+  cada bin y se vuelve al tiempo.
+- **El nivel de un bin.** 4·|X|/N es la amplitud de un seno que cae en ese bin: el mismo "pico de un seno" que mide la
+  Fase 9 (un seno de −12 dBFS lee −12.04). Pero un **ruido** reparte su energía en cientos de bins y cada uno lee mucho
+  menos que el ruido entero: el umbral de una banda espectral se compara con cada franja sola. Por eso suele ir más
+  abajo que el de una dinámica normal.
+- **La ventana reparte un seno en 3-4 bins.** El del centro y sus vecinos (6 dB más abajo). Si cada bin decidiera solo,
+  el centro bajaría todo y los costados casi nada: el tono bajaría menos de lo que pide. Cada bin mira también a sus dos
+  vecinos (el máximo de los tres) y todo el seno recibe la misma ganancia: con 6 dB sobre el umbral, el tono baja 6 dB.
+- **Cuánto corta cada bin.** La curva de la Fase 9 (rodilla de 6 dB, 1 dB por dB hasta el rango) y ataque/liberación,
+  pero de cada bin y una vez por tramo. Después se escala por la forma de la banda: en el centro de la campana el bin
+  puede moverse todo el rango; en los flancos, lo que la campana movería ahí; lejos, nada. Si todos los bins van a fondo,
+  la banda es exactamente la dinámica normal con todo el rango.
+- **Volver al tiempo: overlap-add.** FFT inversa de cada tramo, otra ventana de Hann y se suman los tramos solapados.
+  Con dos ventanas de Hann y un hop de N/4, las ventanas al cuadrado suman 1.5 en todas partes: sin cambios, la suma es
+  la señal. La segunda ventana suaviza el borde de cada tramo: un cambio de ganancia de un tramo al siguiente se funde a
+  lo largo de 46 ms, sin clic.
+- **El precio: latencia y lentitud.** Un tramo necesita 2048 muestras antes de salir: **46 ms de latencia** (FL la
+  compensa; se suma a la del modo de fase). Y la ganancia cambia como mucho cada 11.6 ms y "ve" 46 ms a la vez: para un
+  transitorio (el ataque de un snare, una "t"), la dinámica normal es más rápida. A cambio, la espectral es **casi un
+  lookahead**: el tramo que decide la ganancia es el mismo que se procesa.
+- **Resolución en graves.** 21.5 Hz por bin y un seno ocupando ~86 Hz: debajo de ~150 Hz dos armónicos cercanos se
+  mezclan. En el 808 funciona para la zona de 100-400 Hz (los armónicos que "zumban"), no para separar el sub de su
+  primer armónico.
+- **El detector escucha lo que llega a la banda.** Lo que sale de las bandas, menos la curva estática de la propia banda
+  (así una campana de +3 dB espectral no se dispara con su propia subida), o el sidechain (retrasado como lo que sale de
+  los modos de fase, para que los dos tramos sean del mismo instante).
+- **Umbral automático, versión espectral.** Sigue el nivel típico de la zona entera (su energía, como el RMS de la Fase
+  9) + 3 dB: solo actúan las frecuencias que, ellas solas, suenan más fuerte que toda la zona de costumbre. Lo que es
+  "siempre así" se queda.
+- **Bit a bit cuando no hace nada.** Mientras ninguna frecuencia pasa el umbral, la salida es la entrada retrasada 46 ms
+  tal cual (no la suma de tramos, que se le parece hasta el redondeo). Medido en los tests: idéntica muestra a muestra.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **ESPECTRAL** (junto a DINÁMICO, en el panel de la banda; también "Dinámica espectral" en el menú del nodo, que
+  enciende la dinámica de paso): la dinámica de la banda pasa a decidir por frecuencia. Solo campanas y shelves (los
+  tilts inclinan todo: no tienen una zona que vigilar). Los demás controles de la dinámica significan lo mismo, por
+  frecuencia: RANGO = cuánto puede moverse cada una; UMBRAL = desde qué nivel de UNA frecuencia; ATAQUE/LIBERACIÓN = de
+  cada frecuencia (de a tramos de 11.6 ms: menos de 10 ms de ataque ya es "lo más rápido posible"); DETECTOR = la banda o
+  el sidechain; AUTO = el nivel típico de la zona.
+- **El medidor** muestra la frecuencia más fuerte del centro de la zona contra el umbral ("· por frecuencia") y, a la
+  derecha, lo que más se mueve ahora alguna frecuencia.
+- **En el visor**: la curva de la banda muestra lo que mueve cada frecuencia AHORA: "dientes" donde corta, con la curva
+  en reposo punteada; la curva blanca total los incluye. El punto blanco sobre la línea del rango marca la frecuencia que
+  más se movió. La etiqueta del nodo dice "espectral −6.0 dB (ahora −4.2 dB)".
+- **La latencia** de la columna de SALIDA suma los 46 ms en cuanto una banda es espectral. Encender la primera o apagar
+  la última cambia la latencia: hay un fundido de 20 ms entre la salida sin y con retraso (un instante de las dos
+  mezcladas, sin clic), como al cambiar de modo de fase.
+- CPU (5 bandas dinámicas sobre ruido, estéreo, 44.1 kHz): 5 espectrales ≈ 5 normales (3.4 % de un núcleo); a 96 kHz,
+  6.3 %. Entra al DESHACER, al A/B y a la automatización (pero no automatices ESPECTRAL: cada cambio mueve la latencia).
+
+### Ejercicio de escucha guiado en FL Studio
+
+Una voz con autotune que tenga notas largas (o un pad con acordes que cambian) y AUTO GAIN encendido.
+1. **Encontrar la resonancia que va y viene.** Campana Q 2, SOLO, barre de 1 a 5 kHz: busca una franja que se pone
+   chillona solo en algunas notas. Mira el analizador: un pico angosto que aparece y desaparece.
+2. **Dinámica normal.** DINÁMICO, rango −6, umbral hasta que el medidor lo pase solo en esas notas. Escucha con SOLO
+   apagado: cuando corta, toda la franja baja (la voz se "nubla" un instante en esas notas).
+3. **Espectral.** Enciende ESPECTRAL (baja el umbral ~10 dB: ahora se compara con una frecuencia sola). Mira la curva:
+   aparecen dientes angostos justo donde está el armónico, que se mueven con las notas. Compara con A/B: la nota chillona
+   se calma y el resto de la voz queda igual de clara.
+4. **El límite.** Pon la misma banda espectral en el sub del 808 (60 Hz, Q 1): el corte se oye "borroso" (21 Hz por
+   franja no alcanzan para separar el sub de su armónico) y tarda en entrar en los golpes. Ahí va la dinámica normal.
+
+### Receta: la voz con autotune que silba en algunas notas
+
+1. Campana Q 1.5 en la zona del silbido (barre con SOLO; en voces suele estar entre 2.5 y 5 kHz), ganancia 0 dB.
+2. DINÁMICO + ESPECTRAL, rango −6 dB, ataque 10 ms, liberación 120 ms.
+3. AUTO encendido (el umbral sigue al nivel típico de esa zona: si la voz sube en el estribillo, el EQ no corta más).
+4. Mira los dientes: si corta en todas las notas, la zona está demasiado ancha o el rango demasiado hondo; si no corta
+   nunca, apaga AUTO y baja el umbral a mano.
+
+Por qué funciona: la resonancia de una voz con autotune está en un armónico que cambia de frecuencia con la nota. Una
+campana fija (estática o dinámica) tendría que cubrir toda la zona por donde se mueve; la espectral corta solo el
+armónico de turno, dentro de esa zona, y deja intactos los demás.
+
+### Reto sin receta
+
+Un pad de acordes con mucho medio-grave se pelea con la voz, pero solo en algunos acordes (los que tienen notas en
+300-500 Hz). Haz que el pad le deje lugar a la voz SOLO donde la voz tiene sus armónicos y SOLO mientras canta. Pistas
+(si no sale): ¿qué escucha el detector con DETECTOR = Sidechain? ¿La voz tiene su energía en una franja o en armónicos
+separados? ¿Qué ventaja tiene que el corte sea por frecuencia y no de toda la zona?
+
+### Vocabulario
+
+- **STFT**: la FFT de tramos cortos y solapados de la señal (el "espectrograma" es su dibujo).
+- **Bin**: cada franja de frecuencia de una FFT (fs / N Hz de ancho).
+- **Hop**: cada cuántas muestras empieza un tramo nuevo.
+- **Overlap-add (OLA)**: volver al tiempo sumando los tramos solapados.
+- **Leakage (fuga espectral)**: la energía de un seno que la ventana reparte en los bins vecinos.
+- **Supresor de resonancias**: la familia de procesadores que bajan por frecuencia solo lo que sobresale. **Ejemplo
+  real**: en voces de trap y reggaetón con autotune fuerte es común un supresor de resonancias después del autotune para
+  quitar el "silbido" metálico en las notas altas sin oscurecer la voz.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **El mismo umbral que la dinámica normal**: aquí se compara con una frecuencia sola; con un umbral alto no corta
+  nunca. Empieza con AUTO o mira el medidor.
+- **Rangos enormes en zonas anchas**: con −12 dB en una campana de 3 octavas, cada nota con armónicos fuertes "agujerea"
+  el sonido y puede sonar acuoso (cortes por franjas que cambian cada tramo). Mejor rango moderado (−3 a −6) y zona
+  justa.
+- **Transitorios**: una "t", el ataque del snare o el golpe del kick son más rápidos que un tramo de 46 ms; para eso, la
+  dinámica normal (o un compresor).
+- **Graves bajo ~150 Hz**: la resolución no alcanza; el corte se oye borroso. Dinámica normal o una campana estática.
+- **Mientras grabas o tocas en vivo**: 46 ms de latencia se sienten.
+- **En el master "por las dudas"**: un supresor que corta todo el tiempo aplana el carácter de la mezcla; primero busca
+  la resonancia con SOLO y úsalo solo donde hace falta.

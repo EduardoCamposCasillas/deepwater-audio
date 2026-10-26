@@ -20,7 +20,8 @@ namespace fathom::gui
 // elegida. Los controles que la forma no usa se atenúan. Lo mismo se edita arrastrando el nodo en el visor (Fase 4).
 // El SOLO sigue a la banda del panel: con él encendido, elegir otra banda escucha la zona de la nueva.
 // Abajo, la dinámica (Fase 9): DINÁMICO, un medidor (nivel de la zona, umbral y cuánto se mueve la banda ahora),
-// DETECTOR (la banda o el sidechain), umbral AUTO, RANGO, UMBRAL, ATAQUE y LIBERACIÓN.
+// DETECTOR (la banda o el sidechain), umbral AUTO, RANGO, UMBRAL, ATAQUE y LIBERACIÓN. Junto a DINÁMICO, ESPECTRAL (Fase
+// 11): la dinámica decide frecuencia por frecuencia (y el medidor muestra la más fuerte y la que más se mueve).
 class BandPanel final : public juce::Component
 {
 public:
@@ -125,6 +126,18 @@ public:
                                       "grave que se acumula en un acorde. Solo las campanas, shelves y tilts."));
         addAndMakeVisible (dynamicButton);
 
+        // Fase 11.
+        spectralButton.setClickingTogglesState (true);
+        spectralButton.setTooltip (juce::String::fromUTF8 (
+            "Din\xc3\xa1mica espectral: en vez de mover la banda entera, decide frecuencia por frecuencia (en franjas de ~21 Hz). "
+            "Solo baja (o sube) donde esa frecuencia pasa el UMBRAL; lo dem\xc3\xa1s de la zona queda intacto. La campana marca "
+            "d\xc3\xb3nde mirar y el RANGO, cu\xc3\xa1nto puede moverse cada frecuencia. Para lo que cambia con las notas: la "
+            "resonancia de una sola nota del 808, el arm\xc3\xb3nico que silba en una vocal. Ojo: el umbral se compara con cada "
+            "frecuencia sola (un tono lee su pico; un ruido reparte su energ\xc3\xad" "a y cada franja lee mucho menos).\n"
+            "Agrega 46 ms de latencia (el host la compensa) y reacciona cada ~12 ms: para golpes r\xc3\xa1pidos, la din\xc3\xa1mica "
+            "normal. Solo campanas y shelves."));
+        addAndMakeVisible (spectralButton);
+
         autoButton.setClickingTogglesState (true);
         autoButton.setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.45f));
         autoButton.setTooltip (juce::String::fromUTF8 ("Umbral autom\xc3\xa1tico: el umbral queda 3 dB sobre el nivel T\xc3\x8dPICO de la zona (el "
@@ -185,6 +198,7 @@ public:
         slopeAttachment.reset();
         placementAttachment.reset();
         dynamicAttachment.reset();
+        spectralAttachment.reset();
         autoAttachment.reset();
         sourceAttachment.reset();
         for (auto* knob : { &frequency, &gain, &q, &range, &threshold, &attack, &release })
@@ -198,6 +212,7 @@ public:
         attachKnob (gain, params::band (band, params::gain));
         attachKnob (q, params::band (band, params::q));
         dynamicAttachment = std::make_unique<ButtonAttachment> (parameters, params::band (band, params::dynamic), dynamicButton);
+        spectralAttachment = std::make_unique<ButtonAttachment> (parameters, params::band (band, params::spectral), spectralButton);
         autoAttachment = std::make_unique<ButtonAttachment> (parameters, params::band (band, params::autoThreshold), autoButton);
         sourceAttachment = std::make_unique<ComboBoxAttachment> (parameters, params::band (band, params::dynamicSource), sourceBox);
         attachKnob (range, params::band (band, params::dynamicRange));
@@ -208,6 +223,7 @@ public:
         const auto colour = theme::bandColour (band);
         enabledButton.setColour (juce::TextButton::buttonOnColourId, colour.withAlpha (0.45f));
         dynamicButton.setColour (juce::TextButton::buttonOnColourId, colour.withAlpha (0.45f));
+        spectralButton.setColour (juce::TextButton::buttonOnColourId, colour.withAlpha (0.45f));
         for (auto* knob : { &frequency, &gain, &q, &range, &threshold, &attack, &release })
             knob->slider.setColour (juce::Slider::rotarySliderFillColourId, colour);
         bandSelector.setSelectedId (band + 1, juce::dontSendNotification);
@@ -262,6 +278,7 @@ public:
         const bool canMove = dsp::canBeDynamic (settings.shape);
         const bool moving = canMove && settings.dynamics.enabled;
         dynamicButton.setAlpha (canMove ? 1.0f : 0.35f);
+        spectralButton.setAlpha (moving && dsp::canBeSpectral (settings.shape) ? 1.0f : 0.35f);
         for (auto* component : std::initializer_list<juce::Component*> { &autoButton, &sourceBox, &sourceLabel, &autoLabel })
             component->setAlpha (moving ? 1.0f : 0.45f);
         for (auto* knob : { &range, &attack, &release })
@@ -327,7 +344,10 @@ public:
         dividerY = static_cast<float> (dynamicsRow.getY()) - 5.0f;
         auto row = dynamicsRow;
         auto dynamicLeft = row.removeFromLeft (200);
-        dynamicButton.setBounds (dynamicLeft.removeFromTop (26).removeFromLeft (104));
+        auto dynamicTop = dynamicLeft.removeFromTop (26);
+        dynamicButton.setBounds (dynamicTop.removeFromLeft (104));
+        dynamicTop.removeFromLeft (6);
+        spectralButton.setBounds (dynamicTop);
         dynamicLeft.removeFromTop (6);
         meterArea = dynamicLeft.removeFromTop (34).toFloat();
         row.removeFromLeft (12);
@@ -382,7 +402,7 @@ private:
         return a.enabled == b.enabled && a.frequency == b.frequency && a.gainDb == b.gainDb && a.q == b.q && a.shape == b.shape
                && a.slopeIndex == b.slopeIndex && a.placement == b.placement && a.dynamics.enabled == b.dynamics.enabled
                && a.dynamics.rangeDb == b.dynamics.rangeDb && a.dynamics.autoThreshold == b.dynamics.autoThreshold
-               && a.dynamics.external == b.dynamics.external;
+               && a.dynamics.external == b.dynamics.external && a.dynamics.spectral == b.dynamics.spectral;
     }
 
     // El medidor de la dinámica: una barra con el nivel de la zona (de −60 a +6 dB), una marca en el umbral y, a la
@@ -429,7 +449,9 @@ private:
         g.fillRect (juce::Rectangle<float> (thresholdX - 1.0f, bar.getY() - 4.0f, 2.0f, bar.getHeight() + 8.0f));
         g.setColour (theme::dimText);
         g.setFont (juce::FontOptions (10.0f));
-        g.drawText ((settings.dynamics.autoThreshold ? "auto " : "umbral ") + format::db (shownDynamics.thresholdDb),
+        // Fase 11: con la espectral, el nivel es el de la frecuencia más fuerte del centro de la zona.
+        g.drawText ((settings.dynamics.autoThreshold ? "auto " : "umbral ") + format::db (shownDynamics.thresholdDb)
+                        + (dsp::isSpectral (settings) ? juce::String::fromUTF8 ("  \xc2\xb7  por frecuencia") : juce::String()),
                     juce::Rectangle<float> (bar.getX(), bar.getBottom() + 3.0f, bar.getWidth(), 11.0f), juce::Justification::centredLeft);
     }
 
@@ -504,7 +526,8 @@ private:
                                                                                   "\nSolo el centro (mid)", "\nSolo el ancho (side)" };
         text << placedText[static_cast<size_t> (s.placement)];
         if (s.dynamics.enabled && dsp::canBeDynamic (s.shape))
-            text << juce::String::fromUTF8 ("\nDin\xc3\xa1mica: ") << format::db (s.dynamics.rangeDb) << (s.dynamics.external ? " con el sidechain" : "");
+            text << juce::String::fromUTF8 (dsp::isSpectral (s) ? "\nDin\xc3\xa1mica espectral: " : "\nDin\xc3\xa1mica: ")
+                 << format::db (s.dynamics.rangeDb) << (s.dynamics.external ? " con el sidechain" : "");
         if (! s.enabled)
             text << "\n(apagada)";
         return text;
@@ -532,10 +555,11 @@ private:
     // Fase 9.
     static constexpr float meterBottomDb = -60.0f, meterTopDb = 6.0f;
     juce::TextButton dynamicButton { juce::String::fromUTF8 ("DIN\xc3\x81MICO") };
+    juce::TextButton spectralButton { "ESPECTRAL" }; // Fase 11
     juce::TextButton autoButton { "AUTO" };
     juce::ComboBox sourceBox;
     juce::Label sourceLabel, autoLabel;
-    std::unique_ptr<ButtonAttachment> dynamicAttachment, autoAttachment;
+    std::unique_ptr<ButtonAttachment> dynamicAttachment, spectralAttachment, autoAttachment;
     std::unique_ptr<ComboBoxAttachment> sourceAttachment;
     Knob range, threshold, attack, release;
     juce::Rectangle<int> dynamicsRow;

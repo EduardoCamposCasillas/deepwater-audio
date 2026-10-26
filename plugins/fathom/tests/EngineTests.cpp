@@ -1,4 +1,4 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda, EQ dinámico y modos de fase), las cuentas de la edición (deshacer, arrastrar
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y dinámica espectral), las cuentas de la edición (deshacer, arrastrar
 // nodos) y las del analizador (inclinación, balística, retención y picos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
@@ -2157,6 +2157,399 @@ void testPhaseMemoryOnDemand()
 
 } // namespace
 
+// --- Fase 11: dinámica espectral --------------------------------------------------------------------------------------
+
+// Una campana dinámica espectral (ganancia propia 0 dB).
+BandSettings spectralBell (float hz, float q, float rangeDb, float thresholdDb)
+{
+    auto band = bandOf (Shape::bell, hz, 0.0f, q);
+    band.dynamics.enabled = true;
+    band.dynamics.spectral = true;
+    band.dynamics.rangeDb = rangeDb;
+    band.dynamics.thresholdDb = thresholdDb;
+    return band;
+}
+
+// La frecuencia del centro de un bin de la STFT (ahí un seno lee su pico exacto, sin la "festoneada" de Hann).
+double binCentre (int bin, double sampleRate) { return bin * sampleRate / SpectralSizes::frameLength (sampleRate); }
+
+std::vector<float> plus (std::vector<float> a, const std::vector<float>& b)
+{
+    for (size_t i = 0; i < a.size(); ++i)
+        a[i] += b[i];
+    return a;
+}
+
+bool isDelayedCopy (const std::vector<float>& output, const std::vector<float>& input, int delay)
+{
+    const auto d = static_cast<size_t> (delay);
+    for (size_t i = 0; i < std::min (d, output.size()); ++i)
+        if (output[i] != 0.0f)
+            return false;
+    for (size_t i = 0; i + d < output.size(); ++i)
+        if (output[i + d] != input[i])
+            return false;
+    return true;
+}
+
+// Como biggestSecondDifference pero relativa a la amplitud del momento (el pico en ± un ciclo, al menos 'floor': lo que
+// queda muy por debajo del tono de entrada no cuenta como clic) y a lo más puntiagudo de un seno de esa frecuencia,
+// (2·sin(π·f/fs))²: un seno cuyo volumen cambia suave da ~1; un clic, mucho más.
+float biggestRelativeSecondDifference (const std::vector<float>& y, double hz, double sampleRate, float floor)
+{
+    const auto period = static_cast<size_t> (std::ceil (sampleRate / hz));
+    const auto sharpest = static_cast<float> (std::pow (2.0 * std::sin (pi * hz / sampleRate), 2.0));
+    float biggest = 0.0f;
+    for (size_t i = 2; i < y.size(); ++i)
+    {
+        float envelope = 0.0f;
+        for (size_t j = i > period ? i - period : 0; j < std::min (y.size(), i + period); ++j)
+            envelope = std::max (envelope, std::abs (y[j]));
+        biggest = std::max (biggest, std::abs (y[i] - 2.0f * y[i - 1] + y[i - 2]) / (std::max (envelope, floor) * sharpest));
+    }
+    return biggest;
+}
+
+void testSpectralLatencyAndIdentity()
+{
+    std::printf ("Espectral: agrega N muestras de latencia (2048, el doble a 88.2/96) y, sin pasar el umbral, es la entrada retrasada bit a bit\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const int n = SpectralSizes::frameLength (sampleRate);
+        CHECK (n == (sampleRate > 50000.0 ? 4096 : 2048));
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f, only (spectralBell (2000.0f, 1.0f, -12.0f, 0.0f)));
+        CHECK (engine.getLatencySamples() == n);
+        StereoSignal signal (static_cast<int> (sampleRate / 2), sampleRate); // −6 y −10 dBFS de pico: debajo del umbral (0 dB)
+        const StereoSignal original = signal;
+        processInBlocks (engine, signal, 512, [] (int) {});
+        CHECK (isDelayedCopy (signal.left, original.left, n));
+        CHECK (isDelayedCopy (signal.right, original.right, n));
+
+        // Sin bandas espectrales no hay latencia (y la dinámica normal tampoco agrega).
+        auto normal = spectralBell (2000.0f, 1.0f, -12.0f, -10.0f);
+        normal.dynamics.spectral = false;
+        Engine plain;
+        plain.prepare (sampleRate, false, 0.0f, only (normal));
+        CHECK (plain.getLatencySamples() == 0);
+        // Una forma que no puede ser espectral (tilt) se queda en la dinámica normal, sin latencia.
+        auto tilt = spectralBell (2000.0f, 1.0f, -12.0f, -10.0f);
+        tilt.shape = Shape::tiltShelf;
+        Engine tilted;
+        tilted.prepare (sampleRate, false, 0.0f, only (tilt));
+        CHECK (tilted.getLatencySamples() == 0);
+    }
+}
+
+void testSpectralActsOnlyWhereLoud()
+{
+    std::printf ("Espectral: baja solo la frecuencia que pasa el umbral; la dinamica normal baja toda la zona\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const auto numSamples = static_cast<size_t> (sampleRate);
+        // Una campana ancha en 2.3 kHz: 2 kHz fuerte (−6 dBFS, 24 dB sobre el umbral) y 2.6 kHz suave (−34, debajo).
+        const auto band = spectralBell (2300.0f, 1.0f, -12.0f, -30.0f);
+        const auto input = plus (sine (2000.0, 0.5, sampleRate, numSamples), sine (2600.0, 0.02, sampleRate, numSamples));
+        for (const bool spectralMode : { true, false })
+        {
+            auto settings = band;
+            settings.dynamics.spectral = spectralMode;
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (settings));
+            auto left = input, right = input;
+            runStereo (engine, left, right);
+            const double loud = levelDb (toneAmplitude (left, 2000.0, sampleRate, numSamples / 2) / 0.5);
+            const double quiet = levelDb (toneAmplitude (left, 2600.0, sampleRate, numSamples / 2) / 0.02);
+            const double expectedLoud = Band::coefficientsFor (band, sampleRate, -12.0f).magnitudeDb (2000.0, sampleRate);
+            const double fullQuiet = Band::coefficientsFor (band, sampleRate, -12.0f).magnitudeDb (2600.0, sampleRate);
+            std::printf ("  %6.0f Hz %s: 2 kHz %.2f dB (banda a fondo %.2f), 2.6 kHz %.2f dB (a fondo %.2f)\n", sampleRate,
+                         spectralMode ? "espectral" : "normal   ", loud, expectedLoud, quiet, fullQuiet);
+            CHECK (std::abs (loud - expectedLoud) < (spectralMode ? 0.5 : 0.05));
+            if (spectralMode)
+                CHECK (std::abs (quiet) < 0.3); // la suave queda intacta
+            else
+                CHECK (std::abs (quiet - fullQuiet) < 0.05); // la normal se la lleva con la zona
+            CHECK (left == right);
+        }
+    }
+}
+
+void testSpectralLevelAndThreshold()
+{
+    std::printf ("Espectral: el nivel de un bin es el pico de un seno; 6 dB sobre el umbral = 6 dB de cambio (cortando o subiendo)\n");
+    for (const double sampleRate : sampleRates)
+        for (const float range : { -12.0f, 12.0f })
+        {
+            const double hz = binCentre (93, sampleRate); // ~2 kHz
+            const double amplitude = 0.25;
+            const auto threshold = static_cast<float> (levelDb (amplitude) - 6.0);
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (spectralBell (static_cast<float> (hz), 2.0f, range, threshold)));
+            auto left = sine (hz, amplitude, sampleRate, static_cast<size_t> (sampleRate / 2)), right = left;
+            runStereo (engine, left, right);
+            const auto readout = engine.getDynamicReadout (0);
+            std::printf ("  %6.0f Hz rango %+.0f: nivel %.3f dB, cambio %.3f dB\n", sampleRate, static_cast<double> (range),
+                         static_cast<double> (readout.levelDb), static_cast<double> (readout.gainDb));
+            CHECK (std::abs (static_cast<double> (readout.levelDb) - levelDb (amplitude)) < 0.1);
+            CHECK (std::abs (readout.thresholdDb - threshold) < 1.0e-4f);
+            CHECK (std::abs (std::abs (readout.gainDb) - 6.0f) < 0.1f);
+            CHECK ((readout.gainDb > 0.0f) == (range > 0.0f));
+            // Lo que se oye: el tono movido esos 6 dB (en el centro de la campana el bin mueve todo lo que pide).
+            const double measured = levelDb (toneAmplitude (left, hz, sampleRate, left.size() / 2) / amplitude);
+            CHECK (std::abs (std::abs (measured) - 6.0) < 0.3);
+        }
+}
+
+void testSpectralBypassAndMidSide()
+{
+    std::printf ("Espectral: el bypass sale retrasado igual; mid no toca el side; side no hace nada en mono\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const auto numSamples = static_cast<size_t> (sampleRate);
+        const int n = SpectralSizes::frameLength (sampleRate);
+        // Bypass: la entrada retrasada N, bit a bit (con la banda que cortaría fuerte).
+        {
+            Engine engine;
+            engine.prepare (sampleRate, true, 0.0f, only (spectralBell (2000.0f, 1.0f, -12.0f, -40.0f)));
+            auto left = sine (2000.0, 0.5, sampleRate, numSamples), right = left;
+            const auto original = left;
+            runStereo (engine, left, right);
+            CHECK (isDelayedCopy (left, original, n));
+        }
+        // Mid: el centro (2 kHz, −6 dBFS) baja; el side (también 2 kHz, desfasado) queda igual.
+        {
+            auto band = spectralBell (2000.0f, 1.0f, -12.0f, -30.0f);
+            band.placement = Placement::mid;
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (band));
+            const auto mid = sine (2000.0, 0.5, sampleRate, numSamples);
+            std::vector<float> left (numSamples), right (numSamples);
+            for (size_t i = 0; i < numSamples; ++i)
+            {
+                const auto side = static_cast<float> (0.01 * std::cos (2.0 * pi * 2000.0 * static_cast<double> (i) / sampleRate));
+                left[i] = mid[i] + side;
+                right[i] = mid[i] - side;
+            }
+            runStereo (engine, left, right);
+            std::vector<float> outMid (numSamples), outSide (numSamples);
+            for (size_t i = 0; i < numSamples; ++i)
+            {
+                outMid[i] = 0.5f * (left[i] + right[i]);
+                outSide[i] = 0.5f * (left[i] - right[i]);
+            }
+            const double midDb = levelDb (toneAmplitude (outMid, 2000.0, sampleRate, numSamples / 2) / 0.5);
+            const double sideDb = levelDb (toneAmplitude (outSide, 2000.0, sampleRate, numSamples / 2) / 0.01);
+            std::printf ("  %6.0f Hz mid: centro %.2f dB, side %.4f dB\n", sampleRate, midDb, sideDb);
+            CHECK (midDb < -11.0);
+            CHECK (std::abs (sideDb) < 0.01);
+        }
+        // Mono: una banda side no tiene nada que tocar (ni latencia); una mid actúa sobre el único canal.
+        for (const auto placement : { Placement::side, Placement::mid })
+        {
+            auto band = spectralBell (2000.0f, 1.0f, -12.0f, -30.0f);
+            band.placement = placement;
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (band));
+            auto x = sine (2000.0, 0.5, sampleRate, numSamples);
+            const auto original = x;
+            for (size_t start = 0; start < numSamples; start += 256)
+            {
+                float* channels[] { x.data() + start };
+                engine.process (channels, 1, static_cast<int> (std::min<size_t> (256, numSamples - start)));
+            }
+            if (placement == Placement::side)
+            {
+                CHECK (engine.getLatencySamples() == 0);
+                CHECK (biggestDifference (std::vector<float> (x.begin() + static_cast<long> (numSamples / 2), x.end()),
+                                          std::vector<float> (original.begin() + static_cast<long> (numSamples / 2), original.end()))
+                       == 0.0f);
+            }
+            else
+                CHECK (levelDb (toneAmplitude (x, 2000.0, sampleRate, numSamples / 2) / 0.5) < -11.0);
+        }
+    }
+}
+
+void testSpectralSidechainAndAutoThreshold()
+{
+    std::printf ("Espectral: con el sidechain escucha el otro (sin el, nada); el umbral automatico deja lo de siempre y baja lo que sube\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const auto numSamples = static_cast<size_t> (sampleRate);
+        auto band = spectralBell (2000.0f, 1.0f, -12.0f, -24.0f);
+        band.dynamics.external = true;
+        const auto quiet = sine (2000.0, 0.02, sampleRate, numSamples);
+        const auto key = sine (2000.0, 0.5, sampleRate, numSamples);
+        for (const bool connected : { true, false })
+        {
+            Engine engine;
+            engine.prepare (sampleRate, false, 0.0f, only (band));
+            auto left = quiet, right = quiet;
+            runStereo (engine, left, right, connected ? &key : nullptr);
+            const double db = levelDb (toneAmplitude (left, 2000.0, sampleRate, numSamples / 2) / 0.02);
+            if (connected)
+                CHECK (db < -11.0);
+            else
+                CHECK (std::abs (db) < 1.0e-3);
+        }
+    }
+
+    const double sampleRate = 44100.0;
+    const double hz = binCentre (93, sampleRate);
+    auto band = spectralBell (static_cast<float> (hz), 1.0f, -6.0f, -60.0f); // el umbral manual (−60) no cuenta
+    band.dynamics.autoThreshold = true;
+    Engine engine;
+    engine.prepare (sampleRate, false, 0.0f, only (band));
+    const auto play = [&] (double amplitude, double seconds) {
+        auto left = sine (hz, amplitude, sampleRate, static_cast<size_t> (sampleRate * seconds)), right = left;
+        runStereo (engine, left, right);
+    };
+    play (0.1, 6.0);
+    std::printf ("  sostenido: umbral %.2f dB, ganancia %.2f dB\n", static_cast<double> (engine.getDynamicReadout (0).thresholdDb),
+                 static_cast<double> (engine.getDynamicReadout (0).gainDb));
+    CHECK (std::abs (engine.getDynamicReadout (0).thresholdDb - (-20.0f + BandDynamics::autoMarginDb)) < 0.5f);
+    CHECK (engine.getDynamicReadout (0).gainDb > -0.5f);
+    play (0.4, 0.1); // +12 dB de golpe
+    std::printf ("  de golpe +12 dB: ganancia %.2f dB\n", static_cast<double> (engine.getDynamicReadout (0).gainDb));
+    CHECK (engine.getDynamicReadout (0).gainDb < -5.5f);
+}
+
+void testSpectralSwitchingHasNoClicks()
+{
+    std::printf ("Espectral: encender y apagar la parte espectral sonando (con su cambio de latencia) no hace clic\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const int interval = static_cast<int> (0.4 * sampleRate);
+        const int steps = 8;
+        auto left = sine (1000.0, 0.5, sampleRate, static_cast<size_t> (interval * steps)), right = left;
+        Engine engine;
+        auto band = spectralBell (1000.0f, 1.0f, -12.0f, -30.0f);
+        band.dynamics.spectral = false;
+        engine.prepare (sampleRate, false, 0.0f, only (band));
+        bool latencyFollows = true;
+        BlockSizes sizes;
+        const int total = static_cast<int> (left.size());
+        for (int start = 0; start < total;)
+        {
+            const int count = std::min (sizes.next (512), total - start);
+            // Espectral un intervalo sí y otro no (en los otros, la dinámica normal de la Fase 9).
+            band.dynamics.spectral = (start / interval) % 2 == 1;
+            engine.setBand (0, band);
+            float* channels[] { left.data() + start, right.data() + start };
+            engine.process (channels, 2, count);
+            latencyFollows = latencyFollows && engine.getLatencySamples() == (band.dynamics.spectral ? SpectralSizes::frameLength (sampleRate) : 0);
+            start += count;
+        }
+        CHECK (latencyFollows);
+        const double s = 2.0 * std::sin (pi * 1000.0 / sampleRate);
+        const auto bound = static_cast<float> (1.2 * 0.5 * s * s);
+        const float measured = biggestSecondDifference (left);
+        std::printf ("  %6.0f Hz: segunda diferencia %.5f (cota %.5f)\n", sampleRate, static_cast<double> (measured), static_cast<double> (bound));
+        CHECK (measured < bound);
+        CHECK (left == right);
+    }
+}
+
+// Todo al azar en cada bloque, con la parte espectral o sin ella (la dinámica de la Fase 9 con los mismos cambios): lo
+// más puntiagudo de la salida, relativo a lo que suena (ver biggestRelativeSecondDifference).
+float randomSpectralAutomation (double sampleRate, bool spectralAllowed)
+{
+    Engine engine;
+    engine.prepare (sampleRate, false, 0.0f, only (spectralBell (1000.0f, 1.0f, -12.0f, -30.0f)));
+    const auto numSamples = static_cast<size_t> (2.0 * sampleRate);
+    auto left = sine (1000.0, 0.05, sampleRate, numSamples), right = left;
+    auto key = sine (1000.0, 0.5, sampleRate, numSamples);
+    for (size_t i = 0; i < numSamples; ++i)
+        if ((i / static_cast<size_t> (sampleRate * 0.01)) % 2 == 1)
+            key[i] = 0.0f;
+    BlockSizes sizes;
+    std::uint32_t seed = 4242;
+    auto random = [&seed] (std::uint32_t range) {
+        seed = seed * 1664525u + 1013904223u;
+        return (seed >> 16) % range;
+    };
+    static constexpr std::array<Shape, 3> shapes { Shape::bell, Shape::lowShelf, Shape::highShelf };
+    const int total = static_cast<int> (numSamples);
+    bool switched = false;
+    for (int start = 0; start < total;)
+    {
+        const int count = std::min (sizes.next (256), total - start);
+        for (int b = 0; b < 3; ++b)
+        {
+            auto band = spectralBell (random (2) == 0 ? 700.0f : 1400.0f, random (2) == 0 ? 0.7f : 2.0f, random (2) == 0 ? -24.0f : 24.0f,
+                                      random (2) == 0 ? -50.0f : -20.0f);
+            band.shape = shapes[random (3)];
+            band.gainDb = random (2) == 0 ? -6.0f : 6.0f;
+            band.enabled = random (10) != 0;
+            band.placement = random (4) == 0 ? Placement::mid : Placement::stereo;
+            auto& d = band.dynamics;
+            d.spectral = random (8) != 0 && spectralAllowed;
+            d.attackMs = random (2) == 0 ? 0.5f : 30.0f;
+            d.releaseMs = random (2) == 0 ? 5.0f : 300.0f;
+            d.autoThreshold = random (5) == 0;
+            d.external = random (2) == 0;
+            engine.setBand (b, band);
+        }
+        if (! switched && start >= total / 2)
+        {
+            engine.setPhaseMode (PhaseMode::linear, 0);
+            switched = true;
+        }
+        float* channels[] { left.data() + start, right.data() + start };
+        const float* sidechain[] { key.data() + start, key.data() + start };
+        engine.process (channels, 2, count, sidechain, 2);
+        start += count;
+    }
+    if (left != right)
+        return 1.0e9f;
+    // Desde 0.1 s: el seno de prueba arranca de golpe (retrasado por la latencia; ese arranque no es del EQ).
+    return biggestRelativeSecondDifference (std::vector<float> (left.begin() + static_cast<long> (sampleRate / 10), left.end()), 1000.0,
+                                            sampleRate, 0.05f);
+}
+
+void testSpectralAutomationHasNoClicks()
+{
+    std::printf ("Espectral: todo al azar en cada bloque (frecuencia, forma, rango, umbral, canal, sidechain, fase lineal) no hace clic\n");
+    for (const double sampleRate : sampleRates)
+    {
+        // Tres bandas apiladas en la misma zona pueden subir el tono +90 dB: la medida es relativa a lo que suena. Con
+        // ataques de 0.5 ms y un sidechain a golpes cada 10 ms, la dinámica normal ya da 2-4 (cambios de volumen muy
+        // rápidos, no clics: pasa su propio test de la Fase 9). La espectral no puede ser más puntiaguda que eso.
+        const float spectral = randomSpectralAutomation (sampleRate, true);
+        const float normal = randomSpectralAutomation (sampleRate, false);
+        std::printf ("  %6.0f Hz: segunda diferencia relativa %.3f (la misma automatizacion sin la parte espectral: %.3f)\n", sampleRate,
+                     static_cast<double> (spectral), static_cast<double> (normal));
+        CHECK (std::isfinite (spectral));
+        CHECK (spectral <= std::max (1.5f, normal));
+    }
+}
+
+void testSpectralWithLinearPhase()
+{
+    std::printf ("Espectral con fase lineal: las latencias se suman; sin pasar el umbral = la entrada retrasada bit a bit; corta igual\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const int total = PhaseSizes::latency (PhaseMode::linear, 0, sampleRate) + SpectralSizes::frameLength (sampleRate);
+        const auto numSamples = static_cast<size_t> (sampleRate);
+        {
+            Engine engine;
+            prepareIn (engine, PhaseMode::linear, 0, sampleRate, only (spectralBell (2000.0f, 1.0f, -12.0f, 0.0f)));
+            CHECK (engine.getLatencySamples() == total);
+            auto left = sine (300.0, 0.25, sampleRate, numSamples), right = left;
+            const auto original = left;
+            runStereo (engine, left, right);
+            CHECK (isDelayedCopy (left, original, total));
+        }
+        {
+            Engine engine;
+            prepareIn (engine, PhaseMode::linear, 0, sampleRate, only (spectralBell (2000.0f, 1.0f, -12.0f, -30.0f)));
+            auto left = sine (2000.0, 0.5, sampleRate, numSamples), right = left;
+            runStereo (engine, left, right);
+            CHECK (levelDb (toneAmplitude (left, 2000.0, sampleRate, numSamples / 2) / 0.5) < -11.0);
+        }
+    }
+}
+
 int main()
 {
     testPassthroughIsBitExact();
@@ -2209,6 +2602,14 @@ int main()
     testPhaseModesInMono();
     testLinearPhaseSolo();
     testPhaseMemoryOnDemand();
+    testSpectralLatencyAndIdentity();
+    testSpectralActsOnlyWhereLoud();
+    testSpectralLevelAndThreshold();
+    testSpectralBypassAndMidSide();
+    testSpectralSidechainAndAutoThreshold();
+    testSpectralSwitchingHasNoClicks();
+    testSpectralAutomationHasNoClicks();
+    testSpectralWithLinearPhase();
 
     if (failures > 0)
     {

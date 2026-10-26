@@ -119,12 +119,19 @@ public:
             autoGainReadout.setText (text, juce::dontSendNotification);
         autoGainReadout.setColour (juce::Label::textColourId, on ? theme::text : theme::dimText.withAlpha (0.6f));
 
-        // La calidad solo cuenta en fase lineal; abajo, la latencia que agrega el modo (la que FL compensa).
+        // La calidad solo cuenta en fase lineal; abajo, la latencia que agrega el modo (la que FL compensa), más la de la
+        // dinámica espectral si alguna banda la usa (Fase 11).
         const auto mode = processor.getPhaseMode();
         qualityBox.setEnabled (mode == dsp::PhaseMode::linear);
         qualityLabel.setAlpha (mode == dsp::PhaseMode::linear ? 1.0f : 0.4f);
         const double sampleRate = processor.getAnalyzerSampleRate();
-        const int latency = dsp::PhaseSizes::latency (mode, processor.getLinearQuality(), sampleRate);
+        int latency = dsp::PhaseSizes::latency (mode, processor.getLinearQuality(), sampleRate);
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (dsp::isSpectral (processor.getBandSettings (b)))
+            {
+                latency += dsp::SpectralSizes::latency (sampleRate);
+                break;
+            }
         const auto latencyText = latency == 0 ? juce::String ("sin latencia")
                                               : "latencia " + juce::String (1000.0 * latency / sampleRate, latency * 1000.0 < 10.0 * sampleRate ? 1 : 0) + " ms";
         if (latencyText != latencyReadout.getText())

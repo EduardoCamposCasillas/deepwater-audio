@@ -201,6 +201,9 @@ public:
     // La latencia del modo pedido (la que se informa al host).
     [[nodiscard]] int getLatencySamples() const noexcept { return PhaseSizes::latency (target.mode, target.quality, sampleRate); }
 
+    // La del modo que suena ahora (Fase 11: con ella se alinea el sidechain de la etapa espectral con lo que sale de aquí).
+    [[nodiscard]] int getAudibleLatency() const noexcept { return PhaseSizes::latency (current.mode, current.quality, sampleRate); }
+
     // ¿Se reservó la memoria de los modos de fase? Sin ella, la etapa se queda en cero latencia y wantsMemory() avisa
     // si le pidieron otro modo.
     [[nodiscard]] bool hasMemory() const noexcept { return memory; }

@@ -45,8 +45,8 @@ Lo que Fathom va a usar de `libs/dsp` (`deepwater::dsp`):
 - `AnalyzerTap.h` ganó `pushSide` en la Fase 8 (escribe el side, (L − R) / 2, para el analizador M/S).
 - `Smoothing.h` (`LinearRamp`, `EffectSwitch`), `Decibels.h`, `Pitch.h`, `LevelMeter.h`.
 - `RealFft.h` y `Convolver.h` (nacieron en la Fase 10): FFT real para el audio y convolución por FFT particionada con
-  fundido entre kernels (los modos de fase; la reverb los va a usar). `Fft.h` (la clara, fuera del audio): dinámica
-  espectral (Fase 11).
+  fundido entre kernels (los modos de fase; la reverb los va a usar). La dinámica espectral (Fase 11) también usa
+  `RealFft.h` (su STFT; `Fft.h` no hizo falta).
 - `EnvelopeFollower.h`: se probó para el detector del EQ dinámico (Fase 9) y se descartó: suaviza el nivel en lineal y,
   con el umbral muy por debajo de la señal, el ataque efectivo se volvía casi instantáneo. El detector de la Fase 9
   (RMS corto + ataque/liberación sobre la ganancia en dB) vive en `Source/dsp/Dynamics.h`; si el compresor (plugin 5)
@@ -79,12 +79,14 @@ plugins/fathom/
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie (con su dinámica), modos de fase,
-                             # escala de ganancia, salida, auto gain, balance, polaridad, solo y bypass; la memoria de
-                             # los modos de fase a pedido (providePhaseMemory)
+                             # dinámica espectral, escala de ganancia, salida, auto gain, balance, polaridad, solo y
+                             # bypass; la memoria de los modos de fase a pedido (providePhaseMemory)
     dsp/PhaseDesign.h        # modos de fase: tamaños y latencias, el pedido de diseño y PhaseDesigner (FIR de fase
                              # lineal y de corrección natural, con caché por banda)
     dsp/PhaseStage.h         # los modos de fase en el audio: convolucionadores, kernels entre hilos (KernelStore), hilo
                              # de diseño, transiciones sin clic, dry retrasado y detectores alineados
+    dsp/SpectralDynamics.h   # dinámica espectral (Fase 11): STFT, detector y ganancia por bin, suma de tramos, salida bit
+                             # a bit sin cambios, fundido de la latencia y la grilla para la GUI (SpectralStage)
     dsp/Dynamics.h           # EQ dinámico: el detector de una banda (zona del solo, RMS corto, rodilla, rango,
                              # ataque/liberación sobre la ganancia, umbral automático)
     dsp/AutoGain.h           # cuánto cambia la sonoridad la curva (ruido rosa con peso K de BS.1770), por banda;
@@ -106,7 +108,8 @@ plugins/fathom/
                              # la banda elegida (BandPanel, con SOLO, CANAL y la fila de la dinámica), ajustes del
                              # analizador (AnalyzerPanel), columna de salida
                              # (OutputPanel: escala, auto gain, balance, polaridad, ganancia, fase y calidad)
-  tests/EngineTests.cpp    # tests del motor (con auto gain, solo, estéreo por banda, EQ dinámico y modos de fase), de la
+  tests/EngineTests.cpp    # tests del motor (con auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y
+                           # dinámica espectral), de la
                            # edición y del analizador (sin JUCE)
 ```
 
@@ -154,7 +157,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       con la forma de la banda o con el sidechain externo; la curva se mueve en vivo en el visor.
 - [x] Fase 10 — Modos de fase: fase lineal (convolución por FFT particionada, varias calidades, latencia informada)
       y fase "natural" propia (magnitud y fase del analógico); cambio de modo sin clics.
-- [ ] Fase 11 — Dinámica espectral: una banda dinámica que actúa por bin de la FFT (solo donde hay exceso, no en toda
+- [x] Fase 11 — Dinámica espectral: una banda dinámica que actúa por bin de la FFT (solo donde hay exceso, no en toda
       la zona): domar resonancias que cambian con las notas.
 - [ ] Fase 12 — Igualar y dibujar: igualar el espectro a una referencia (sidechain) creando bandas; dibujar la curva a
       mano y convertirla en bandas.
@@ -167,7 +170,60 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 10 COMPLETADA (2026-10-25). Probada por el usuario en FL Studio: funciona.
+Fase 11 COMPLETADA (2026-10-26). Falta probarla en FL Studio.
+- Dinámica espectral (`dsp/SpectralDynamics.h`, `SpectralStage`): una banda dinámica con ESPECTRAL decide por bin de una
+  STFT en vez de mover la banda entera. Parámetro nuevo por banda (versionHint 11, al final del layout):
+  `band<N>Spectral` (off: un proyecto de las Fases 1-10 suena igual). `DynamicSettings::spectral`, `canBeSpectral`
+  (campana, shelf grave, shelf agudo; los tilts no) e `isSpectral(settings)` en `Band.h`. Una banda espectral deja quieto
+  su `BandDynamics` (Fase 9): su parte estática sigue en las bandas IIR (o en el FIR lineal) y lo dinámico va a la etapa.
+- STFT: N = 2048 a 44.1/48 kHz (4096 a 88.2/96, ×4 sobre 100 kHz), hop N/4, Hann periódica en el análisis y en la
+  síntesis (las ventanas² solapadas suman 1.5: se escala por 2/3), FFT real de la librería (`RealFft<float>`; `Fft.h`
+  no hizo falta). Latencia N (46 ms), sumada a la de los modos de fase; la etapa va DESPUÉS de los modos de fase y
+  retrasa también la original (bypass, solo y mezcla alineados). Sin ninguna banda espectral no hace nada (bit a bit,
+  sin latencia); guarda la historia siempre, así al arrancar lo retrasado ya tiene el pasado.
+- Por bin: nivel = (4·|X|/N)² en dB (un seno en su bin lee su pico: −12.04 dBFS medido), en el canal de la banda
+  (estéreo = el lado más fuerte, L, R, mid, side; sidechain igual, en mono su mid) y el máximo con sus 2 vecinos (sin
+  eso, un seno bin-centrado bajaba 2.5 de los 6 dB pedidos: los costados del lóbulo de Hann leían 6 dB menos). Al nivel
+  de la señal se le resta la curva estática de la propia banda (lee "lo que llega", como la Fase 9). La curva de
+  ganancia es `BandDynamics::gainChangeDb`; ataque/liberación por bin a ritmo de tramo; a 0.001 dB se copia. Lo que se
+  aplica en el bin = peso·ganancia, con peso = (|H con ganancia + rango| − |H con ganancia|) / rango en dB (los mismos
+  coeficientes que la curva; 1 en el centro de una campana). Varias bandas se suman por grupo (L, R, mid, side; mid/side
+  se aplican pasando el espectro a M/S y de vuelta).
+- Umbral automático: nivel típico de la zona = 1.5 s de promedio (en dB, sin silencios) de Σ peso²·potencia / 1.5
+  (Hann reparte un seno en 1.5 bins de ancho de ruido) + 3 dB, con la potencia SIN el máximo de los vecinos (con él, un
+  seno sostenido leía +3.6 dB y no se cortaba lo que subía 12 dB).
+- Bit a bit: un tramo sin cambios (todos los bins en 0 dB exactos) se suma en el tiempo (x·ventana², sin FFT inversa);
+  una muestra "limpia" (ningún tramo con cambios la tocó: el último terminó hace más de N muestras) sale de la historia
+  retrasada N tal cual. Primera banda espectral / última: fundido de 20 ms en S entre la salida sin y con retraso (las
+  bandas actúan recién con el retraso del todo y N + hop muestras de tramos); al irse, sueltan (rampa de 20 ms por
+  banda), se espera a que no quede ningún tramo con cambios y se funde de vuelta. La latencia informada es la del estado
+  pedido (`Engine::getLatencySamples` = fase + espectral); la cola (`getTailLengthSeconds`) suma N.
+- GUI: botón ESPECTRAL junto a DINÁMICO (atenuado si la forma no puede o la dinámica está apagada), medidor = el bin más
+  fuerte del centro de la zona (peso ≥ 0.5) contra el umbral ("· por frecuencia") y el que más se mueve; "Dinámica
+  espectral" en el menú del nodo (enciende también la dinámica); la etapa publica lo que mueve cada banda en una grilla
+  log de 256 puntos (20 Hz-20 kHz, el bin que más se mueve de los que caen en cada punto) por `TripleBuffer`
+  (`Engine::readSpectralSnapshot`, un solo lector: el visor), que el visor suma a la curva de la banda ("dientes", con la
+  curva en reposo punteada) y a la total (también a la lectura de arriba y a las curvas por canal; la corrección del FIR
+  de fase se calcula sin ella). Etiqueta "espectral ... (ahora ...)". La latencia de la columna de SALIDA suma los 46 ms.
+  Cabecera "Fase 11: dinámica espectral". `Engine::getDynamicReadout` (normal o espectral) alimenta `getDynamicState`.
+- CPU (5 bandas dinámicas sobre ruido, estéreo, bloques de 256): a 44.1 kHz 0 espectrales 3.3 %, 1 espectral 4.0 %, 5
+  espectrales 3.4 %; a 96 kHz 6.6 / 6.6 / 6.3 %. OJO: el tramo se calcula cada hop (512 muestras): con bloques chicos un
+  callback hace todo el trabajo (pico); repartirlo es Fase 16, como la convolución.
+- Tests nuevos `FathomTests`: latencia N (y 0 sin espectrales o con un tilt); debajo del umbral = la entrada retrasada N
+  bit a bit; 2 kHz fuerte + 2.6 kHz suave en una campana ancha: la espectral baja 2 kHz como la banda a fondo (±0.1 dB)
+  y deja 2.6 kHz en 0.00 dB, la normal baja los dos; nivel = pico del seno (±0.1 dB) y 6 dB sobre el umbral = 6 dB
+  (cortando y subiendo, medido en el tono); bypass retrasado bit a bit; mid baja el centro y deja el side (< 0.01 dB);
+  mono: side no hace nada (ni latencia), mid actúa; sidechain (y sin él, nada); umbral automático (sostenido no se toca,
+  +12 dB de golpe = todo el rango); encender/apagar sonando sin clic con la latencia siguiendo; con fase lineal (latencias
+  sumadas, bit a bit, corta igual); automatización al azar (3 bandas, formas, rango ±24, canal, sidechain a golpes y
+  cambio a fase lineal): la segunda diferencia relativa a la amplitud local (piso = el tono de entrada) no supera a la de
+  la misma automatización sin la parte espectral (1.2-2.7 contra 2.1-4.0). La cota absoluta de la Fase 9 no sirve aquí:
+  tres bandas espectrales apiladas suben legítimamente el tono +90 dB.
+- GUI: captura del Standalone solo de la cabecera (sale recortada por el escalado de pantalla): el panel y los dientes del visor, revisarlos en FL.
+- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 10
+Probada por el usuario en FL Studio: funciona.
 - Tres modos (`dsp/PhaseDesign.h`, `PhaseMode`): cero latencia (lo de siempre), natural y lineal. Parámetros nuevos
   (versionHint 10): `phaseMode` (Zero Latency / Natural Phase / Linear Phase, cero latencia por defecto: un proyecto de
   las Fases 1-9 suena igual) y `linearQuality` (Low / Medium / High / Very High / Maximum, Medium por defecto). Entran al
@@ -533,4 +589,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 11 (dinámica espectral).
+Siguiente: probar la Fase 11 en FL Studio; después, Fase 12 (igualar y dibujar).

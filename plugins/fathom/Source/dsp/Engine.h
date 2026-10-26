@@ -13,6 +13,7 @@
 #include "dsp/Dynamics.h"
 #include "dsp/PhaseStage.h"
 #include "dsp/Solo.h"
+#include "dsp/SpectralDynamics.h"
 
 namespace fathom::dsp
 {
@@ -41,6 +42,10 @@ namespace fathom::dsp
 // natural, un FIR corto corrige lo que dejaron las bandas; con fase lineal, las bandas no corren y un FIR largo filtra la
 // entrada. La señal "original" del bypass, del solo y de la mezcla sale de ahí retrasada lo mismo que la procesada.
 // Con fase lineal los detectores dinámicos escuchan la entrada alineada con el centro del FIR (no lo que deja cada banda).
+//
+// Las bandas espectrales (Fase 11, SpectralDynamics.h) dejan su parte estática en las bandas (o en el FIR) y su dinámica
+// va a una etapa STFT después de los modos de fase: baja cada frecuencia de su zona según su propio exceso. Mientras
+// haya alguna, retrasa todo (también la original) N muestras más.
 class Engine
 {
 public:
@@ -89,6 +94,7 @@ public:
         const bool isRealtime = realtime.load (std::memory_order_relaxed);
         const bool withMemory = phase->hasMemory() || phaseMode != PhaseMode::zeroLatency || ! isRealtime;
         phase->prepare (sampleRate, phaseMode, linearQuality, isRealtime, sounding, withMemory);
+        spectral->prepare (sampleRate, sounding);
     }
 
     // Hilo de mensajes (el procesador lo llama con un temporizador): si se eligió fase natural o lineal y la memoria no
@@ -163,8 +169,9 @@ public:
         phase->setRealtime (isRealtime);
     }
 
-    // La latencia del modo pedido, para informarla al host (0 con cero latencia).
-    [[nodiscard]] int getLatencySamples() const noexcept { return phase->getLatencySamples(); }
+    // La latencia del modo pedido, para informarla al host (0 con cero latencia), más la de la etapa espectral si alguna
+    // banda la usa (Fase 11).
+    [[nodiscard]] int getLatencySamples() const noexcept { return phase->getLatencySamples() + spectral->getLatencySamples(); }
 
     // Hilo de audio (o tests): si la memoria de los modos de fase ya está reservada.
     [[nodiscard]] bool hasPhaseMemory() const noexcept { return phase->hasMemory(); }
@@ -216,7 +223,11 @@ public:
             stage.process (dryPointers.data(), io.data(), numChannels, count, sidechainChunk.data(), sidechainChannels);
             if (aligned)
                 feedAlignedDetectors (numChannels, count, sidechainChannels);
-            const std::array<const float*, maxChannels> original { stage.dryOutput (0), stage.dryOutput (numChannels - 1) };
+            // Fase 11: la dinámica espectral, sobre lo que sale de los modos de fase (y la original, retrasada igual).
+            const std::array<const float*, maxChannels> phaseDry { stage.dryOutput (0), stage.dryOutput (numChannels - 1) };
+            spectral->process (io.data(), phaseDry.data(), numChannels, count, sidechainChunk.data(), sidechainChannels,
+                               stage.getAudibleLatency());
+            const std::array<const float*, maxChannels> original { spectral->dryOutput (0), spectral->dryOutput (numChannels - 1) };
 
             for (int i = 0; i < count; ++i)
             {
@@ -263,6 +274,19 @@ public:
     // Fase 9, para la GUI: lo que la dinámica le suma ahora a la ganancia de una banda (dB, ya con la escala), el nivel
     // de su zona y el umbral que usa (con el automático, el nivel típico).
     [[nodiscard]] const BandDynamics& getDynamics (int index) const noexcept { return dynamics[static_cast<size_t> (index)]; }
+
+    // Lo mismo para el medidor, venga de la dinámica normal o de la espectral (Fase 11: el bin que más se mueve, el más
+    // fuerte del centro de la zona y el umbral).
+    [[nodiscard]] SpectralStage::Readout getDynamicReadout (int index) const noexcept
+    {
+        const auto b = static_cast<size_t> (index);
+        if (isSpectral (sounding[b]))
+            return spectral->getReadout (index);
+        return { dynamics[b].getGainDb(), dynamics[b].getLevelDb(), dynamics[b].getThresholdDb() };
+    }
+
+    // Fase 11, hilo de la GUI (un solo lector): lo que mueve ahora cada banda espectral, en la grilla de la GUI.
+    bool readSpectralSnapshot (SpectralStage::Snapshot& out) noexcept { return spectral->readSnapshot (out); }
 
     // True mientras se oye (o se está fundiendo) la zona de una banda.
     [[nodiscard]] bool isSoloing() const noexcept { return ! soloFade.isSilent (soloOn); }
@@ -410,6 +434,7 @@ private:
         for (size_t b = 0; b < dynamics.size(); ++b)
             dynamicDb[b] = dynamics[b].getGainDb();
         phase->beginBlock (sounding, dynamicDb, numChannels == 1);
+        spectral->beginBlock (sounding, numChannels == 1);
         if (phase->wantsMemory())
             memoryWanted.store (true, std::memory_order_relaxed);
 
@@ -483,6 +508,8 @@ private:
     PhaseMode phaseMode = PhaseMode::zeroLatency;
     int linearQuality = defaultLinearQuality;
     std::atomic<bool> realtime { false };
+
+    std::unique_ptr<SpectralStage> spectral = std::make_unique<SpectralStage>(); // Fase 11 (en el heap: es grande)
 };
 
 } // namespace fathom::dsp
