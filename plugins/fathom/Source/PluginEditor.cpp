@@ -63,7 +63,8 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
         "la frecuencia de muestreo: 22 kHz a 44.1). Apagado: la bilineal cl\xc3\xa1sica, que \"aplasta\" lo que est\xc3\xa1 "
         "arriba: una campana en 12 kHz sale m\xc3\xa1s angosta y su lado de arriba cae a 0 dB en 22 kHz; un corte de agudos "
         "se hunde de golpe al llegar a Nyquist. Los dos sin latencia. Mira la curva al alternar: abajo de ~5 kHz casi no "
-        "cambia. Con A/B y AUTO GAIN se comparan a o\xc3\xad" "do."));
+        "cambia. Con A/B y AUTO GAIN se comparan a o\xc3\xad" "do. Con FASE NATURAL no hace falta: siempre es la "
+        "anal\xc3\xb3gica (y adem\xc3\xa1s con su fase)."));
     addAndMakeVisible (analogButton);
     analogAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), fathom::params::analogResponse, analogButton);
 
@@ -119,6 +120,8 @@ void FathomAudioProcessorEditor::timerCallback()
     outputPanel.refresh();
     if ((processor.getCompareSide() == 1) != sideBButton.getToggleState()) // un proyecto cargado con la ventana abierta
         showCompareSide();
+    // Fase 10: con fase natural las bandas son siempre las analógicas (el botón no cambia nada).
+    analogButton.setAlpha (processor.getPhaseMode() == fathom::dsp::PhaseMode::natural ? 0.4f : 1.0f);
     undoButton.setEnabled (processor.getEditHistory().canUndo());
     redoButton.setEnabled (processor.getEditHistory().canRedo());
 }
@@ -167,7 +170,7 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 9: EQ din\xc3\xa1mico"), header, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 10: modos de fase"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));

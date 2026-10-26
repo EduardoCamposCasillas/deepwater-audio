@@ -1025,3 +1025,132 @@ nivel típico?
 - **Juzgar sin igualar el volumen**: el corte dinámico baja el nivel en los momentos fuertes y "suena más suave"; usa
   A/B con AUTO GAIN y escucha el detalle, no el volumen.
 - **Sidechain sin conectar**: la banda no se mueve (mira el aviso en el visor).
+
+## Fase 10 — Modos de fase: qué cambia un EQ además del volumen
+
+La curva dice cuánto sube o baja cada frecuencia. Pero un filtro también **retrasa** cada frecuencia un poco distinto:
+eso es la **fase**. Casi nunca se oye en una pista sola; se oye cuando esa señal se suma con otra parecida (capas del
+mismo sonido, micrófonos de una batería, un bus) o en el golpe de un kick, que es la suma de muchas frecuencias que
+tienen que llegar juntas. Fathom ahora tiene tres maneras de tratar la fase, con la misma curva.
+
+### Conceptos aprendidos
+
+- **Fase mínima (CERO LATENCIA).** Los filtros de las bandas (el SVF, como un EQ analógico) responden al instante, pero
+  alrededor de lo que tocan unas frecuencias salen un poco antes que otras. Una campana de +6 dB en 100 Hz "corre" un
+  poco los graves respecto de los medios. Es lo que hacen todas las consolas y casi todos los EQ: no tiene nada de malo.
+- **Fase lineal.** Un filtro **FIR simétrico** con la misma magnitud: todas las frecuencias se retrasan **lo mismo**
+  (la mitad del largo del filtro). La forma de onda no se deforma; solo llega más tarde y FL compensa ese retardo
+  (por eso Fathom le **informa la latencia** y el bypass la conserva). Se diseña por **muestreo en frecuencia**: se
+  pide la magnitud en una grilla de frecuencias, una FFT inversa da la respuesta al impulso, se la centra y se le pone
+  una **ventana de Hann** (que la apaga suave en los bordes: cortarla de golpe dejaría ondulaciones en la curva).
+- **Convolución por FFT particionada.** Aplicar un FIR de 4096 muestras "a mano" son 4096 multiplicaciones por
+  muestra. En frecuencia la convolución es un producto: con la FFT es cientos de veces más barato. Para no esperar
+  todo el filtro antes de tener salida, se parte en trozos de 512 muestras; cada bloque de entrada se transforma una
+  vez y se multiplica por cada trozo (contra la entrada de hace 1, 2, 3... bloques). La latencia es la mitad del FIR
+  más un bloque. Esta pieza quedó en la librería (`Convolver.h`): la reverb la va a usar.
+- **El precio de la fase lineal: pre-eco (pre-ringing).** Una campana angosta "suena" un rato (resuena) después de un
+  golpe. En fase mínima ese sonido va **después**; en fase lineal, como el filtro es simétrico, la mitad va **antes**
+  del golpe: un "chorro" o "aspirado" que se oye antes del kick. Medido con una campana −12 dB, Q 8, 100 Hz: la energía
+  antes del golpe es −38 dB en lineal, −74 dB en natural y nada en cero latencia.
+- **La calidad es la resolución en graves.** Un FIR de N muestras no puede dibujar detalles más finos que ~fs/N Hz. Una
+  campana de +9 dB, Q 4 en 40 Hz llega a +2.9 dB con calidad BAJA (2048), +4.7 MEDIA, +6.6 ALTA, +8.0 MUY ALTA y +8.7
+  MÁXIMA (32768). Por eso la curva del visor en fase lineal es la del **FIR de verdad**: vas a ver la campana "aplastada"
+  en los graves si la calidad no alcanza.
+- **Fase natural.** La magnitud **y** la fase de un EQ analógico. El filtro "matched" de la Fase 7 ya tiene la magnitud
+  analógica casi hasta Nyquist, pero su fase se aparta en los agudos (medido: hasta 120° con una campana en 12 kHz y un
+  corte de agudos a 44.1 kHz). Fathom le suma después un **FIR corto de corrección** = analógico ÷ digital: lejos de
+  Nyquist vale 1 (no hace nada) y cerca corrige lo que falta. Como es suave, alcanzan 256 muestras: 3.6 ms de latencia
+  y casi sin pre-eco. Medido contra el prototipo analógico: menos de 0.07 dB y 0.4° en todo el rango.
+- **Mid/side y L/R en fase lineal.** Como en el auto gain, cada frecuencia es una matriz 2×2 sobre (L, R): con bandas
+  mid o side hacen falta cuatro FIR (L→L, R→L, L→R, R→R). En fase lineal el mid y el side se filtran sin cambiarles la
+  fase; en cero latencia el mid filtrado vuelve con la fase de la banda y se suma un poco distinto con el side intacto.
+- **EQ dinámico en fase lineal.** El detector escucha la entrada retrasada hasta el centro del FIR (así la ganancia
+  cambia cuando llega el golpe, no medio filtro antes) y el FIR se rediseña con la ganancia nueva unas decenas de veces
+  por segundo, fundiéndose de uno a otro. Escucha la entrada del EQ, no lo que dejaron las bandas anteriores.
+- **Cambiar de modo sin clic.** Cada modo tiene otra latencia: no hay forma de que la salida quede "pegada". El modo
+  nuevo arranca por su cuenta sin oírse (se llena su filtro) y después se funde del viejo al nuevo en 20 ms con una
+  curva en S (si el fundido fuera una recta, quedaría un quiebre al empezar). FL recibe la latencia nueva.
+- **Los FIR se diseñan en otro hilo.** Diseñar uno grande cuesta milisegundos; en el hilo de audio sería un corte. El
+  audio pide el diseño y sigue; cuando llega, lo funde. Al renderizar (offline) se diseña ahí mismo: el render sale
+  siempre igual. Y la memoria (15-35 MB) recién se reserva cuando eliges natural o lineal: con cero latencia, Fathom
+  sigue igual de liviano en cada pista.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+Al final de la columna de SALIDA:
+
+- **FASE**: Cero latencia (por defecto: un proyecto de las Fases 1-9 suena igual) / Natural / Lineal.
+- **CALIDAD** (solo en lineal): Baja 35 ms, Media 58 ms (por defecto), Alta 104 ms, Muy alta 197 ms, Máxima 383 ms de
+  latencia a 44.1/48 kHz (a 88.2/96, el doble de muestras: el mismo tiempo).
+- Debajo, **la latencia** que agrega el modo ("sin latencia" / "latencia 58 ms"). FL la compensa sola en la mezcla.
+- **En el visor**: con fase lineal o natural aparece "FASE LINEAL" / "FASE NATURAL" arriba a la izquierda y la curva
+  blanca es la del FIR que suena (en lineal con poca calidad, mira los graves). Con curvas por canal (L/R o M/S), esas
+  curvas siguen siendo las de las bandas (lo avisa el texto).
+- **ANALÓGICA** se atenúa en fase natural: ahí las bandas son siempre las analógicas.
+- CPU (5 bandas, estéreo, 44.1 kHz): cero latencia 0.3 % de un núcleo, natural 0.9 %, lineal de 0.7 % (baja) a 2.1 %
+  (máxima). Todo entra al DESHACER, al A/B y a la automatización (pero no automatices el modo: cada cambio mueve la
+  latencia).
+
+### Ejercicio de escucha guiado en FL Studio
+
+Usa un kick con buen "golpe" (un dembow con kick seco sirve) y AUTO GAIN encendido.
+1. **Pre-eco.** Campana en 60 Hz, −12 dB, Q 8 (angosta y profunda). En CERO LATENCIA escucha el golpe. Pasa a LINEAL,
+   calidad MÁXIMA: antes de cada golpe aparece un "fffum" grave, como si el kick empezara antes. Ese es el pre-eco.
+   Baja a calidad BAJA: el pre-eco se acorta, pero mira la curva: la campana ya no llega a −12 dB.
+2. **Natural.** Lo mismo en NATURAL: el golpe suena como en cero latencia (sin pre-eco). La diferencia con cero
+   latencia está en los agudos; para oírla, pasa a un hi-hat con un shelf de +6 dB en 10 kHz y alterna NATURAL/CERO
+   LATENCIA con A/B: es sutil (la fase arriba de 10 kHz), y es normal no oír nada.
+3. **Partir y volver a sumar: la prueba de nulo** (donde la fase lineal brilla). Pon el mismo bajo en TRES canales del
+   mixer. A: Fathom con DOS cortes de graves de 12 dB/oct en 150 Hz (dos en serie = un Linkwitz-Riley de 24 dB/oct, el
+   corte que suma plano). B: DOS cortes de agudos de 12 dB/oct en 150 Hz. C: Fathom sin bandas y con Ø POLARIDAD. A + B
+   ya es el bajo partido en dos y vuelto a juntar; C le resta el original. En CERO LATENCIA no se anulan: queda un resto
+   alrededor de 150 Hz (el volumen de A + B es el de antes, pero las dos mitades salen giradas de fase). Pasa A y B a
+   LINEAL con la misma calidad (FL compensa la latencia de cada canal): silencio. Partir en fase lineal no le cambia
+   nada al sonido; por eso se usa para procesar graves y agudos por separado y volver a sumarlos. (Con cortes
+   Butterworth de 24 dB/oct, A + B tendría +3 dB en 150 Hz en los dos modos: no son complementarios.)
+
+### Receta: el bus de batería con fase lineal
+
+En un bus donde suenan kick, snare y percusión juntos, cortar graves con fase mínima corre la fase de lo que queda
+cerca del corte y puede "ablandar" el golpe del kick cuando se suma con su propio sub en otra pista.
+1. Fathom en el bus de batería, FASE = LINEAL, calidad MEDIA (58 ms; FL la compensa).
+2. Corte de graves 24 dB/oct en 35 Hz (lo que no suena en ningún parlante).
+3. Campana ancha −2 dB, Q 1, en 400 Hz (el "cartón" del bus).
+4. Compara con CERO LATENCIA con A/B y AUTO GAIN: el kick conserva el mismo frente de onda.
+
+Por qué funciona: con fase lineal, quitar graves no corre en el tiempo lo que queda; el kick del bus y el sub que va
+por otro lado siguen alineados. Y con cortes anchos y suaves, el pre-eco casi no existe (lo produce lo angosto y
+empinado).
+
+### Reto sin receta
+
+Tienes un 808 con un corte de graves de 96 dB/oct en 30 Hz y te parece que el golpe del principio se "ensucia". ¿Es
+el corte o es la fase? Averígualo sin cambiar la curva. Pistas (si no sale): ¿qué cambia entre CERO LATENCIA, NATURAL y
+LINEAL si la curva es la misma? ¿En cuál aparece algo ANTES del golpe? ¿Qué pasa si bajas la pendiente a 24 dB/oct en
+cada modo?
+
+### Vocabulario
+
+- **Fase**: cuánto se retrasa cada frecuencia al pasar por el filtro.
+- **Fase mínima**: el filtro que responde al instante (todo IIR "normal", como un EQ analógico).
+- **Fase lineal**: todas las frecuencias se retrasan lo mismo; la forma de onda no cambia.
+- **FIR / IIR**: filtro de respuesta finita (una lista de números que se multiplica por la entrada) / infinita (con
+  realimentación: el SVF).
+- **Convolución**: aplicar un FIR (multiplicar y sumar con la entrada pasada); por FFT, en bloques.
+- **Latencia y PDC**: el retardo que agrega un plugin; FL lo compensa en las demás pistas (Plugin Delay Compensation).
+- **Pre-eco (pre-ringing)**: lo que un filtro de fase lineal hace sonar ANTES del golpe.
+- **Ejemplo real**: en el mastering de música electrónica y urbana es común un EQ de fase lineal en el master para
+  cortes anchos (y nunca para campanas angostas en graves); en las baterías grabadas con muchos micrófonos, la fase
+  lineal evita que el EQ de un micrófono cambie cómo se suma con los otros.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Fase lineal para todo**: en una pista sola, casi nunca suena mejor que cero latencia, y agrega latencia, CPU y
+  pre-eco. Úsala cuando la señal se suma con otra parecida (capas, paralelo, M/S, buses).
+- **Campanas angostas y cortes empinados en graves con fase lineal**: ahí el pre-eco es más largo y más audible. Para
+  eso, cero latencia o natural.
+- **Calidad baja con graves finos**: la curva te lo muestra; si la campana no llega, sube la calidad (o usa otro modo).
+- **Fase lineal mientras grabas o tocas en vivo**: 58-383 ms de retardo se sienten. Para grabar, cero latencia.
+- **Automatizar el modo de fase**: cada cambio mueve la latencia y FL tiene que reacomodarse; elige el modo y déjalo.
+- **Esperar "mejor sonido" de la fase natural en graves**: cambia la fase solo en los agudos; en una pista de 808 suena
+  igual que cero latencia (y está bien: el analógico y el digital ya coinciden ahí).

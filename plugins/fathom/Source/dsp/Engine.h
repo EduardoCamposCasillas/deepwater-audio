@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <memory>
 #include <optional>
 
 #include "deepwater/dsp/Decibels.h"
@@ -9,6 +11,7 @@
 #include "dsp/AutoGain.h"
 #include "dsp/Band.h"
 #include "dsp/Dynamics.h"
+#include "dsp/PhaseStage.h"
 #include "dsp/Solo.h"
 
 namespace fathom::dsp
@@ -33,6 +36,11 @@ namespace fathom::dsp
 // Las bandas dinámicas (Fase 9) tienen además su detector (Dynamics.h), que escucha lo que llega a la banda (lo que ya
 // dejaron las anteriores) o el sidechain, y le mueve la ganancia. El auto gain y el solo miran la ganancia propia de cada
 // banda, no la dinámica: compensar cada movimiento de la banda haría "respirar" el volumen.
+//
+// Los modos de fase (Fase 10, PhaseStage.h) van entre las bandas y la salida: con cero latencia no hacen nada; con fase
+// natural, un FIR corto corrige lo que dejaron las bandas; con fase lineal, las bandas no corren y un FIR largo filtra la
+// entrada. La señal "original" del bypass, del solo y de la mezcla sale de ahí retrasada lo mismo que la procesada.
+// Con fase lineal los detectores dinámicos escuchan la entrada alineada con el centro del FIR (no lo que deja cada banda).
 class Engine
 {
 public:
@@ -47,8 +55,9 @@ public:
 
     using BandArray = std::array<BandSettings, numBands>;
 
-    // Los ajustes de salida que se pidieron antes (setGainScale, setPan...) arrancan ya en su sitio, sin rampa.
-    void prepare (double newSampleRate, bool bypassed, float outputDb, const BandArray& bandSettings = {}) noexcept
+    // Los ajustes de salida que se pidieron antes (setGainScale, setPan, setPhaseMode...) arrancan ya en su sitio, sin
+    // rampa. Reserva la memoria de los modos de fase: fuera del hilo de audio.
+    void prepare (double newSampleRate, bool bypassed, float outputDb, const BandArray& bandSettings = {})
     {
         sampleRate = newSampleRate;
         autoGain.prepare (sampleRate);
@@ -72,6 +81,34 @@ public:
         soloFade.snap (false);
         soloOn = false;
         soloPlaying = -1;
+        // Los modos de fase: con la memoria reservada si ya se usan (o ya se usaron), si este modo la necesita o si es
+        // un render offline (ahí no hay hilo de mensajes a tiempo: todo tiene que estar listo y dar siempre lo mismo).
+        offered.reset();
+        offerState.store (offerIdle);
+        memoryWanted.store (false);
+        const bool isRealtime = realtime.load (std::memory_order_relaxed);
+        const bool withMemory = phase->hasMemory() || phaseMode != PhaseMode::zeroLatency || ! isRealtime;
+        phase->prepare (sampleRate, phaseMode, linearQuality, isRealtime, sounding, withMemory);
+    }
+
+    // Hilo de mensajes (el procesador lo llama con un temporizador): si se eligió fase natural o lineal y la memoria no
+    // estaba reservada, prepara una etapa nueva con memoria y se la ofrece al audio, que la cambia por la suya en el
+    // próximo bloque (las dos están en cero latencia: no se nota); la vieja vuelve aquí y se destruye aquí. Sin nada
+    // pendiente, no hace nada.
+    void providePhaseMemory()
+    {
+        if (offerState.load (std::memory_order_acquire) == offerReturned)
+        {
+            offered.reset();
+            offerState.store (offerIdle, std::memory_order_release);
+        }
+        if (! memoryWanted.load (std::memory_order_acquire) || offerState.load (std::memory_order_acquire) != offerIdle)
+            return;
+        auto fresh = std::make_unique<PhaseStage>();
+        fresh->prepare (sampleRate, PhaseMode::zeroLatency, defaultLinearQuality, realtime.load (std::memory_order_relaxed), {}, true);
+        offered = std::move (fresh);
+        memoryWanted.store (false, std::memory_order_relaxed);
+        offerState.store (offerMade, std::memory_order_release);
     }
 
     void setBypassed (bool bypassed) noexcept { processing = ! bypassed; }
@@ -109,6 +146,29 @@ public:
 
     void setAutoGain (bool on) noexcept { autoGainOn = on; }
 
+    // Fase 10: el modo de fase y la calidad de la fase lineal (0-4). Se aplica en las bandas siguientes (la natural usa
+    // siempre la respuesta analógica) y, si cambia el modo, empieza la transición (ver PhaseStage.h).
+    void setPhaseMode (PhaseMode mode, int quality) noexcept
+    {
+        phaseMode = mode;
+        linearQuality = std::clamp (quality, 0, numLinearQualities - 1);
+        phase->setTarget (phaseMode, linearQuality);
+    }
+
+    // true = tiempo real: los FIR se diseñan en un hilo aparte (lo que se pida antes de prepare decide si se arranca).
+    // false = offline (render, tests): se diseñan en el audio y el resultado no depende del tiempo.
+    void setRealtime (bool isRealtime) noexcept
+    {
+        realtime.store (isRealtime, std::memory_order_relaxed);
+        phase->setRealtime (isRealtime);
+    }
+
+    // La latencia del modo pedido, para informarla al host (0 con cero latencia).
+    [[nodiscard]] int getLatencySamples() const noexcept { return phase->getLatencySamples(); }
+
+    // Hilo de audio (o tests): si la memoria de los modos de fase ya está reservada.
+    [[nodiscard]] bool hasPhaseMemory() const noexcept { return phase->hasMemory(); }
+
     // La banda (0-23) cuya zona se escucha, o −1 = sin solo. Las formas sin zona (los tilts) no hacen solo.
     void setSolo (int band) noexcept { soloRequest = band >= 0 && band < numBands ? band : -1; }
 
@@ -123,6 +183,7 @@ public:
         if (sidechain == nullptr)
             sidechainChannels = 0;
         numChannels = std::min (numChannels, maxChannels);
+        takeOfferedPhase();
         prepareBlock (numChannels);
 
         // Por tramos de 'chunkSize' muestras: cada banda recorre el tramo entero antes de pasar a la siguiente (sus
@@ -134,34 +195,28 @@ public:
             for (int ch = 0; ch < numChannels; ++ch)
                 std::copy_n (channels[ch] + start, count, dry[static_cast<size_t> (ch)].begin());
 
-            for (size_t b = 0; b < bands.size(); ++b)
-            {
-                auto& band = bands[b];
-                auto& dynamic = dynamics[b];
-                if (band.isIdle())
+            // Las bandas IIR vuelven después de la fase lineal: arrancan en limpio, con sus ajustes en su sitio (el
+            // modo nuevo no se oye hasta que pasa su transitorio).
+            auto& stage = *phase;
+            if (stage.takeIirRestart())
+                for (size_t b = 0; b < bands.size(); ++b)
                 {
-                    if (dynamic.isRunning())
-                    {
-                        dynamic.stop();
-                        band.setDynamicGain (0.0f);
-                    }
-                    continue;
+                    bands[b].prepare (sampleRate, sounding[b]);
+                    bands[b].setDynamicGain (dynamics[b].getGainDb());
                 }
-                if (dynamic.isRunning())
-                    processDynamic (band, dynamic, channels, numChannels, start, count, sidechain, sidechainChannels);
-                else if (numChannels == 2)
-                    for (int i = start; i < start + count; ++i)
-                    {
-                        band.advance();
-                        band.processStereo (channels[0][i], channels[1][i]);
-                    }
-                else
-                    for (int i = start; i < start + count; ++i)
-                    {
-                        band.advance();
-                        band.processMono (channels[0][i]);
-                    }
-            }
+            const bool aligned = stage.alignedDetectors();
+            if (stage.needsIir())
+                processBands (channels, numChannels, start, count, sidechain, sidechainChannels, ! aligned);
+
+            const std::array<const float*, maxChannels> dryPointers { dry[0].data(), dry[1].data() };
+            const std::array<float*, maxChannels> io { channels[0] + start, channels[numChannels - 1] + start };
+            std::array<const float*, maxChannels> sidechainChunk {};
+            for (int ch = 0; ch < sidechainChannels; ++ch)
+                sidechainChunk[static_cast<size_t> (ch)] = sidechain[ch] + start;
+            stage.process (dryPointers.data(), io.data(), numChannels, count, sidechainChunk.data(), sidechainChannels);
+            if (aligned)
+                feedAlignedDetectors (numChannels, count, sidechainChannels);
+            const std::array<const float*, maxChannels> original { stage.dryOutput (0), stage.dryOutput (numChannels - 1) };
 
             for (int i = 0; i < count; ++i)
             {
@@ -170,20 +225,20 @@ public:
                                                              numChannels == 2 ? common * panRight.next() : common };
                 const float solo = advanceSolo();
                 const float wet = bypassFade.next (processing); // 1 = procesado, 0 = original
-                const auto at = static_cast<size_t> (i);
-                // La zona del solo, en el canal de la banda (una banda side se escucha solo en el side).
+                // La zona del solo, en el canal de la banda (una banda side se escucha solo en el side), sobre la
+                // original ya retrasada como la salida.
                 std::array<float, maxChannels> zone {};
                 if (solo > 0.0f)
                 {
                     if (numChannels == 2)
-                        zone = soloBand.zoneStereo (dry[0][at], dry[1][at]);
+                        zone = soloBand.zoneStereo (original[0][i], original[1][i]);
                     else
-                        zone[0] = soloBand.zoneMono (dry[0][at]);
+                        zone[0] = soloBand.zoneMono (original[0][i]);
                 }
                 for (int ch = 0; ch < numChannels; ++ch)
                 {
                     float& sample = channels[ch][start + i];
-                    const float original = dry[static_cast<size_t> (ch)][at];
+                    const float originalSample = original[static_cast<size_t> (ch)][i];
                     const float gain = gains[static_cast<size_t> (ch)];
                     float processed = gain == 1.0f ? sample : sample * gain;
                     if (solo > 0.0f)
@@ -195,7 +250,9 @@ public:
                     // Fuera del fundido se copia la señal tal cual: con o sin bypass, con las bandas en 0 dB (o
                     // apagadas) y la salida en 0 dB, la salida es la entrada bit a bit. En bypass las bandas siguen
                     // corriendo: al volver no arrancan con un estado viejo.
-                    sample = wet == 1.0f ? processed : wet == 0.0f ? original : original + (processed - original) * wet;
+                    sample = wet == 1.0f   ? processed
+                             : wet == 0.0f ? originalSample
+                                           : originalSample + (processed - originalSample) * wet;
                 }
             }
         }
@@ -214,11 +271,70 @@ private:
     static constexpr int chunkSize = 64;
 
     // La escala de ganancia también escala el rango dinámico: al 50 % la banda se mueve la mitad.
+    // Con fase natural las bandas son siempre las analógicas (matched): el FIR corrige desde ahí.
     [[nodiscard]] BandSettings scaled (BandSettings settings) const noexcept
     {
         settings.gainDb *= gainScale;
         settings.dynamics.rangeDb *= gainScale;
+        settings.analog = settings.analog || phaseMode == PhaseMode::natural;
         return settings;
+    }
+
+    // Las 24 bandas IIR en un tramo, en el sitio. 'detect' = los detectores dinámicos escuchan lo que llega a cada
+    // banda (con fase lineal los alimenta feedAlignedDetectors y aquí solo se usa su ganancia).
+    void processBands (float* const* channels, int numChannels, int start, int count, const float* const* sidechain,
+                       int sidechainChannels, bool detect) noexcept
+    {
+        for (size_t b = 0; b < bands.size(); ++b)
+        {
+            auto& band = bands[b];
+            auto& dynamic = dynamics[b];
+            if (band.isIdle())
+            {
+                if (dynamic.isRunning())
+                {
+                    dynamic.stop();
+                    band.setDynamicGain (0.0f);
+                }
+                continue;
+            }
+            if (dynamic.isRunning() && detect)
+                processDynamic (band, dynamic, channels, numChannels, start, count, sidechain, sidechainChannels);
+            else
+            {
+                if (dynamic.isRunning())
+                    band.setDynamicGain (dynamic.getGainDb());
+                if (numChannels == 2)
+                    for (int i = start; i < start + count; ++i)
+                    {
+                        band.advance();
+                        band.processStereo (channels[0][i], channels[1][i]);
+                    }
+                else
+                    for (int i = start; i < start + count; ++i)
+                    {
+                        band.advance();
+                        band.processMono (channels[0][i]);
+                    }
+            }
+        }
+    }
+
+    // Una muestra a un detector: la de la banda o la del sidechain (uno mono va a los dos lados; con la pista mono, el
+    // promedio de los dos lados del sidechain). Devuelve true cuando tiene una ganancia nueva.
+    static bool feed (BandDynamics& dynamic, int numChannels, float left, float right, const float* const* sidechain,
+                      int sidechainChannels, int i) noexcept
+    {
+        if (dynamic.listensToSidechain())
+        {
+            const int last = std::max (0, sidechainChannels - 1);
+            if (numChannels == 2)
+                return sidechainChannels > 0 ? dynamic.feedStereo (sidechain[0][i], sidechain[last][i]) : dynamic.feedStereo (0.0f, 0.0f);
+            return dynamic.feedMono (sidechainChannels == 0   ? 0.0f
+                                     : sidechainChannels == 1 ? sidechain[0][i]
+                                                              : 0.5f * (sidechain[0][i] + sidechain[1][i]));
+        }
+        return numChannels == 2 ? dynamic.feedStereo (left, right) : dynamic.feedMono (left);
     }
 
     // Una banda dinámica en un tramo: el detector escucha la muestra que llega a la banda (o la del sidechain) ANTES de
@@ -226,37 +342,51 @@ private:
     static void processDynamic (Band& band, BandDynamics& dynamic, float* const* channels, int numChannels, int start, int count,
                                 const float* const* sidechain, int sidechainChannels) noexcept
     {
-        const bool external = dynamic.listensToSidechain();
-        const int lastSidechain = std::max (0, sidechainChannels - 1);
         for (int i = start; i < start + count; ++i)
         {
             band.advance();
-            bool ready = false;
-            if (numChannels == 2)
-            {
-                if (! external)
-                    ready = dynamic.feedStereo (channels[0][i], channels[1][i]);
-                else if (sidechainChannels > 0)
-                    ready = dynamic.feedStereo (sidechain[0][i], sidechain[lastSidechain][i]); // un sidechain mono, a los dos lados
-                else
-                    ready = dynamic.feedStereo (0.0f, 0.0f);
-            }
-            else
-            {
-                if (! external)
-                    ready = dynamic.feedMono (channels[0][i]);
-                else
-                    ready = dynamic.feedMono (sidechainChannels == 0   ? 0.0f
-                                              : sidechainChannels == 1 ? sidechain[0][i]
-                                                                       : 0.5f * (sidechain[0][i] + sidechain[1][i]));
-            }
-            if (ready)
+            if (feed (dynamic, numChannels, channels[0][i], channels[numChannels - 1][i], sidechain, sidechainChannels, i))
                 band.setDynamicGain (dynamic.getGainDb());
             if (numChannels == 2)
                 band.processStereo (channels[0][i], channels[1][i]);
             else
                 band.processMono (channels[0][i]);
         }
+    }
+
+    // Fase lineal: los detectores escuchan la entrada (y el sidechain) retrasados como el centro del FIR; su ganancia
+    // entra al diseño del FIR siguiente (prepareBlock).
+    void feedAlignedDetectors (int numChannels, int count, int sidechainChannels) noexcept
+    {
+        const auto& stage = *phase;
+        const std::array<const float*, maxChannels> sidechain { stage.alignedSidechainInput (0), stage.alignedSidechainInput (1) };
+        const float* left = stage.alignedInput (0);
+        const float* right = stage.alignedInput (numChannels - 1);
+        for (size_t b = 0; b < dynamics.size(); ++b)
+        {
+            auto& dynamic = dynamics[b];
+            if (! dynamic.isRunning())
+                continue;
+            if (! sounding[b].enabled)
+            {
+                dynamic.stop();
+                continue;
+            }
+            for (int i = 0; i < count; ++i)
+                feed (dynamic, numChannels, left[i], right[i], sidechain.data(), sidechainChannels, i);
+        }
+    }
+
+    // La etapa con memoria que preparó el hilo de mensajes (providePhaseMemory): se cambia por la de ahora si esta está
+    // quieta en cero latencia, y la vieja vuelve para que la destruya ese hilo (aquí no se libera memoria).
+    void takeOfferedPhase() noexcept
+    {
+        if (offerState.load (std::memory_order_acquire) != offerMade || ! phase->isQuiet())
+            return;
+        std::swap (phase, offered);
+        phase->setTarget (phaseMode, linearQuality);
+        phase->setRealtime (realtime.load (std::memory_order_relaxed));
+        offerState.store (offerReturned, std::memory_order_release);
     }
 
     [[nodiscard]] float autoGainTarget() noexcept
@@ -274,6 +404,14 @@ private:
     {
         autoGain.setMono (numChannels == 1);
         autoGainRamp.setTarget (autoGainTarget());
+
+        // Los modos de fase: la transición, si hay una, y el FIR de los ajustes de ahora (con la dinámica de ahora).
+        std::array<float, numBands> dynamicDb {};
+        for (size_t b = 0; b < dynamics.size(); ++b)
+            dynamicDb[b] = dynamics[b].getGainDb();
+        phase->beginBlock (sounding, dynamicDb, numChannels == 1);
+        if (phase->wantsMemory())
+            memoryWanted.store (true, std::memory_order_relaxed);
 
         soloNext.reset();
         if (soloRequest >= 0)
@@ -334,6 +472,17 @@ private:
     int soloSlope = 1;
     Placement soloPlacement = Placement::stereo;
     bool soloOn = false;
+
+    // Fase 10. 'offered' pasa entre el hilo de mensajes y el de audio según 'offerState' (solo lo toca el dueño del
+    // estado: libre/devuelta = mensajes, ofrecida = audio).
+    std::unique_ptr<PhaseStage> phase = std::make_unique<PhaseStage>();
+    std::unique_ptr<PhaseStage> offered;
+    static constexpr int offerIdle = 0, offerMade = 1, offerReturned = 2;
+    std::atomic<int> offerState { offerIdle };
+    std::atomic<bool> memoryWanted { false };
+    PhaseMode phaseMode = PhaseMode::zeroLatency;
+    int linearQuality = defaultLinearQuality;
+    std::atomic<bool> realtime { false };
 };
 
 } // namespace fathom::dsp

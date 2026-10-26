@@ -1,13 +1,16 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda y EQ dinámico), las cuentas de la edición (deshacer, arrastrar
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda, EQ dinámico y modos de fase), las cuentas de la edición (deshacer, arrastrar
 // nodos) y las del analizador (inclinación, balística, retención y picos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdint>
 #include <cstdio>
 #include <tuple>
+#include <thread>
 #include <vector>
 
 #include "analysis/SpectrumView.h"
@@ -1621,6 +1624,537 @@ void testDynamicChangesHaveNoClicks()
         CHECK (left == right);
     }
 }
+// --- Fase 10: modos de fase -------------------------------------------------------------------------------------------
+
+// La respuesta al impulso del motor (estéreo: el mismo impulso en los dos canales) en 'length' muestras.
+std::array<std::vector<float>, 2> impulseResponse (Engine& engine, int length, float leftAmount = 1.0f, float rightAmount = 1.0f)
+{
+    std::array<std::vector<float>, 2> h { std::vector<float> (static_cast<size_t> (length), 0.0f),
+                                          std::vector<float> (static_cast<size_t> (length), 0.0f) };
+    h[0][0] = leftAmount;
+    h[1][0] = rightAmount;
+    for (int start = 0; start < length; start += 256)
+    {
+        const int count = std::min (256, length - start);
+        float* channels[] { h[0].data() + start, h[1].data() + start };
+        engine.process (channels, 2, count);
+    }
+    return h;
+}
+
+// La DFT de una respuesta al impulso en 'hz', sin el retardo 'delay' (H·e^(jωD)).
+std::complex<double> responseAt (const std::vector<float>& h, double hz, double sampleRate, int delay)
+{
+    std::complex<double> sum {};
+    for (size_t n = 0; n < h.size(); ++n)
+        sum += static_cast<double> (h[n]) * std::polar (1.0, -2.0 * pi * hz * (static_cast<double> (n) - delay) / sampleRate);
+    return sum;
+}
+
+std::vector<double> logFrequencies (double from, double to, int count)
+{
+    std::vector<double> hz;
+    for (int i = 0; i < count; ++i)
+        hz.push_back (from * std::pow (to / from, i / (count - 1.0)));
+    return hz;
+}
+
+// Una banda encendida, con lo esencial.
+BandSettings bandOf (Shape shape, float hz, float gainDb, float q, int slopeIndex = 1)
+{
+    BandSettings band;
+    band.enabled = true;
+    band.shape = shape;
+    band.frequency = hz;
+    band.gainDb = gainDb;
+    band.q = q;
+    band.slopeIndex = slopeIndex;
+    return band;
+}
+
+// Un motor en un modo de fase, listo (offline: los FIR se diseñan en el mismo hilo).
+void prepareIn (Engine& engine, PhaseMode mode, int quality, double sampleRate, const Engine::BandArray& bands)
+{
+    engine.setPhaseMode (mode, quality);
+    engine.prepare (sampleRate, false, 0.0f, bands);
+}
+
+void testPhaseLatencies()
+{
+    std::printf ("Fase: latencias informadas (la mitad del FIR + un bloque de la convolucion), el doble de muestras a 88.2/96\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const int factor = sampleRate > 50000.0 ? 2 : 1;
+        Engine engine;
+        CHECK (engine.getLatencySamples() == 0);
+        prepareIn (engine, PhaseMode::natural, 0, sampleRate, {});
+        CHECK (engine.getLatencySamples() == (128 + 32) * factor);
+        for (int q = 0; q < numLinearQualities; ++q)
+        {
+            engine.setPhaseMode (PhaseMode::linear, q);
+            CHECK (engine.getLatencySamples() == ((2048 << q) / 2 + 512) * factor);
+        }
+        engine.setPhaseMode (PhaseMode::zeroLatency, 0);
+        CHECK (engine.getLatencySamples() == 0);
+    }
+    for (int q = 0; q < numLinearQualities; ++q)
+        std::printf ("   lineal %d: %d muestras a 44.1 kHz (%.0f ms)\n", q, PhaseSizes::latency (PhaseMode::linear, q, 44100.0),
+                     1000.0 * PhaseSizes::latency (PhaseMode::linear, q, 44100.0) / 44100.0);
+    std::printf ("   natural: %d muestras (%.1f ms)\n", PhaseSizes::latency (PhaseMode::natural, 0, 44100.0),
+                 1000.0 * PhaseSizes::latency (PhaseMode::natural, 0, 44100.0) / 44100.0);
+}
+
+void testPhaseModesFlatAreTransparent()
+{
+    std::printf ("Fase: con todo plano (y en bypass) cada modo es la entrada retrasada su latencia, bit a bit\n");
+    for (const double sampleRate : { 44100.0, 96000.0 })
+        for (const auto mode : { PhaseMode::natural, PhaseMode::linear })
+            for (const bool bypassed : { false, true })
+            {
+                auto bands = only (bandOf (Shape::bell, 1000.0f, 0.0f, 1.0f)); // encendida pero en 0 dB
+                if (bypassed)
+                    bands[1] = bandOf (Shape::bell, 3000.0f, 9.0f, 2.0f); // con bypass suena lo de antes, aunque haya bandas
+                Engine engine;
+                engine.setPhaseMode (mode, 0);
+                engine.prepare (sampleRate, bypassed, 0.0f, bands);
+                const int latency = engine.getLatencySamples();
+                StereoSignal signal (latency + 4096, sampleRate);
+                const StereoSignal original = signal;
+                processInBlocks (engine, signal, 700, [] (int) {});
+                bool exact = true;
+                for (size_t i = 0; i < signal.left.size(); ++i)
+                {
+                    const bool before = i < static_cast<size_t> (latency);
+                    const float left = before ? 0.0f : original.left[i - static_cast<size_t> (latency)];
+                    const float right = before ? 0.0f : original.right[i - static_cast<size_t> (latency)];
+                    exact = exact && signal.left[i] == left && signal.right[i] == right;
+                }
+                CHECK (exact);
+            }
+}
+
+void testLinearPhaseIsSymmetricWithTheCurve()
+{
+    std::printf ("Fase lineal: la respuesta al impulso es simetrica (todas las frecuencias se retrasan igual) y su magnitud es la curva\n");
+    for (const double sampleRate : sampleRates)
+    {
+        Engine::BandArray bands {};
+        bands[0] = bandOf (Shape::bell, 1000.0f, 6.0f, 1.0f);
+        bands[1] = bandOf (Shape::lowCut, 80.0f, 0.0f, 0.71f, 3); // 24 dB/oct
+        bands[2] = bandOf (Shape::highShelf, 6000.0f, -4.0f, 0.71f);
+        bands[3] = bandOf (Shape::notch, 3500.0f, 0.0f, 6.0f);
+        Engine engine;
+        prepareIn (engine, PhaseMode::linear, 2, sampleRate, bands); // alta
+        const int latency = engine.getLatencySamples();
+        const int length = PhaseSizes::linearLength (2, sampleRate);
+        const auto h = impulseResponse (engine, latency + length);
+        // El FIR va de latency − N/2 a latency + N/2: simétrico alrededor de 'latency'.
+        float asymmetry = 0.0f, peak = 0.0f;
+        for (int k = 0; k < length / 2; ++k)
+        {
+            asymmetry = std::max (asymmetry, std::abs (h[0][static_cast<size_t> (latency + k)] - h[0][static_cast<size_t> (latency - k)]));
+            peak = std::max (peak, std::abs (h[0][static_cast<size_t> (latency + k)]));
+        }
+        CHECK (asymmetry < 1.0e-6f * peak);
+        CHECK (h[0] == h[1]);
+
+        // Magnitud contra la curva de las bandas (los mismos coeficientes), de 60 Hz a 18 kHz y donde no está cortado.
+        double worstDb = 0.0, worstPhase = 0.0;
+        for (const double hz : logFrequencies (60.0, std::min (18000.0, 0.45 * sampleRate), 120))
+        {
+            double curveDb = 0.0;
+            for (const auto& band : bands)
+                curveDb += Band::coefficientsFor (band, sampleRate).magnitudeDb (hz, sampleRate);
+            if (curveDb < -30.0)
+                continue;
+            const auto measured = responseAt (h[0], hz, sampleRate, latency);
+            worstDb = std::max (worstDb, std::abs (20.0 * std::log10 (std::abs (measured)) - curveDb));
+            worstPhase = std::max (worstPhase, std::abs (std::arg (measured)) * 180.0 / pi);
+        }
+        CHECK (worstDb < 0.1);
+        CHECK (worstPhase < 0.5);
+        std::printf ("   %6.0f Hz: |error| %.3f dB, fase %.3f grados\n", sampleRate, worstDb, worstPhase);
+    }
+}
+
+void testNaturalPhaseMatchesTheAnalog()
+{
+    std::printf ("Fase natural: magnitud Y fase del prototipo analogico tambien cerca de Nyquist (cero latencia: solo la magnitud)\n");
+    // Tres casos: bandas agudas suaves; una campana angosta cerca de Nyquist con un corte de 48 dB/oct, un shelf grave y
+    // un all-pass; y lo extremo (campana Q 20 en 18 kHz, notch Q 10, shelf en 19 kHz).
+    for (const int hard : { 0, 1, 2 })
+        for (const double sampleRate : sampleRates)
+    {
+        Engine::BandArray bands {};
+        bands[0] = bandOf (Shape::bell, 12000.0f, 9.0f, 1.0f);
+        bands[1] = bandOf (Shape::highShelf, 5000.0f, -6.0f, 0.71f);
+        bands[2] = bandOf (Shape::bell, 300.0f, -4.0f, 2.0f);
+        bands[3] = bandOf (Shape::highCut, 18000.0f, 0.0f, 0.71f, 1);
+        if (hard)
+        {
+            bands[0] = bandOf (Shape::bell, 15000.0f, -12.0f, 8.0f);
+            bands[3] = bandOf (Shape::highCut, 16000.0f, 0.0f, 0.71f, 8);
+            bands[4] = bandOf (Shape::lowShelf, 40.0f, 6.0f, 1.0f);
+            bands[5] = bandOf (Shape::allPass, 9000.0f, 0.0f, 2.0f);
+        }
+        if (hard == 2)
+        {
+            bands = {};
+            bands[0] = bandOf (Shape::bell, 18000.0f, 12.0f, 20.0f);
+            bands[1] = bandOf (Shape::notch, 16500.0f, 0.0f, 10.0f);
+            bands[2] = bandOf (Shape::highShelf, 19000.0f, 9.0f, 2.0f);
+        }
+        const auto analog = [&] (double hz) {
+            std::complex<double> total { 1.0 };
+            for (const auto& band : bands)
+                if (const auto prototype = Band::analogPrototype (band, sampleRate))
+                    total *= prototype->response (hz);
+            return total;
+        };
+        std::array<double, 2> worstDb {}, worstPhase {};
+        for (const auto mode : { PhaseMode::zeroLatency, PhaseMode::natural })
+        {
+            Engine engine;
+            prepareIn (engine, mode, 0, sampleRate, bands);
+            const int latency = engine.getLatencySamples();
+            const auto h = impulseResponse (engine, latency + static_cast<int> (0.2 * sampleRate));
+            const auto m = static_cast<size_t> (mode == PhaseMode::natural);
+            for (const double hz : logFrequencies (40.0, std::min (20000.0, 0.45 * sampleRate), 150))
+            {
+                const auto expected = analog (hz);
+                if (std::abs (expected) < 0.03) // −30 dB: lo que el corte ya se llevó
+                    continue;
+                const auto measured = responseAt (h[0], hz, sampleRate, latency);
+                worstDb[m] = std::max (worstDb[m], std::abs (20.0 * std::log10 (std::abs (measured) / std::abs (expected))));
+                worstPhase[m] = std::max (worstPhase[m], std::abs (std::arg (measured / expected)) * 180.0 / pi);
+            }
+        }
+        std::printf ("   %6.0f Hz: cero latencia %.2f dB %.1f grados; natural %.3f dB %.2f grados\n", sampleRate, worstDb[0], worstPhase[0],
+                     worstDb[1], worstPhase[1]);
+        CHECK (worstDb[1] < 0.25);
+        CHECK (worstPhase[1] < 2.0);
+        CHECK (worstPhase[1] < 0.25 * worstPhase[0]);
+    }
+}
+
+void testPhaseModeSwitchHasNoClicks()
+{
+    std::printf ("Fase: cambiar de modo y de calidad sonando no hace clic (fundido de 20 ms entre las dos salidas)\n");
+    struct Step
+    {
+        PhaseMode mode;
+        int quality;
+    };
+    const std::array<Step, 8> steps { { { PhaseMode::natural, 0 },
+                                        { PhaseMode::linear, 1 },
+                                        { PhaseMode::linear, 3 },
+                                        { PhaseMode::natural, 0 },
+                                        { PhaseMode::zeroLatency, 0 },
+                                        { PhaseMode::linear, 0 },
+                                        { PhaseMode::zeroLatency, 0 },
+                                        { PhaseMode::linear, 2 } } };
+    for (const double sampleRate : sampleRates)
+    {
+        Engine::BandArray bands {};
+        bands[0] = bandOf (Shape::bell, 1000.0f, 6.0f, 1.0f);
+        bands[1] = bandOf (Shape::lowCut, 60.0f, 0.0f, 0.71f, 3);
+        bands[2] = bandOf (Shape::highShelf, 8000.0f, 4.0f, 0.71f);
+        Engine engine;
+        prepareIn (engine, PhaseMode::zeroLatency, 0, sampleRate, bands);
+        const int interval = static_cast<int> (0.6 * sampleRate);
+        StereoSignal signal (interval * static_cast<int> (steps.size() + 1), sampleRate);
+        bool latencyFollows = true;
+        processInBlocks (engine, signal, 512, [&] (int start) {
+            const auto step = static_cast<size_t> (start / interval);
+            if (step >= 1 && step <= steps.size())
+            {
+                const auto& wanted = steps[step - 1];
+                engine.setPhaseMode (wanted.mode, wanted.quality);
+                latencyFollows = latencyFollows && engine.getLatencySamples() == PhaseSizes::latency (wanted.mode, wanted.quality, sampleRate);
+            }
+        });
+        CHECK (latencyFollows);
+        // Cota: lo más puntiagudo de cada seno (220 Hz × 0.5 a la izquierda, 3150 Hz × 0.3 a la derecha) con la
+        // ganancia más alta de la curva por esa zona (+1 dB a lo sumo) y un margen.
+        const auto bound = [&] (double hz, double amplitude) {
+            const double s = 2.0 * std::sin (pi * hz / sampleRate);
+            return static_cast<float> (1.5 * 1.15 * amplitude * s * s);
+        };
+        const std::vector<float> left (signal.left.begin() + interval / 2, signal.left.end());
+        const std::vector<float> right (signal.right.begin() + interval / 2, signal.right.end());
+        const float leftPeak = biggestSecondDifference (left), rightPeak = biggestSecondDifference (right);
+        CHECK (leftPeak < bound (220.0, 0.5));
+        CHECK (rightPeak < bound (3150.0, 0.3));
+        std::printf ("   %6.0f Hz: segunda diferencia L %.5f (cota %.5f), R %.4f (cota %.4f)\n", sampleRate, leftPeak, bound (220.0, 0.5),
+                     rightPeak, bound (3150.0, 0.3));
+    }
+}
+
+void testLinearPhasePlacements()
+{
+    std::printf ("Fase lineal por canal: mid no toca el side, izquierda no toca la derecha; mismas ganancias que cero latencia\n");
+    const double sampleRate = 48000.0;
+    for (const auto placement : { Placement::mid, Placement::side, Placement::left })
+    {
+        auto band = bandOf (Shape::bell, 1000.0f, 9.0f, 1.0f);
+        band.placement = placement;
+        // Lo que la banda no debería ver: el side (contrafase) para mid, el centro para side, lo de la derecha para izquierda.
+        const auto untouched = [&] (std::vector<float>& l, std::vector<float>& r) {
+            const auto tone = sine (1000.0, 0.4, sampleRate, 16384);
+            l = tone;
+            r = tone;
+            if (placement == Placement::mid)
+                for (auto& x : r)
+                    x = -x;
+            if (placement == Placement::left)
+                std::fill (l.begin(), l.end(), 0.0f);
+        };
+        Engine engine;
+        prepareIn (engine, PhaseMode::linear, 1, sampleRate, only (band));
+        const int latency = engine.getLatencySamples();
+        std::vector<float> left, right;
+        untouched (left, right);
+        const auto originalLeft = left, originalRight = right;
+        runStereo (engine, left, right);
+        float worst = 0.0f;
+        for (size_t i = static_cast<size_t> (latency); i < left.size(); ++i)
+            worst = std::max ({ worst, std::abs (left[i] - originalLeft[i - static_cast<size_t> (latency)]),
+                                std::abs (right[i] - originalRight[i - static_cast<size_t> (latency)]) });
+        CHECK (worst < 1.0e-4f);
+
+        // Lo que sí ve (solo su parte: un tono al centro para mid, en contrafase para side, a la izquierda para
+        // izquierda): el mismo nivel que con cero latencia (la magnitud es la misma; cambia la fase). Con una mezcla de
+        // las dos partes los niveles de L y R no tienen por qué coincidir: en cero latencia el mid filtrado vuelve con
+        // la fase de la banda y se suma distinto con el side intacto.
+        std::array<double, 2> levels {};
+        for (const auto mode : { PhaseMode::zeroLatency, PhaseMode::linear })
+        {
+            Engine e;
+            prepareIn (e, mode, 1, sampleRate, only (band));
+            auto l = sine (1000.0, 0.4, sampleRate, 32768), r = l;
+            if (placement == Placement::side)
+                for (auto& x : r)
+                    x = -x;
+            if (placement == Placement::left)
+                r = sine (2000.0, 0.2, sampleRate, 32768);
+            runStereo (e, l, r);
+            levels[mode == PhaseMode::linear] = levelDb (toneAmplitude (l, 1000.0, sampleRate, 16384) / 0.4);
+        }
+        CHECK (std::abs (levels[0] - levels[1]) < 0.02);
+        CHECK (std::abs (levels[1] - 9.0) < 0.05);
+    }
+}
+
+void testLinearPhaseDynamics()
+{
+    std::printf ("Fase lineal con EQ dinamico: corta lo mismo que con cero latencia y no toca lo suave\n");
+    const double sampleRate = 44100.0;
+    auto band = bandOf (Shape::bell, 1000.0f, 0.0f, 1.0f);
+    band.dynamics.enabled = true;
+    band.dynamics.rangeDb = -12.0f;
+    band.dynamics.thresholdDb = -30.0f;
+    for (const double amplitude : { 0.5, 0.002 })
+    {
+        std::array<double, 2> levels {};
+        for (const auto mode : { PhaseMode::zeroLatency, PhaseMode::linear })
+        {
+            Engine engine;
+            prepareIn (engine, mode, 1, sampleRate, only (band));
+            auto l = sine (1000.0, amplitude, sampleRate, static_cast<size_t> (sampleRate)), r = l;
+            runStereo (engine, l, r);
+            levels[mode == PhaseMode::linear] = levelDb (toneAmplitude (l, 1000.0, sampleRate, l.size() / 2) / amplitude);
+        }
+        std::printf ("   seno de %.3f: cero latencia %.2f dB, lineal %.2f dB\n", amplitude, levels[0], levels[1]);
+        CHECK (std::abs (levels[0] - levels[1]) < 0.3);
+        CHECK (amplitude > 0.1 ? levels[1] < -11.0 : std::abs (levels[1]) < 0.01);
+    }
+}
+
+void testPhaseDesignThread()
+{
+    std::printf ("Fase: en tiempo real los FIR se disenan en otro hilo y llegan en unos bloques\n");
+    const double sampleRate = 48000.0;
+    Engine engine;
+    engine.setRealtime (true);
+    prepareIn (engine, PhaseMode::linear, 1, sampleRate, {});
+    // Una banda nueva con el motor ya sonando: el audio la pide y sigue; el hilo la diseña.
+    engine.setBand (0, bandOf (Shape::bell, 2000.0f, -9.0f, 1.0f));
+    auto left = sine (2000.0, 0.5, sampleRate, static_cast<size_t> (sampleRate)), right = left;
+    for (size_t start = 0; start < left.size(); start += 256)
+    {
+        float* channels[] { left.data() + start, right.data() + start };
+        engine.process (channels, 2, static_cast<int> (std::min<size_t> (256, left.size() - start)));
+        std::this_thread::sleep_for (std::chrono::microseconds (500));
+    }
+    const double level = levelDb (toneAmplitude (left, 2000.0, sampleRate, left.size() / 2) / 0.5);
+    std::printf ("   nivel con la campana de -9 dB: %.2f dB\n", level);
+    CHECK (std::abs (level + 9.0) < 0.05);
+}
+
+void testPreRinging()
+{
+    std::printf ("Fase: el pre-eco (energia ANTES del golpe) de una campana angosta en cada modo\n");
+    const double sampleRate = 44100.0;
+    const auto bands = only (bandOf (Shape::bell, 100.0f, -12.0f, 8.0f));
+    std::array<double, 3> before {};
+    for (const auto mode : { PhaseMode::zeroLatency, PhaseMode::natural, PhaseMode::linear })
+    {
+        Engine engine;
+        prepareIn (engine, mode, 3, sampleRate, bands);
+        const int latency = engine.getLatencySamples();
+        const auto h = impulseResponse (engine, latency + static_cast<int> (sampleRate));
+        double early = 0.0, total = 0.0;
+        for (size_t n = 0; n < h[0].size(); ++n)
+        {
+            const double e = static_cast<double> (h[0][n]) * h[0][n];
+            total += e;
+            if (n + 1 < static_cast<size_t> (latency))
+                early += e;
+        }
+        before[static_cast<size_t> (mode)] = 10.0 * std::log10 (std::max (early, 1.0e-30) / total);
+    }
+    std::printf ("   energia antes del golpe: cero latencia %.0f dB, natural %.0f dB, lineal %.0f dB\n", std::max (before[0], -300.0), before[1],
+                 before[2]);
+    CHECK (before[0] < -200.0);           // cero latencia: nada antes del golpe (es causal)
+    CHECK (before[1] < -60.0);            // natural: casi nada (el FIR de corrección es corto y casi un impulso)
+    CHECK (before[2] > before[1] + 20.0); // lineal: la mitad del "ringing" de la campana suena antes
+}
+
+void testLinearQualityResolution()
+{
+    std::printf ("Fase lineal: la calidad es la resolucion en graves (una campana de +9 dB, Q 4 en 40 Hz)\n");
+    const double sampleRate = 44100.0;
+    const auto bands = only (bandOf (Shape::bell, 40.0f, 9.0f, 4.0f));
+    double previous = 0.0;
+    for (int q = 0; q < numLinearQualities; ++q)
+    {
+        Engine engine;
+        prepareIn (engine, PhaseMode::linear, q, sampleRate, bands);
+        auto l = sine (40.0, 0.1, sampleRate, static_cast<size_t> (2.0 * sampleRate)), r = l;
+        runStereo (engine, l, r);
+        const double gain = levelDb (toneAmplitude (l, 40.0, sampleRate, l.size() / 2) / 0.1);
+        std::printf ("   calidad %d (%5d muestras): %.2f dB en 40 Hz\n", q, PhaseSizes::linearLength (q, sampleRate), gain);
+        CHECK (gain > previous - 0.01);
+        previous = gain;
+    }
+    CHECK (std::abs (previous - 9.0) < 0.5);
+}
+
+void testFirModesAutomationHasNoClicks()
+{
+    std::printf ("Fase natural y lineal: la banda saltando en cada bloque (automatizacion) no hace clic\n");
+    for (const auto mode : { PhaseMode::natural, PhaseMode::linear })
+        for (const double sampleRate : sampleRates)
+        {
+            // Lo mismo que en cero latencia: el FIR cambia (a lo sumo) una vez por bloque de la convolución, fundido.
+            Engine engine;
+            prepareIn (engine, mode, 0, sampleRate, only ({ true, 1000.0f, 0.0f, 1.0f }));
+            auto left = sine (1000.0, 0.05, sampleRate, static_cast<size_t> (sampleRate));
+            auto right = left;
+            BlockSizes sizes;
+            std::uint32_t seed = 99;
+            auto pick = [&seed] (auto a, auto b) {
+                seed = seed * 1664525u + 1013904223u;
+                return (seed >> 16) % 2 == 0 ? a : b;
+            };
+            const int total = static_cast<int> (left.size());
+            for (int start = 0; start < total;)
+            {
+                const int count = std::min (sizes.next (256), total - start);
+                engine.setBand (0, { pick (true, false), pick (300.0f, 3000.0f), pick (-24.0f, 24.0f), pick (0.5f, 4.0f) });
+                float* channels[] { left.data() + start, right.data() + start };
+                engine.process (channels, 2, count);
+                start += count;
+            }
+            const double steepest = 16.0 * 0.05 * std::pow (2.0 * std::sin (pi * 1000.0 / sampleRate), 2.0);
+            const float measured = biggestSecondDifference (left);
+            std::printf ("  %s %6.0f Hz: segunda diferencia %.4f (cota %.4f)\n", mode == PhaseMode::natural ? "natural" : "lineal ", sampleRate,
+                         static_cast<double> (measured), 1.5 * steepest);
+            CHECK (measured < 1.5 * steepest);
+            CHECK (left == right);
+        }
+}
+
+void testPhaseModesInMono()
+{
+    std::printf ("Fase natural y lineal en mono: la curva en el unico canal; una banda side no hace nada (retardo exacto)\n");
+    const double sampleRate = 44100.0;
+    for (const auto mode : { PhaseMode::natural, PhaseMode::linear })
+    {
+        Engine engine;
+        prepareIn (engine, mode, 1, sampleRate, only (bandOf (Shape::bell, 1000.0f, 6.0f, 1.0f)));
+        auto x = sine (1000.0, 0.25, sampleRate, 32768);
+        float* mono[] { x.data() };
+        engine.process (mono, 1, static_cast<int> (x.size()));
+        CHECK (std::abs (toneDb (x, 1000.0, 0.25, sampleRate) - 6.0) < 0.02);
+
+        auto side = bandOf (Shape::bell, 1000.0f, 6.0f, 1.0f);
+        side.placement = Placement::side;
+        Engine sideOnly;
+        prepareIn (sideOnly, mode, 1, sampleRate, only (side));
+        const int latency = sideOnly.getLatencySamples();
+        auto y = sine (1000.0, 0.25, sampleRate, 16384);
+        const auto original = y;
+        for (size_t start = 0; start < y.size(); start += 333)
+        {
+            float* channel[] { y.data() + start };
+            sideOnly.process (channel, 1, static_cast<int> (std::min<size_t> (333, y.size() - start)));
+        }
+        bool exact = true;
+        for (size_t i = static_cast<size_t> (latency); i < y.size(); ++i)
+            exact = exact && y[i] == original[i - static_cast<size_t> (latency)];
+        CHECK (exact);
+    }
+}
+
+void testLinearPhaseSolo()
+{
+    std::printf ("Fase lineal: el solo es la zona de la banda sobre la original retrasada (alineado con la salida)\n");
+    const double sampleRate = 48000.0;
+    const BandSettings band { true, 1000.0f, -6.0f, 4.0f };
+    const auto zone = Band::coefficientsFor (*soloZoneFor (band), sampleRate);
+    for (const double hz : { 1000.0, 100.0 })
+    {
+        Engine engine;
+        prepareIn (engine, PhaseMode::linear, 1, sampleRate, only (band));
+        engine.setSolo (0);
+        const double level = toneDb (processedSine (engine, hz, 0.25, sampleRate, 32768), hz, 0.25, sampleRate);
+        CHECK (std::abs (level - zone.magnitudeDb (hz, sampleRate)) < 0.01);
+    }
+}
+
+void testPhaseMemoryOnDemand()
+{
+    std::printf ("Fase: en tiempo real la memoria de los modos de fase se reserva recien al elegir uno (desde el hilo de mensajes)\n");
+    const double sampleRate = 48000.0;
+    Engine engine;
+    engine.setRealtime (true);
+    engine.prepare (sampleRate, false, 0.0f, only (bandOf (Shape::bell, 2000.0f, -9.0f, 1.0f)));
+    CHECK (! engine.hasPhaseMemory()); // cero latencia: no hace falta
+    engine.setPhaseMode (PhaseMode::linear, 0);
+    auto left = sine (2000.0, 0.5, sampleRate, static_cast<size_t> (sampleRate)), right = left;
+    bool swapped = false;
+    for (size_t start = 0; start < left.size(); start += 256)
+    {
+        float* channels[] { left.data() + start, right.data() + start };
+        engine.process (channels, 2, static_cast<int> (std::min<size_t> (256, left.size() - start)));
+        engine.providePhaseMemory(); // lo que hace el temporizador del procesador
+        swapped = swapped || engine.hasPhaseMemory();
+        std::this_thread::sleep_for (std::chrono::microseconds (500));
+    }
+    CHECK (swapped);
+    CHECK (engine.getLatencySamples() == PhaseSizes::latency (PhaseMode::linear, 0, sampleRate));
+    // Ya en fase lineal: la salida es el seno con la campana (con la latencia; el nivel no depende de ella).
+    const double level = levelDb (toneAmplitude (left, 2000.0, sampleRate, left.size() / 2) / 0.5);
+    CHECK (std::abs (level + 9.0) < 0.05);
+    engine.providePhaseMemory(); // destruye la etapa vieja que devolvió el audio
+
+    // Offline (render) se reserva siempre en prepare: no hay a quién esperar.
+    Engine offline;
+    offline.prepare (sampleRate, false, 0.0f, {});
+    CHECK (offline.hasPhaseMemory());
+}
+
 } // namespace
 
 int main()
@@ -1661,6 +2195,20 @@ int main()
     testDynamicStereoScaleAndAutoGain();
     testDynamicOffIsBitExact();
     testDynamicChangesHaveNoClicks();
+    testPhaseLatencies();
+    testPhaseModesFlatAreTransparent();
+    testLinearPhaseIsSymmetricWithTheCurve();
+    testNaturalPhaseMatchesTheAnalog();
+    testPhaseModeSwitchHasNoClicks();
+    testLinearPhasePlacements();
+    testLinearPhaseDynamics();
+    testPhaseDesignThread();
+    testPreRinging();
+    testLinearQualityResolution();
+    testFirModesAutomationHasNoClicks();
+    testPhaseModesInMono();
+    testLinearPhaseSolo();
+    testPhaseMemoryOnDemand();
 
     if (failures > 0)
     {

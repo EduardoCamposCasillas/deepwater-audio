@@ -19,6 +19,10 @@ inline constexpr const char* autoGain = "autoGain";       // compensar el volume
 // Fase 7: respuesta analógica (la magnitud del prototipo analógico también cerca de Nyquist) o bilineal clásica.
 inline constexpr const char* analogResponse = "analogResponse";
 
+// Fase 10: modos de fase (cero latencia / natural / lineal) y la calidad (el largo del FIR) de la fase lineal.
+inline constexpr const char* phaseMode = "phaseMode";
+inline constexpr const char* linearQuality = "linearQuality";
+
 // Las 24 bandas: "band<N><Ajuste>", con N de 1 a 24 (band1Frequency, band12Shape...). Los cuatro primeros ajustes
 // nacieron en la Fase 2 con la banda 1; forma y pendiente, en la Fase 3; el canal, en la Fase 8; la dinámica, en la Fase 9.
 inline constexpr int numBands = 24;
@@ -52,4 +56,5 @@ inline constexpr int versionHintPhase6 = 6; // escala, balance, polaridad y auto
 inline constexpr int versionHintPhase7 = 7; // respuesta analógica
 inline constexpr int versionHintPhase8 = 8; // el canal de cada banda
 inline constexpr int versionHintPhase9 = 9; // la dinámica de cada banda
+inline constexpr int versionHintPhase10 = 10; // modo de fase y calidad de la fase lineal
 } // namespace fathom::params

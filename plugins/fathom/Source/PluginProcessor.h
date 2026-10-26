@@ -12,15 +12,16 @@
 // tomas lock-free (AnalyzerTap) para el analizador de la GUI. Para escuchar y comparar (Fase 6): solo de banda, auto
 // gain, escala de ganancia, balance, polaridad y comparación A/B. Cada banda en estéreo, L, R, mid o side y el
 // analizador también del side (Fase 8). EQ dinámico por banda, con el detector en la banda o en el sidechain (Fase 9).
+// Modos de fase cero latencia / natural / lineal, con la latencia informada al host (Fase 10).
 // El audio está en fathom::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
-class FathomAudioProcessor final : public juce::AudioProcessor
+class FathomAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
 public:
     // 32768 muestras: la FFT más grande del analizador (resolución máxima a 88.2/96 kHz).
     using AnalyzerTap = deepwater::dsp::AnalyzerTap<32768>;
 
     FathomAudioProcessor();
-    ~FathomAudioProcessor() override = default;
+    ~FathomAudioProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -36,7 +37,7 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override;
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -93,6 +94,10 @@ public:
     // Lo que está compensando el auto gain ahora (0 dB si está apagado), para mostrarlo.
     float getAutoGainDb() const noexcept { return autoGainDb.load (std::memory_order_relaxed); }
 
+    // Fase 10: el modo de fase y la calidad pedidos (leen los parámetros: sirven en los dos hilos).
+    fathom::dsp::PhaseMode getPhaseMode() const noexcept;
+    int getLinearQuality() const noexcept;
+
     // Fase 9, hilo de la GUI: lo que la dinámica le suma ahora a una banda (dB, con la escala: la curva en vivo), el
     // nivel de su zona y el umbral que usa (con el automático, el que calculó). Sin audio se quedan en lo último.
     struct DynamicState
@@ -124,6 +129,8 @@ private:
     std::atomic<float>* phaseInvertParam = nullptr;
     std::atomic<float>* autoGainParam = nullptr;
     std::atomic<float>* analogResponseParam = nullptr;
+    std::atomic<float>* phaseModeParam = nullptr;
+    std::atomic<float>* linearQualityParam = nullptr;
     struct BandParameters
     {
         std::atomic<float>* enabled = nullptr;
@@ -152,6 +159,8 @@ private:
     std::atomic<bool> analyzerActive { false };
     std::atomic<int> soloBand { -1 };
     std::atomic<float> autoGainDb { 0.0f };
+    std::atomic<int> engineLatency { 0 }; // la latencia que pide el motor (el temporizador se la informa al host)
+    std::atomic<double> preparedSampleRate { 44100.0 };
     struct LiveDynamics
     {
         std::atomic<float> gainDb { 0.0f }, levelDb { -120.0f }, thresholdDb { 0.0f };
@@ -162,7 +171,8 @@ private:
 
     // Hilo de audio: el mid y el side de unos canales a sus tomas.
     static void pushTaps (AnalyzerTap& mid, AnalyzerTap& side, const float* const* channels, int numChannels, int numSamples) noexcept;
-    void setOutputSettings() noexcept; // pasa al motor la escala, el balance, la polaridad y el auto gain
+    void setOutputSettings() noexcept; // pasa al motor la escala, el balance, la polaridad, el auto gain y el modo de fase
+    void timerCallback() override;     // hilo de mensajes: informa al host la latencia nueva (cambiar de modo de fase)
     std::vector<float> otherSideValues() const;
     void storeOtherSide (const std::vector<float>& values);
 

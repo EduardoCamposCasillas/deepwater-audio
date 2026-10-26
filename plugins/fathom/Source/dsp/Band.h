@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 
 #include "deepwater/dsp/EqFilter.h"
 #include "deepwater/dsp/MatchedEq.h"
@@ -313,6 +314,40 @@ public:
         const auto targets = targetsFor (settings);
         return makeCascade (settings.shape, settings.slopeIndex, targets[0], clampGain (targets[1] + dynamicDb), targets[2], sampleRate,
                             design, settings.analog);
+    }
+
+    // Fase 10: el prototipo analógico de la banda (lo que imita el modo de fase natural, en magnitud y fase), con los
+    // mismos números que el diseño digital (y la frecuencia limitada a 0.49·fs como en él). El flat tilt no tiene uno:
+    // es una escalera de pares digitales (nullopt = no se corrige).
+    static std::optional<deepwater::dsp::AnalogCascade> analogPrototype (const BandSettings& settings, double sampleRate,
+                                                                          float dynamicDb = 0.0f) noexcept
+    {
+        using deepwater::dsp::AnalogBiquad;
+        using deepwater::dsp::AnalogCascade;
+        if (! settings.enabled || settings.shape == Shape::flatTilt)
+            return std::nullopt;
+        const auto targets = targetsFor (settings);
+        const double hz = std::min (std::exp2 (static_cast<double> (targets[0])), 0.49 * sampleRate);
+        const double q = std::exp2 (static_cast<double> (targets[2]));
+        const auto gain = static_cast<double> (clampGain (targets[1] + dynamicDb));
+        const int order = slopes[static_cast<size_t> (clampSlope (settings.slopeIndex))] / 6;
+        AnalogCascade cascade;
+        cascade.numStages = 1;
+        auto& stage = cascade.stages[0];
+        switch (settings.shape)
+        {
+            case Shape::lowCut: return AnalogCascade::butterworth (hz, order, q, true);
+            case Shape::highCut: return AnalogCascade::butterworth (hz, order, q, false);
+            case Shape::bell: stage = AnalogBiquad::bell (hz, q, gain); break;
+            case Shape::lowShelf: stage = AnalogBiquad::lowShelf (hz, q, gain); break;
+            case Shape::highShelf: stage = AnalogBiquad::highShelf (hz, q, gain); break;
+            case Shape::tiltShelf: stage = AnalogBiquad::tiltShelf (hz, q, gain); break;
+            case Shape::notch: stage = AnalogBiquad::notch (hz, q); break;
+            case Shape::bandPass: stage = AnalogBiquad::bandPass (hz, q); break;
+            case Shape::allPass: stage = AnalogBiquad::allPass (hz, q); break;
+            case Shape::flatTilt: return std::nullopt;
+        }
+        return cascade;
     }
 
     [[nodiscard]] const deepwater::dsp::EqCascade& getCascade() const noexcept { return cascade; }

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -13,6 +14,7 @@
 #include "PluginProcessor.h"
 #include "analysis/SpectrumView.h"
 #include "deepwater/dsp/SpectrumAnalyzer.h"
+#include "dsp/PhaseDesign.h"
 #include "dsp/Solo.h"
 #include "edit/NodeEditing.h"
 #include "gui/BandEdits.h"
@@ -38,6 +40,8 @@ namespace fathom::gui
 //  - Estéreo por banda (Fase 8): con bandas en un solo canal, en vez de la curva blanca hay una por canal (L, R, M, S:
 //    las bandas estéreo más las de ese canal) y cada nodo lleva su letra. Con solo L/R o solo M/S es la respuesta exacta
 //    de cada canal; si se mezclan las dos clases, cada curva es una guía (una banda izquierda también mueve el mid).
+//  - Modos de fase (Fase 10): con fase lineal o natural la curva total es la del FIR que suena de verdad (la GUI diseña
+//    el mismo filtro): con poca calidad se ve cómo una campana angosta en los graves no llega a su ganancia.
 //  - Agarrar un pico: con el mouse cerca de un pico del espectro aparece su marca (Hz y nota); clic y arrastrar = una
 //    campana nueva justo en ese pico (arrastrar hacia abajo = cortarlo). Ctrl mientras se arrastra un nodo = imán a los
 //    picos.
@@ -114,6 +118,7 @@ public:
         // Solo se repinta si algo cambió de forma visible: sin audio, las curvas terminan de caer al piso y el visor
         // queda quieto (no gasta CPU).
         bool changed = refreshBands (sampleRate);
+        changed = refreshPhaseCurve (sampleRate) || changed;
         const bool side = view.channels() == analysis::Channels::side;
         changed = updateTrace (input, side ? processor.getInputSideTap() : processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
         changed = updateTrace (output, side ? processor.getOutputSideTap() : processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
@@ -200,6 +205,8 @@ public:
             bandCurveDb[static_cast<size_t> (b)].assign (points, 0.0f);
             updateBandCurve (b);
         }
+        phaseDb.clear(); // otra cantidad de puntos: se recalcula en el próximo cuadro
+        phaseDirty = true;
         updateTotalCurve();
     }
 
@@ -865,10 +872,80 @@ private:
                 changed = true;
             }
         }
+        // Fase 10: el modo de fase cambia la curva total (la del FIR).
+        const auto mode = processor.getPhaseMode();
+        const int quality = processor.getLinearQuality();
+        if (mode != paintedMode || quality != paintedQuality)
+        {
+            paintedMode = mode;
+            paintedQuality = quality;
+            changed = true;
+        }
         if (changed)
+        {
+            phaseDirty = true;
             updateTotalCurve();
+        }
         return changed;
     }
+
+    // Fase 10: con fase lineal o natural, la diferencia entre la curva de las bandas y la del FIR que suena (en dB por
+    // punto). Diseñar el FIR cuesta (hasta decenas de ms con calidad máxima): como mucho cada 0.12 s, y solo si algo
+    // cambió. Devuelve true si la curva cambió.
+    bool refreshPhaseCurve (double sampleRate)
+    {
+        if (paintedMode == dsp::PhaseMode::zeroLatency)
+        {
+            if (phaseDb.empty())
+                return false;
+            phaseDb.clear();
+            updateTotalCurve();
+            return true;
+        }
+        if (! phaseDirty || nowSeconds() - lastPhaseSeconds < phaseRefreshSeconds || curveDb.size() < 2 || sampleRate <= 0.0)
+            return false;
+        phaseDirty = false;
+        lastPhaseSeconds = nowSeconds();
+        if (phaseDesigner == nullptr || phaseDesigner->getSampleRate() != sampleRate)
+        {
+            phaseDesigner = std::make_unique<dsp::PhaseDesigner>(); // fuera del audio: aquí se puede reservar
+            phaseDesigner->prepare (sampleRate);
+        }
+        // El mismo pedido que hace el motor: las bandas con la escala de ganancia y la dinámica de ahora.
+        dsp::DesignRequest request;
+        request.mode = paintedMode;
+        request.quality = paintedQuality;
+        for (size_t b = 0; b < paintedBands.size(); ++b)
+        {
+            request.bands[b] = paintedBands[b];
+            request.bands[b].gainDb *= paintedScale;
+            request.dynamicDb[b] = liveDb[b];
+        }
+        const auto result = phaseDesigner->designImpulses (request);
+        phaseDesigner->analyse (0, result.length);
+        const auto points = curveDb.size();
+        phaseDb.assign (points, 0.0f);
+        for (size_t i = 0; i < points; ++i)
+        {
+            float bands = 0.0f;
+            for (const auto& curve : bandCurveDb)
+                bands += curve[i];
+            phaseDb[i] = phaseCorrectionDb (pointHz (i, points), bands);
+        }
+        updateTotalCurve();
+        return true;
+    }
+
+    // Lo que el FIR le cambia a la curva de las bandas ('bandsDb') en una frecuencia: con fase lineal el FIR ES toda la
+    // respuesta (se reemplaza); con natural, el FIR es la corrección que se suma.
+    float phaseCorrectionDb (double hz, float bandsDb) const noexcept
+    {
+        const float fir = phaseDesigner->analysedDb (hz);
+        return paintedMode == dsp::PhaseMode::linear ? fir - bandsDb : fir;
+    }
+
+    // ¿La curva total lleva la corrección del FIR? (Con curvas por canal, no: esas se quedan con las bandas.)
+    bool phaseCurveShown() const noexcept { return ! phaseDb.empty() && phaseDb.size() == curveDb.size() && ! splitCurves(); }
 
     // Después de editar: la curva y los nodos al instante, sin esperar al siguiente cuadro.
     void refreshNow()
@@ -1203,11 +1280,13 @@ private:
     // La respuesta total en dB en una frecuencia: las bandas (con sus coeficientes reales) más la ganancia de salida.
     float totalDb (float hz) const noexcept
     {
-        double total = static_cast<double> (paintedGainDb);
+        double bands = 0.0;
         for (int b = 0; b < dsp::Engine::numBands; ++b)
             if (paintedBands[static_cast<size_t> (b)].enabled)
-                total += bandCascades[static_cast<size_t> (b)].magnitudeDb (hz, curveSampleRate);
-        return static_cast<float> (total);
+                bands += bandCascades[static_cast<size_t> (b)].magnitudeDb (hz, curveSampleRate);
+        if (phaseCurveShown()) // Fase 10: la del FIR
+            bands += static_cast<double> (phaseCorrectionDb (hz, static_cast<float> (bands)));
+        return static_cast<float> (bands) + paintedGainDb;
     }
 
     // Las curvas por canal (Fase 8): L, R, M y S, cada una con las bandas estéreo y las de ese canal.
@@ -1280,15 +1359,6 @@ private:
 
     void updateTotalCurve()
     {
-        const auto points = curveDb.size();
-        for (size_t i = 0; i < points; ++i)
-        {
-            float total = paintedGainDb;
-            for (const auto& curve : bandCurveDb)
-                total += curve[i];
-            curveDb[i] = total;
-        }
-
         // Con bandas en un solo canal: las curvas de L y R (si hay bandas L o R) y las de M y S (si hay bandas M o S).
         bool leftRight = false, midSide = false;
         for (const auto& band : paintedBands)
@@ -1297,6 +1367,17 @@ private:
             midSide = midSide || (band.enabled && (band.placement == dsp::Placement::mid || band.placement == dsp::Placement::side));
         }
         channelShown = { leftRight, leftRight, midSide, midSide };
+
+        const auto points = curveDb.size();
+        const bool phase = phaseCurveShown();
+        for (size_t i = 0; i < points; ++i)
+        {
+            float total = paintedGainDb;
+            for (const auto& curve : bandCurveDb)
+                total += curve[i];
+            curveDb[i] = phase ? total + phaseDb[i] : total;
+        }
+
         for (size_t c = 0; c < curveChannels.size(); ++c)
         {
             auto& curve = channelCurveDb[c];
@@ -1502,6 +1583,11 @@ private:
         };
         if (frozen)
             note ("CONGELADO", theme::accent);
+        // Fase 10: con fase lineal o natural la curva es la del FIR (y con curvas por canal, la guía de las bandas).
+        if (paintedMode != dsp::PhaseMode::zeroLatency)
+            note (juce::String (paintedMode == dsp::PhaseMode::linear ? "FASE LINEAL" : "FASE NATURAL")
+                      + (splitCurves() ? juce::String::fromUTF8 (" (CURVAS POR CANAL: LAS DE LAS BANDAS)") : juce::String()),
+                  theme::text.withAlpha (0.7f));
         if (view.channels() == analysis::Channels::side)
             note ("ANALIZADOR: SIDE", theme::spectrumSide);
         else if (view.channels() == analysis::Channels::midAndSide)
@@ -1688,6 +1774,14 @@ private:
     std::array<float, dsp::Engine::numBands> liveDb {}, rangeDb {};
     std::array<std::vector<float>, dsp::Engine::numBands> restingCurveDb;
     double curveSampleRate = 0.0; // 0 = todavía sin calcular
+    // Fase 10: el modo de fase dibujado y la corrección del FIR por punto (vacía con cero latencia).
+    dsp::PhaseMode paintedMode = dsp::PhaseMode::zeroLatency;
+    int paintedQuality = -1;
+    std::unique_ptr<dsp::PhaseDesigner> phaseDesigner;
+    std::vector<float> phaseDb;
+    bool phaseDirty = true;
+    double lastPhaseSeconds = 0.0;
+    static constexpr double phaseRefreshSeconds = 0.12;
     std::vector<float> curveDb; // la respuesta total en dB, un valor por punto
     std::array<std::vector<float>, 4> channelCurveDb; // Fase 8: la de L, R, M y S (si hay bandas en un solo canal)
     std::array<bool, 4> channelShown {};

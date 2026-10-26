@@ -58,7 +58,9 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
   prototipos `AnalogBiquad`/`AnalogCascade` para medir), crossover Linkwitz-Riley y divisor multibanda
   (`Crossover.h`), filtro de 1 polo TPT y tilt EQ (`OnePole.h`), suavizado de parámetros y fundidos
   (`Smoothing.h`), línea de retardo con lectura lineal, cúbica y Lagrange (`DelayLine.h`), SIMD SSE2 (`Simd.h`),
-  `fastTanh` (`FastMath.h`), FFT (`Fft.h`), toma de señal lock-free audio → GUI (`AnalyzerTap.h`), buzón del último valor audio → GUI (`TripleBuffer.h`, venía de Ebb), analizador de
+  `fastTanh` (`FastMath.h`), FFT (`Fft.h`, clara, fuera del audio) y FFT real para el audio (`RealFft.h`, de Fathom),
+  convolución por FFT particionada con fundido entre kernels (`Convolver.h`, de Fathom: la fase lineal; la reverb la va a
+  usar), toma de señal lock-free audio → GUI (`AnalyzerTap.h`), buzón del último valor audio → GUI (`TripleBuffer.h`, venía de Ebb), analizador de
   espectro calibrado, fuera del audio, con picos afinados entre bins (`SpectrumAnalyzer.h`, venía de Riptide), `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de
   pico/RMS (`LevelMeter.h`), LFO con divisiones de tempo (`Lfo.h`, venía de Undertow), curva por puntos con tensión
   (`BreakpointCurve.h`, venía de Ebb), seguidor de envolvente
@@ -91,7 +93,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 | 1 | Undertow — sintetizador wavetable (FM, warp, unison, matriz de modulación, FX) | Serum 2, Vital | ✅ Terminado (ampliación en curso: cuerda pulsada) |
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | ✅ Terminado |
 | 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | ✅ Terminado |
-| 4 | Fathom — EQ paramétrico con analizador (24 bandas, dinámico, M/S, fase lineal, dinámica espectral) | FabFilter Pro-Q 4 | En curso (Fase 9) |
+| 4 | Fathom — EQ paramétrico con analizador (24 bandas, dinámico, M/S, fase lineal, dinámica espectral) | FabFilter Pro-Q 4 | En curso (Fase 10) |
 | 5 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
 | 6 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
 | 7 | Reverb algorítmica (FDN, difusión, modulación; modos vintage y espacial) | Valhalla VintageVerb, Supermassive | Pendiente |

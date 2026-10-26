@@ -44,7 +44,9 @@ Lo que Fathom va a usar de `libs/dsp` (`deepwater::dsp`):
   ganó `peak()` (el pico de una zona afinado con una parábola por los bins: < 0.05 bin).
 - `AnalyzerTap.h` ganó `pushSide` en la Fase 8 (escribe el side, (L − R) / 2, para el analizador M/S).
 - `Smoothing.h` (`LinearRamp`, `EffectSwitch`), `Decibels.h`, `Pitch.h`, `LevelMeter.h`.
-- `Fft.h`: fase lineal y dinámica espectral (Fases 10–11).
+- `RealFft.h` y `Convolver.h` (nacieron en la Fase 10): FFT real para el audio y convolución por FFT particionada con
+  fundido entre kernels (los modos de fase; la reverb los va a usar). `Fft.h` (la clara, fuera del audio): dinámica
+  espectral (Fase 11).
 - `EnvelopeFollower.h`: se probó para el detector del EQ dinámico (Fase 9) y se descartó: suaviza el nivel en lineal y,
   con el umbral muy por debajo de la señal, el ataque efectivo se volvía casi instantáneo. El detector de la Fase 9
   (RMS corto + ataque/liberación sobre la ganancia en dB) vive en `Source/dsp/Dynamics.h`; si el compresor (plugin 5)
@@ -76,8 +78,13 @@ plugins/fathom/
                              # y el solo
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
-    dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie (con su dinámica), escala de
-                             # ganancia, salida, auto gain, balance, polaridad, solo y bypass
+    dsp/Engine.h             # cadena de audio completa, sin JUCE: 24 bandas en serie (con su dinámica), modos de fase,
+                             # escala de ganancia, salida, auto gain, balance, polaridad, solo y bypass; la memoria de
+                             # los modos de fase a pedido (providePhaseMemory)
+    dsp/PhaseDesign.h        # modos de fase: tamaños y latencias, el pedido de diseño y PhaseDesigner (FIR de fase
+                             # lineal y de corrección natural, con caché por banda)
+    dsp/PhaseStage.h         # los modos de fase en el audio: convolucionadores, kernels entre hilos (KernelStore), hilo
+                             # de diseño, transiciones sin clic, dry retrasado y detectores alineados
     dsp/Dynamics.h           # EQ dinámico: el detector de una banda (zona del solo, RMS corto, rodilla, rango,
                              # ataque/liberación sobre la ganancia, umbral automático)
     dsp/AutoGain.h           # cuánto cambia la sonoridad la curva (ruido rosa con peso K de BS.1770), por banda;
@@ -98,9 +105,9 @@ plugins/fathom/
                              # agarrar picos, curvas por canal), BandEdits (cambiar parámetros con gestos), panel de
                              # la banda elegida (BandPanel, con SOLO, CANAL y la fila de la dinámica), ajustes del
                              # analizador (AnalyzerPanel), columna de salida
-                             # (OutputPanel: escala, auto gain, balance, polaridad, ganancia)
-  tests/EngineTests.cpp    # tests del motor (con auto gain, solo, estéreo por banda y EQ dinámico), de la edición y del
-                           # analizador (sin JUCE)
+                             # (OutputPanel: escala, auto gain, balance, polaridad, ganancia, fase y calidad)
+  tests/EngineTests.cpp    # tests del motor (con auto gain, solo, estéreo por banda, EQ dinámico y modos de fase), de la
+                           # edición y del analizador (sin JUCE)
 ```
 
 ## Aprendizaje de mezcla (igual de importante que el código)
@@ -145,7 +152,7 @@ fábrica incluyen notas de para qué sirven y por qué.
 - [x] Fase 8 — Estéreo por banda: Estéreo / L / R / Mid / Side; analizador M/S.
 - [x] Fase 9 — EQ dinámico: por banda umbral, rango (corta o sube), ataque/liberación y umbral automático; detector
       con la forma de la banda o con el sidechain externo; la curva se mueve en vivo en el visor.
-- [ ] Fase 10 — Modos de fase: fase lineal (convolución por FFT particionada, varias calidades, latencia informada)
+- [x] Fase 10 — Modos de fase: fase lineal (convolución por FFT particionada, varias calidades, latencia informada)
       y fase "natural" propia (magnitud y fase del analógico); cambio de modo sin clics.
 - [ ] Fase 11 — Dinámica espectral: una banda dinámica que actúa por bin de la FFT (solo donde hay exceso, no en toda
       la zona): domar resonancias que cambian con las notas.
@@ -160,7 +167,75 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 9 COMPLETADA (2026-10-25). Probada por el usuario en FL Studio: funciona.
+Fase 10 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
+- Tres modos (`dsp/PhaseDesign.h`, `PhaseMode`): cero latencia (lo de siempre), natural y lineal. Parámetros nuevos
+  (versionHint 10): `phaseMode` (Zero Latency / Natural Phase / Linear Phase, cero latencia por defecto: un proyecto de
+  las Fases 1-9 suena igual) y `linearQuality` (Low / Medium / High / Very High / Maximum, Medium por defecto). Entran al
+  deshacer, al A/B y a la automatización.
+- Fase lineal: FIR de `2048 << calidad` muestras a 44.1/48 kHz (×2 a 88.2/96, ×4 sobre 100 kHz) por muestreo en
+  frecuencia: |H| de cada banda (los mismos coeficientes que la curva, `Band::coefficientsFor`) en una grilla de 2N
+  bins, producto, FFT inversa, centrado en N/2 y ventana de Hann (se probó Hann/Blackman/Kaiser 6-12 en numpy: Hann
+  da el menor error en graves y el piso de un corte de 96 dB/oct queda bajo −180 dB igual). Latencia N/2 + 512
+  (bloque de la convolución): 1536 / 2560 / 4608 / 8704 / 16896 muestras (35 / 58 / 104 / 197 / 383 ms a 44.1). Con
+  bandas L/R, dos FIR; con mid/side, la matriz 2×2 por bin y cuatro FIR (L→L, R→L, L→R, R→R).
+- Natural: las bandas IIR (siempre matched: `Engine::scaled` y `getBandSettings` fuerzan `analog`) + un FIR de
+  corrección C = analógico / IIR (`Band::analogPrototype`, nuevo; el flat tilt no se corrige). Donde el IIR baja de
+  −40 dB, C → 1 (peso |H|² / (|H|² + 0.01²)); |C| limitado a ±12 dB. 256 muestras a 44.1/48 (se probaron 1024 y 512:
+  mismo error), partición 32: latencia 160 muestras (3.6 ms). Error contra el prototipo analógico (campana 12 kHz,
+  shelf 5 kHz, corte 18 kHz; campana Q 8 en 15 kHz con corte de 48 dB/oct, shelf grave y all-pass; campana Q 20 en
+  18 kHz + notch + shelf 19 kHz): ≤ 0.07 dB y 0.4° a las 4 frecuencias de muestreo (cero latencia: hasta 1.9 dB y 179°).
+- Librería (nuevo): `RealFft.h` (FFT real de N puntos con media FFT compleja, tablas en `prepare`, sin reservar al
+  transformar; float para el audio, double para diseñar) y `Convolver.h` (`ConvolutionKernel` con caminos
+  entrada → salida y trozos vacíos salteados, `PartitionedConvolver` uniformemente particionado overlap-save, hasta 4
+  entradas y 4 salidas, latencia P, fundido lineal entre kernels en un bloque, `getAudibleKernel` = el kernel de lo que
+  está saliendo). Tests en `DeepwaterDspTests`.
+- Motor (`dsp/PhaseStage.h`): tres convolucionadores (natural y dos de fase lineal: cambiar de calidad es cambiar de
+  uno al otro), cada uno con 3 lugares de kernel (`KernelStore`: estados atómicos libre/escribiéndose/listo/en uso,
+  sin locks). Los diseña un hilo propio (`std::thread`, duerme 1 ms sin trabajo; el audio pide a lo sumo un diseño a la
+  vez por convolucionador por `TripleBuffer` y solo si cambió algo: la dinámica, desde 0.05 dB); offline (o en los
+  tests) se diseña en el audio y el render es determinista. El diseñador cachea |H| (o C) de cada banda por bin: mover
+  un nodo recalcula una banda. Un kernel nuevo se funde con el viejo en un bloque; con todo plano el kernel es un
+  impulso y, cuando es lo que SE OYE (no solo lo calculado: `getAudibleKernel`), la salida es un retardo exacto (bit a
+  bit). Primero se cambiaba con el kernel calculado: la automatización extrema en lineal daba 0.09 de segunda diferencia
+  (cota 0.024); con lo audible, 0.007.
+- Transición de modo: el modo nuevo arranca sin oírse (su convolucionador se llena: N + P muestras; si las bandas IIR
+  estaban quietas por la fase lineal, se reinician y se esperan 50 ms) y después fundido de 20 ms con smoothstep (el
+  fundido recto dejaba un quiebre de pendiente: 0.0014 contra 0.00085 de cota; con la curva en S, 0.00052). El dry del
+  bypass, el solo y la mezcla salen de una línea de retardo con la latencia de cada modo (se funde igual). Latencia
+  informada = la del modo pedido.
+- EQ dinámico en lineal: los detectores escuchan la entrada (y el sidechain) retrasados N/2 (alineados con el centro
+  del FIR) y su ganancia entra al FIR siguiente. No escuchan lo que dejaron las bandas anteriores (en cero latencia sí).
+- Memoria: 15-35 MB por instancia con todo (designer + kernels + FDL). En tiempo real se reserva recién al pedir natural
+  o lineal: la etapa sin memoria se queda en cero latencia y avisa; el temporizador del procesador (10 Hz, hilo de
+  mensajes) llama a `Engine::providePhaseMemory`, que prepara una etapa nueva y se la ofrece al audio (estado atómico
+  libre/ofrecida/devuelta); el audio la cambia si la suya está quieta en cero latencia y la vieja se destruye en el hilo
+  de mensajes. Offline (y los tests) siempre con memoria en `prepare`. Una vez reservada, se queda.
+- Procesador: `setRealtime (! isNonRealtime())` en cada bloque; `setLatencySamples` en `prepareToPlay` y desde el
+  temporizador cuando cambia (no desde el audio); `getTailLengthSeconds` = el largo del FIR.
+- GUI: FASE / CALIDAD / latencia al final de la columna de SALIDA (CALIDAD atenuada fuera de lineal); ANALÓGICA atenuado
+  en natural; en el visor, con fase lineal o natural la curva total (y la lectura de arriba) es la del FIR real (la GUI
+  diseña el mismo con su `PhaseDesigner`, como mucho cada 0.12 s; lineal = la respuesta del FIR, natural = curva de las
+  bandas + |C|); con curvas por canal se quedan las de las bandas. Aviso "FASE LINEAL" / "FASE NATURAL". Cabecera
+  "Fase 10: modos de fase".
+- CPU medida (5 bandas, estéreo, bloques de 256, 44.1 kHz): cero latencia 0.34 % de un núcleo, natural 0.88 %, lineal
+  0.74 / 0.81 / 0.99 / 1.31 / 2.14 %; a 96 kHz 1.24, 2.38 y 1.44-5.10 %. OJO: la convolución calcula un bloque cada P
+  muestras: con bloques del host chicos, un callback de cada 512/64 hace todo el trabajo (pico); repartirlo es Fase 16.
+- Tests nuevos `FathomTests`: latencias; plano y bypass = la entrada retrasada bit a bit (natural y lineal); lineal
+  simétrico (< 1e-6) y su magnitud = la curva (< 0.1 dB, fase < 0.5°); natural contra el analógico en 3 casos; cambiar
+  de modo y de calidad sonando sin clic; lineal por canal (mid no toca el side, side no toca el centro, izquierda no
+  toca la derecha, < 1e-4; nivel = cero latencia con la parte que le toca); dinámica en lineal (−11.97 contra −12.00 dB;
+  lo suave intacto); hilo de diseño (−9.00 dB con la banda puesta en marcha); pre-eco (campana −12 dB Q 8 en 100 Hz:
+  −300 / −74 / −38 dB de energía antes del golpe); resolución por calidad (+9 dB Q 4 en 40 Hz: 2.93 / 4.72 / 6.62 /
+  7.96 / 8.66 dB); automatización extrema en natural y lineal sin clic; mono (side = retardo exacto); solo en lineal;
+  memoria a pedido. `DeepwaterDspTests`: `RealFft` contra `fft()` de 4 a 8192 puntos (float y double), convolución
+  particionada = directa (< 1e-5, 3 caminos, bloques al azar), trozos vacíos salteados, fundido entre kernels.
+- GUI no revisada con capturas (esta vez el permiso para lanzar el script de captura fue denegado): revisarla en FL.
+- Release con 0 warnings; FathomTests y DeepwaterDspTests: todos pasan; ctest 7/8: UndertowTests falló en su test de
+  CPU (20.7 % y 20.9 % contra 20 %; ni Undertow ni lo que usa de `libs/` cambió: en la librería solo hay headers
+  nuevos); pluginval strictness 10 ampliado: SUCCESS (antes y después de la memoria a pedido).
+
+### Lo que quedó de la Fase 9
+Probada por el usuario en FL Studio: funciona.
 - Cada banda con ganancia (campana, shelves, tilts) puede ser dinámica: `DynamicSettings` en `BandSettings::dynamics`
   (encendido, rango, umbral, ataque, liberación, umbral automático, detector externo) y `canBeDynamic(shape)`.
 - Detector (`dsp/Dynamics.h`, `BandDynamics`): la zona de `soloZoneFor` (con el canal de la banda; los tilts escuchan su
@@ -458,4 +533,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 10 (modos de fase).
+Siguiente: probar la Fase 10 en FL Studio; después, Fase 11 (dinámica espectral).

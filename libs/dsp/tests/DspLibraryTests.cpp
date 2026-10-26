@@ -18,6 +18,7 @@
 
 #include "deepwater/dsp/AnalyzerTap.h"
 #include "deepwater/dsp/BreakpointCurve.h"
+#include "deepwater/dsp/Convolver.h"
 #include "deepwater/dsp/Crossover.h"
 #include "deepwater/dsp/DcBlocker.h"
 #include "deepwater/dsp/Decibels.h"
@@ -33,6 +34,7 @@
 #include "deepwater/dsp/OnePole.h"
 #include "deepwater/dsp/Oversampler.h"
 #include "deepwater/dsp/Pitch.h"
+#include "deepwater/dsp/RealFft.h"
 #include "deepwater/dsp/Simd.h"
 #include "deepwater/dsp/Smoothing.h"
 #include "deepwater/dsp/SpectrumAnalyzer.h"
@@ -1996,6 +1998,175 @@ void testTripleBuffer()
     CHECK (freshReads > 0);
 }
 
+// --- FFT real y convolución particionada (Fathom, Fase 10) -------------------------------------------------------------
+
+// Ruido repetible en [−1, 1].
+struct Noise
+{
+    std::uint32_t state = 2463534242u;
+    float next() noexcept
+    {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        return static_cast<float> (state) / 2147483648.0f - 1.0f;
+    }
+};
+
+template <typename T>
+void checkRealFft (double tolerance)
+{
+    Noise noise;
+    for (int size = 4; size <= 8192; size *= 2)
+    {
+        dw::RealFft<T> fft;
+        fft.prepare (size);
+        CHECK (fft.getNumBins() == size / 2 + 1);
+        std::vector<T> x (static_cast<size_t> (size)), back (x.size());
+        std::vector<Complex> reference (x.size());
+        for (size_t i = 0; i < x.size(); ++i)
+        {
+            x[i] = static_cast<T> (noise.next());
+            reference[i] = static_cast<double> (x[i]);
+        }
+        dw::fft (reference, false);
+        std::vector<T> re (static_cast<size_t> (size / 2 + 1)), im (re.size());
+        fft.forward (x.data(), re.data(), im.data());
+        double worst = 0.0;
+        for (size_t k = 0; k < re.size(); ++k)
+            worst = std::max (worst, std::abs (Complex (re[k], im[k]) - reference[k]));
+        CHECK (worst < tolerance * size);
+        fft.inverse (re.data(), im.data(), back.data());
+        double roundTrip = 0.0;
+        for (size_t i = 0; i < x.size(); ++i)
+            roundTrip = std::max (roundTrip, std::abs (static_cast<double> (back[i] - x[i])));
+        CHECK (roundTrip < tolerance * 16.0);
+    }
+}
+
+void testRealFft()
+{
+    std::printf ("RealFft: igual a la FFT de referencia y la inversa devuelve la senal (4 a 8192 puntos, float y double)\n");
+    // Igual a la FFT compleja de referencia (fft() en double) y la inversa devuelve la señal, de 4 a 8192 puntos.
+    checkRealFft<double> (1.0e-13);
+    checkRealFft<float> (1.0e-6);
+}
+
+// Convolución directa, la verdad contra la que se mide la particionada.
+std::vector<float> directConvolution (const std::vector<float>& x, const std::vector<float>& h)
+{
+    std::vector<float> y (x.size(), 0.0f);
+    for (size_t n = 0; n < x.size(); ++n)
+    {
+        double sum = 0.0;
+        for (size_t k = 0; k < h.size() && k <= n; ++k)
+            sum += static_cast<double> (h[k]) * x[n - k];
+        y[n] = static_cast<float> (sum);
+    }
+    return y;
+}
+
+void testPartitionedConvolution()
+{
+    std::printf ("Convolucion particionada: = la directa retrasada un bloque (3 caminos, bloques al azar); trozos vacios salteados\n");
+    // Dos entradas, dos salidas y tres caminos (L→L, R→L, R→R) con filtros al azar de largos distintos, en bloques de
+    // tamaño variable: cada salida = la suma de sus convoluciones directas, retrasada P muestras.
+    constexpr int partition = 64, maxPartitions = 32, length = 6000;
+    Noise noise;
+    std::vector<float> left (length), right (length);
+    for (int i = 0; i < length; ++i)
+    {
+        left[static_cast<size_t> (i)] = noise.next();
+        right[static_cast<size_t> (i)] = noise.next();
+    }
+    std::vector<float> hLL (1000), hRL (777), hRR (2048);
+    for (auto* h : { &hLL, &hRL, &hRR })
+        for (auto& v : *h)
+            v = noise.next() * 0.05f;
+
+    dw::ConvolutionKernel kernel;
+    kernel.prepare (partition, maxPartitions, 4);
+    CHECK (kernel.addPath (0, 0, hLL.data(), static_cast<int> (hLL.size())));
+    CHECK (kernel.addPath (1, 0, hRL.data(), static_cast<int> (hRL.size())));
+    CHECK (kernel.addPath (1, 1, hRR.data(), static_cast<int> (hRR.size())));
+    dw::PartitionedConvolver convolver;
+    convolver.prepare (partition, maxPartitions, 2, 2);
+    CHECK (convolver.getLatency() == partition);
+    convolver.setKernel (&kernel, false);
+
+    std::vector<float> outLeft (length), outRight (length);
+    std::uint32_t seed = 99;
+    for (int start = 0; start < length;)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        const int count = std::min (length - start, 1 + static_cast<int> ((seed >> 8) % 300u));
+        const std::array<const float*, 2> in { left.data() + start, right.data() + start };
+        const std::array<float*, 2> out { outLeft.data() + start, outRight.data() + start };
+        convolver.process (in.data(), out.data(), count);
+        start += count;
+    }
+    const auto ll = directConvolution (left, hLL), rl = directConvolution (right, hRL), rr = directConvolution (right, hRR);
+    double worst = 0.0;
+    for (int n = 0; n < partition; ++n)
+        worst = std::max ({ worst, static_cast<double> (std::abs (outLeft[static_cast<size_t> (n)])),
+                            static_cast<double> (std::abs (outRight[static_cast<size_t> (n)])) });
+    for (int n = partition; n < length; ++n)
+    {
+        const auto at = static_cast<size_t> (n), was = static_cast<size_t> (n - partition);
+        worst = std::max ({ worst, static_cast<double> (std::abs (outLeft[at] - (ll[was] + rl[was]))),
+                            static_cast<double> (std::abs (outRight[at] - rr[was])) });
+    }
+    CHECK (worst < 1.0e-5);
+
+    // Un retardo puro: solo el trozo donde está el impulso (los demás ni se calculan).
+    std::vector<float> delta (1000, 0.0f);
+    delta[300] = 1.0f;
+    dw::ConvolutionKernel sparse;
+    sparse.prepare (partition, maxPartitions, 1);
+    sparse.addPath (0, 0, delta.data(), static_cast<int> (delta.size()));
+    CHECK (sparse.getPath (0).first == 300 / partition && sparse.getPath (0).count == 1);
+}
+
+void testConvolverCrossfade()
+{
+    std::printf ("Convolucion particionada: el kernel nuevo se funde en un bloque sin saltos (sin fundido, salta)\n");
+    // Con una entrada constante y el kernel que pasa de ×1 a ×0.5 con fundido: la salida baja en línea recta a lo largo
+    // de un bloque, sin saltos, y después se queda en 0.5. Sin fundido, salta de golpe.
+    constexpr int partition = 32;
+    std::vector<float> one { 1.0f }, half { 0.5f };
+    dw::ConvolutionKernel a, b;
+    a.prepare (partition, 4, 1);
+    b.prepare (partition, 4, 1);
+    a.addPath (0, 0, one.data(), 1);
+    b.addPath (0, 0, half.data(), 1);
+    for (const bool fade : { true, false })
+    {
+        dw::PartitionedConvolver convolver;
+        convolver.prepare (partition, 4, 1, 1);
+        convolver.setKernel (&a, false);
+        std::vector<float> in (static_cast<size_t> (8 * partition), 1.0f), out (in.size());
+        const float* input = in.data();
+        float* output = out.data();
+        convolver.process (&input, &output, 3 * partition);
+        CHECK (convolver.setKernel (&b, fade));
+        CHECK (convolver.hasPendingKernel() == fade);
+        CHECK (! fade || ! convolver.setKernel (&a, true)); // uno pendiente a la vez
+        input += 3 * partition;
+        output += 3 * partition;
+        convolver.process (&input, &output, 5 * partition);
+        CHECK (! convolver.hasPendingKernel() && convolver.getCurrentKernel() == &b);
+        float biggestStep = 0.0f;
+        for (size_t i = static_cast<size_t> (2 * partition); i + 1 < out.size(); ++i)
+            biggestStep = std::max (biggestStep, std::abs (out[i + 1] - out[i]));
+        CHECK (std::abs (out[static_cast<size_t> (4 * partition) - 1] - 1.0f) < 1.0e-6f);
+        CHECK (std::abs (out.back() - 0.5f) < 1.0e-6f);
+        if (fade)
+            CHECK (biggestStep < 0.5f / partition + 1.0e-5f);
+        else
+            CHECK (biggestStep > 0.49f);
+    }
+}
+
 } // namespace
 
 int main()
@@ -2042,6 +2213,9 @@ int main()
     testAnalyzerTap();
     testSpectrumAnalyzer();
     testTripleBuffer();
+    testRealFft();
+    testPartitionedConvolution();
+    testConvolverCrossfade();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de deepwater::dsp pasaron.\n");

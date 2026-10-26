@@ -81,6 +81,8 @@ FathomAudioProcessor::FathomAudioProcessor()
     phaseInvertParam = parameters.getRawParameterValue (id::phaseInvert);
     autoGainParam = parameters.getRawParameterValue (id::autoGain);
     analogResponseParam = parameters.getRawParameterValue (id::analogResponse);
+    phaseModeParam = parameters.getRawParameterValue (id::phaseMode);
+    linearQualityParam = parameters.getRawParameterValue (id::linearQuality);
     for (int b = 0; b < id::numBands; ++b)
     {
         auto& band = bandParams[static_cast<size_t> (b)];
@@ -123,6 +125,45 @@ FathomAudioProcessor::FathomAudioProcessor()
         if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter); ranged != nullptr && ranged != bypassParameter)
             undoable.push_back (ranged);
     history.attach (std::move (undoable));
+
+    // Fase 10: cambiar de modo de fase cambia la latencia; el host se entera desde el hilo de mensajes (no desde el
+    // audio: avisarle es una llamada al sistema).
+    startTimerHz (10);
+}
+
+FathomAudioProcessor::~FathomAudioProcessor()
+{
+    stopTimer();
+}
+
+fathom::dsp::PhaseMode FathomAudioProcessor::getPhaseMode() const noexcept
+{
+    return static_cast<fathom::dsp::PhaseMode> (juce::jlimit (0, fathom::dsp::numPhaseModes - 1, juce::roundToInt (phaseModeParam->load())));
+}
+
+int FathomAudioProcessor::getLinearQuality() const noexcept
+{
+    return juce::jlimit (0, fathom::dsp::numLinearQualities - 1, juce::roundToInt (linearQualityParam->load()));
+}
+
+double FathomAudioProcessor::getTailLengthSeconds() const
+{
+    // Después de la latencia todavía queda la segunda mitad del FIR (la cola del filtro).
+    const double sampleRate = preparedSampleRate.load (std::memory_order_relaxed);
+    switch (getPhaseMode())
+    {
+        case fathom::dsp::PhaseMode::linear: return fathom::dsp::PhaseSizes::linearLength (getLinearQuality(), sampleRate) / sampleRate;
+        case fathom::dsp::PhaseMode::natural: return fathom::dsp::PhaseSizes::naturalLength (sampleRate) / sampleRate;
+        case fathom::dsp::PhaseMode::zeroLatency: break;
+    }
+    return 0.0;
+}
+
+void FathomAudioProcessor::timerCallback()
+{
+    engine.providePhaseMemory(); // si se eligió fase natural o lineal por primera vez, su memoria (fuera del audio)
+    if (const int latency = engineLatency.load (std::memory_order_relaxed); latency != getLatencySamples())
+        setLatencySamples (latency);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::createParameterLayout()
@@ -157,6 +198,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
     // analógica; la diferencia está en las bandas agudas (con 44.1/48 kHz, sobre todo encima de ~8 kHz).
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::analogResponse, id::versionHintPhase7 },
                                                             "Analog Response", true));
+    // Fase 10. Cero latencia por defecto: un proyecto de las Fases 1-9 suena igual. La calidad solo cuenta en fase
+    // lineal (media: 4096 muestras a 44.1/48 kHz, 58 ms de latencia).
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::phaseMode, id::versionHintPhase10 }, "Phase Mode",
+                                                              juce::StringArray { "Zero Latency", "Natural Phase", "Linear Phase" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::linearQuality, id::versionHintPhase10 },
+                                                              "Linear Quality",
+                                                              juce::StringArray { "Low", "Medium", "High", "Very High", "Maximum" },
+                                                              fathom::dsp::defaultLinearQuality));
 
     // Las 24 bandas, apagadas. Rangos como los de un EQ profesional: 10 Hz-30 kHz (encima de Nyquist se limita),
     // ±30 dB y Q de 0.025 (casi 9 octavas de ancho) a 40 (un 1/36 de octava: para cazar una resonancia). Cada banda
@@ -254,7 +303,8 @@ fathom::dsp::BandSettings FathomAudioProcessor::getBandSettings (int band) const
                                          p.q->load(),
                                          static_cast<fathom::dsp::Shape> (juce::jlimit (0, fathom::dsp::numShapes - 1, juce::roundToInt (p.shape->load()))),
                                          juce::jlimit (0, static_cast<int> (fathom::dsp::slopes.size()) - 1, juce::roundToInt (p.slope->load())),
-                                         analogResponseParam->load() >= 0.5f,
+                                         // Con fase natural, siempre la analógica (el FIR corrige desde ahí).
+                                         analogResponseParam->load() >= 0.5f || getPhaseMode() == fathom::dsp::PhaseMode::natural,
                                          static_cast<fathom::dsp::Placement> (
                                              juce::jlimit (0, fathom::dsp::numPlacements - 1, juce::roundToInt (p.stereo->load()))) };
     auto& d = settings.dynamics;
@@ -278,11 +328,15 @@ fathom::dsp::Engine::BandArray FathomAudioProcessor::getAllBandSettings() const 
 
 void FathomAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlock*/)
 {
-    // Sin buffers propios: el motor procesa en el sitio y las tomas del analizador son de tamaño fijo.
+    // Sin buffers propios: el motor procesa en el sitio y las tomas del analizador son de tamaño fijo. El motor sí
+    // reserva aquí lo de los modos de fase (y arranca su hilo de diseño si no estamos renderizando offline).
     setOutputSettings();
+    engine.setRealtime (! isNonRealtime());
     engine.prepare (sampleRate, bypassParam->load() >= 0.5f, outputGainParam->load(), getAllBandSettings());
     analyzerSampleRate.store (sampleRate);
-    setLatencySamples (0);
+    preparedSampleRate.store (sampleRate);
+    engineLatency.store (engine.getLatencySamples());
+    setLatencySamples (engine.getLatencySamples());
 }
 
 void FathomAudioProcessor::releaseResources() {}
@@ -315,6 +369,7 @@ void FathomAudioProcessor::setOutputSettings() noexcept
     engine.setPan (outputPanParam->load() * 0.01f);
     engine.setPhaseInverted (phaseInvertParam->load() >= 0.5f);
     engine.setAutoGain (autoGainParam->load() >= 0.5f);
+    engine.setPhaseMode (getPhaseMode(), getLinearQuality());
 }
 
 namespace
@@ -441,6 +496,7 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     engine.setBypassed (bypassParam->load() >= 0.5f);
     engine.setOutputDb (outputGainParam->load());
+    engine.setRealtime (! isNonRealtime()); // renderizando offline, los FIR se diseñan aquí mismo (el render es siempre igual)
     setOutputSettings(); // antes de las bandas: la escala de ganancia se aplica al pasarlas
     for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
         engine.setBand (b, getBandSettings (b));
@@ -448,6 +504,7 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     engine.process (buffer.getArrayOfWritePointers(), numChannels, numSamples,
                     sidechainChannels > 0 ? sidechain.getArrayOfReadPointers() : nullptr, sidechainChannels);
     autoGainDb.store (engine.getAutoGainDb(), std::memory_order_relaxed);
+    engineLatency.store (engine.getLatencySamples(), std::memory_order_relaxed);
     for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
     {
         const auto& dynamics = engine.getDynamics (b);
