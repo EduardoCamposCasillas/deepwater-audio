@@ -160,7 +160,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 9 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
+Fase 9 COMPLETADA (2026-10-25). Probada por el usuario en FL Studio: funciona.
 - Cada banda con ganancia (campana, shelves, tilts) puede ser dinámica: `DynamicSettings` en `BandSettings::dynamics`
   (encendido, rango, umbral, ataque, liberación, umbral automático, detector externo) y `canBeDynamic(shape)`.
 - Detector (`dsp/Dynamics.h`, `BandDynamics`): la zona de `soloZoneFor` (con el canal de la banda; los tilts escuchan su
@@ -200,7 +200,7 @@ Fase 9 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
   azar cada bloque con un sidechain a golpes sin clic (cota a 1/4 de la de antes: sin interpolar los coeficientes sale
   entre 0.3 y 0.9 de la cota, con la interpolación < 0.08).
 - GUI revisada con una captura del Standalone (`PrintWindow`: `CopyFromScreen` falla en esta sesión) solo en reposo: los
-  clics simulados no llegan a la ventana. Lo interactivo (medidor, curva en vivo, línea del rango) falta verlo en FL.
+  clics simulados no llegan a la ventana. Lo interactivo (medidor, curva en vivo, línea del rango) lo revisó el usuario en FL.
 - Release con 0 warnings; FathomTests: todos pasan; ctest 7/8: UndertowTests falló en su test de CPU (21.0 % y 22.1 %
   contra 20 %, con Docker y el navegador abiertos; ni Undertow ni `libs/` cambiaron en esta fase); pluginval strictness
   10 ampliado: SUCCESS.
@@ -458,4 +458,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 9 en FL Studio; después, Fase 10 (modos de fase).
+Siguiente: Fase 10 (modos de fase).
