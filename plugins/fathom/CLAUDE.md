@@ -167,7 +167,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 10 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
+Fase 10 COMPLETADA (2026-10-25). Probada por el usuario en FL Studio: funciona.
 - Tres modos (`dsp/PhaseDesign.h`, `PhaseMode`): cero latencia (lo de siempre), natural y lineal. Parámetros nuevos
   (versionHint 10): `phaseMode` (Zero Latency / Natural Phase / Linear Phase, cero latencia por defecto: un proyecto de
   las Fases 1-9 suena igual) y `linearQuality` (Low / Medium / High / Very High / Maximum, Medium por defecto). Entran al
@@ -229,7 +229,7 @@ Fase 10 COMPLETADA (2026-10-25). Falta probarla en FL Studio.
   7.96 / 8.66 dB); automatización extrema en natural y lineal sin clic; mono (side = retardo exacto); solo en lineal;
   memoria a pedido. `DeepwaterDspTests`: `RealFft` contra `fft()` de 4 a 8192 puntos (float y double), convolución
   particionada = directa (< 1e-5, 3 caminos, bloques al azar), trozos vacíos salteados, fundido entre kernels.
-- GUI no revisada con capturas (esta vez el permiso para lanzar el script de captura fue denegado): revisarla en FL.
+- GUI no revisada con capturas (esta vez el permiso para lanzar el script de captura fue denegado): la revisó el usuario en FL.
 - Release con 0 warnings; FathomTests y DeepwaterDspTests: todos pasan; ctest 7/8: UndertowTests falló en su test de
   CPU (20.7 % y 20.9 % contra 20 %; ni Undertow ni lo que usa de `libs/` cambió: en la librería solo hay headers
   nuevos); pluginval strictness 10 ampliado: SUCCESS (antes y después de la memoria a pedido).
@@ -533,4 +533,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 10 en FL Studio; después, Fase 11 (dinámica espectral).
+Siguiente: Fase 11 (dinámica espectral).
