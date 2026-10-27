@@ -100,16 +100,20 @@ plugins/fathom/
     edit/EditHistory.h       # deshacer con JUCE: escucha los gestos de los parámetros (no la automatización del host);
                              # fotos y carga de todos los parámetros para el A/B
     edit/NodeEditing.h       # cuentas de la edición sin JUCE: arrastrar nodos, rueda = Q, banda libre, notas
+    edit/CurveFit.h          # Fase 12, sin JUCE: de una curva a bandas (grilla, codicioso + Levenberg-Marquardt)
+    edit/CurveTools.h        # Fase 12, sin JUCE: estado de IGUALAR y DIBUJAR (en el procesador), trazos y metas
     analysis/SpectrumView.h  # cuentas del analizador sin JUCE: inclinación, rango, resolución, balística, retención
                              # de picos, canales (mid/side), ajustes de la vista (ViewSettings) y búsqueda de picos
+    analysis/SpectrumMatch.h # Fase 12, sin JUCE: espectro promedio (LTAS) y la curva para igualar a una referencia
     gui/                     # tema (con el color de cada banda), LookAndFeel, formato de valores, atajos (Keys),
                              # visor (EqDisplay: cuadrícula, analizador, curvas, nodos editables, teclado de piano,
                              # agarrar picos, curvas por canal), BandEdits (cambiar parámetros con gestos), panel de
                              # la banda elegida (BandPanel, con SOLO, CANAL y la fila de la dinámica), ajustes del
                              # analizador (AnalyzerPanel), columna de salida
-                             # (OutputPanel: escala, auto gain, balance, polaridad, ganancia, fase y calidad)
+                             # (OutputPanel: escala, auto gain, balance, polaridad, ganancia, fase y calidad),
+                             # panel de IGUALAR y DIBUJAR (CurvePanel, Fase 12; el visor tiene las herramientas)
   tests/EngineTests.cpp    # tests del motor (con auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y
-                           # dinámica espectral), de la
+                           # dinámica espectral), de igualar y dibujar (ajuste de bandas, espectro promedio), de la
                            # edición y del analizador (sin JUCE)
 ```
 
@@ -159,7 +163,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       y fase "natural" propia (magnitud y fase del analógico); cambio de modo sin clics.
 - [x] Fase 11 — Dinámica espectral: una banda dinámica que actúa por bin de la FFT (solo donde hay exceso, no en toda
       la zona): domar resonancias que cambian con las notas.
-- [ ] Fase 12 — Igualar y dibujar: igualar el espectro a una referencia (sidechain) creando bandas; dibujar la curva a
+- [x] Fase 12 — Igualar y dibujar: igualar el espectro a una referencia (sidechain) creando bandas; dibujar la curva a
       mano y convertirla en bandas.
 - [ ] Fase 13 — Color analógico: modos limpio / sutil / cálido (saturación suave con sobremuestreo, con lo aprendido
       en Riptide).
@@ -170,7 +174,57 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 11 COMPLETADA (2026-10-26). Probada por el usuario en FL Studio: funciona.
+Fase 12 COMPLETADA (2026-10-27). Falta probarla en FL Studio.
+- Igualar y dibujar, todo en la GUI (sin parámetros nuevos ni cambios en el audio: un proyecto de las Fases 1-11 suena
+  igual). Botones IGUALAR y DIBUJAR en la cabecera del visor; con uno activo, `gui/CurvePanel.h` ocupa el lugar del panel
+  de la banda (el editor los alterna; Esc, SALIR o el mismo botón vuelven).
+- `edit/CurveFit.h` (sin JUCE): de una curva a bandas. Grilla `CurveGrid` de 1/24 de octava, 20 Hz-20 kHz (241 puntos);
+  `CurveTarget` = dB que deben sumar las bandas nuevas + peso por punto. `fitBands`: codicioso (en el mayor residuo con
+  peso: campana con la altura y el ancho a media altura → Q = 1/(2·sinh(N·ln2/2)); shelves desde el primer/último punto
+  con peso; cada candidato se afina solo con 15 iteraciones y gana el de menor error) + Levenberg-Marquardt de todas
+  (8 iteraciones por banda agregada, 40 al final; jacobiana por diferencias finitas de 1e-3 sobre
+  `Band::coefficientsFor`, ecuaciones normales con λ·diag, Cholesky). Parámetros en log2 Hz, dB y log2 Q; límites:
+  20 Hz-min(20 kHz, 0.45·fs), ±maxGainDb, Q de campana 0.15-12 y de shelf 0.35-1.0. Para: máximo de bandas, residuo
+  < 0.3 dB en todos los puntos o una banda que mejora < 2 %. Quita las que quedan en < 0.05 dB y ordena por frecuencia.
+  Medido: 2 campanas + 2 shelves exactos (0.000 dB, 4 bandas, ~20 ms); 24 bandas sobre un dibujo con escalones ~220 ms.
+- `analysis/SpectrumMatch.h` (sin JUCE): `AverageSpectrum` = suma de la potencia por bin de una FFT de 8192 (16384 a
+  88.2/96) de lo que deja la toma del analizador, por cuadro con audio nuevo; puerta de −70 dBFS RMS; `levelDb(hz,
+  octavas)` = potencia media de los bins en la ventana (o interpolada si es más angosta que un bin); otra fs lo borra.
+  `matchCurve` = referencia − pista suavizadas (1, 1/2, 1/3 por defecto, 1/6 oct), menos su promedio entre 50 Hz y
+  10 kHz, ±24 dB, × CANTIDAD; peso 0 donde alguno está 80 dB bajo su máximo o sobre 0.45·fs.
+- `edit/CurveTools.h`: el estado (lo aprendido, lo dibujado, CANTIDAD, SUAVIZADO, BANDAS, SUMAR/REEMPLAZAR), en el
+  procesador (`getCurveTools`, solo el hilo de la GUI; no se guarda en el proyecto). `draw`/`erase` rellenan los puntos
+  entre dos eventos del mouse. `drawnTarget`: lo dibujado donde se dibujó y la curva actual en el resto, todo con peso 1
+  (lo no dibujado se deja como está). `newBandsTarget`: lo pedido menos lo que ya suman las bandas (salvo REEMPLAZAR).
+- Lo que "ya hay" = las bandas encendidas en ESTÉREO, en reposo (sin la dinámica) y con la escala de ganancia; las de un
+  solo canal no cuentan (las herramientas crean bandas estéreo). El ajuste se hace en dB "como suenan" (máximo ±30 ×
+  escala) y al crear se divide por la escala (mínimo 5 %).
+- La referencia se aprende del sidechain o de la entrada (otra parte de la misma pista); TU PISTA, de la entrada (antes
+  del EQ). Aprender solo con IGUALAR a la vista (salir o cerrar la ventana lo apaga). La curva se recalcula 4 veces por
+  segundo mientras aprende; la vista previa (el ajuste) no se calcula mientras se aprende, se dibuja o se arrastra un
+  nodo, y como mucho cada 0.2 s.
+- Visor: IGUALAR = referencia aprendida (ámbar) y pista (gris punteada) en la escala del analizador con la inclinación,
+  curva pedida naranja punteada (en la escala del EQ, cortada donde no pesa), vista previa verde (la curva total con las
+  bandas nuevas); los nodos se siguen editando. DIBUJAR = arrastrar traza (naranja), clic derecho o Alt borra, Supr borra
+  el dibujo; los nodos, los picos, la rueda y el doble clic quedan quietos. Nota en la esquina ("IGUALAR: APRENDIENDO",
+  "REFERENCIA: SIDECHAIN SIN CONECTAR", "DIBUJAR: ...").
+- CREAR BANDAS: recalcula la vista previa, (REEMPLAZAR: devuelve a como nacen las bandas en uso) y la pone en las bandas
+  libres en orden, un solo paso de deshacer; quedan elegidas todas y se vuelve a la edición normal (DIBUJAR borra el
+  dibujo). `BandEdits::setSettings` ahora también pone el canal, la dinámica y la espectral (una banda libre reutilizada
+  o borrada no se queda con la dinámica que tuvo; el resto de los ajustes de la dinámica se conservan).
+- Tests nuevos `FathomTests`: reconstruir 2 campanas + 2 shelves a las 4 frecuencias de muestreo (< 0.3 dB, ≤ 6 bandas,
+  error informado = medido, orden por frecuencia); una campana sola (frecuencia y Q al 1-2 %, ganancia ±0.05 dB); plano
+  = 0 bandas, lo que no pesa no cuenta, el máximo y los límites se respetan con metas imposibles (±40 dB, un pozo de 1/10
+  de octava); espectro promedio (la puerta, los segundos, ruido con campana + shelf contra el mismo ruido 10 dB más
+  fuerte: la curva = las bandas sin su promedio, peor 0.12 dB entre 100 Hz y 15 kHz; CANTIDAD escala; sin datos no pide
+  nada; 3 bandas que deshacen el color: peor 0.14 dB; otra fs borra); dibujo (trazos sin huecos, la recta en log, un
+  clic = un punto, borrar, sumar/reemplazar, una meseta de 200-800 Hz: 5.7 dB en 400 Hz y ~0 lejos).
+- GUI: sin captura (el Standalone sale recortado por el escalado de pantalla): el panel, las curvas y el dibujo, revisarlos
+  en FL.
+- Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 11
+Probada por el usuario en FL Studio: funciona.
 - Dinámica espectral (`dsp/SpectralDynamics.h`, `SpectralStage`): una banda dinámica con ESPECTRAL decide por bin de una
   STFT en vez de mover la banda entera. Parámetro nuevo por banda (versionHint 11, al final del layout):
   `band<N>Spectral` (off: un proyecto de las Fases 1-10 suena igual). `DynamicSettings::spectral`, `canBeSpectral`
@@ -589,4 +643,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 12 (igualar y dibujar).
+Siguiente: probar la Fase 12 en FL Studio; después, Fase 13 (color analógico).

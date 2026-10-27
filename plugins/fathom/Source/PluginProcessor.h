@@ -5,6 +5,7 @@
 #include "analysis/SpectrumView.h"
 #include "deepwater/dsp/AnalyzerTap.h"
 #include "dsp/Engine.h"
+#include "edit/CurveTools.h"
 #include "edit/EditHistory.h"
 
 // Efecto mono/estéreo: 24 bandas de EQ con todas las formas y la ganancia de salida (Fase 3), editables sobre el visor
@@ -13,7 +14,7 @@
 // gain, escala de ganancia, balance, polaridad y comparación A/B. Cada banda en estéreo, L, R, mid o side y el
 // analizador también del side (Fase 8). EQ dinámico por banda, con el detector en la banda o en el sidechain (Fase 9).
 // Modos de fase cero latencia / natural / lineal, con la latencia informada al host (Fase 10). Dinámica espectral por banda
-// (Fase 11).
+// (Fase 11). Igualar a una referencia y dibujar la curva, convertidas en bandas (Fase 12: todo en la GUI).
 // El audio está en fathom::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
@@ -65,6 +66,10 @@ public:
 
     // Hilo de la GUI: deshacer/rehacer. Vive en el procesador y no en el editor: sobrevive a cerrar y abrir la ventana.
     fathom::edit::EditHistory& getEditHistory() noexcept { return history; }
+
+    // Fase 12, hilo de la GUI: lo aprendido para IGUALAR, lo dibujado y sus ajustes. Aquí y no en el editor por lo mismo
+    // que el historial; no se guarda en el proyecto (lo que queda son las bandas creadas).
+    fathom::edit::CurveTools& getCurveTools() noexcept { return curveTools; }
 
     // Hilo de la GUI: las tomas del analizador y la frecuencia de muestreo con la que se escribieron.
     const AnalyzerTap& getInputTap() const noexcept { return inputTap; }
@@ -175,6 +180,7 @@ private:
     std::array<LiveDynamics, fathom::dsp::Engine::numBands> dynamicStates;
     fathom::edit::EditHistory history; // después de 'parameters': se destruye antes (deja de escucharlos)
     fathom::edit::UndoStack otherSideHistory; // el historial del lado de la comparación que no está activo
+    fathom::edit::CurveTools curveTools;
 
     // Hilo de audio: el mid y el side de unos canales a sus tomas.
     static void pushTaps (AnalyzerTap& mid, AnalyzerTap& side, const float* const* channels, int numChannels, int numSamples) noexcept;

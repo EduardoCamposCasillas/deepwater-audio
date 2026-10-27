@@ -32,6 +32,11 @@ inline const juce::Colour curveLeft { 0xff6ec6ff };
 inline const juce::Colour curveRight { 0xffff8a80 };
 inline const juce::Colour curveSide { 0xffc6a6ff };
 
+// Fase 12: la curva que se pide (lo que hay que igualar o lo dibujado), naranja; la vista previa de lo que harían las
+// bandas, verde.
+inline const juce::Colour curveWanted { 0xffff9f43 };
+inline const juce::Colour curvePreview { 0xff6ee7a0 };
+
 // Cada banda tiene su color (el nodo, su relleno y las perillas cuando está elegida). Ocho tonos que se repiten: con
 // 24 bandas, la 1, la 9 y la 17 comparten color, pero rara vez se usan todas.
 inline juce::Colour bandColour (int band)

@@ -16,6 +16,7 @@
 #include "deepwater/dsp/SpectrumAnalyzer.h"
 #include "dsp/PhaseDesign.h"
 #include "dsp/Solo.h"
+#include "edit/CurveTools.h"
 #include "edit/NodeEditing.h"
 #include "gui/BandEdits.h"
 #include "gui/Format.h"
@@ -47,6 +48,10 @@ namespace fathom::gui
 //  - Agarrar un pico: con el mouse cerca de un pico del espectro aparece su marca (Hz y nota); clic y arrastrar = una
 //    campana nueva justo en ese pico (arrastrar hacia abajo = cortarlo). Ctrl mientras se arrastra un nodo = imán a los
 //    picos.
+//  - Igualar y dibujar (Fase 12), con los botones de arriba: IGUALAR aprende el espectro promedio de una referencia y el
+//    de la pista y muestra la curva que lleva la pista hacia la referencia (naranja); DIBUJAR deja trazar esa curva a
+//    mano (arrastrar = dibujar, clic derecho o Alt = borrar). En las dos, la línea verde es lo que harían las bandas que
+//    se crearían (edit/CurveFit.h); el panel de abajo (CurvePanel) las crea.
 //
 // Edición (Fase 4), pensada para no tener que ir al panel:
 //  - Doble clic en el vacío = crear una banda ahí (campana; en los extremos, un corte). Doble clic en un nodo = apagarla
@@ -93,6 +98,22 @@ public:
         };
         updateRangeText();
         addAndMakeVisible (rangeButton);
+
+        // Fase 12: las dos herramientas (una a la vez; la misma otra vez = salir).
+        matchButton.setTooltip (juce::String::fromUTF8 (
+            "Igualar a una referencia: Fathom aprende el espectro promedio de otra pista (por el sidechain) y el de la tuya, "
+            "y crea las bandas que llevan tu pista hacia el color de la referencia. Abajo aparecen sus controles."));
+        drawButton.setTooltip (juce::String::fromUTF8 (
+            "Dibujar la curva a mano: arrastra sobre el visor la forma que quieres y Fathom la convierte en bandas "
+            "(editables despuÃ©s como cualquier otra)."));
+        for (auto* button : { &matchButton, &drawButton })
+        {
+            button->setClickingTogglesState (false);
+            button->setColour (juce::TextButton::buttonOnColourId, theme::curveWanted.withAlpha (0.5f));
+            addAndMakeVisible (*button);
+        }
+        matchButton.onClick = [this] { setTool (tool == Tool::match ? Tool::none : Tool::match); };
+        drawButton.onClick = [this] { setTool (tool == Tool::draw ? Tool::none : Tool::draw); };
         setMouseCursor (juce::MouseCursor::CrosshairCursor);
         setWantsKeyboardFocus (true);
         selection.set (static_cast<size_t> (focusedBand));
@@ -122,6 +143,7 @@ public:
         bool changed = refreshBands (sampleRate);
         changed = refreshSpectral() || changed;
         changed = refreshPhaseCurve (sampleRate) || changed;
+        changed = updateCurveTool (sampleRate) || changed; // Fase 12
         const bool side = view.channels() == analysis::Channels::side;
         changed = updateTrace (input, side ? processor.getInputSideTap() : processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
         changed = updateTrace (output, side ? processor.getOutputSideTap() : processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
@@ -147,6 +169,8 @@ public:
             return;
         const bool newChannels = newView.channelsIndex != view.channelsIndex;
         const bool restartHold = newView.holdIndex != view.holdIndex || newView.tiltIndex != view.tiltIndex || newChannels;
+        // Fase 12: los espectros aprendidos se dibujan con la inclinación.
+        wantedDirty = wantedDirty || newView.tiltIndex != view.tiltIndex;
         view = newView;
         if (newChannels)
             for (auto* trace : traces())
@@ -183,6 +207,10 @@ public:
         auto title = area.removeFromTop (22.0f);
         rangeButton.setBounds (title.removeFromRight (64.0f).reduced (0.0f, 2.0f).toNearestInt());
         title.removeFromRight (12.0f);
+        drawButton.setBounds (title.removeFromRight (72.0f).reduced (0.0f, 2.0f).toNearestInt());
+        title.removeFromRight (4.0f);
+        matchButton.setBounds (title.removeFromRight (76.0f).reduced (0.0f, 2.0f).toNearestInt());
+        title.removeFromRight (12.0f);
         titleArea = title;
         area.removeFromTop (4.0f);
         zoneArea = area.removeFromBottom (16.0f);
@@ -212,6 +240,10 @@ public:
             curve.clear(); // ídem: llega con el próximo tramo
         phaseDb.clear(); // otra cantidad de puntos: se recalcula en el próximo cuadro
         phaseDirty = true;
+        referenceShown.clear(); // Fase 12: ídem
+        currentShown.clear();
+        previewDb.clear();
+        wantedDirty = previewDirty = true;
         updateTotalCurve();
     }
 
@@ -270,6 +302,7 @@ public:
             }
             paintAnalyzerStatus (g);
             paintCurve (g);
+            paintCurveTool (g);
             paintPeakMarker (g);
             paintLasso (g);
             paintNodeLabel (g);
@@ -290,6 +323,11 @@ public:
             return juce::String::fromUTF8 ("Las notas en su frecuencia (nombres de FL: C5 = Do central, A5 = 440 Hz). "
                                            "Clic en una tecla = llevar la banda del panel justo a esa nota: una campana "
                                            "afinada a la nota del 808, un notch en el tono que zumba.");
+        if (tool == Tool::draw && plot.contains (position))
+            return juce::String::fromUTF8 ("Arrastrar = dibujar la curva que quieres (en la escala del EQ, la de la "
+                                           "derecha). Clic derecho o Alt + arrastrar = borrar. Lo que no dibujes se queda "
+                                           "como est\xc3\xa1. La l\xc3\xadnea verde es lo que har\xc3\xad" "an las bandas; "
+                                           "CREAR BANDAS (abajo) las crea. Supr = borrar todo el dibujo, Esc = salir.");
         if (nodeAt (position) >= 0)
             return juce::String::fromUTF8 ("Arrastrar = frecuencia y ganancia (Shift = fino, Alt = un solo eje, Ctrl = "
                                            "im\xc3\xa1n a los picos del espectro). Rueda = Q. Doble clic = apagar/encender. "
@@ -309,6 +347,15 @@ public:
     void mouseMove (const juce::MouseEvent& event) override
     {
         mouse = event.position;
+        if (tool == Tool::draw) // dibujando, los nodos y los picos no se agarran
+        {
+            if (hoveredNode >= 0 || hoveredPeak >= 0)
+                repaint (plot.toNearestInt());
+            hoveredNode = hoveredPeak = -1;
+            setMouseCursor (pianoArea.contains (mouse) ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::CrosshairCursor);
+            repaintReadoutAndAxis();
+            return;
+        }
         const int node = nodeAt (mouse);
         const int peak = pickPeak();
         if (node != hoveredNode || peak != hoveredPeak)
@@ -350,6 +397,15 @@ public:
         }
         if (! plot.contains (event.position))
             return;
+
+        if (tool == Tool::draw) // Fase 12: un trazo (o borrar, con el botón derecho o Alt)
+        {
+            drag = Drag::draw;
+            erasing = event.mods.isPopupMenu() || event.mods.isAltDown();
+            drawLast = event.position;
+            drawTo (event.position);
+            return;
+        }
 
         const int node = nodeAt (event.position);
         if (node >= 0)
@@ -393,6 +449,12 @@ public:
     void mouseDrag (const juce::MouseEvent& event) override
     {
         mouse = event.position;
+        if (drag == Drag::draw)
+        {
+            drawTo (event.position);
+            repaintReadoutAndAxis();
+            return;
+        }
         if (drag == Drag::lasso)
         {
             lassoMoved = lassoMoved || event.position.getDistanceFrom (dragOrigin) > 3.0f;
@@ -448,6 +510,11 @@ public:
             finishLasso (lassoRectangle (event.position));
         if (drag == Drag::nodes && dragMoved && ! wheelEditing)
             edits.end();
+        if (drag == Drag::draw) // la vista previa se calcula al soltar (ajustar mientras se dibuja trabaría el trazo)
+        {
+            wantedDirty = previewDirty = true;
+            lastFitSeconds = 0.0;
+        }
         drag = Drag::none;
         grabbing = false;
         repaint (plot.toNearestInt());
@@ -455,7 +522,7 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& event) override
     {
-        if (! plot.contains (event.position) || event.mods.isPopupMenu() || lastClickGrabbed)
+        if (! plot.contains (event.position) || event.mods.isPopupMenu() || lastClickGrabbed || tool == Tool::draw)
             return;
         if (const int node = nodeAt (event.position); node >= 0)
         {
@@ -471,7 +538,7 @@ public:
 
     void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override
     {
-        const int node = nodeAt (event.position);
+        const int node = tool == Tool::draw ? -1 : nodeAt (event.position);
         if (node < 0)
             return;
         if (! selection.test (static_cast<size_t> (node)))
@@ -498,6 +565,17 @@ public:
 
     bool keyPressed (const juce::KeyPress& key) override
     {
+        // Fase 12: Esc sale de la herramienta; dibujando, Supr borra el dibujo (no las bandas).
+        if (key == juce::KeyPress::escapeKey && tool != Tool::none)
+        {
+            setTool (Tool::none);
+            return true;
+        }
+        if (tool == Tool::draw && (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey))
+        {
+            clearDrawing();
+            return true;
+        }
         if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
         {
             deleteSelection();
@@ -532,6 +610,123 @@ public:
     // Avisa al editor de qué banda mostrar en el panel (un clic en un nodo, una banda creada...).
     std::function<void (int)> onBandFocused;
 
+    // ---- Fase 12: igualar y dibujar ------------------------------------------------------------------------------------
+
+    enum class Tool
+    {
+        none,  // edición normal
+        match, // IGUALAR: la curva sale de los espectros aprendidos (los nodos se siguen editando)
+        draw,  // DIBUJAR: arrastrar sobre el visor traza la curva (los nodos quedan quietos)
+    };
+
+    Tool getTool() const noexcept { return tool; }
+
+    void setTool (Tool newTool)
+    {
+        if (newTool == tool)
+            return;
+        if (drag == Drag::nodes && dragMoved && ! wheelEditing) // Esc a mitad de un arrastre: el paso de deshacer se cierra
+            edits.end();
+        drag = Drag::none;
+        grabbing = false;
+        tool = newTool;
+        auto& tools = processor.getCurveTools();
+        if (tool != Tool::match) // sin la herramienta a la vista no se aprende (nadie ve cuánto lleva)
+            tools.learningReference = tools.learningCurrent = false;
+        matchButton.setToggleState (tool == Tool::match, juce::dontSendNotification);
+        drawButton.setToggleState (tool == Tool::draw, juce::dontSendNotification);
+        hoveredPeak = -1;
+        wantedDirty = previewDirty = true;
+        preview = {};
+        previewDb.clear();
+        if (onToolChanged)
+            onToolChanged (tool);
+        repaint();
+    }
+
+    std::function<void (Tool)> onToolChanged;
+
+    // Lo que el panel de la herramienta muestra.
+    struct CurveStatus
+    {
+        bool hasWanted = false;   // hay una curva que pedir (aprendida o dibujada)
+        bool previewReady = false; // la vista previa corresponde a lo de ahora
+        int bands = 0;            // las bandas que se crearían
+        int freeBands = 0;        // las que hay disponibles
+        float startErrorDb = 0.0f, maxErrorDb = 0.0f;
+    };
+
+    CurveStatus getCurveStatus() const
+    {
+        CurveStatus status;
+        status.hasWanted = std::any_of (wanted.weight.begin(), wanted.weight.end(), [] (float w) { return w > 0.0f; });
+        status.previewReady = ! previewDirty;
+        status.bands = static_cast<int> (preview.bands.size());
+        status.freeBands = freeBandCount();
+        status.startErrorDb = preview.startErrorDb;
+        status.maxErrorDb = preview.maxErrorDb;
+        return status;
+    }
+
+    // El panel cambió algo de CurveTools (aprender, cantidad, suavizado, máximo, reemplazar, borrar).
+    void curveSettingsChanged()
+    {
+        wantedDirty = previewDirty = true;
+        repaint();
+    }
+
+    void clearDrawing()
+    {
+        processor.getCurveTools().clearDrawing();
+        curveSettingsChanged();
+    }
+
+    // CREAR BANDAS: las de la vista previa (calculada de nuevo, por si algo cambió), en bandas libres, como un solo paso de
+    // deshacer. Quedan elegidas (para moverlas juntas) y se vuelve a la edición normal. Devuelve cuántas se crearon.
+    int createBandsFromCurve()
+    {
+        refreshBands (processor.getAnalyzerSampleRate());
+        if (tool == Tool::match)
+            updateWanted();
+        computePreview();
+        if (preview.bands.empty())
+            return 0;
+        auto& tools = processor.getCurveTools();
+        const float scale = curveScale();
+        edits.begin();
+        if (tools.replace)
+            for (int b = 0; b < dsp::Engine::numBands; ++b)
+                if (inUse (b))
+                    edits.reset (b);
+        std::bitset<dsp::Engine::numBands> created;
+        size_t next = 0;
+        for (int b = 0; b < dsp::Engine::numBands && next < preview.bands.size(); ++b)
+        {
+            if (! tools.replace && inUse (b))
+                continue;
+            auto settings = preview.bands[next++];
+            // Las bandas se ajustaron en dB "como suenan": con la escala de ganancia, el parámetro es eso dividido por ella.
+            settings.gainDb = juce::jlimit (dsp::BandSettings::minGainDb, dsp::BandSettings::maxGainDb, settings.gainDb / scale);
+            edits.setSettings (b, settings);
+            created.set (static_cast<size_t> (b));
+        }
+        edits.end();
+        if (tool == Tool::draw)
+            tools.clearDrawing();
+        const int count = static_cast<int> (created.count());
+        setTool (Tool::none);
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (created.test (static_cast<size_t> (b)))
+            {
+                selectOnly (b);
+                break;
+            }
+        selection |= created;
+        refreshNow();
+        repaint();
+        return count;
+    }
+
 private:
     struct Trace
     {
@@ -549,6 +744,7 @@ private:
         none,
         nodes, // moviendo los nodos elegidos
         lasso, // rectángulo de selección
+        draw,  // Fase 12: trazando (o borrando) la curva a mano
     };
 
     // Las zonas del mapa de frecuencias (aproximadas: cada instrumento las cruza, pero sirven para ubicarse).
@@ -881,7 +1077,10 @@ private:
             const bool dynamic = settings.enabled && settings.dynamics.enabled && dsp::canBeDynamic (settings.shape) && ! dsp::isSpectral (settings);
             const float live = dynamic ? processor.getDynamicState (b).gainDb : 0.0f;
             const bool moved = std::abs (live - liveDb[index]) >= 0.05f || (live == 0.0f) != (liveDb[index] == 0.0f);
-            if (allBands || moved || ! sameSettings (settings, paintedBands[index]))
+            const bool edited = ! sameSettings (settings, paintedBands[index]);
+            // Fase 12: lo que piden las herramientas depende de las bandas de ahora (no de lo que mueve la dinámica).
+            previewDirty = previewDirty || edited || allBands;
+            if (allBands || moved || edited)
             {
                 paintedBands[index] = settings;
                 liveDb[index] = live;
@@ -1113,7 +1312,7 @@ private:
     int pickPeak() const noexcept
     {
         const auto* trace = grabTrace();
-        if (trace == nullptr || peaks.empty() || ! plot.contains (mouse) || nodeAt (mouse) >= 0 || trace->shown.size() < 2)
+        if (tool == Tool::draw || trace == nullptr || peaks.empty() || ! plot.contains (mouse) || nodeAt (mouse) >= 0 || trace->shown.size() < 2)
             return -1;
         const float step = plot.getWidth() / static_cast<float> (trace->shown.size() - 1);
         const int peak = analysis::nearestPeak (peaks, static_cast<double> ((mouse.x - plot.getX()) / step), static_cast<double> (peakGrabPixels / step));
@@ -1668,6 +1867,259 @@ private:
             }
     }
 
+    // ---- Fase 12: igualar y dibujar ------------------------------------------------------------------------------------
+
+    // La escala de ganancia con que se crean las bandas (con 0 % no se podría: lo poco que se deja es un mínimo).
+    float curveScale() const noexcept { return std::max (paintedScale, 0.05f); }
+
+    // Cuántas bandas se pueden crear: las libres, o todas si se reemplazan.
+    int freeBandCount() const noexcept
+    {
+        if (processor.getCurveTools().replace)
+            return dsp::Engine::numBands;
+        int count = 0;
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            count += inUse (b) ? 0 : 1;
+        return count;
+    }
+
+    // Las bandas que cuentan como "lo que ya hay": las encendidas en estéreo, en reposo (sin lo que mueve la dinámica) y
+    // con la escala de ganancia. Las de un solo canal no entran: las herramientas crean bandas estéreo.
+    std::vector<deepwater::dsp::EqCascade> existingCascades() const
+    {
+        std::vector<deepwater::dsp::EqCascade> cascades;
+        if (curveSampleRate <= 0.0)
+            return cascades;
+        for (auto settings : paintedBands)
+            if (settings.enabled && settings.placement == dsp::Placement::stereo)
+            {
+                settings.gainDb *= paintedScale;
+                cascades.push_back (dsp::Band::coefficientsFor (settings, curveSampleRate));
+            }
+        return cascades;
+    }
+
+    edit::CurveValues existingGrid() const
+    {
+        edit::CurveValues total {};
+        for (const auto& cascade : existingCascades())
+            for (int i = 0; i < edit::CurveGrid::points; ++i)
+                total[static_cast<size_t> (i)] += static_cast<float> (cascade.magnitudeDb (edit::CurveGrid::hz (i), curveSampleRate));
+        return total;
+    }
+
+    // Una vez por cuadro con una herramienta: aprender, recalcular lo que se pide y la vista previa. Devuelve true si
+    // algo visible cambió.
+    bool updateCurveTool (double sampleRate)
+    {
+        if (tool == Tool::none)
+            return false;
+        auto& tools = processor.getCurveTools();
+        bool changed = false;
+        const bool learning = tool == Tool::match && (tools.learningReference || tools.learningCurrent);
+        if (tool == Tool::match)
+        {
+            tools.reference.prepare (sampleRate);
+            tools.current.prepare (sampleRate);
+            bool learned = false;
+            if (tools.learningReference)
+                learned = tools.reference.feed (tools.referenceSource == 0 ? processor.getSidechainTap() : processor.getInputTap());
+            if (tools.learningCurrent)
+                learned = tools.current.feed (processor.getInputTap()) || learned;
+            wantedDirty = wantedDirty || learned;
+            // Aprendiendo, la curva se recalcula 4 veces por segundo (cambia poco de un cuadro a otro).
+            if (wantedDirty && (! learning || nowSeconds() - lastWantedSeconds >= wantedRefreshSeconds))
+            {
+                updateWanted();
+                changed = true;
+            }
+        }
+        else if (wantedDirty && drag != Drag::draw)
+        {
+            updateWanted();
+            changed = true;
+        }
+        // La vista previa cuesta (de unos ms a ~0.2 s con 24 bandas): no mientras se aprende, se dibuja o se arrastra un
+        // nodo, y como mucho 5 veces por segundo (girar una perilla del panel no la recalcula en cada paso).
+        if (learning && ! previewDb.empty())
+        {
+            previewDb.clear();
+            preview = {};
+            changed = true;
+        }
+        if (previewDirty && ! learning && drag == Drag::none && ! wheelEditing && nowSeconds() - lastFitSeconds >= 0.2)
+        {
+            computePreview();
+            changed = true;
+        }
+        return changed;
+    }
+
+    // Lo que se pide en total: la curva de igualar (y los espectros aprendidos para dibujarlos) o lo dibujado.
+    void updateWanted()
+    {
+        wantedDirty = false;
+        lastWantedSeconds = nowSeconds();
+        previewDirty = true;
+        const auto& tools = processor.getCurveTools();
+        if (tool == Tool::draw)
+        {
+            wanted = edit::drawnTarget (tools, existingGrid());
+            return;
+        }
+        if (tool != Tool::match)
+        {
+            wanted = {};
+            return;
+        }
+        const double octaves = analysis::matchSmoothingOctaves[static_cast<size_t> (std::clamp (tools.smoothingIndex, 0, 3))];
+        wanted = analysis::matchCurve (tools.reference, tools.current, octaves, tools.amount);
+        const auto points = curveDb.size();
+        const auto shown = [&] (const analysis::AverageSpectrum& spectrum, std::vector<float>& out) {
+            out.clear();
+            if (! spectrum.hasData() || points < 2)
+                return;
+            out.resize (points);
+            for (size_t i = 0; i < points; ++i)
+            {
+                const double hz = pointHz (i, points);
+                out[i] = spectrum.levelDb (hz, octaves) + analysis::tiltDb (hz, view.tilt());
+            }
+        };
+        shown (tools.reference, referenceShown);
+        shown (tools.current, currentShown);
+    }
+
+    // Ajusta las bandas a lo que se pide (edit/CurveFit.h) y la curva total que quedaría con ellas.
+    void computePreview()
+    {
+        previewDirty = false;
+        lastFitSeconds = nowSeconds();
+        preview = {};
+        previewDb.clear();
+        if (curveSampleRate <= 0.0)
+            return;
+        const auto& tools = processor.getCurveTools();
+        const auto existing = existingGrid();
+        if (tool == Tool::draw) // lo no dibujado sigue a las bandas de ahora
+            wanted = edit::drawnTarget (tools, existing);
+        if (std::none_of (wanted.weight.begin(), wanted.weight.end(), [] (float w) { return w > 0.0f; }))
+            return;
+        edit::FitOptions options;
+        options.sampleRate = curveSampleRate;
+        options.analog = paintedBands[0].analog; // el ajuste global (todas las bandas lo tienen igual)
+        options.maxBands = std::min (tools.maxBands, freeBandCount());
+        options.maxGainDb = dsp::BandSettings::maxGainDb * curveScale();
+        preview = edit::fitBands (edit::newBandsTarget (wanted, existing, tools.replace), options);
+
+        const auto points = curveDb.size();
+        if (points < 2)
+            return;
+        std::vector<deepwater::dsp::EqCascade> cascades;
+        if (! tools.replace)
+            cascades = existingCascades();
+        for (const auto& band : preview.bands)
+            cascades.push_back (dsp::Band::coefficientsFor (band, curveSampleRate));
+        previewDb.assign (points, 0.0f);
+        for (size_t i = 0; i < points; ++i)
+            for (const auto& cascade : cascades)
+                previewDb[i] += static_cast<float> (cascade.magnitudeDb (pointHz (i, points), curveSampleRate));
+    }
+
+    // Un tramo del trazo, desde el evento anterior del mouse: dibuja (lo que deben sumar las bandas en la altura del
+    // mouse, sin la salida) o borra.
+    void drawTo (juce::Point<float> position)
+    {
+        auto& tools = processor.getCurveTools();
+        const auto hzAt = [this] (float x) { return static_cast<double> (xToHz (juce::jlimit (plot.getX(), plot.getRight(), x))); };
+        const auto dbAt = [this] (float y) {
+            return juce::jlimit (-eqRange(), eqRange(), yToEqDb (juce::jlimit (plot.getY(), plot.getBottom(), y))) - paintedGainDb;
+        };
+        if (erasing)
+            tools.erase (hzAt (drawLast.x), hzAt (position.x));
+        else
+            tools.draw (hzAt (drawLast.x), dbAt (drawLast.y), hzAt (position.x), dbAt (position.y));
+        drawLast = position;
+        wantedDirty = previewDirty = true;
+        repaint (plot.toNearestInt());
+    }
+
+    // Unos valores de la grilla (dB que suman las bandas) como líneas, cortadas donde 'keep' dice que no.
+    template <typename Keep>
+    juce::Path gridPath (const edit::CurveValues& db, Keep&& keep) const
+    {
+        juce::Path path;
+        bool open = false;
+        const float top = plot.getY() + 1.0f, bottom = plot.getBottom() - 1.0f;
+        for (int i = 0; i < edit::CurveGrid::points; ++i)
+        {
+            const auto at = static_cast<size_t> (i);
+            if (! keep (at))
+            {
+                open = false;
+                continue;
+            }
+            const juce::Point<float> point { hzToX (static_cast<float> (edit::CurveGrid::hz (i))),
+                                             juce::jlimit (top, bottom, eqDbToY (db[at] + paintedGainDb)) };
+            if (open)
+                path.lineTo (point);
+            else
+                path.startNewSubPath (point);
+            open = true;
+        }
+        return path;
+    }
+
+    // IGUALAR: los espectros aprendidos (referencia ámbar, pista gris punteada, en la escala del analizador) y la curva
+    // que se pide (naranja punteada). DIBUJAR: el trazo (naranja; un punto suelto, un círculo). Las dos: la vista previa
+    // (verde: la curva total con las bandas que se crearían).
+    void paintCurveTool (juce::Graphics& g) const
+    {
+        if (tool == Tool::none || curveDb.size() < 2)
+            return;
+        const auto& tools = processor.getCurveTools();
+        const float dashes[] { 5.0f, 4.0f };
+        if (tool == Tool::match)
+        {
+            if (referenceShown.size() == curveDb.size())
+            {
+                g.setColour (theme::spectrumSidechain.withAlpha (0.9f));
+                g.strokePath (tracePath (referenceShown, false), juce::PathStrokeType (1.8f));
+            }
+            if (currentShown.size() == curveDb.size())
+            {
+                juce::Path dashed;
+                juce::PathStrokeType (1.6f).createDashedStroke (dashed, tracePath (currentShown, false), dashes, 2);
+                g.setColour (theme::spectrumIn.withAlpha (0.9f));
+                g.fillPath (dashed);
+            }
+            juce::Path dashed;
+            juce::PathStrokeType (2.4f).createDashedStroke (dashed, gridPath (wanted.db, [this] (size_t i) { return wanted.weight[i] > 0.0f; }),
+                                                            dashes, 2);
+            g.setColour (theme::curveWanted);
+            g.fillPath (dashed);
+        }
+        else
+        {
+            g.setColour (theme::curveWanted);
+            g.strokePath (gridPath (tools.drawnDb, [&tools] (size_t i) { return tools.drawn[i]; }),
+                          juce::PathStrokeType (2.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            for (int i = 0; i < edit::CurveGrid::points; ++i) // los puntos sueltos (un clic sin arrastrar)
+            {
+                const auto at = static_cast<size_t> (i);
+                const bool alone = tools.drawn[at] && (i == 0 || ! tools.drawn[at - 1]) && (i == edit::CurveGrid::points - 1 || ! tools.drawn[at + 1]);
+                if (alone)
+                    g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre (
+                        { hzToX (static_cast<float> (edit::CurveGrid::hz (i))), eqDbToY (tools.drawnDb[at] + paintedGainDb) }));
+            }
+        }
+        if (! previewDirty && previewDb.size() == curveDb.size())
+        {
+            g.setColour (theme::curvePreview.withAlpha (0.95f));
+            g.strokePath (curvePath (previewDb, paintedGainDb), juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+    }
+
     // La retención de picos: una línea fina por encima del espectro.
     void paintHeld (juce::Graphics& g, const Trace& trace, juce::Colour colour) const
     {
@@ -1691,6 +2143,18 @@ private:
         };
         if (frozen)
             note ("CONGELADO", theme::accent);
+        // Fase 12: la herramienta activa.
+        if (tool == Tool::match)
+        {
+            const auto& tools = processor.getCurveTools();
+            note (tools.learningReference || tools.learningCurrent ? "IGUALAR: APRENDIENDO" : "IGUALAR", theme::curveWanted);
+            if (tools.referenceSource == 0 && ! sidechainConnected)
+                note ("REFERENCIA: SIDECHAIN SIN CONECTAR", theme::spectrumSidechain);
+        }
+        else if (tool == Tool::draw)
+        {
+            note ("DIBUJAR: ARRASTRA PARA TRAZAR (CLIC DERECHO = BORRAR)", theme::curveWanted);
+        }
         // Fase 10: con fase lineal o natural la curva es la del FIR (y con curvas por canal, la guía de las bandas).
         if (paintedMode != dsp::PhaseMode::zeroLatency)
             note (juce::String (paintedMode == dsp::PhaseMode::linear ? "FASE LINEAL" : "FASE NATURAL")
@@ -1917,6 +2381,19 @@ private:
     // Rueda.
     bool wheelEditing = false;
     double lastWheelSeconds = 0.0;
+
+    // Fase 12: la herramienta, lo que se pide en total (dB por punto de la grilla), las bandas de la vista previa y la
+    // curva total con ellas (sin la salida, por punto del visor), los espectros aprendidos (por punto, con la
+    // inclinación) y el trazo en curso.
+    juce::TextButton matchButton { "IGUALAR" }, drawButton { "DIBUJAR" };
+    Tool tool = Tool::none;
+    edit::CurveTarget wanted;
+    edit::FitResult preview;
+    std::vector<float> previewDb, referenceShown, currentShown;
+    bool wantedDirty = true, previewDirty = true, erasing = false;
+    double lastWantedSeconds = 0.0, lastFitSeconds = 0.0;
+    juce::Point<float> drawLast;
+    static constexpr double wantedRefreshSeconds = 0.25;
 };
 
 } // namespace fathom::gui

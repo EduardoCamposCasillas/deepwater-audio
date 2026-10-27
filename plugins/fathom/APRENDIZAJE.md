@@ -1275,3 +1275,134 @@ separados? ¿Qué ventaja tiene que el corte sea por frecuencia y no de toda la 
 - **Mientras grabas o tocas en vivo**: 46 ms de latencia se sienten.
 - **En el master "por las dudas"**: un supresor que corta todo el tiempo aplana el carácter de la mezcla; primero busca
   la resonancia con SOLO y úsalo solo donde hace falta.
+
+## Fase 12 — Igualar y dibujar: de una curva a bandas
+
+Dos formas nuevas de decirle al EQ qué hacer sin mover nodos uno por uno. **IGUALAR** escucha una referencia (una
+canción cuyo sonido te gusta) y tu pista, y propone la curva que acerca tu balance tonal al de la referencia. **DIBUJAR**
+te deja trazar a mano la forma que imaginas. En las dos, Fathom convierte esa curva en bandas normales (campanas y
+shelves) que después retocas como cualquier otra: no es una "caja negra", es un punto de partida.
+
+### Conceptos aprendidos
+
+- **El espectro promedio (LTAS).** El analizador muestra el ahora: 93 ms que saltan con cada nota y cada golpe. Para
+  hablar del "color" de una mezcla hace falta lo contrario: el promedio de muchos segundos, donde las notas se reparten y
+  queda el balance (cuánto grave, cuánto medio, cuánto brillo). Fathom suma la **potencia** de cada franja de una FFT de
+  186 ms (8192 muestras: 5.4 Hz por franja, buen detalle en graves) en cada cuadro mientras APRENDER está encendido, y
+  divide por cuántos cuadros sumó. Los trozos de menos de −70 dBFS (silencios, colas) no cuentan.
+- **Suavizado en fracciones de octava.** El promedio todavía tiene picos en las notas que más se repiten en esa canción
+  (la tonalidad, la nota del 808). Antes de comparar, cada punto se reemplaza por la potencia media de la ventana de, por
+  ejemplo, 1/3 de octava a su alrededor. Con 1 octava solo queda el balance grueso; con 1/6 la curva empieza a copiar
+  detalles de la otra canción (que no tienen nada que ver con tu tema).
+- **La curva de igualar = referencia − tu pista**, en dB, punto por punto: positiva donde a tu pista le falta, negativa
+  donde le sobra. Se le resta su **promedio entre 50 Hz y 10 kHz**: una referencia masterizada 8 dB más fuerte no debe
+  convertirse en "+8 dB en todas partes". Igualar es sobre el color, no sobre el volumen (para el volumen, AUTO GAIN y tu
+  oído). Donde alguno de los dos no tiene energía real (80 dB bajo su punto más fuerte, o arriba de 0.45·fs) la curva no
+  pide nada: restar dos ruidos de fondo daría números sin sentido.
+- **De una curva a bandas: ajuste de curvas.** Ninguna fórmula dice "esta curva son estas 5 campanas", porque la
+  respuesta de una banda no es lineal en sus parámetros (mover la frecuencia desplaza toda la campana). Fathom lo resuelve
+  como un problema de **mínimos cuadrados no lineales**, en dos pasos:
+  1. **Codicioso**: busca dónde la curva se aleja más de lo que ya suman las bandas (el "residuo") y pone ahí una banda
+     con una estimación a ojo: la altura del residuo como ganancia y el ancho a media altura como Q (es la definición del
+     Q de una campana). En los extremos prueba también un shelf, y se queda con la opción que más reduce el error.
+  2. **Levenberg-Marquardt** afina todas las bandas juntas: mide cuánto cambia la curva al mover un poquito cada
+     frecuencia, ganancia y Q (con la respuesta exacta de la banda: los mismos coeficientes que suenan), resuelve hacia
+     dónde moverlas para bajar el error y acepta el paso solo si baja de verdad. Su parámetro λ alterna entre "saltar
+     directo a la solución" (rápido cuando está cerca) y "dar un pasito cuesta abajo" (seguro cuando está lejos).
+  Se repite hasta el máximo de BANDAS, hasta que la curva se cumple (0.3 dB) o hasta que otra banda mejoraría menos del
+  2 %. Medido: dos campanas y dos shelves se reconstruyen exactos (error 0.000 dB, 4 bandas, ~20 ms); una campana sola
+  sale con su frecuencia, ganancia y Q al 0.1 %.
+- **Lo no dibujado se deja como está.** En DIBUJAR, donde no trazaste nada la meta es la curva que ya tienes: las bandas
+  nuevas solo cambian lo que dibujaste (si no, una campana ancha podría "derramarse" sobre zonas que no tocaste).
+- **Sumar o reemplazar.** SUMAR: las bandas nuevas van en las libres y solo agregan lo que falta respecto de lo que ya
+  hacen las tuyas. REEMPLAZAR: las tuyas se borran y las nuevas hacen toda la curva (en DIBUJAR, también reconstruyen lo
+  que no dibujaste).
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **IGUALAR** y **DIBUJAR** (arriba del visor, junto a la escala): entran a cada herramienta; el panel de abajo cambia al
+  de la herramienta. El mismo botón otra vez, SALIR o Esc vuelven a la edición normal.
+- **REFERENCIA · APRENDER** (y "del sidechain" / "de la entrada"): suma el espectro de la referencia mientras está
+  encendido; el botón cuenta los segundos. **TU PISTA · APRENDER**: lo mismo con lo que entra a Fathom ANTES del EQ (lo
+  que ya hacen tus bandas no ensucia lo aprendido). Pueden aprender a la vez. **BORRAR**: empieza de cero.
+- **CANTIDAD**: cuánto de la diferencia se pide (100 % = el balance de la referencia). **SUAVIZADO**: 1 oct, 1/2, 1/3
+  (por defecto) o 1/6: cuánto detalle copia.
+- **BANDAS**: el máximo de bandas (usa menos si alcanzan). **SUMAR / REEMPLAZAR**: ver arriba (las bandas de un solo
+  canal, L/R/M/S, no se cuentan: las herramientas crean bandas estéreo). **CREAR BANDAS**: las crea como un solo paso de
+  DESHACER y quedan elegidas todas (arrastrar una las mueve juntas; la rueda cambia el Q de todas; la escala de ganancia
+  de SALIDA las agranda o achica juntas).
+- **En el visor (IGUALAR)**: la línea **ámbar** es la referencia aprendida y la **gris punteada** tu pista (los dos
+  suavizados, en la escala del analizador); la **naranja punteada** es la curva que se pide (en la escala del EQ); la
+  **verde** es la curva total que quedaría con las bandas nuevas. Los nodos siguen editables.
+- **En el visor (DIBUJAR)**: arrastrar traza (naranja, en la escala del EQ); clic derecho o Alt + arrastrar borra; Supr
+  borra todo el dibujo. Al soltar aparece la verde.
+- El panel dice cuántas bandas usaría la vista previa y cuánto se aleja todavía de lo pedido ("se aleja 0.8 dB como
+  mucho"). La vista previa se calcula al soltar el mouse o al apagar APRENDER (con 24 bandas tarda ~0.2 s).
+- Lo aprendido y lo dibujado viven mientras el proyecto está abierto (aunque cierres la ventana de Fathom); no se guardan
+  en el proyecto: lo que queda son las bandas.
+
+### Ejercicio de escucha guiado en FL Studio
+
+Elige una canción de reggaetón cuyo sonido te guste (la referencia) y un beat tuyo en el que estés trabajando. Pon
+Fathom en un bus que tenga todo el beat (o en el master, antes del limitador) con AUTO GAIN encendido.
+1. **Mandar la referencia.** Carga la canción en una pista del mixer de FL, saca su salida del master (para no oírla
+   mezclada) y mándala a la pista de Fathom como sidechain (con la pista de la referencia elegida, clic derecho en la
+   flecha de la pista de Fathom → "Sidechain to this track"). En Fathom, IGUALAR; abajo, la REFERENCIA debe decir "del
+   sidechain".
+2. **Aprender.** Reproduce el coro (o la parte más llena) y enciende APRENDER en los dos. 20-30 s bastan. Apágalos.
+   Mira: ¿dónde está la ámbar por encima de la gris? Eso es lo que le falta a tu beat.
+3. **Leer la curva naranja antes de crear nada.** ¿Pide más sub (20-60 Hz)? ¿Menos barro (250-500)? ¿Más aire (10 kHz+)?
+   Di en voz alta qué crees que vas a oír.
+4. **Crear y comparar.** CANTIDAD 100 %, BANDAS 8, CREAR BANDAS. Alterna BYPASS con AUTO GAIN encendido (el volumen
+   igualado): ¿se parece más el color a la referencia? Ahora baja la escala de ganancia de SALIDA a 50 %: muchas veces
+   suena mejor (acerca el color sin copiarlo).
+5. **Suavizado.** Ctrl+Z, vuelve a IGUALAR, cambia a 1/6 oct: la naranja se llena de picos (las notas de la otra
+   canción). Escucha si eso suma o solo "ensucia". Vuelve a 1 oct: solo el balance grueso.
+
+### Receta: un beat que suena "chico" al lado de la referencia
+
+1. Fathom en el bus del beat (no después del limitador del master). AUTO GAIN encendido.
+2. IGUALAR, referencia por sidechain, aprende 20-30 s de la parte más llena de los dos (coro con el beat completo).
+3. SUAVIZADO 1/3 oct, CANTIDAD 60-70 %, BANDAS 6, SUMAR.
+4. CREAR BANDAS y revísalas una por una con SOLO: borra las que corrijan algo que es del arreglo y no de la mezcla (si la
+   referencia tiene una guitarra en 2 kHz y tu beat no, una campana de +5 dB en 2 kHz no va a inventar la guitarra).
+5. Compara con BYPASS a volumen igualado. Si suena más "grande", deja; si suena "procesado", baja la escala de SALIDA.
+
+Por qué funciona: el "tamaño" de un beat de reggaetón está casi siempre en el balance de los extremos (sub del 808 y
+aire de los hi-hats) contra los medios. La referencia ya resolvió ese balance; igualar te dice cuánto te alejas y crea
+las bandas anchas que lo corrigen, a una fracción (CANTIDAD) para no perder tu carácter.
+
+### Reto sin receta
+
+Dibuja a mano la curva de "voz de teléfono" (o de radio vieja) para un efecto de transición en la intro: sin graves, sin
+agudos, un poco nasal. Hazlo con 4 bandas como mucho y que suene creíble. Pistas (si no sale): ¿entre qué frecuencias
+vive el sonido de un teléfono? ¿Qué pasa con la verde si el dibujo baja más rápido de lo que una campana o un shelf
+pueden bajar? ¿Qué forma de banda, de las que no crea DIBUJAR, haría esa caída mejor? Después compáralo con hacerlo a
+mano con un pasa banda.
+
+### Vocabulario
+
+- **LTAS (long-term average spectrum)**: el espectro promedio de muchos segundos; el "balance tonal" de una mezcla.
+- **Balance tonal**: cuánto pesan los graves, los medios y los agudos entre sí (independiente del volumen).
+- **Suavizado en fracciones de octava**: promediar cada punto con sus vecinos dentro de 1/N de octava.
+- **EQ de igualación (match EQ)**: un EQ que copia el balance tonal de una referencia. **Ejemplo real**: al masterizar
+  reggaetón y trap es común comparar con 2-3 temas del mismo estilo y usar un match EQ a 30-60 % como punto de partida,
+  nunca al 100 %.
+- **Mínimos cuadrados**: elegir los parámetros que hacen más chica la suma de los errores al cuadrado.
+- **Levenberg-Marquardt**: el método clásico para mínimos cuadrados no lineales (mezcla de Gauss-Newton y descenso).
+- **Residuo**: lo que todavía falta: la meta menos lo que ya se consiguió.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Igualar al 100 % y listo**: la referencia tiene otro arreglo, otros instrumentos, otra tonalidad. Igualar copia el
+  balance, no la canción: usa CANTIDAD 50-70 % y escucha.
+- **Comparar partes distintas**: el coro de la referencia contra la intro de tu beat da una curva enorme y falsa. Aprende
+  partes equivalentes (las dos llenas).
+- **Igualar sin el volumen igualado**: la curva no cuenta el volumen, pero tu oído sí. AUTO GAIN encendido al comparar.
+- **Referencia con otro master**: una referencia limitada muy fuerte tiene los graves aplastados por el limitador; tu
+  beat sin master no se le va a parecer en los graves solo con EQ. Mejor una referencia menos exprimida.
+- **Corregir con EQ lo que es de arreglo**: si falta una guitarra, ninguna campana la crea. Borra esas bandas.
+- **Dibujar paredes**: una caída vertical de 30 dB no la hace ninguna campana o shelf; la verde muestra hasta dónde se
+  llega. Para cortar, un corte de graves/agudos con su pendiente (créalo a mano).
+- **Aprender sin audio**: APRENDER necesita la ventana de Fathom abierta y audio sonando (los silencios no cuentan).
+  Igualar no agrega latencia: lo que crea son bandas normales.

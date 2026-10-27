@@ -4,6 +4,7 @@
 
 #include "gui/AnalyzerPanel.h"
 #include "gui/BandPanel.h"
+#include "gui/CurvePanel.h"
 #include "gui/EqDisplay.h"
 #include "gui/FathomLookAndFeel.h"
 #include "gui/OutputPanel.h"
@@ -12,7 +13,8 @@ class FathomAudioProcessor;
 
 // El visor (lienzo del EQ con el analizador, la curva y los nodos editables de las bandas), debajo el panel de la banda
 // elegida, en la cabecera la comparación A/B, deshacer/rehacer y el bypass, y a la derecha los ajustes del analizador y
-// la columna de SALIDA. Un temporizador a 30 cuadros por segundo actualiza el analizador, la curva, los paneles y los
+// la columna de SALIDA. Con IGUALAR o DIBUJAR (Fase 12), el panel de la herramienta ocupa el lugar del de la banda. Un
+// temporizador a 30 cuadros por segundo actualiza el analizador, la curva, los paneles y los
 // botones.
 class FathomAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -31,6 +33,7 @@ private:
     void selectBand (int band);
     void showAnalyzerView (const fathom::analysis::ViewSettings&);
     void showCompareSide();
+    void showTool (fathom::gui::EqDisplay::Tool);
 
     FathomAudioProcessor& processor;
     fathom::gui::FathomLookAndFeel lookAndFeel;
@@ -38,6 +41,7 @@ private:
 
     fathom::gui::EqDisplay display;
     fathom::gui::BandPanel bandPanel;
+    fathom::gui::CurvePanel curvePanel; // Fase 12
     fathom::gui::AnalyzerPanel analyzerPanel;
     fathom::gui::OutputPanel outputPanel;
     fathom::analysis::ViewSettings shownView; // la vista que muestran el panel y el visor (para notar un proyecto cargado)

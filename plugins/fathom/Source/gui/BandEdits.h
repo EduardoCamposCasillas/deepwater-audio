@@ -62,7 +62,9 @@ public:
         parameter->setValueNotifyingHost (normalised);
     }
 
-    // Todos los ajustes de una banda (solo se tocan los que cambian).
+    // Todos los ajustes de una banda (solo se tocan los que cambian). Fase 12: también el canal y si es dinámica o
+    // espectral (una banda libre reutilizada, o borrada, no se queda con la dinámica que tuvo); los demás ajustes de la
+    // dinámica (umbral, rango...) se conservan: solo cuentan si se enciende.
     void setSettings (int band, const dsp::BandSettings& s)
     {
         set (band, params::enabled, s.enabled ? 1.0f : 0.0f);
@@ -71,6 +73,9 @@ public:
         set (band, params::q, s.q);
         set (band, params::shape, static_cast<float> (static_cast<int> (s.shape)));
         set (band, params::slope, static_cast<float> (s.slopeIndex));
+        set (band, params::stereo, static_cast<float> (static_cast<int> (s.placement)));
+        set (band, params::dynamic, s.dynamics.enabled ? 1.0f : 0.0f);
+        set (band, params::spectral, s.dynamics.spectral ? 1.0f : 0.0f);
     }
 
     // Borrar una banda = devolverla a como nace (apagada, en su frecuencia inicial): queda libre otra vez.

@@ -1,4 +1,4 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y dinámica espectral), las cuentas de la edición (deshacer, arrastrar
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y dinámica espectral), igualar y dibujar (Fase 12), las cuentas de la edición (deshacer, arrastrar
 // nodos) y las del analizador (inclinación, balística, retención y picos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
@@ -13,11 +13,13 @@
 #include <thread>
 #include <vector>
 
+#include "analysis/SpectrumMatch.h"
 #include "analysis/SpectrumView.h"
 #include "deepwater/dsp/Decibels.h"
 #include "deepwater/dsp/MatchedEq.h"
 #include "deepwater/dsp/SpectrumAnalyzer.h"
 #include "dsp/Engine.h"
+#include "edit/CurveTools.h"
 #include "edit/NodeEditing.h"
 #include "edit/UndoStack.h"
 
@@ -2550,6 +2552,307 @@ void testSpectralWithLinearPhase()
     }
 }
 
+// --- Fase 12: igualar y dibujar ---------------------------------------------------------------------------------------
+
+namespace
+{
+using fathom::edit::CurveGrid;
+using fathom::edit::CurveTarget;
+using fathom::edit::CurveValues;
+
+// La suma de unas bandas en la grilla (con los mismos coeficientes que el audio).
+CurveValues sumOf (const std::vector<BandSettings>& bands, double sampleRate)
+{
+    CurveValues total {};
+    for (const auto& band : bands)
+    {
+        const auto cascade = Band::coefficientsFor (band, sampleRate);
+        for (int i = 0; i < CurveGrid::points; ++i)
+            total[static_cast<size_t> (i)] += static_cast<float> (cascade.magnitudeDb (CurveGrid::hz (i), sampleRate));
+    }
+    return total;
+}
+
+CurveTarget targetOf (const CurveValues& db)
+{
+    CurveTarget target;
+    target.db = db;
+    target.weight.fill (1.0f);
+    return target;
+}
+
+// El mayor alejamiento entre la suma de unas bandas y la meta, donde pesa.
+double worstError (const CurveTarget& target, const std::vector<BandSettings>& bands, double sampleRate)
+{
+    const auto total = sumOf (bands, sampleRate);
+    double worst = 0.0;
+    for (size_t i = 0; i < total.size(); ++i)
+        if (target.weight[i] > 0.0f)
+            worst = std::max (worst, std::abs (static_cast<double> (total[i] - target.db[i])));
+    return worst;
+}
+
+BandSettings shapedBand (Shape shape, float hz, float gainDb, float q)
+{
+    BandSettings band { true, hz, gainDb, q };
+    band.shape = shape;
+    return band;
+}
+
+// Ruido blanco repetible (LCG), amplitud ±0.5.
+std::vector<float> whiteNoise (size_t numSamples, std::uint32_t seed)
+{
+    std::vector<float> noise (numSamples);
+    for (auto& x : noise)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        x = static_cast<float> (static_cast<double> (seed >> 8) / 16777216.0 - 0.5);
+    }
+    return noise;
+}
+
+// Aprende un espectro promedio pasándole trozos consecutivos (sin solaparse) de una señal.
+void learn (fathom::analysis::AverageSpectrum& spectrum, const std::vector<float>& signal)
+{
+    const auto size = static_cast<size_t> (spectrum.getSize());
+    for (size_t start = 0; start + size <= signal.size(); start += size)
+        spectrum.add (signal.data() + start, size);
+}
+
+size_t gridIndex (double hz) { return static_cast<size_t> (std::round (CurveGrid::position (hz))); }
+} // namespace
+
+void testCurveFitRecoversBands()
+{
+    std::printf ("Ajuste: la suma de dos campanas y dos shelves se reconstruye con pocas bandas (< 0.3 dB)\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const std::vector<BandSettings> source { shapedBand (Shape::lowShelf, 90.0f, -3.0f, 0.71f), shapedBand (Shape::bell, 400.0f, 4.0f, 1.5f),
+                                                 shapedBand (Shape::bell, 2500.0f, -5.0f, 4.0f), shapedBand (Shape::highShelf, 8000.0f, 5.0f, 0.71f) };
+        const auto target = targetOf (sumOf (source, sampleRate));
+        fathom::edit::FitOptions options;
+        options.sampleRate = sampleRate;
+        options.maxBands = 8;
+        const auto start = std::chrono::steady_clock::now();
+        const auto result = fathom::edit::fitBands (target, options);
+        const double ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - start).count();
+        const double worst = worstError (target, result.bands, sampleRate);
+        std::printf ("  %.0f Hz: %zu bandas, error %.2f -> %.3f dB (medido %.3f), %.0f ms\n", sampleRate, result.bands.size(),
+                     static_cast<double> (result.startErrorDb), static_cast<double> (result.maxErrorDb), worst, ms);
+        CHECK (worst < 0.3);
+        CHECK (std::abs (worst - static_cast<double> (result.maxErrorDb)) < 0.01);
+        CHECK (result.bands.size() <= 6);
+        for (size_t b = 1; b < result.bands.size(); ++b)
+            CHECK (result.bands[b - 1].frequency <= result.bands[b].frequency);
+    }
+}
+
+void testCurveFitSingleBell()
+{
+    std::printf ("Ajuste: una campana sola sale como una banda con su frecuencia, ganancia y Q\n");
+    const double sampleRate = 48000.0;
+    const auto target = targetOf (sumOf ({ shapedBand (Shape::bell, 1000.0f, -6.0f, 3.0f) }, sampleRate));
+    fathom::edit::FitOptions options;
+    options.sampleRate = sampleRate;
+    const auto result = fathom::edit::fitBands (target, options);
+    CHECK (result.bands.size() == 1);
+    if (result.bands.size() == 1)
+    {
+        const auto& band = result.bands[0];
+        std::printf ("  %.1f Hz, %.2f dB, Q %.3f\n", static_cast<double> (band.frequency), static_cast<double> (band.gainDb), static_cast<double> (band.q));
+        CHECK (band.shape == Shape::bell && band.enabled && band.placement == Placement::stereo);
+        CHECK (std::abs (band.frequency / 1000.0f - 1.0f) < 0.01f);
+        CHECK (std::abs (band.gainDb + 6.0f) < 0.05f);
+        CHECK (std::abs (band.q / 3.0f - 1.0f) < 0.02f);
+    }
+}
+
+void testCurveFitLimits()
+{
+    std::printf ("Ajuste: plano = ninguna banda; respeta el maximo, los limites y los pesos; mas bandas = menos error\n");
+    const double sampleRate = 44100.0;
+    fathom::edit::FitOptions options;
+    options.sampleRate = sampleRate;
+    CHECK (fathom::edit::fitBands (targetOf ({}), options).bands.empty());
+
+    // Lo que no pesa no cuenta: basura de +20 dB con peso 0 sobre una meta plana.
+    auto ignored = targetOf ({});
+    for (size_t i = 100; i < 140; ++i)
+    {
+        ignored.db[i] = 20.0f;
+        ignored.weight[i] = 0.0f;
+    }
+    CHECK (fathom::edit::fitBands (ignored, options).bands.empty());
+
+    // Un dibujo "a mano" lleno de escalones (que ninguna banda reproduce exacto) y extremos imposibles.
+    CurveValues jagged {};
+    for (int i = 0; i < CurveGrid::points; ++i)
+    {
+        const double hz = CurveGrid::hz (i);
+        jagged[static_cast<size_t> (i)] = hz < 40.0 ? -40.0f : hz < 300.0 ? 6.0f : hz < 320.0 ? -18.0f : hz < 5000.0 ? 1.0f : 40.0f;
+    }
+    const auto target = targetOf (jagged);
+    double previous = 1.0e9;
+    for (const int maxBands : { 0, 1, 2, 4, 8, 16, 24 })
+    {
+        options.maxBands = maxBands;
+        const auto start = std::chrono::steady_clock::now();
+        const auto result = fathom::edit::fitBands (target, options);
+        const double ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - start).count();
+        std::printf ("  hasta %2d bandas: %2zu, error %.2f dB, %.0f ms\n", maxBands, result.bands.size(), static_cast<double> (result.maxErrorDb), ms);
+        CHECK (static_cast<int> (result.bands.size()) <= maxBands);
+        CHECK (static_cast<double> (result.maxErrorDb) <= previous + 0.5); // el máximo puede no bajar siempre; el total sí
+        previous = std::min (previous, static_cast<double> (result.maxErrorDb));
+        for (const auto& band : result.bands)
+        {
+            CHECK (band.frequency >= 20.0f && band.frequency <= 0.45f * 44100.0f + 1.0f);
+            CHECK (std::abs (band.gainDb) <= BandSettings::maxGainDb);
+            CHECK (band.q >= 0.149f && band.q <= 12.01f);
+            CHECK (band.shape == Shape::bell || band.shape == Shape::lowShelf || band.shape == Shape::highShelf);
+        }
+    }
+    // Lo que queda es lo imposible: −40 dB bajo 40 Hz y +40 sobre 5 kHz (las bandas llegan a ±30) y un pozo de 1/10 de
+    // octava (más angosto que el Q máximo).
+    CHECK (previous < 9.0);
+}
+
+void testAverageSpectrum()
+{
+    std::printf ("Igualar: el espectro promedio, el silencio no cuenta y la curva = la diferencia de color\n");
+    const double sampleRate = 48000.0;
+    fathom::analysis::AverageSpectrum plain, shaped;
+    plain.prepare (sampleRate);
+    shaped.prepare (sampleRate);
+    CHECK (plain.getSize() == 8192);
+    CHECK (! plain.hasData());
+
+    // El silencio (y lo muy suave) no se aprende.
+    const std::vector<float> silence (8192, 1.0e-5f);
+    CHECK (! plain.add (silence.data(), 8192));
+    CHECK (! plain.hasData() && plain.seconds() == 0.0);
+
+    // Referencia: ruido con una campana de +6 dB en 1 kHz y un shelf de agudos de −4 dB. Pista: el mismo ruido, plano y
+    // 10 dB más fuerte (el volumen no debe contar).
+    const auto noise = whiteNoise (static_cast<size_t> (sampleRate * 12.0), 777u);
+    auto left = noise, right = noise;
+    Engine::BandArray bands {};
+    bands[0] = shapedBand (Shape::bell, 1000.0f, 6.0f, 1.0f);
+    bands[1] = shapedBand (Shape::highShelf, 6000.0f, -4.0f, 0.71f);
+    Engine engine;
+    engine.prepare (sampleRate, false, 0.0f, bands);
+    runStereo (engine, left, right);
+    auto louder = noise;
+    for (auto& x : louder)
+        x *= 3.1623f;
+    learn (shaped, left);
+    learn (plain, louder);
+    std::printf ("  aprendido: %.1f s\n", plain.seconds());
+    CHECK (std::abs (plain.seconds() - 12.0) < 0.2);
+
+    const auto curve = fathom::analysis::matchCurve (shaped, plain, 1.0 / 3.0, 1.0f);
+    // Lo esperado: la suma de las dos bandas, sin su promedio entre 50 Hz y 10 kHz.
+    const auto expected = sumOf ({ bands[0], bands[1] }, sampleRate);
+    double mean = 0.0;
+    int count = 0;
+    for (int i = 0; i < CurveGrid::points; ++i)
+        if (const double hz = CurveGrid::hz (i); hz >= 50.0 && hz <= 10000.0)
+        {
+            mean += static_cast<double> (expected[static_cast<size_t> (i)]);
+            ++count;
+        }
+    mean /= count;
+    double worst = 0.0;
+    for (int i = 0; i < CurveGrid::points; ++i)
+    {
+        const auto at = static_cast<size_t> (i);
+        const double hz = CurveGrid::hz (i);
+        CHECK (curve.weight[at] == (hz < 0.45 * sampleRate ? 1.0f : 0.0f));
+        if (hz >= 100.0 && hz <= 15000.0)
+            worst = std::max (worst, std::abs (static_cast<double> (curve.db[at]) - (static_cast<double> (expected[at]) - mean)));
+    }
+    std::printf ("  curva contra lo esperado (100 Hz-15 kHz): peor %.2f dB\n", worst);
+    CHECK (worst < 1.0);
+
+    // CANTIDAD escala la curva; sin una de las dos no hay curva.
+    const auto half = fathom::analysis::matchCurve (shaped, plain, 1.0 / 3.0, 0.5f);
+    for (size_t i = 0; i < half.db.size(); ++i)
+        CHECK (std::abs (half.db[i] - 0.5f * curve.db[i]) < 1.0e-4f);
+    fathom::analysis::AverageSpectrum empty;
+    empty.prepare (sampleRate);
+    const auto none = fathom::analysis::matchCurve (shaped, empty, 1.0 / 3.0, 1.0f);
+    CHECK (std::all_of (none.weight.begin(), none.weight.end(), [] (float w) { return w == 0.0f; }));
+
+    // Con la curva ajustada, las bandas deshacen el color: la referencia "plana" contra la pista con el color.
+    fathom::edit::FitOptions options;
+    options.sampleRate = sampleRate;
+    options.maxBands = 6;
+    const auto inverse = fathom::analysis::matchCurve (plain, shaped, 1.0 / 3.0, 1.0f);
+    const auto fitted = fathom::edit::fitBands (inverse, options);
+    const auto total = sumOf (fitted.bands, sampleRate);
+    double worstInverse = 0.0;
+    for (int i = 0; i < CurveGrid::points; ++i)
+        if (const double hz = CurveGrid::hz (i); hz >= 100.0 && hz <= 15000.0)
+            worstInverse = std::max (worstInverse, std::abs (static_cast<double> (total[static_cast<size_t> (i)])
+                                                             + (static_cast<double> (expected[static_cast<size_t> (i)]) - mean)));
+    std::printf ("  %zu bandas que deshacen el color: peor %.2f dB\n", fitted.bands.size(), worstInverse);
+    CHECK (worstInverse < 1.2);
+
+    // Otra frecuencia de muestreo borra lo aprendido.
+    plain.prepare (96000.0);
+    CHECK (! plain.hasData() && plain.getSize() == 16384);
+}
+
+void testDrawingTools()
+{
+    std::printf ("Dibujar: trazos sin huecos, borrar, lo no dibujado se deja como esta y reemplazar\n");
+    fathom::edit::CurveTools tools;
+    CHECK (! tools.hasDrawing());
+    tools.draw (100.0, 6.0f, 1000.0, -6.0f); // un trazo rápido: dos eventos del mouse lejos
+    const auto first = gridIndex (100.0), last = gridIndex (1000.0);
+    for (size_t i = 0; i < tools.drawn.size(); ++i)
+        CHECK (tools.drawn[i] == (i >= first && i <= last));
+    CHECK (std::abs (tools.drawnDb[first] - 6.0f) < 0.1f);
+    CHECK (std::abs (tools.drawnDb[last] + 6.0f) < 0.1f);
+    CHECK (std::abs (tools.drawnDb[(first + last) / 2]) < 0.2f); // la recta en log de frecuencia
+    tools.draw (2000.0, 3.0f, 2000.0, 3.0f); // un clic sin mover: un punto
+    CHECK (tools.drawn[gridIndex (2000.0)]);
+    tools.erase (90.0, 320.0);
+    CHECK (! tools.drawn[first] && tools.drawn[last]);
+
+    // Lo que piden las bandas nuevas: con bandas que ya suben 3 dB en todos lados, lo dibujado menos eso; lo no
+    // dibujado, nada. Al reemplazar, todo (lo no dibujado = lo que ya había).
+    CurveValues existing {};
+    existing.fill (3.0f);
+    const auto wanted = fathom::edit::drawnTarget (tools, existing);
+    const auto added = fathom::edit::newBandsTarget (wanted, existing, false);
+    const auto replaced = fathom::edit::newBandsTarget (wanted, existing, true);
+    for (size_t i = 0; i < wanted.db.size(); ++i)
+    {
+        CHECK (wanted.weight[i] == 1.0f);
+        CHECK (std::abs (added.db[i] - (tools.drawn[i] ? tools.drawnDb[i] - 3.0f : 0.0f)) < 1.0e-5f);
+        CHECK (std::abs (replaced.db[i] - (tools.drawn[i] ? tools.drawnDb[i] : 3.0f)) < 1.0e-5f);
+    }
+    tools.clearDrawing();
+    CHECK (! tools.hasDrawing());
+    const auto nothing = fathom::edit::drawnTarget (tools, existing);
+    CHECK (std::all_of (nothing.weight.begin(), nothing.weight.end(), [] (float w) { return w == 0.0f; }));
+
+    // Un trazo plano de +6 dB entre 200 y 800 Hz sobre un EQ plano: las bandas lo siguen ahí y dejan el resto en ~0.
+    tools.draw (200.0, 6.0f, 800.0, 6.0f);
+    const auto target = fathom::edit::newBandsTarget (fathom::edit::drawnTarget (tools, {}), {}, false);
+    fathom::edit::FitOptions options;
+    options.sampleRate = 44100.0;
+    options.maxBands = 6;
+    const auto result = fathom::edit::fitBands (target, options);
+    const auto total = sumOf (result.bands, 44100.0);
+    std::printf ("  meseta de 200-800 Hz: %zu bandas, en 400 Hz %.2f dB, en 50 Hz %.2f dB, en 5 kHz %.2f dB\n", result.bands.size(),
+                 static_cast<double> (total[gridIndex (400.0)]), static_cast<double> (total[gridIndex (50.0)]),
+                 static_cast<double> (total[gridIndex (5000.0)]));
+    CHECK (std::abs (total[gridIndex (400.0)] - 6.0f) < 1.0f);
+    CHECK (std::abs (total[gridIndex (50.0)]) < 1.0f);
+    CHECK (std::abs (total[gridIndex (5000.0)]) < 1.0f);
+}
+
 int main()
 {
     testPassthroughIsBitExact();
@@ -2610,6 +2913,11 @@ int main()
     testSpectralSwitchingHasNoClicks();
     testSpectralAutomationHasNoClicks();
     testSpectralWithLinearPhase();
+    testCurveFitRecoversBands();
+    testCurveFitSingleBell();
+    testCurveFitLimits();
+    testAverageSpectrum();
+    testDrawingTools();
 
     if (failures > 0)
     {
