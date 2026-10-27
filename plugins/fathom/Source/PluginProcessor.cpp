@@ -83,6 +83,7 @@ FathomAudioProcessor::FathomAudioProcessor()
     analogResponseParam = parameters.getRawParameterValue (id::analogResponse);
     phaseModeParam = parameters.getRawParameterValue (id::phaseMode);
     linearQualityParam = parameters.getRawParameterValue (id::linearQuality);
+    analogColorParam = parameters.getRawParameterValue (id::analogColor);
     for (int b = 0; b < id::numBands; ++b)
     {
         auto& band = bandParams[static_cast<size_t> (b)];
@@ -145,6 +146,11 @@ fathom::dsp::PhaseMode FathomAudioProcessor::getPhaseMode() const noexcept
 int FathomAudioProcessor::getLinearQuality() const noexcept
 {
     return juce::jlimit (0, fathom::dsp::numLinearQualities - 1, juce::roundToInt (linearQualityParam->load()));
+}
+
+fathom::dsp::ColorMode FathomAudioProcessor::getColorMode() const noexcept
+{
+    return static_cast<fathom::dsp::ColorMode> (juce::jlimit (0, fathom::dsp::numColorModes - 1, juce::roundToInt (analogColorParam->load())));
 }
 
 double FathomAudioProcessor::getTailLengthSeconds() const
@@ -212,6 +218,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout FathomAudioProcessor::create
                                                               "Linear Quality",
                                                               juce::StringArray { "Low", "Medium", "High", "Very High", "Maximum" },
                                                               fathom::dsp::defaultLinearQuality));
+    // Fase 13. Limpio por defecto: un proyecto de las Fases 1-12 suena igual (sin latencia). El orden es el de
+    // fathom::dsp::ColorMode (se guarda el índice).
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::analogColor, id::versionHintPhase13 }, "Analog Color",
+                                                              juce::StringArray { "Clean", "Subtle", "Warm" }, 0));
 
     // Las 24 bandas, apagadas. Rangos como los de un EQ profesional: 10 Hz-30 kHz (encima de Nyquist se limita),
     // ±30 dB y Q de 0.025 (casi 9 octavas de ancho) a 40 (un 1/36 de octava: para cazar una resonancia). Cada banda
@@ -347,6 +357,7 @@ void FathomAudioProcessor::prepareToPlay (double sampleRate, int /*samplesPerBlo
     engine.prepare (sampleRate, bypassParam->load() >= 0.5f, outputGainParam->load(), getAllBandSettings());
     analyzerSampleRate.store (sampleRate);
     preparedSampleRate.store (sampleRate);
+    colorLatency.store (engine.getColorLatency());
     engineLatency.store (engine.getLatencySamples());
     setLatencySamples (engine.getLatencySamples());
 }
@@ -382,6 +393,7 @@ void FathomAudioProcessor::setOutputSettings() noexcept
     engine.setPhaseInverted (phaseInvertParam->load() >= 0.5f);
     engine.setAutoGain (autoGainParam->load() >= 0.5f);
     engine.setPhaseMode (getPhaseMode(), getLinearQuality());
+    engine.setColor (getColorMode());
 }
 
 namespace

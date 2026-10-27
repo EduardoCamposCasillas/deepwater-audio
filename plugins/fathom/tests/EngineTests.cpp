@@ -1,4 +1,4 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y dinámica espectral), igualar y dibujar (Fase 12), las cuentas de la edición (deshacer, arrastrar
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y dinámica espectral), igualar y dibujar (Fase 12), el color analógico (Fase 13), las cuentas de la edición (deshacer, arrastrar
 // nodos) y las del analizador (inclinación, balística, retención y picos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
@@ -2853,6 +2853,223 @@ void testDrawingTools()
     CHECK (std::abs (total[gridIndex (5000.0)]) < 1.0f);
 }
 
+// --- Fase 13: color analógico ---------------------------------------------------------------------------------------
+
+// Un seno por el motor con un color, en estéreo (los dos canales iguales); devuelve el canal izquierdo.
+std::vector<float> colored (ColorMode mode, double hz, double amplitude, double sampleRate, size_t numSamples, bool bypassed = false)
+{
+    Engine engine;
+    engine.setColor (mode);
+    engine.prepare (sampleRate, bypassed, 0.0f);
+    auto left = sine (hz, amplitude, sampleRate, numSamples), right = left;
+    runStereo (engine, left, right);
+    CHECK (left == right);
+    return left;
+}
+
+// Armónicos / fundamental (hasta el 9.º o 0.45·fs), en dB: todos y solo los pares.
+std::pair<double, double> distortionDb (const std::vector<float>& signal, double hz, double sampleRate)
+{
+    const size_t start = signal.size() / 4;
+    const double fundamental = toneAmplitude (signal, hz, sampleRate, start);
+    double all = 0.0, even = 0.0;
+    for (int k = 2; k <= 9 && k * hz < 0.45 * sampleRate; ++k)
+    {
+        const double a = toneAmplitude (signal, k * hz, sampleRate, start);
+        all += a * a;
+        if (k % 2 == 0)
+            even += a * a;
+    }
+    const double f2 = fundamental * fundamental;
+    return { 10.0 * std::log10 (all / f2 + 1.0e-30), 10.0 * std::log10 (even / f2 + 1.0e-30) };
+}
+
+void testColorLatencyAndTransparency()
+{
+    std::printf ("Color: LIMPIO sin latencia; con color, la latencia del sobremuestreo, bypass = la entrada retrasada bit a bit "
+                 "y con poca senal = la entrada retrasada (la curva del EQ no cambia)\n");
+    for (const double sampleRate : sampleRates)
+    {
+        Engine clean;
+        clean.prepare (sampleRate, false, 0.0f);
+        CHECK (clean.getLatencySamples() == 0);
+        const int latency = clean.getColorLatency();
+        std::printf ("  %6.0f Hz: latencia del color %d muestras (%.2f ms)\n", sampleRate, latency, 1000.0 * latency / sampleRate);
+        CHECK (latency > 0 && latency < 100);
+
+        for (const auto mode : { ColorMode::subtle, ColorMode::warm })
+        {
+            Engine engine;
+            engine.setColor (mode);
+            engine.prepare (sampleRate, true, 0.0f);
+            CHECK (engine.getLatencySamples() == latency);
+            StereoSignal signal (8192, sampleRate);
+            const StereoSignal original = signal;
+            processInBlocks (engine, signal, 512, [] (int) {});
+            CHECK (isDelayedCopy (signal.left, original.left, latency));
+            CHECK (isDelayedCopy (signal.right, original.right, latency));
+
+            // −60 dBFS: la misma señal retrasada (salvo el filtro DC y los halfband, mínimos).
+            const auto n = static_cast<size_t> (0.5 * sampleRate);
+            for (const double hz : { 30.0, 1000.0, 15000.0 })
+            {
+                const auto input = sine (hz, 0.001, sampleRate, n);
+                const auto output = colored (mode, hz, 0.001, sampleRate, n);
+                const double gainDb = levelDb (toneAmplitude (output, hz, sampleRate, n / 4) / toneAmplitude (input, hz, sampleRate, n / 4));
+                CHECK (std::abs (gainDb) < 0.03);
+                if (hz == 1000.0)
+                {
+                    float worst = 0.0f;
+                    for (size_t i = n / 4; i < n; ++i)
+                        worst = std::max (worst, std::abs (output[i] - input[i - static_cast<size_t> (latency)]));
+                    CHECK (worst < 0.01f * 0.001f);
+                }
+            }
+        }
+    }
+}
+
+void testColorHarmonics()
+{
+    std::printf ("Color: armonicos que crecen con el nivel y con el modo, mas en los graves (CALIDO con pares) y sin aliasing\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const auto n = static_cast<size_t> (0.5 * sampleRate);
+        std::printf ("  %6.0f Hz:", sampleRate);
+        std::array<std::array<double, 3>, 2> thd {};
+        double warmEven = 0.0;
+        for (size_t m = 0; m < 2; ++m)
+        {
+            const auto mode = m == 0 ? ColorMode::subtle : ColorMode::warm;
+            const std::array<double, 3> levels { -12.0, -6.0, 0.0 };
+            for (size_t l = 0; l < levels.size(); ++l)
+            {
+                const auto output = colored (mode, 1000.0, deepwater::dsp::dbToGain (static_cast<float> (levels[l])), sampleRate, n);
+                const auto [all, even] = distortionDb (output, 1000.0, sampleRate);
+                thd[m][l] = all;
+                if (m == 1 && l == 1)
+                    warmEven = even;
+                std::printf (" %s %+.0f: %.1f;", m == 0 ? "sutil" : "calido", levels[l], all);
+            }
+        }
+        const double warmBass = distortionDb (colored (ColorMode::warm, 60.0, 0.5, sampleRate, n), 60.0, sampleRate).first;
+        std::printf ("\n           calido 60 Hz -6 dBFS: %.1f dB; pares de 1 kHz -6 dBFS: %.1f dB\n", warmBass, warmEven);
+        for (size_t m = 0; m < 2; ++m)
+            CHECK (thd[m][0] < thd[m][1] && thd[m][1] < thd[m][2]);
+        for (size_t l = 0; l < 3; ++l)
+            CHECK (thd[0][l] + 10.0 < thd[1][l]);
+        CHECK (thd[0][2] < -34.0 && thd[0][2] > -46.0); // SUTIL a 0 dBFS: ~1 %
+        CHECK (thd[1][2] < -20.0 && thd[1][2] > -32.0); // CÁLIDO a 0 dBFS: ~5 %
+        CHECK (thd[0][0] < -55.0);                      // SUTIL a −12 dBFS: casi nada
+        CHECK (warmBass > thd[1][1] + 2.0);             // el transformador: más en los graves
+        CHECK (warmEven > thd[1][1] - 6.0);             // los pares pesan (la asimetría)
+
+        // Aliasing: 15 kHz a 0 dBFS en CÁLIDO. El 2.º y el 3.º (30 y 45 kHz) no caben a 44.1/48: si se reflejaran,
+        // caerían en fs − 30 kHz y 45 kHz − fs.
+        if (sampleRate < 60000.0)
+        {
+            const auto output = colored (ColorMode::warm, 15000.0, 1.0, sampleRate, n);
+            const double fundamental = toneAmplitude (output, 15000.0, sampleRate, n / 4);
+            double worst = -300.0;
+            for (const double alias : { sampleRate - 30000.0, 45000.0 - sampleRate })
+                worst = std::max (worst, levelDb (toneAmplitude (output, alias, sampleRate, n / 4) / fundamental));
+            std::printf ("           aliasing de 15 kHz a 0 dBFS: %.1f dB\n", worst);
+            CHECK (worst < -90.0);
+        }
+    }
+}
+
+void testColorSwitchingHasNoClicks()
+{
+    std::printf ("Color: cambiar de modo sonando (con su cambio de latencia) no hace clic y la latencia lo sigue\n");
+    for (const double sampleRate : sampleRates)
+    {
+        const int interval = static_cast<int> (0.15 * sampleRate);
+        static constexpr std::array<ColorMode, 8> sequence { ColorMode::subtle, ColorMode::clean, ColorMode::warm, ColorMode::subtle,
+                                                             ColorMode::warm,   ColorMode::clean, ColorMode::warm, ColorMode::clean };
+        auto left = sine (1000.0, 0.5, sampleRate, static_cast<size_t> (interval) * sequence.size()), right = left;
+        Engine engine;
+        engine.prepare (sampleRate, false, 0.0f);
+        const int latency = engine.getColorLatency();
+        bool latencyFollows = true;
+        BlockSizes sizes;
+        const int total = static_cast<int> (left.size());
+        for (int start = 0; start < total;)
+        {
+            const int count = std::min (sizes.next (512), total - start);
+            const auto mode = sequence[static_cast<size_t> (start / interval)];
+            engine.setColor (mode);
+            float* channels[] { left.data() + start, right.data() + start };
+            engine.process (channels, 2, count);
+            latencyFollows = latencyFollows && engine.getLatencySamples() == (mode == ColorMode::clean ? 0 : latency);
+            start += count;
+        }
+        CHECK (latencyFollows);
+        // Lo más puntiagudo del seno limpio o del mismo seno en CÁLIDO (sus armónicos pesan más a 88.2/96 kHz), con 10 %
+        // de margen: un salto de latencia sin fundir lo pasaría de largo.
+        const double s = 2.0 * std::sin (pi * 1000.0 / sampleRate);
+        const auto warm = colored (ColorMode::warm, 1000.0, 0.5, sampleRate, left.size() / 4);
+        const float steadyWarm = biggestSecondDifference ({ warm.begin() + static_cast<std::ptrdiff_t> (warm.size() / 2), warm.end() }); // sin el arranque
+        const auto bound = 1.1f * std::max (static_cast<float> (0.5 * s * s), steadyWarm);
+        const float measured = biggestSecondDifference (left);
+        std::printf ("  %6.0f Hz: segunda diferencia %.5f (calido quieto %.5f, cota %.5f)\n", sampleRate, static_cast<double> (measured),
+                     static_cast<double> (steadyWarm), static_cast<double> (bound));
+        CHECK (measured < bound);
+        CHECK (left == right);
+
+        // Al final, de vuelta en LIMPIO: la entrada tal cual, bit a bit.
+        const auto input = sine (1000.0, 0.5, sampleRate, left.size());
+        bool exact = true;
+        for (size_t i = left.size() - static_cast<size_t> (interval / 3); i < left.size(); ++i)
+            exact = exact && left[i] == input[i];
+        CHECK (exact);
+    }
+}
+
+void testColorInMono()
+{
+    std::printf ("Color: en mono colorea el canal igual que en estereo\n");
+    for (const double sampleRate : sampleRates)
+    {
+        Engine engine;
+        engine.setColor (ColorMode::warm);
+        engine.prepare (sampleRate, false, 0.0f);
+        const auto n = static_cast<size_t> (0.5 * sampleRate);
+        auto mono = sine (1000.0, 1.0, sampleRate, n);
+        BlockSizes sizes;
+        for (int start = 0; start < static_cast<int> (n);)
+        {
+            const int count = std::min (sizes.next (512), static_cast<int> (n) - start);
+            float* channels[] { mono.data() + start };
+            engine.process (channels, 1, count);
+            start += count;
+        }
+        CHECK (mono == colored (ColorMode::warm, 1000.0, 1.0, sampleRate, n));
+    }
+}
+
+void testColorCpu()
+{
+    std::printf ("Color: CPU (solo informa; estereo, bloques de 256, 5 s de audio)\n");
+    for (const double sampleRate : { 44100.0, 96000.0 })
+        for (const auto mode : { ColorMode::clean, ColorMode::warm })
+        {
+            Engine engine;
+            engine.setColor (mode);
+            engine.prepare (sampleRate, false, 0.0f);
+            const auto n = static_cast<size_t> (5.0 * sampleRate);
+            auto left = sine (100.0, 0.5, sampleRate, n), right = left;
+            const auto start = std::chrono::steady_clock::now();
+            for (size_t i = 0; i + 256 <= n; i += 256)
+            {
+                float* channels[] { left.data() + i, right.data() + i };
+                engine.process (channels, 2, 256);
+            }
+            const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+            std::printf ("  %6.0f Hz %s: %.2f %% de un nucleo\n", sampleRate, mode == ColorMode::clean ? "limpio" : "calido", 100.0 * seconds / 5.0);
+        }
+}
+
 int main()
 {
     testPassthroughIsBitExact();
@@ -2918,6 +3135,11 @@ int main()
     testCurveFitLimits();
     testAverageSpectrum();
     testDrawingTools();
+    testColorLatencyAndTransparency();
+    testColorHarmonics();
+    testColorSwitchingHasNoClicks();
+    testColorInMono();
+    testColorCpu();
 
     if (failures > 0)
     {

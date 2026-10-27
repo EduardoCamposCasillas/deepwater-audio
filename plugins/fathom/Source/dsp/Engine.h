@@ -8,6 +8,7 @@
 
 #include "deepwater/dsp/Decibels.h"
 #include "deepwater/dsp/Smoothing.h"
+#include "dsp/AnalogColor.h"
 #include "dsp/AutoGain.h"
 #include "dsp/Band.h"
 #include "dsp/Dynamics.h"
@@ -46,6 +47,10 @@ namespace fathom::dsp
 // Las bandas espectrales (Fase 11, SpectralDynamics.h) dejan su parte estática en las bandas (o en el FIR) y su dinámica
 // va a una etapa STFT después de los modos de fase: baja cada frecuencia de su zona según su propio exceso. Mientras
 // haya alguna, retrasa todo (también la original) N muestras más.
+//
+// El color analógico (Fase 13, AnalogColor.h) va al final de lo procesado, antes de la salida: una curva suave con
+// sobremuestreo, como los amplificadores de un EQ de hardware (subir una banda también empuja el color). En LIMPIO no
+// hace nada; con color retrasa todo (también la original) la latencia del sobremuestreo.
 class Engine
 {
 public:
@@ -95,6 +100,7 @@ public:
         const bool withMemory = phase->hasMemory() || phaseMode != PhaseMode::zeroLatency || ! isRealtime;
         phase->prepare (sampleRate, phaseMode, linearQuality, isRealtime, sounding, withMemory);
         spectral->prepare (sampleRate, sounding);
+        color.prepare (sampleRate, colorMode);
     }
 
     // Hilo de mensajes (el procesador lo llama con un temporizador): si se eligió fase natural o lineal y la memoria no
@@ -169,9 +175,22 @@ public:
         phase->setRealtime (isRealtime);
     }
 
+    // Fase 13: el color analógico (se aplica en el bloque siguiente; antes de prepare, decide con qué se arranca).
+    void setColor (ColorMode mode) noexcept
+    {
+        colorMode = mode;
+        color.setMode (mode);
+    }
+
     // La latencia del modo pedido, para informarla al host (0 con cero latencia), más la de la etapa espectral si alguna
-    // banda la usa (Fase 11).
-    [[nodiscard]] int getLatencySamples() const noexcept { return phase->getLatencySamples() + spectral->getLatencySamples(); }
+    // banda la usa (Fase 11) y la del color analógico (Fase 13).
+    [[nodiscard]] int getLatencySamples() const noexcept
+    {
+        return phase->getLatencySamples() + spectral->getLatencySamples() + color.getLatencySamples();
+    }
+
+    // La latencia que agrega cualquier color a la frecuencia preparada (para la GUI).
+    [[nodiscard]] int getColorLatency() const noexcept { return color.getColorLatency(); }
 
     // Hilo de audio (o tests): si la memoria de los modos de fase ya está reservada.
     [[nodiscard]] bool hasPhaseMemory() const noexcept { return phase->hasMemory(); }
@@ -227,7 +246,10 @@ public:
             const std::array<const float*, maxChannels> phaseDry { stage.dryOutput (0), stage.dryOutput (numChannels - 1) };
             spectral->process (io.data(), phaseDry.data(), numChannels, count, sidechainChunk.data(), sidechainChannels,
                                stage.getAudibleLatency());
-            const std::array<const float*, maxChannels> original { spectral->dryOutput (0), spectral->dryOutput (numChannels - 1) };
+            const std::array<const float*, maxChannels> spectralDry { spectral->dryOutput (0), spectral->dryOutput (numChannels - 1) };
+            // Fase 13: el color analógico, sobre todo lo procesado (y la original, retrasada igual).
+            color.process (io.data(), spectralDry.data(), numChannels, count);
+            const std::array<const float*, maxChannels> original { color.dryOutput (0), color.dryOutput (numChannels - 1) };
 
             for (int i = 0; i < count; ++i)
             {
@@ -510,6 +532,9 @@ private:
     std::atomic<bool> realtime { false };
 
     std::unique_ptr<SpectralStage> spectral = std::make_unique<SpectralStage>(); // Fase 11 (en el heap: es grande)
+
+    ColorStage color; // Fase 13
+    ColorMode colorMode = ColorMode::clean;
 };
 
 } // namespace fathom::dsp

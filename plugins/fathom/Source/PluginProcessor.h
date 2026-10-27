@@ -104,6 +104,10 @@ public:
     fathom::dsp::PhaseMode getPhaseMode() const noexcept;
     int getLinearQuality() const noexcept;
 
+    // Fase 13: el color analógico pedido y la latencia que agrega cualquier color a la frecuencia de ahora.
+    fathom::dsp::ColorMode getColorMode() const noexcept;
+    int getColorLatency() const noexcept { return colorLatency.load (std::memory_order_relaxed); }
+
     // Fase 9, hilo de la GUI: lo que la dinámica le suma ahora a una banda (dB, con la escala: la curva en vivo), el
     // nivel de su zona y el umbral que usa (con el automático, el que calculó). Sin audio se quedan en lo último.
     // Fase 11, con una banda espectral: el bin que más se mueve, el nivel del más fuerte del centro de la zona y el umbral.
@@ -142,6 +146,7 @@ private:
     std::atomic<float>* analogResponseParam = nullptr;
     std::atomic<float>* phaseModeParam = nullptr;
     std::atomic<float>* linearQualityParam = nullptr;
+    std::atomic<float>* analogColorParam = nullptr;
     struct BandParameters
     {
         std::atomic<float>* enabled = nullptr;
@@ -171,6 +176,7 @@ private:
     std::atomic<bool> analyzerActive { false };
     std::atomic<int> soloBand { -1 };
     std::atomic<float> autoGainDb { 0.0f };
+    std::atomic<int> colorLatency { 0 };
     std::atomic<int> engineLatency { 0 }; // la latencia que pide el motor (el temporizador se la informa al host)
     std::atomic<double> preparedSampleRate { 44100.0 };
     struct LiveDynamics

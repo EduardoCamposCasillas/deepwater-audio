@@ -23,6 +23,9 @@ inline constexpr const char* analogResponse = "analogResponse";
 inline constexpr const char* phaseMode = "phaseMode";
 inline constexpr const char* linearQuality = "linearQuality";
 
+// Fase 13: color analógico (limpio / sutil / cálido).
+inline constexpr const char* analogColor = "analogColor";
+
 // Las 24 bandas: "band<N><Ajuste>", con N de 1 a 24 (band1Frequency, band12Shape...). Los cuatro primeros ajustes
 // nacieron en la Fase 2 con la banda 1; forma y pendiente, en la Fase 3; el canal, en la Fase 8; la dinámica, en la Fase 9;
 // la dinámica espectral, en la Fase 11.
@@ -61,4 +64,5 @@ inline constexpr int versionHintPhase8 = 8; // el canal de cada banda
 inline constexpr int versionHintPhase9 = 9; // la dinámica de cada banda
 inline constexpr int versionHintPhase10 = 10; // modo de fase y calidad de la fase lineal
 inline constexpr int versionHintPhase11 = 11; // la dinámica espectral de cada banda
+inline constexpr int versionHintPhase13 = 13; // el color analógico
 } // namespace fathom::params

@@ -185,7 +185,7 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 12: igualar y dibujar"), header, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 13: color anal\xc3\xb3gico"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));

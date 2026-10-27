@@ -1406,3 +1406,114 @@ mano con un pasa banda.
   llega. Para cortar, un corte de graves/agudos con su pendiente (créalo a mano).
 - **Aprender sin audio**: APRENDER necesita la ventana de Fathom abierta y audio sonando (los silencios no cuentan).
   Igualar no agrega latencia: lo que crea son bandas normales.
+
+## Fase 13 — Color analógico: el "calor" de un EQ de hardware
+
+Un EQ de hardware (un Pultec, el EQ de una consola Neve o SSL) no es solo sus filtros: la señal pasa por amplificadores
+(bulbos, transistores) y transformadores que no son perfectamente rectos. Con poca señal no se nota; con la señal
+fuerte redondean un poquito los picos y suman armónicos. Eso es el "color" o el "calor". Fathom lo agrega con el selector
+**COLOR** de la columna de SALIDA: **Limpio** (lo de siempre), **Sutil** y **Cálido**.
+
+### Conceptos aprendidos
+
+- **Saturación = una curva que se dobla.** Un amplificador ideal es una recta: salida = entrada. Uno real se dobla al
+  acercarse a su límite. Fathom usa f(x) = tanh(d·x + β), normalizada para que cerca de cero sea exactamente la recta
+  (con poca señal no cambian ni el volumen ni la curva del EQ). **d** es cuánto se dobla (el drive del circuito) y **β**
+  corre el punto de trabajo, como el bias de un bulbo: la curva queda asimétrica (los picos positivos se doblan antes que
+  los negativos).
+- **Armónicos impares y pares.** Una curva simétrica solo crea armónicos impares (3.º, 5.º: el sonido se pone "hueco",
+  hacia cuadrada). Una asimétrica crea también los pares (2.º = la octava, 4.º = dos octavas): se oyen "llenos" o
+  "cálidos" porque son notas de la misma armonía. Los impares crecen con el cuadrado del drive y del nivel; los pares,
+  más despacio. Por eso con poca señal domina el 2.º.
+- **Depende del nivel.** Es la idea más importante: el color NO es un filtro. Cada 6 dB más de señal, más o menos el
+  doble de armónicos. Medido con un seno de 1 kHz (distorsión = armónicos / fundamental):
+  - SUTIL: −12 dBFS → −57 dB (0.15 %), −6 dBFS → −49 dB, 0 dBFS → −39 dB (1.1 %).
+  - CÁLIDO: −12 dBFS → −37 dB (1.4 %), −6 dBFS → −31 dB (casi todo pares), 0 dBFS → −24 dB (6 %).
+- **El transformador ensucia más los graves.** El núcleo de un transformador se satura con el flujo magnético, que crece
+  cuanto más baja es la frecuencia. Fathom lo imita con un **énfasis**: antes de la curva sube los graves (por debajo de
+  ~100 Hz: +3 dB en SUTIL, +6 dB en CÁLIDO) y después los baja exactamente lo mismo. Con poca señal los dos filtros se
+  anulan (respuesta plana); con nivel, los graves llegan más fuertes a la curva y se saturan antes. Un bajo de 60 Hz a
+  −6 dBFS en CÁLIDO: −23.5 dB de distorsión, 7 dB más que un 1 kHz igual de fuerte. Es la idea del énfasis de la cinta
+  de Riptide, al revés (allá eran los agudos).
+- **Sobremuestreo (lo de Riptide).** Los armónicos de un 15 kHz caen en 30, 45 kHz...: más allá de Nyquist (22.05 kHz a
+  44.1) no desaparecen, se reflejan como tonos inarmónicos (aliasing). La curva se calcula a ×4 a 44.1/48 kHz y a ×2 a
+  88.2/96: lo reflejado de un 15 kHz a 0 dBFS queda bajo −130 dB. Cuesta latencia (los filtros de subida y bajada son FIR
+  de fase lineal): 75 muestras (1.7 ms) a 44.1 kHz, 44 a 48, 13 a 88.2 y 11 a 96. FL la compensa sola.
+- **Dónde va.** Después de las bandas (y de los modos de fase y la dinámica espectral), antes de la ganancia de SALIDA,
+  como los amplificadores de salida de un EQ de hardware. Consecuencia: subir una banda empuja el color (una campana de
+  +6 dB en el 808 lo satura más); la GANANCIA de salida no (es un ajuste limpio después).
+- **Filtro DC.** Una curva asimétrica corre un poquito la onda hacia arriba o abajo (componente de 0 Hz). Un high-pass de
+  2 Hz lo quita (en 20 Hz baja 0.04 dB: no se ve en la curva).
+- **Sin clics.** Pasar de LIMPIO a un color cambia la latencia: la cadena arranca sin oírse, se llena y después se funde
+  en 20 ms de la salida sin retraso a la coloreada y retrasada. Entre SUTIL y CÁLIDO, el drive, el bias y el énfasis van
+  en rampa de 20 ms. En LIMPIO la cadena se detiene: no gasta CPU y la salida es bit a bit la de antes.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **COLOR** (columna de SALIDA, debajo de CALIDAD): Limpio / Sutil / Cálido. Se automatiza y entra al deshacer y al A/B.
+- La **latencia** de abajo suma la del color (a 44.1 kHz y con fase de cero latencia: "latencia 1.7 ms").
+- **La curva del EQ no cambia** con el color: la curva es el filtro, y el color no es un filtro. Lo que sí cambia es el
+  analizador de SALIDA: con un tono fuerte (o un 808 sostenido) aparecen picos nuevos en 2×, 3×, 4× su frecuencia.
+- En BYPASS la original sale retrasada lo mismo (se compara sin saltos de tiempo).
+
+### Ejercicio de escucha guiado en FL Studio
+
+1. **Ver los armónicos.** En un canal, un 808 largo y limpio, una sola nota (por ejemplo A2, 55 Hz; la lectura de nota
+   del visor te la confirma). Fathom sin bandas, COLOR en Limpio. En el analizador: un pico en la fundamental y poco más.
+2. Pasa a **Cálido**: aparecen picos en 110, 165, 220 Hz (2×, 3×, 4×). Escucha en audífonos y después en el parlante del
+   teléfono o de una laptop: con Cálido el 808 se **oye** en parlantes chicos aunque no reproduzcan los 55 Hz. El oído
+   reconstruye la fundamental a partir de sus armónicos.
+3. **El nivel manda.** Baja 12 dB lo que llega a Fathom (el volumen del sampler o un Fruity Balance antes) y sube 12 dB
+   la GANANCIA de salida de Fathom para escuchar igual de fuerte: los armónicos casi desaparecen. Mismo ajuste, otro
+   resultado: así funciona el hardware (gain staging).
+4. **A ciegas, con el volumen igualado.** En una voz o un bus de batería a nivel normal (picos en −6 dBFS), alterna Limpio
+   y Sutil sin mirar (que alguien lo cambie, o cámbialo varias veces con los ojos cerrados). ¿Lo distingues? Muchas veces
+   no: Sutil se siente más que se oye (más "densidad", transientes un pelo más redondos). Está bien que sea así.
+
+### Receta: el 808 que desaparece en el teléfono
+
+1. Fathom en el canal del 808, AUTO GAIN encendido.
+2. Corte de graves de 24 dB/oct en ~25 Hz (lo que no suena en ningún parlante).
+3. Campana +3 dB, Q 1, en la fundamental del 808 (agarra el pico del analizador).
+4. COLOR en **Cálido**. En el analizador, armónicos en 2× y 3× la fundamental. Si el 808 ya llega fuerte (picos cerca de
+   0 dBFS), basta así; si llega bajo, súbelo ANTES de Fathom (no con la salida).
+5. Compara en el parlante del teléfono con BYPASS: con color, la nota se sigue oyendo aunque el teléfono no reproduzca
+   los 50 Hz.
+
+Por qué funciona: el 2.º y el 3.º armónico de un 808 (100-200 Hz) caen donde los parlantes chicos sí suenan, y el oído
+"rellena" la fundamental (fundamental ausente). El énfasis de graves hace que justo el 808 sea lo que más se colorea, y
+la campana lo empuja un poco más hacia la curva.
+
+### Reto sin receta
+
+En el bus de la batería del dembow (kick, snare, hi-hats), consigue que suene más "pegado" y con más cuerpo sin que se
+note el EQ: ninguna campana de más de 2 dB. Pistas (si no sale): ¿qué color le corresponde a un bus que ya suena bien?
+¿Qué pasa con el color si subes 3 dB la entrada del bus? ¿Y si pones un shelf grave de +2 dB (que va antes del color)?
+Compara siempre con el volumen igualado: AUTO GAIN compensa las bandas pero no el color (usa la GANANCIA de salida a
+oído o el medidor de FL).
+
+### Vocabulario
+
+- **Saturación**: la curva de un circuito que se dobla con nivel; redondea picos y suma armónicos.
+- **THD (distorsión armónica total)**: los armónicos sobre la fundamental, en % o dB. Un EQ de consola: 0.01-1 %; un
+  Pultec empujado: unos pocos %.
+- **Armónicos pares / impares**: múltiplos 2×, 4×... (octavas: "cálido") o 3×, 5×... ("áspero", "hueco").
+- **Gain staging**: cuidar a qué nivel llega la señal a cada etapa. **Ejemplo real**: en las consolas SSL muchos
+  ingenieros de hip hop suben la entrada del bus para que "pegue" más; el mismo ajuste con la señal baja no hace nada.
+- **Transformador**: dos bobinas sobre un núcleo de hierro; satura antes en los graves. Parte del "peso" en los graves de
+  un Neve o de un Pultec viene de ahí.
+- **Fundamental ausente**: el oído escucha la nota de una serie de armónicos aunque la fundamental no suene.
+- **Aliasing**: armónicos que pasan de Nyquist y se reflejan como tonos inarmónicos.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Juzgar que más color = mejor.** Cálido comprime un poquito los picos y suma armónicos: suena "más" aunque no sea
+  mejor. Compara siempre con el volumen igualado.
+- **Ponerlo en todas las pistas.** Sutil en 20 pistas se suma: el conjunto se pone opaco y menos definido. Úsalo en los
+  buses o en las pistas que lo pidan.
+- **Esperar color con la señal baja.** Con picos en −20 dBFS ni Cálido hace mucho. Es a propósito (así es el hardware):
+  sube el nivel ANTES de Fathom.
+- **En pistas que deben quedar limpias**: un sub muy puro para un club (los armónicos le quitan definición al sub-bajo
+  en un sistema grande), una voz susurrada muy expuesta, o un master que ya satura en el limitador.
+- **Cuando la latencia importa**: grabando en vivo con Fathom en el canal de entrada, 1.7 ms suman. Graba en Limpio.
+- **Para corregir**: el color no arregla un balance tonal; primero las bandas, después el color.

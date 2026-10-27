@@ -87,6 +87,8 @@ plugins/fathom/
                              # de diseño, transiciones sin clic, dry retrasado y detectores alineados
     dsp/SpectralDynamics.h   # dinámica espectral (Fase 11): STFT, detector y ganancia por bin, suma de tramos, salida bit
                              # a bit sin cambios, fundido de la latencia y la grilla para la GUI (SpectralStage)
+    dsp/AnalogColor.h        # color analógico (Fase 13): modos, curva tanh con drive y bias, énfasis de graves,
+                             # sobremuestreo, filtro DC y fundido de la latencia (ColorStage)
     dsp/Dynamics.h           # EQ dinámico: el detector de una banda (zona del solo, RMS corto, rodilla, rango,
                              # ataque/liberación sobre la ganancia, umbral automático)
     dsp/AutoGain.h           # cuánto cambia la sonoridad la curva (ruido rosa con peso K de BS.1770), por banda;
@@ -110,10 +112,11 @@ plugins/fathom/
                              # agarrar picos, curvas por canal), BandEdits (cambiar parámetros con gestos), panel de
                              # la banda elegida (BandPanel, con SOLO, CANAL y la fila de la dinámica), ajustes del
                              # analizador (AnalyzerPanel), columna de salida
-                             # (OutputPanel: escala, auto gain, balance, polaridad, ganancia, fase y calidad),
+                             # (OutputPanel: escala, auto gain, balance, polaridad, ganancia, fase, calidad y color),
                              # panel de IGUALAR y DIBUJAR (CurvePanel, Fase 12; el visor tiene las herramientas)
   tests/EngineTests.cpp    # tests del motor (con auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y
-                           # dinámica espectral), de igualar y dibujar (ajuste de bandas, espectro promedio), de la
+                           # dinámica espectral), de igualar y dibujar (ajuste de bandas, espectro promedio), del color
+                           # analógico, de la
                            # edición y del analizador (sin JUCE)
 ```
 
@@ -165,7 +168,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       la zona): domar resonancias que cambian con las notas.
 - [x] Fase 12 — Igualar y dibujar: igualar el espectro a una referencia (sidechain) creando bandas; dibujar la curva a
       mano y convertirla en bandas.
-- [ ] Fase 13 — Color analógico: modos limpio / sutil / cálido (saturación suave con sobremuestreo, con lo aprendido
+- [x] Fase 13 — Color analógico: modos limpio / sutil / cálido (saturación suave con sobremuestreo, con lo aprendido
       en Riptide).
 - [ ] Fase 14 — Otras instancias: ver el espectro de las demás instancias de Fathom del proyecto y marcar dónde chocan
       (enmascaramiento); editarlas desde aquí.
@@ -174,7 +177,42 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 12 COMPLETADA (2026-10-27). Probada por el usuario en FL Studio: funciona.
+Fase 13 COMPLETADA (2026-10-27). Falta probarla en FL Studio.
+- Color analógico (`dsp/AnalogColor.h`, `ColorStage`): parámetro nuevo `analogColor` (versionHint 13, lista Clean /
+  Subtle / Warm, Clean por defecto: un proyecto de las Fases 1-12 suena igual, bit a bit y sin latencia). Entra al
+  deshacer, al A/B y a la automatización. `Engine::setColor`, `getColorLatency`; el procesador lo pasa en
+  `setOutputSettings` y guarda la latencia del color para la GUI (`getColorLatency`).
+- Cadena por canal (L y R separados, como hardware de dos canales): énfasis de graves (x + (G − 1)·LP de 1 polo en
+  100 Hz) → ↑N → curva → ↓N → de-énfasis (inverso exacto: 1 + (1/G − 1)·LP con g·G, el mismo truco bilineal que la cinta
+  de Riptide) → filtro DC de 2 Hz (`DcBlocker`). Curva f(x) = (tanh(d·x + β) − tanh β) / (d·(1 − tanh² β)) con
+  `fastTanh` (pendiente 1 en el origen). SUTIL d 0.35, β 0.03, G +3 dB; CÁLIDO d 0.75, β 0.15, G +6 dB.
+- Va después de la etapa espectral y antes de la ganancia de salida, el auto gain, el balance y la polaridad (subir una
+  banda empuja el color; la GANANCIA de salida no). Retrasa también la original (bypass, solo y mezcla alineados).
+- Sobremuestreo con `Oversampler` de la librería: ×4 bajo 60 kHz, ×2 bajo 120 kHz, nada encima. Latencia 75 / 44 / 13 /
+  11 muestras a 44.1 / 48 / 88.2 / 96 kHz (1.7 ms a 44.1), sumada a la de fase y espectral (`getLatencySamples` = la del
+  modo pedido). La curva del EQ no cambia (con poca señal, la salida = la entrada retrasada); los halfband cortan lo que
+  pasa de ~20 kHz a 44.1/48.
+- Transiciones: LIMPIO → color = la cadena arranca en limpio con el voicing en su sitio, se llena (2·latencia + 32
+  muestras) y se funde 20 ms en S de la salida sin retraso a la coloreada retrasada (igual la original); al volver, al
+  revés, y se detiene (sin CPU). SUTIL ↔ CÁLIDO = rampas de 20 ms de d, β y G, muestra a muestra (primero se cambiaban
+  cada 32 muestras para usar el sobremuestreo en bloque: escalones de −70 dB que el test de clics vio, 15-18 % sobre el
+  seno coloreado a 88.2/96); quietos, el sobremuestreo va en bloques de 32.
+- Medido (seno de 1 kHz, armónicos / fundamental): SUTIL −57 / −49 / −39 dB a −12 / −6 / 0 dBFS; CÁLIDO −37 / −31 / −24 dB
+  (a −6 dBFS sobre todo pares: −31.3 dB); CÁLIDO con 60 Hz a −6 dBFS −23.5 dB (el énfasis). Aliasing de 15 kHz a 0 dBFS
+  en CÁLIDO: −145 dB a 44.1, −134 dB a 48. CPU (estéreo, bloques de 256): CÁLIDO 1.1 % de un núcleo a 44.1 y 1.0 % a 96
+  (el motor sin bandas: 0.1 / 0.2 %).
+- GUI: COLOR (Limpio / Sutil / Cálido) en la columna de SALIDA debajo de CALIDAD, con la explicación en el tooltip; la
+  latencia de abajo suma la del color. Cabecera "Fase 13: color analógico".
+- Tests nuevos `FathomTests`: latencias; bypass con color = la entrada retrasada bit a bit; −60 dBFS en 30 Hz, 1 kHz y
+  15 kHz = ±0.03 dB y la forma de onda retrasada (< 1 % de error); armónicos que crecen con el nivel y el modo (rangos en
+  0 dBFS, SUTIL a −12 bajo −55 dB, graves más que 1 kHz, pares), aliasing < −90 dB; cambiar de modo sonando (8 cambios
+  con la latencia) sin clic contra el seno coloreado quieto (+10 %) y al final LIMPIO bit a bit; mono = estéreo.
+- GUI: sin captura (el Standalone sale recortado por el escalado de pantalla): revisar el selector en FL.
+- Release con 0 warnings; FathomTests: todos pasan; ctest 7/8: UndertowTests falló en su test de CPU (el del resonador;
+  ni Undertow ni `libs/` cambiaron en esta fase); pluginval strictness 10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 12
+Probada por el usuario en FL Studio: funciona.
 - Igualar y dibujar, todo en la GUI (sin parámetros nuevos ni cambios en el audio: un proyecto de las Fases 1-11 suena
   igual). Botones IGUALAR y DIBUJAR en la cabecera del visor; con uno activo, `gui/CurvePanel.h` ocupa el lugar del panel
   de la banda (el editor los alterna; Esc, SALIR o el mismo botón vuelven).
@@ -643,4 +681,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 13 (color analógico).
+Siguiente: Fase 14 (otras instancias).

@@ -14,7 +14,8 @@ namespace fathom::gui
 
 // La columna de SALIDA, el final de la cadena (como el canal de una consola, de arriba a abajo): ESCALA de la ganancia
 // de todas las bandas, AUTO GAIN (con lo que está compensando), BALANCE, invertir la polaridad (Ø) y la GANANCIA de salida.
-// Abajo, el modo de FASE (Fase 10) con la calidad de la fase lineal y la latencia que agrega.
+// Abajo, el modo de FASE (Fase 10) con la calidad de la fase lineal, el COLOR analógico (Fase 13) y la latencia que
+// agregan.
 class OutputPanel final : public juce::Component
 {
 public:
@@ -102,6 +103,24 @@ public:
         addAndMakeVisible (qualityBox);
         qualityAttachment = std::make_unique<ComboBoxAttachment> (parameters, params::linearQuality, qualityBox);
 
+        // Fase 13: el color analógico. El orden de la lista es el de dsp::ColorMode.
+        setUpLabel (colorLabel, "COLOR");
+        colorBox.addItem ("Limpio", 1);
+        colorBox.addItem ("Sutil", 2);
+        colorBox.addItem (juce::String::fromUTF8 ("C\xc3\xa1lido"), 3);
+        colorBox.setTooltip (juce::String::fromUTF8 (
+            "La saturaci\xc3\xb3n de los amplificadores y transformadores de un EQ de hardware, despu\xc3\xa9s de las "
+            "bandas: redondea un poco los picos y suma arm\xc3\xb3nicos. Depende del NIVEL: con poca se\xc3\xb1" "al casi "
+            "no hace nada; con la pista fuerte (o subiendo una banda) se nota m\xc3\xa1s.\n"
+            "LIMPIO: nada (sin latencia).\n"
+            "SUTIL: una consola bien ajustada. 1 % de distorsi\xc3\xb3n a 0 dBFS, 0.15 % a \xe2\x88\x92" "12: se siente "
+            "m\xc3\xa1s que se oye (densidad, pegamento en buses y master).\n"
+            "C\xc3\x81LIDO: un bulbo con transformador. 6 % a 0 dBFS, con arm\xc3\xb3nicos PARES (octavas: suena lleno) y "
+            "m\xc3\xa1s en los graves (un 808 engorda). Para dar car\xc3\xa1" "cter, no para corregir.\n"
+            "Compara con el volumen igualado: el color comprime un poco los picos. 1.7 ms de latencia a 44.1 kHz."));
+        addAndMakeVisible (colorBox);
+        colorAttachment = std::make_unique<ComboBoxAttachment> (parameters, params::analogColor, colorBox);
+
         latencyReadout.setJustificationType (juce::Justification::centred);
         latencyReadout.setFont (juce::FontOptions (11.0f));
         latencyReadout.setColour (juce::Label::textColourId, theme::dimText);
@@ -126,6 +145,8 @@ public:
         qualityLabel.setAlpha (mode == dsp::PhaseMode::linear ? 1.0f : 0.4f);
         const double sampleRate = processor.getAnalyzerSampleRate();
         int latency = dsp::PhaseSizes::latency (mode, processor.getLinearQuality(), sampleRate);
+        if (processor.getColorMode() != dsp::ColorMode::clean) // Fase 13: el sobremuestreo del color
+            latency += processor.getColorLatency();
         for (int b = 0; b < dsp::Engine::numBands; ++b)
             if (dsp::isSpectral (processor.getBandSettings (b)))
             {
@@ -165,6 +186,9 @@ public:
         area.removeFromTop (6);
         qualityLabel.setBounds (area.removeFromTop (15));
         qualityBox.setBounds (area.removeFromTop (24));
+        area.removeFromTop (6);
+        colorLabel.setBounds (area.removeFromTop (15));
+        colorBox.setBounds (area.removeFromTop (24));
         latencyReadout.setBounds (area.removeFromTop (18));
     }
 
@@ -210,9 +234,9 @@ private:
     std::unique_ptr<ButtonAttachment> autoGainAttachment;
     juce::TextButton invertButton { juce::String::fromUTF8 ("\xc3\x98  POLARIDAD") };
     std::unique_ptr<ButtonAttachment> invertAttachment;
-    juce::Label phaseLabel, qualityLabel, latencyReadout;
-    juce::ComboBox phaseBox, qualityBox;
-    std::unique_ptr<ComboBoxAttachment> phaseAttachment, qualityAttachment;
+    juce::Label phaseLabel, qualityLabel, colorLabel, latencyReadout;
+    juce::ComboBox phaseBox, qualityBox, colorBox;
+    std::unique_ptr<ComboBoxAttachment> phaseAttachment, qualityAttachment, colorAttachment;
 };
 
 } // namespace fathom::gui
