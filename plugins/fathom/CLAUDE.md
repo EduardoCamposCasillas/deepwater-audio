@@ -170,7 +170,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 11 COMPLETADA (2026-10-26). Falta probarla en FL Studio.
+Fase 11 COMPLETADA (2026-10-26). Probada por el usuario en FL Studio: funciona.
 - Dinámica espectral (`dsp/SpectralDynamics.h`, `SpectralStage`): una banda dinámica con ESPECTRAL decide por bin de una
   STFT en vez de mover la banda entera. Parámetro nuevo por banda (versionHint 11, al final del layout):
   `band<N>Spectral` (off: un proyecto de las Fases 1-10 suena igual). `DynamicSettings::spectral`, `canBeSpectral`
@@ -219,7 +219,7 @@ Fase 11 COMPLETADA (2026-10-26). Falta probarla en FL Studio.
   cambio a fase lineal): la segunda diferencia relativa a la amplitud local (piso = el tono de entrada) no supera a la de
   la misma automatización sin la parte espectral (1.2-2.7 contra 2.1-4.0). La cota absoluta de la Fase 9 no sirve aquí:
   tres bandas espectrales apiladas suben legítimamente el tono +90 dB.
-- GUI: captura del Standalone solo de la cabecera (sale recortada por el escalado de pantalla): el panel y los dientes del visor, revisarlos en FL.
+- GUI: captura del Standalone solo de la cabecera (sale recortada por el escalado de pantalla): el panel y los dientes del visor los revisó el usuario en FL.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
 ### Lo que quedó de la Fase 10
@@ -589,4 +589,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 11 en FL Studio; después, Fase 12 (igualar y dibujar).
+Siguiente: Fase 12 (igualar y dibujar).
