@@ -174,7 +174,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 12 COMPLETADA (2026-10-27). Falta probarla en FL Studio.
+Fase 12 COMPLETADA (2026-10-27). Probada por el usuario en FL Studio: funciona.
 - Igualar y dibujar, todo en la GUI (sin parámetros nuevos ni cambios en el audio: un proyecto de las Fases 1-11 suena
   igual). Botones IGUALAR y DIBUJAR en la cabecera del visor; con uno activo, `gui/CurvePanel.h` ocupa el lugar del panel
   de la banda (el editor los alterna; Esc, SALIR o el mismo botón vuelven).
@@ -219,8 +219,8 @@ Fase 12 COMPLETADA (2026-10-27). Falta probarla en FL Studio.
   fuerte: la curva = las bandas sin su promedio, peor 0.12 dB entre 100 Hz y 15 kHz; CANTIDAD escala; sin datos no pide
   nada; 3 bandas que deshacen el color: peor 0.14 dB; otra fs borra); dibujo (trazos sin huecos, la recta en log, un
   clic = un punto, borrar, sumar/reemplazar, una meseta de 200-800 Hz: 5.7 dB en 400 Hz y ~0 lejos).
-- GUI: sin captura (el Standalone sale recortado por el escalado de pantalla): el panel, las curvas y el dibujo, revisarlos
-  en FL.
+- GUI: sin captura (el Standalone sale recortado por el escalado de pantalla): el panel, las curvas y el dibujo los revisó
+  el usuario en FL.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
 ### Lo que quedó de la Fase 11
@@ -643,4 +643,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 12 en FL Studio; después, Fase 13 (color analógico).
+Siguiente: Fase 13 (color analógico).
