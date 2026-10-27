@@ -177,7 +177,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 13 COMPLETADA (2026-10-27). Falta probarla en FL Studio.
+Fase 13 COMPLETADA (2026-10-27). Probada por el usuario en FL Studio: funciona.
 - Color analógico (`dsp/AnalogColor.h`, `ColorStage`): parámetro nuevo `analogColor` (versionHint 13, lista Clean /
   Subtle / Warm, Clean por defecto: un proyecto de las Fases 1-12 suena igual, bit a bit y sin latencia). Entra al
   deshacer, al A/B y a la automatización. `Engine::setColor`, `getColorLatency`; el procesador lo pasa en
