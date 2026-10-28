@@ -43,8 +43,13 @@ namespace fathom::dsp
 // en todas partes, así que sin cambios la suma devuelve la señal (dividida por 1.5). La segunda ventana suaviza el borde
 // de cada tramo: un cambio de ganancia entre dos tramos se funde a lo largo de toda la ventana, sin clic.
 //
-// El precio: latencia. Un tramo necesita N muestras antes de poder salir: la etapa retrasa N (46 ms con 2048 a 44.1 kHz)
-// y lo informa al host. Y la resolución: un bin mide 21.5 Hz, la ventana de Hann reparte un seno en ~4 bins (86 Hz),
+// El precio: latencia. Un tramo necesita N muestras antes de poder salir, y (Fase 16) un hop más para calcularlo: la
+// etapa retrasa N + hop (58 ms con 2048 a 44.1 kHz) y lo informa al host. El hop extra es para repartir el trabajo:
+// todo el cálculo de un tramo depende de la entrada recién llegada, así que sin él había que hacerlo de golpe en el
+// borde, y con bloques del host chicos un callback de cada hop/bloque se llevaba varias veces su tiempo (el host corta).
+// Ahora el tramo que se completa se calcula por pasos (FFT de cada canal, cada banda, las ganancias, la inversa y la
+// suma de cada canal) a lo largo del hop siguiente, en proporción a las muestras que llegan; sus muestras se leen de la
+// historia (más atrás lo que ya pasó desde el borde) y su suma cae hop muestras más adelante, justo cuando se lee. Y la resolución: un bin mide 21.5 Hz, la ventana de Hann reparte un seno en ~4 bins (86 Hz),
 // así que en graves (bajo ~150 Hz) separa mal dos armónicos cercanos; y la ganancia cambia como mucho cada hop (11.6 ms):
 // es lenta para un transitorio (para eso, la dinámica normal). Con 88.2/96 kHz todo es el doble de muestras (el mismo
 // tiempo y los mismos Hz).
@@ -67,7 +72,7 @@ struct SpectralSizes
 {
     static int frameLength (double sampleRate) noexcept { return 2048 * PhaseSizes::rateFactor (sampleRate); }
     static int hop (double sampleRate) noexcept { return frameLength (sampleRate) / 4; }
-    static int latency (double sampleRate) noexcept { return frameLength (sampleRate); }
+    static int latency (double sampleRate) noexcept { return frameLength (sampleRate) + hop (sampleRate); }
 };
 
 class SpectralStage
@@ -107,6 +112,7 @@ public:
         length = SpectralSizes::frameLength (sampleRate);
         hop = SpectralSizes::hop (sampleRate);
         bins = length / 2 + 1;
+        delay = SpectralSizes::latency (sampleRate);
         frameRate = sampleRate / hop;
         binHz = sampleRate / length;
         fft.prepare (length);
@@ -118,10 +124,10 @@ public:
         for (int ch = 0; ch < maxChannels; ++ch)
         {
             const auto c = static_cast<size_t> (ch);
-            mainHistory[c].prepare (length + 8);
-            dryHistory[c].prepare (length + 8);
-            sidechainHistory[c].prepare (maxSidechainDelay + length + 8);
-            ola[c].assign (static_cast<size_t> (length), 0.0f);
+            mainHistory[c].prepare (delay + 8);
+            dryHistory[c].prepare (delay + 8);
+            sidechainHistory[c].prepare (maxSidechainDelay + delay + 8);
+            ola[c].assign (static_cast<size_t> (delay), 0.0f);
             re[c].assign (static_cast<size_t> (bins), 0.0f);
             im[c].assign (static_cast<size_t> (bins), 0.0f);
             keyRe[c].assign (static_cast<size_t> (bins), 0.0f);
@@ -140,6 +146,7 @@ public:
         delayFade.setTime (fadeSeconds, sampleRate);
         hopCounter = 0;
         olaIndex = 0;
+        work = {};
         sinceChange = std::numeric_limits<int>::max();
         snapshot = {};
         publishedSomething = false;
@@ -227,29 +234,42 @@ public:
             for (int ch = 0; ch < numChannels; ++ch)
             {
                 const auto c = static_cast<size_t> (ch);
-                // La suma de tramos de la muestra de hace N ya está completa (todos los tramos que la tocan pasaron).
+                // La suma de tramos de la muestra de hace N + hop ya está completa (todos los tramos que la tocan se
+                // calcularon).
                 const float processed = ola[c][at];
                 ola[c][at] = 0.0f;
-                const float delayed = clean ? mainHistory[c].read (length) : processed;
-                const float delayedDry = dryHistory[c].read (length);
+                const float delayed = clean ? mainHistory[c].read (delay) : processed;
+                const float delayedDry = dryHistory[c].read (delay);
                 float& sample = main[ch][i];
                 const float original = dry[ch][i];
                 sample = s == 1.0f ? delayed : s == 0.0f ? sample : sample + (delayed - sample) * s;
                 dryOut[c][static_cast<size_t> (i)] = s == 1.0f ? delayedDry : s == 0.0f ? original : original + (delayedDry - original) * s;
             }
-            olaIndex = olaIndex + 1 == length ? 0 : olaIndex + 1;
+            olaIndex = olaIndex + 1 == delay ? 0 : olaIndex + 1;
             if (++hopCounter == hop)
             {
+                // El tramo anterior termina (lo que le falte) y empieza el que se acaba de completar.
                 hopCounter = 0;
-                computeFrame (numChannels);
+                frameAge = hop;
+                advanceFrame (std::numeric_limits<int>::max());
+                beginFrame (numChannels);
             }
+        }
+        // Lo que le toca al tramo en curso por las muestras que llegaron.
+        if (work.active)
+        {
+            frameAge = hopCounter;
+            advanceFrame ((totalSteps() * hopCounter + hop - 1) / hop);
         }
         for (int ch = 0; ch < numChannels; ++ch)
             dryPointers[static_cast<size_t> (ch)] = dryOut[static_cast<size_t> (ch)].data();
 
         // De vuelta sin retraso del todo: se detiene (sin tramos que calcular).
         if (! wanted && delayFade.value == 0.0f && delayFade.isSteady())
+        {
             running = false;
+            work = {};
+        }
     }
 
     [[nodiscard]] const float* dryOutput (int channel) const noexcept { return dryPointers[static_cast<size_t> (channel)]; }
@@ -293,14 +313,15 @@ private:
         sinceStart = 0;
         sinceChange = std::numeric_limits<int>::max();
         hopCounter = 0;
+        work = {};
         for (auto& buffer : ola)
             std::fill (buffer.begin(), buffer.end(), 0.0f);
         delayFade.snap (0.0f);
         delayFade.setTarget (1.0f);
     }
 
-    // Una muestra "limpia" a la salida: ningún tramo con cambios la tocó (el último terminó hace más de N muestras).
-    [[nodiscard]] bool isClean() const noexcept { return sinceChange > length; }
+    // Una muestra "limpia" a la salida: ningún tramo con cambios la tocó (el último empezó hace más de N + hop muestras).
+    [[nodiscard]] bool isClean() const noexcept { return sinceChange > delay; }
 
     void pushHistory (const float* const* main, const float* const* dry, int numChannels, const float* const* sidechain,
                       int sidechainChannels, int i) noexcept
@@ -384,7 +405,7 @@ private:
             {
                 const auto c = static_cast<size_t> (ch);
                 for (int n = 0; n < length; ++n)
-                    frame[static_cast<size_t> (n)] = sidechainHistory[c].read (alignment + length - 1 - n) * window[static_cast<size_t> (n)];
+                    frame[static_cast<size_t> (n)] = sidechainHistory[c].read (alignment + frameAge + length - 1 - n) * window[static_cast<size_t> (n)];
                 fft.forward (frame.data(), keyRe[c].data(), keyIm[c].data());
             }
         }
@@ -550,78 +571,116 @@ private:
         return changed;
     }
 
-    // Un tramo (cada hop): análisis, las bandas, la ganancia por bin y la suma de tramos.
-    void computeFrame (int numChannels) noexcept
+    // Un tramo (cada hop), por pasos a lo largo del hop siguiente: análisis de cada canal, cada banda, las ganancias, la
+    // inversa y la suma de cada canal, y el cierre. Lee la historia 'frameAge' muestras más atrás (lo que pasó desde que
+    // el tramo se completó).
+    struct FrameWork
     {
+        bool active = false;
+        int channels = 1, step = 0, olaStart = 0;
+        bool allowed = false, changed = false, anyBand = false;
+    };
+
+    [[nodiscard]] int totalSteps() const noexcept { return 2 * work.channels + numBands + 2; }
+
+    void beginFrame (int numChannels) noexcept
+    {
+        work.active = true;
+        work.channels = numChannels;
+        work.step = 0;
+        // Su primera muestra se lee dentro de N + hop − N = hop muestras.
+        work.olaStart = olaIndex + hop >= delay ? olaIndex + hop - delay : olaIndex + hop;
+        // Las bandas actúan cuando lo retrasado ya suena del todo y la suma de tramos ya tiene todos los suyos.
+        work.allowed = wanted && delayFade.value == 1.0f && delayFade.isSteady() && sinceStart >= delay + hop;
+        work.changed = work.anyBand = false;
         levelReady = {};
         keyReady = false;
         groupUsed = {};
-        for (int ch = 0; ch < numChannels; ++ch)
-        {
-            const auto c = static_cast<size_t> (ch);
-            for (int n = 0; n < length; ++n)
-                frame[static_cast<size_t> (n)] = mainHistory[c].read (length - 1 - n) * window[static_cast<size_t> (n)];
-            fft.forward (frame.data(), re[c].data(), im[c].data());
-        }
+    }
 
-        // Las bandas actúan cuando lo retrasado ya suena del todo y la suma de tramos ya tiene todos los suyos.
-        const bool allowed = wanted && delayFade.value == 1.0f && delayFade.isSteady() && sinceStart >= length + hop;
-        bool changed = false, anyBand = false;
-        for (size_t b = 0; b < states.size(); ++b)
+    // Hace los pasos del tramo en curso hasta 'target' (o todos).
+    void advanceFrame (int target) noexcept
+    {
+        const int channels = work.channels;
+        const int bandsStart = channels, gainsStep = channels + numBands, outputStart = gainsStep + 1;
+        const int lastStep = outputStart + channels;
+        while (work.active && work.step < std::min (target, lastStep + 1))
         {
-            if (states[b].running || want[b])
+            const int step = work.step++;
+            if (step < bandsStart)
             {
-                anyBand = true;
-                changed = processBand (b, allowed) || changed;
-            }
-            else
-                std::fill (snapshot.db[b].begin(), snapshot.db[b].end(), 0.0f);
-        }
-
-        // La salida de este tramo a la suma: sin cambios, la entrada con las dos ventanas (lo mismo que daría la FFT
-        // inversa, sin hacerla); con cambios, cada bin por su ganancia y la inversa.
-        constexpr float olaScale = 1.0f / 1.5f; // las ventanas al cuadrado solapadas cada N/4 suman 1.5
-        for (int ch = 0; ch < numChannels; ++ch)
-        {
-            const auto c = static_cast<size_t> (ch);
-            if (changed)
-            {
-                applyGains (ch, numChannels);
-                fft.inverse (re[c].data(), im[c].data(), frame.data());
-            }
-            else
+                const auto c = static_cast<size_t> (step);
                 for (int n = 0; n < length; ++n)
-                    frame[static_cast<size_t> (n)] = mainHistory[c].read (length - 1 - n) * window[static_cast<size_t> (n)];
-            auto& buffer = ola[c];
-            for (int n = 0; n < length; ++n)
-            {
-                int at = olaIndex + n;
-                if (at >= length)
-                    at -= length;
-                buffer[static_cast<size_t> (at)] += frame[static_cast<size_t> (n)] * window[static_cast<size_t> (n)] * olaScale;
+                    frame[static_cast<size_t> (n)] = mainHistory[c].read (frameAge + length - 1 - n) * window[static_cast<size_t> (n)];
+                fft.forward (frame.data(), re[c].data(), im[c].data());
             }
+            else if (step < gainsStep)
+            {
+                const auto b = static_cast<size_t> (step - bandsStart);
+                if (states[b].running || want[b])
+                {
+                    work.anyBand = true;
+                    work.changed = processBand (b, work.allowed) || work.changed;
+                }
+                else
+                    std::fill (snapshot.db[b].begin(), snapshot.db[b].end(), 0.0f);
+            }
+            else if (step == gainsStep)
+            {
+                if (work.changed)
+                    applyGains (channels);
+            }
+            else if (step < lastStep)
+                outputChannel (step - outputStart);
+            else
+                finishFrame();
         }
-        if (changed)
-            sinceChange = 0;
+    }
+
+    // La salida de un canal del tramo a la suma: sin cambios, la entrada con las dos ventanas (lo mismo que daría la
+    // FFT inversa, sin hacerla); con cambios, la inversa del espectro con las ganancias.
+    void outputChannel (int ch) noexcept
+    {
+        constexpr float olaScale = 1.0f / 1.5f; // las ventanas al cuadrado solapadas cada N/4 suman 1.5
+        const auto c = static_cast<size_t> (ch);
+        if (work.changed)
+            fft.inverse (re[c].data(), im[c].data(), frame.data());
+        else
+            for (int n = 0; n < length; ++n)
+                frame[static_cast<size_t> (n)] = mainHistory[c].read (frameAge + length - 1 - n) * window[static_cast<size_t> (n)];
+        auto& buffer = ola[c];
+        for (int n = 0; n < length; ++n)
+        {
+            int at = work.olaStart + n;
+            if (at >= delay)
+                at -= delay;
+            buffer[static_cast<size_t> (at)] += frame[static_cast<size_t> (n)] * window[static_cast<size_t> (n)] * olaScale;
+        }
+    }
+
+    void finishFrame() noexcept
+    {
+        work.active = false;
+        // Sus muestras salen desde dentro de hop: se cuenta desde que el tramo se completó (frameAge atrás).
+        if (work.changed)
+            sinceChange = std::min (sinceChange, frameAge);
         for (size_t g = 0; g < groupDb.size(); ++g)
             if (groupUsed[g])
                 std::fill (groupDb[g].begin(), groupDb[g].end(), 0.0f);
 
         // A la GUI: mientras alguna banda actúa (y una vez más al terminar, para que vea el 0).
-        if (anyBand || publishedSomething)
+        if (work.anyBand || publishedSomething)
         {
             ++snapshot.frame;
             mailbox.write (snapshot);
-            publishedSomething = anyBand;
+            publishedSomething = work.anyBand;
         }
     }
 
-    // Las ganancias de los grupos sobre el espectro de un canal. Con mid o side: L y R pasan a M/S (con lo de L/R ya
-    // aplicado), se aplica y vuelven. Se hace una vez (en el canal 0) para los dos canales.
-    void applyGains (int ch, int numChannels) noexcept
+    // Las ganancias de los grupos sobre el espectro de los canales. Con mid o side: L y R pasan a M/S (con lo de L/R ya
+    // aplicado), se aplica y vuelven.
+    void applyGains (int numChannels) noexcept
     {
-        if (ch > 0)
-            return; // el canal 0 ya dejó listos los dos
         const bool stereo = numChannels == 2;
         const bool midSide = stereo && (groupUsed[groupMid] || groupUsed[groupSide]);
         for (int bin = 0; bin < bins; ++bin)
@@ -706,6 +765,9 @@ private:
     std::array<std::vector<float>, maxChannels> ola, re, im, keyRe, keyIm, dryOut;
     std::array<const float*, maxChannels> dryPointers {};
     int hopCounter = 0, olaIndex = 0, alignment = 0, maxSidechainDelay = 0;
+    int delay = 2560;  // la latencia: N + hop (también el largo de la suma de tramos)
+    int frameAge = 0;  // muestras desde que se completó el tramo en curso
+    FrameWork work;
     int sinceChange = 0, sinceStart = 0; // muestras desde el último tramo con cambios y desde que arrancó
     bool running = false, wanted = false, mono = false;
     deepwater::dsp::LinearRamp delayFade; // 0 = sin retraso (la etapa no está), 1 = retrasada N

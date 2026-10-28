@@ -173,7 +173,7 @@ double FathomAudioProcessor::getTailLengthSeconds() const
     }
     for (int b = 0; b < fathom::dsp::Engine::numBands; ++b)
         if (fathom::dsp::isSpectral (getBandSettings (b)))
-            return tail + fathom::dsp::SpectralSizes::frameLength (sampleRate) / sampleRate;
+            return tail + fathom::dsp::SpectralSizes::latency (sampleRate) / sampleRate;
     return tail;
 }
 

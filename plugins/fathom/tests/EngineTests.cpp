@@ -2217,11 +2217,12 @@ float biggestRelativeSecondDifference (const std::vector<float>& y, double hz, d
 
 void testSpectralLatencyAndIdentity()
 {
-    std::printf ("Espectral: agrega N muestras de latencia (2048, el doble a 88.2/96) y, sin pasar el umbral, es la entrada retrasada bit a bit\n");
+    std::printf ("Espectral: agrega N + hop muestras de latencia (2048 + 512, el doble a 88.2/96) y, sin pasar el umbral, es la entrada retrasada bit a bit\n");
     for (const double sampleRate : sampleRates)
     {
-        const int n = SpectralSizes::frameLength (sampleRate);
-        CHECK (n == (sampleRate > 50000.0 ? 4096 : 2048));
+        const int n = SpectralSizes::latency (sampleRate);
+        CHECK (SpectralSizes::frameLength (sampleRate) == (sampleRate > 50000.0 ? 4096 : 2048));
+        CHECK (n == (sampleRate > 50000.0 ? 5120 : 2560));
         Engine engine;
         engine.prepare (sampleRate, false, 0.0f, only (spectralBell (2000.0f, 1.0f, -12.0f, 0.0f)));
         CHECK (engine.getLatencySamples() == n);
@@ -2311,7 +2312,7 @@ void testSpectralBypassAndMidSide()
     for (const double sampleRate : sampleRates)
     {
         const auto numSamples = static_cast<size_t> (sampleRate);
-        const int n = SpectralSizes::frameLength (sampleRate);
+        const int n = SpectralSizes::latency (sampleRate);
         // Bypass: la entrada retrasada N, bit a bit (con la banda que cortaría fuerte).
         {
             Engine engine;
@@ -2442,7 +2443,7 @@ void testSpectralSwitchingHasNoClicks()
             engine.setBand (0, band);
             float* channels[] { left.data() + start, right.data() + start };
             engine.process (channels, 2, count);
-            latencyFollows = latencyFollows && engine.getLatencySamples() == (band.dynamics.spectral ? SpectralSizes::frameLength (sampleRate) : 0);
+            latencyFollows = latencyFollows && engine.getLatencySamples() == (band.dynamics.spectral ? SpectralSizes::latency (sampleRate) : 0);
             start += count;
         }
         CHECK (latencyFollows);
@@ -2534,7 +2535,7 @@ void testSpectralWithLinearPhase()
     std::printf ("Espectral con fase lineal: las latencias se suman; sin pasar el umbral = la entrada retrasada bit a bit; corta igual\n");
     for (const double sampleRate : sampleRates)
     {
-        const int total = PhaseSizes::latency (PhaseMode::linear, 0, sampleRate) + SpectralSizes::frameLength (sampleRate);
+        const int total = PhaseSizes::latency (PhaseMode::linear, 0, sampleRate) + SpectralSizes::latency (sampleRate);
         const auto numSamples = static_cast<size_t> (sampleRate);
         {
             Engine engine;

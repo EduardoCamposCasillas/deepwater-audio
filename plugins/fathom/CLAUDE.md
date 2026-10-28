@@ -192,8 +192,17 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 16 EN CURSO. Paso 1 (CPU de las bandas IIR) probado en FL: funciona. Paso 2 (picos de la convolución) hecho.
-Pendiente: picos de la STFT espectral, GUI escalable, automatización extrema.
+Fase 16 EN CURSO. Paso 1 (CPU de las bandas IIR) probado en FL: funciona. Pasos 2 y 3 (picos de la convolución y de
+la STFT espectral) hechos; falta probarlos en FL. Pendiente: GUI escalable, automatización extrema.
+- Paso 3 (decidido con el usuario: +1 hop de latencia antes que optimizar sin cambiarla o dejarlo): la etapa espectral
+  retrasa N + hop (`SpectralSizes::latency`: 2560 muestras = 58 ms a 44.1, 53 ms a 48; el doble de muestras a 88.2/96).
+  El tramo que se completa se calcula por pasos a lo largo del hop siguiente (`FrameWork`: FFT de cada canal, cada una
+  de las 24 bandas, las ganancias, inversa + suma de cada canal, cierre), en proporción a las muestras llegadas; lee la
+  historia `frameAge` más atrás (también el sidechain) y suma en una suma de tramos de N + hop, hop posiciones más
+  adelante. "Limpio" = el último tramo con cambios se completó hace más de N + hop; las bandas actúan con
+  sinceStart ≥ N + 2·hop. La cola (`getTailLengthSeconds`) suma N + hop. Un proyecto con bandas espectrales suena igual
+  pero 11.6 ms más tarde (FL lo compensa). Peor callback (6 bandas espectrales): 96 kHz/32 200-350 % → ~40 %; 44.1/32
+  44-54 % → 15-37 %.
 - Paso 2: `PartitionedConvolver` adelanta durante el bloque (en cada `process`, en proporción a las muestras llegadas)
   la suma de los trozos de edad ≥ 1 (solo leen entradas pasadas); en el borde quedan la FFT nueva, el trozo 0 y la
   inversa. Misma latencia; mismo resultado salvo el orden de las sumas (bit a bit igual con bloques chicos o de P:
