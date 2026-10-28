@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Timbal, bongó, conga y güira: ataque del cuero sin caja. -->
+<FathomPreset formatVersion="1" name="Percusión Latina Al Frente" category="Percusión" author="Fathom">
+  <Notes>
+    Para la percusión latina que acompaña al dembow (timbales, bongó, congas, güira, shakers): que se oiga el ataque de las
+    manos sobre el cuero sin que el cuerpo de los tambores llene los medios.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 180 Hz, 12 dB/oct (suave: los tambores conservan algo de tono).
+    - Banda 2, −2 dB en 450 Hz (Q 1.0): la "caja", la resonancia de los tambores que se suma con los acordes.
+    - Banda 3, +2.5 dB en 2.5 kHz (Q 1.2): el ataque, la mano contra el cuero.
+    - Banda 4, shelf de agudos +1.5 dB desde 9 kHz: la güira y los shakers.
+
+    Pruébalo: en el analizador, mira la percusión junto con los acordes (INSTANCIAS, si los acordes también tienen Fathom):
+    si chocan en 300-600 Hz, la banda 2 es la que les hace espacio.
+    Cuándo NO usarlo: en un loop que ya trae kick y bajo (el corte de 180 Hz se los come), ni en una conga sola que tiene
+    que sonar grave (baja el corte a 80 Hz).
+    Viene de: Fase 3 y Fase 14 (choques).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="180"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="12 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="450"/>
+    <PARAM id="band2Gain" value="-2"/>
+    <PARAM id="band2Q" value="1"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="Bell"/>
+    <PARAM id="band3Frequency" value="2500"/>
+    <PARAM id="band3Gain" value="2.5"/>
+    <PARAM id="band3Q" value="1.2"/>
+    <PARAM id="band4Enabled" value="On"/>
+    <PARAM id="band4Shape" value="High Shelf"/>
+    <PARAM id="band4Frequency" value="9000"/>
+    <PARAM id="band4Gain" value="1.5"/>
+    <PARAM id="band4Q" value="0.71"/>
+  </Parameters>
+</FathomPreset>

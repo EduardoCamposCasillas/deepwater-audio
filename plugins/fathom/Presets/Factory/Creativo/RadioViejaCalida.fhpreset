@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Una radio de tubos: medios al frente, cortes con resonancia y color cálido. -->
+<FathomPreset formatVersion="1" name="Radio Vieja Cálida" category="Creativo" author="Fathom">
+  <Notes>
+    Una radio vieja de tubos: más graves que el teléfono, medios al frente, los cortes con un pequeño "bulto" de resonancia
+    y la saturación cálida que los tubos le agregan.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 250 Hz, 12 dB/oct, Q 1.2 (resonancia: un bulto justo en el corte, como un parlante en una
+      caja de madera).
+    - Banda 2, +3 dB en 1.2 kHz (Q 0.9): medios al frente.
+    - Banda 3, corte de agudos en 5 kHz, 18 dB/oct, Q 1.0.
+    - COLOR = Cálido: armónicos pares (los de los tubos) y un poco de énfasis en los graves de la saturación.
+
+    Pruébalo: un sample de acordes o una voz de intro. Sube y baja la Q de la banda 1 entre 0.71 (sin bulto) y 2 (bulto
+    marcado) y escucha cómo cambia el "tamaño" de la radio.
+    Cuándo NO usarlo: en el master (el color cálido satura todo), ni si la pista tiene que conservar sus graves.
+    Viene de: Fase 3 (cortes con resonancia) y Fase 13 (color cálido).
+  </Notes>
+  <Parameters>
+    <PARAM id="analogColor" value="Warm"/>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="250"/>
+    <PARAM id="band1Q" value="1.2"/>
+    <PARAM id="band1Slope" value="12 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="1200"/>
+    <PARAM id="band2Gain" value="3"/>
+    <PARAM id="band2Q" value="0.9"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="High Cut"/>
+    <PARAM id="band3Frequency" value="5000"/>
+    <PARAM id="band3Q" value="1"/>
+    <PARAM id="band3Slope" value="18 dB/oct"/>
+  </Parameters>
+</FathomPreset>

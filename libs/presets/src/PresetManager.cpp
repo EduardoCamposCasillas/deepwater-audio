@@ -302,9 +302,13 @@ juce::StringArray PresetManager::load (const Preset& preset)
 {
     juce::StringArray problems;
     const auto values = resolve (preset, &problems);
+    if (format.beforeLoad)
+        format.beforeLoad();
     apply (values);
     if (format.applyExtraState)
         problems.addArray (format.applyExtraState (preset.extraState));
+    if (format.afterLoad)
+        format.afterLoad();
     setCurrent (preset.name, preset.factory, false);
     return problems;
 }

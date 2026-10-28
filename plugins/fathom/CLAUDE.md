@@ -66,6 +66,7 @@ cmake --build build --config Release --target Fathom_VST3      # solo el plugin
 build/plugins/fathom/Release/FathomTests.exe                    # tests del motor (sin JUCE)
 build/plugins/fathom/FathomInstanceTests_artefacts/Release/FathomInstanceTests.exe   # Fase 14: varias instancias (JUCE)
 build/plugins/fathom/FathomUiSnapshot_artefacts/Release/FathomUiSnapshot.exe <carpeta> # capturas PNG de la GUI
+build/plugins/fathom/FathomPresetTests_artefacts/Release/FathomPresetTests.exe [--verbose|--notes]  # Fase 15: presets
 ```
 - VST3: `build/plugins/fathom/Fathom_artefacts/Release/VST3/Fathom.vst3`.
 - Standalone: `build/plugins/fathom/Fathom_artefacts/Release/Standalone/Fathom.exe`.
@@ -73,7 +74,8 @@ build/plugins/fathom/FathomUiSnapshot_artefacts/Release/FathomUiSnapshot.exe <ca
 ## Estructura
 ```
 plugins/fathom/
-  CMakeLists.txt           # plugin y tests; enlaza deepwater::dsp
+  CMakeLists.txt           # plugin y tests; enlaza deepwater::dsp y deepwater::presets; Presets/Factory → BinaryData
+  Presets/Factory/<Categoría>/*.fhpreset   # Fase 15: presets de fábrica con notas (XML legible)
   Source/
     PluginProcessor.h/.cpp   # parámetros, estado (con la vista del analizador y el otro lado del A/B), processBlock,
                              # el bus de sidechain, las tomas del analizador (mid y side), el historial de deshacer
@@ -106,6 +108,8 @@ plugins/fathom/
     edit/NodeEditing.h       # cuentas de la edición sin JUCE: arrastrar nodos, rueda = Q, banda libre, notas
     edit/CurveFit.h          # Fase 12, sin JUCE: de una curva a bandas (grilla, codicioso + Levenberg-Marquardt)
     edit/CurveTools.h        # Fase 12, sin JUCE: estado de IGUALAR y DIBUJAR (en el procesador), trazos y metas
+    presets/FathomPresets.*  # Fase 15: el formato de presets de Fathom (etiqueta, extensión, categorías, carpeta,
+                             # bypass excluido, fábrica) para libs/presets; cargar = un paso de deshacer
     link/InstanceRegistry.h  # Fase 14, sin JUCE: la lista de instancias del proceso (números, avisos al borrar, quién
                              # mira) y LinkSettings (qué ve una instancia de las demás)
     analysis/SpectrumView.h  # cuentas del analizador sin JUCE: inclinación, rango, resolución, balística, retención
@@ -127,6 +131,7 @@ plugins/fathom/
                            # analógico, de la
                            # edición y del analizador, del registro de instancias y de los choques (sin JUCE)
   tests/InstanceTests.cpp  # Fase 14, con JUCE: varios procesadores completos en el mismo proceso
+  tests/PresetTests.cpp    # Fase 15, con JUCE: presets de fábrica, cargar/guardar, estado, deshacer, A/B y audio
   tests/UiSnapshot.cpp     # herramienta (no es test): capturas PNG del editor con varias instancias sonando
 ```
 
@@ -182,12 +187,54 @@ fábrica incluyen notas de para qué sirven y por qué.
       en Riptide).
 - [x] Fase 14 — Otras instancias: ver el espectro de las demás instancias de Fathom del proyecto y marcar dónde chocan
       (enmascaramiento); editarlas desde aquí.
-- [ ] Fase 15 — Presets con notas educativas (voces, 808 y kick del dembow, percusión, buses, master).
+- [x] Fase 15 — Presets con notas educativas (voces, 808 y kick del dembow, percusión, buses, master).
 - [ ] Fase 16 — Pulido: CPU (24 bandas con SIMD, coeficientes), GUI escalable, pluginval estricto, pruebas de
       automatización extrema.
 
 ## Estado actual
-Fase 14 COMPLETADA (2026-10-27). Probada por el usuario en FL Studio: funciona.
+Fase 15 IMPLEMENTADA (2026-10-27), pendiente de probar en FL Studio.
+- Sin parámetros nuevos ni cambios en el sonido (un proyecto de las Fases 1-14 suena igual). Lo que se guarda de nuevo
+  en el proyecto son las propiedades del preset de libs/presets (`presetName`, `presetFactory`, `presetModified`); un
+  proyecto antiguo abre como "Sin nombre" sin "*".
+- `presets/FathomPresets.h/.cpp`: `<FathomPreset>`, `.fhpreset`, categorías Init / Voces / Dembow / Percusión / Buses /
+  Master / Creativo / Otros, usuario en Documentos\Fathom\Presets, el bypass excluido. No usa el "estado extra": todo
+  lo de Fathom que es sonido es parámetro. No entran la vista del analizador, el nombre de la instancia ni el otro lado
+  del A/B (un preset se carga en el lado activo). Un preset de usuario guarda los 369 parámetros (24 × 15 + 9).
+- Librería: `PresetFormat::beforeLoad/afterLoad` (opcionales, nuevos): Fathom abre ahí `EditHistory::beginTransaction`
+  / `endTransaction`, así cargar un preset (también ◀ ▶ e Init) es UN paso de deshacer. Undertow, Riptide y Ebb no los
+  usan (sin cambios).
+- Procesador: `presetManager` después del historial; `writeStateProperties` en `getStateInformation` y
+  `stateRestored` al final de `setStateInformation`.
+- Editor: barra de presets de 370 px en la cabecera, en lugar del subtítulo "Fase N" (FATHOM | presets | ANALÓGICA | A/B
+  | DESHACER/REHACER | BYPASS); navegador y panel de guardar tapan todo lo de abajo de la cabecera; los mensajes en el
+  pie 6 s (en el acento, en lugar de la ayuda); `%APPDATA%\Deepwater\Fathom.settings` (el último autor);
+  `theme::presetPalette` (los del usuario en ámbar).
+- 21 presets (Init + 20): Voces (Voz Limpieza Básica, Voz Autotune Sin Silbidos = de-esser dinámico con umbral auto,
+  Voz Resonancias Que Cambian = espectral, Coros Y Adlibs Abiertos = M/S), Dembow (808 Sub Limpio, 808 Que Se Oye En El
+  Celular, Kick Dembow Con Pegada, 808 Le Abre Paso Al Kick = dinámica con sidechain), Percusión (Hi-Hats Sin Aspereza,
+  Clap Snare Cuerpo Y Chasquido, Percusión Latina Al Frente), Buses (Bus Batería Pegada = color sutil, Bus Música Esquiva
+  La Voz = mid dinámico con sidechain, Bus Graves Mono = side), Master (Master Toque Final = natural + sutil, Master Sub
+  Mono Fase Lineal, Master Más Brillo Flat Tilt), Creativo (Teléfono, Radio Vieja Cálida = cálido, Filtro Para Intro
+  (Automatízame)). Notas: qué es, "Cómo se construyó:" banda por banda, "Pruébalo:", "Cuándo NO usarlo:", "Viene de:".
+  Se escribieron con un script (fuera del repo); los .fhpreset son la fuente.
+- Decisión: la SALIDA de los presets queda en 0 dB. Se probó compensarla con el modelo del AUTO GAIN y se descartó: en un
+  808, el corte de 6 kHz baja 2.1 dB el ruido rosa pero nada del 808 (quedaría más fuerte que el bypass). Cambios de
+  sonoridad sobre ruido rosa (K): de −2.9 (Teléfono) a +0.9 dB; Filtro Para Intro −5.1 dB.
+- `FathomPresetTests` (nuevo, con JUCE, en ctest): los 21 se leen sin avisos, nombres únicos, categorías, notas (> 600
+  caracteres, las cuatro secciones, cada banda encendida explicada), sin bypass; cargar por nombre de opción y en
+  unidades reales, lo que falta = Init, bypass intacto; "*" (también una banda apagada); deshacer = un paso por preset (y
+  la fase); A/B; guardar/releer los 369 parámetros, reemplazar, borrar; estado del proyecto (y uno de la Fase 14); cada
+  preset sobre una mezcla (808 + acorde + ruido rosa, kick en el sidechain) sin NaN ni reservas, latencia 0 solo si es
+  cero latencia sin color ni espectral (espectral 42.7 ms, lineal 53.3, natural + sutil 4.2, sutil 0.9 a 48 kHz); bloques
+  de 1 a 4096, mono/estéreo, con y sin sidechain, 4 sample rates; cambiar de preset cada 150 ms (dos vueltas, offline:
+  con los modos de fase) sin reservas y con salto máximo 0.0053 (cota 0.02).
+- `FathomUiSnapshot` guarda también presets-cargado.png y presets-navegador.png: la barra, el navegador y las notas se
+  revisaron con capturas (el filtro elegido del navegador sale en el rojo de "encendido" del LookAndFeel, como en Ebb).
+- Release con 0 warnings (toda la suite: cambió libs/presets); ctest 10/10 (con UndertowPresetTests, RiptidePresetTests
+  y EbbPresetTests); pluginval strictness 10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 14
+Probada por el usuario en FL Studio: funciona.
 - Sin parámetros nuevos ni cambios en el sonido (un proyecto de las Fases 1-13 suena igual). Lo único que se guarda es
   el nombre puesto a mano (propiedad `instanceName` del estado, fuera del A/B y del deshacer).
 - `link/InstanceRegistry.h` (sin JUCE): `InstanceRegistry<Member>::shared()` = la lista estática del proceso (FL carga la
@@ -742,4 +789,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 15 (presets con notas educativas).
+Siguiente: Fase 16 (pulido: CPU, GUI escalable, pluginval estricto, automatización extrema).

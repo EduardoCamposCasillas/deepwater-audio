@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Cuerpo, menos cartón y el clic que lo hace oír encima del 808. -->
+<FathomPreset formatVersion="1" name="Kick Dembow Con Pegada" category="Dembow" author="Fathom">
+  <Notes>
+    El kick del dembow tiene que pegar en el pecho y oírse encima del 808 aunque compartan los graves. La pegada no está
+    solo en el sub: el "clic" del parche es lo que el oído usa para ubicar el golpe.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 30 Hz, 24 dB/oct: abajo del cuerpo del kick solo hay retumbe.
+    - Banda 2, +2.5 dB en 60 Hz (Q 1.4): el cuerpo, el golpe en el pecho.
+    - Banda 3, −4 dB en 380 Hz (Q 1.6): el "cartón" (el kick suena a caja de zapatos). Es el corte que más cambia el sonido.
+    - Banda 4, +3 dB en 4 kHz (Q 1.0): el clic del parche. Con el 808 tapando los graves, esto es lo que hace que el kick
+      se oiga.
+    - Cero latencia: los transitorios del kick no se tocan (sin pre-eco).
+
+    Pruébalo: SOLO en la banda 4 y muévela entre 2 y 6 kHz: donde el golpe se oye más "definido" sin sonar a lápiz sobre
+    la mesa. Después pon el 808 a sonar y abre INSTANCIAS (si el 808 también tiene Fathom) para ver dónde chocan.
+    Cuándo NO usarlo: en un kick que ya trae mucho clic (con el hi-hat queda áspero), ni en un kick 808 largo con nota
+    (trátalo como un 808: "808 Sub Limpio").
+    Viene de: Fase 3, Fase 6 (solo) y Fase 14 (choques entre instancias).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="30"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="60"/>
+    <PARAM id="band2Gain" value="2.5"/>
+    <PARAM id="band2Q" value="1.4"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="Bell"/>
+    <PARAM id="band3Frequency" value="380"/>
+    <PARAM id="band3Gain" value="-4"/>
+    <PARAM id="band3Q" value="1.6"/>
+    <PARAM id="band4Enabled" value="On"/>
+    <PARAM id="band4Shape" value="Bell"/>
+    <PARAM id="band4Frequency" value="4000"/>
+    <PARAM id="band4Gain" value="3"/>
+    <PARAM id="band4Q" value="1"/>
+  </Parameters>
+</FathomPreset>

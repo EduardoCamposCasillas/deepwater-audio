@@ -8,6 +8,7 @@
 #include "edit/CurveTools.h"
 #include "edit/EditHistory.h"
 #include "link/InstanceRegistry.h"
+#include "presets/FathomPresets.h"
 
 // Efecto mono/estéreo: 24 bandas de EQ con todas las formas y la ganancia de salida (Fase 3), editables sobre el visor
 // con deshacer/rehacer (Fase 4). El audio deja una copia de lo que entra, de lo que sale y del sidechain (Fase 5) en tres
@@ -17,7 +18,8 @@
 // Modos de fase cero latencia / natural / lineal, con la latencia informada al host (Fase 10). Dinámica espectral por banda
 // (Fase 11). Igualar a una referencia y dibujar la curva, convertidas en bandas (Fase 12: todo en la GUI). Color analógico
 // (Fase 13). Cada instancia se anota en una lista del proceso para que las demás vean su espectro, sus choques y sus
-// bandas, y puedan editarlas (Fase 14).
+// bandas, y puedan editarlas (Fase 14). Presets con notas (Fase 15, libs/presets): cargar uno es un paso de deshacer y el
+// nombre del preset (y si se modificó) viaja con el proyecto.
 // El audio está en fathom::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
@@ -150,6 +152,9 @@ public:
     // Qué ve esta instancia de las demás (solo la GUI; no se guarda: los números cambian al abrir el proyecto).
     fathom::link::LinkSettings& getLinkSettings() noexcept { return linkSettings; }
 
+    // Fase 15: biblioteca de presets, preset actual y guardar/cargar (solo desde el hilo de mensajes).
+    deepwater::presets::PresetManager& getPresetManager() noexcept { return presetManager; }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
@@ -204,6 +209,10 @@ private:
     fathom::edit::EditHistory history; // después de 'parameters': se destruye antes (deja de escucharlos)
     fathom::edit::UndoStack otherSideHistory; // el historial del lado de la comparación que no está activo
     fathom::edit::CurveTools curveTools;
+    // Fase 15. Después del historial: cargar un preset abre y cierra un paso en él (se destruye antes que él).
+    deepwater::presets::PresetManager presetManager {
+        parameters, fathom::presets::format ([this] { history.beginTransaction(); }, [this] { history.endTransaction(); })
+    };
 
     // Fase 14. La lista se guarda como referencia: el audio solo lee su atómico (sin pasar por la inicialización
     // de la variable estática en cada bloque).

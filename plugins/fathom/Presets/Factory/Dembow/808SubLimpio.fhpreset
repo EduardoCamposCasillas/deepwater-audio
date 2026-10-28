@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- El 808 con el sub en mono, sin infrasonidos ni barro. -->
+<FathomPreset formatVersion="1" name="808 Sub Limpio" category="Dembow" author="Fathom">
+  <Notes>
+    La limpieza básica de un 808 (o de cualquier bajo con mucho sub): sacar lo que no se oye pero gasta volumen, dejar los
+    graves en mono y quitar el barro que choca con el kick y la voz.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 28 Hz, 24 dB/oct: abajo de ~28 Hz casi ningún parlante reproduce nada, pero esa energía
+      sí empuja el limitador del master (pierdes volumen por algo que nadie oye).
+    - Banda 2, corte de graves en 120 Hz, 24 dB/oct, solo en el SIDE: debajo de 120 Hz el 808 queda en mono. Los graves en
+      estéreo se cancelan en un sistema mono y desordenan el centro.
+    - Banda 3, −3 dB en 320 Hz (Q 1.4): el "cartón" del 808 que choca con el cuerpo de la voz.
+    - Banda 4, corte de agudos en 6 kHz, 12 dB/oct: el ruido del sample y la aspereza de la saturación.
+
+    Pruébalo: mira el analizador en CANALES = Side: abajo de 120 Hz no tiene que quedar nada violeta. Si tu 808 tiene un
+    clic de ataque que te gusta, sube la banda 4 o apágala.
+    Cuándo NO usarlo: si tocas notas por debajo de A1 (27.5 Hz en FL) el corte de 28 Hz se come la fundamental: bájalo a
+    20 Hz. Y si el 808 es un sample mono, la banda 2 no hace nada (no estorba).
+    Viene de: Fase 3 (cortes de 6 a 96 dB/oct) y Fase 8 (side).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="28"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Low Cut"/>
+    <PARAM id="band2Frequency" value="120"/>
+    <PARAM id="band2Q" value="0.71"/>
+    <PARAM id="band2Slope" value="24 dB/oct"/>
+    <PARAM id="band2Stereo" value="Side"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="Bell"/>
+    <PARAM id="band3Frequency" value="320"/>
+    <PARAM id="band3Gain" value="-3"/>
+    <PARAM id="band3Q" value="1.4"/>
+    <PARAM id="band4Enabled" value="On"/>
+    <PARAM id="band4Shape" value="High Cut"/>
+    <PARAM id="band4Frequency" value="6000"/>
+    <PARAM id="band4Q" value="0.71"/>
+    <PARAM id="band4Slope" value="12 dB/oct"/>
+  </Parameters>
+</FathomPreset>

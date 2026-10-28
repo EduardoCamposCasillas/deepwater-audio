@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Graves en mono en el master, con fase lineal para no mover la imagen. -->
+<FathomPreset formatVersion="1" name="Master Sub Mono Fase Lineal" category="Master" author="Fathom">
+  <Notes>
+    Pone los graves de toda la mezcla en mono (para la discoteca y los sistemas mono) sin mover la imagen estéreo. Es el
+    caso donde la fase lineal vale lo que cuesta.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 20 Hz, 24 dB/oct (infrasonidos).
+    - Banda 2, corte de graves en 120 Hz, 12 dB/oct, solo en el SIDE.
+    - FASE = Lineal (calidad Media): un filtro normal retrasa la fase del side cerca de 120 Hz y el mid no; los graves
+      bajos "se corren" del centro. Con fase lineal todo sale con el mismo retraso: solo cambia el volumen del side.
+    - El costo: 58 ms de latencia a 44.1 kHz (FL la compensa) y pre-eco. Con un corte suave de 12 dB/oct en 120 Hz el
+      pre-eco no se oye; con cortes empinados y campanas angostas en graves sí.
+
+    Pruébalo: alterna FASE entre Cero latencia y Lineal con la mezcla en mono y en estéreo; mira la latencia abajo de la
+    columna de SALIDA. Analizador en Mid + Side: el violeta se apaga abajo de 120 Hz.
+    Cuándo NO usarlo: mientras grabas o tocas en vivo (58 ms se sienten), ni en una mezcla con graves que ya están en mono
+    (no hace nada y suma latencia).
+    Viene de: Fase 8 (side) y Fase 10 (fase lineal).
+  </Notes>
+  <Parameters>
+    <PARAM id="phaseMode" value="Linear Phase"/>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="20"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Low Cut"/>
+    <PARAM id="band2Frequency" value="120"/>
+    <PARAM id="band2Q" value="0.71"/>
+    <PARAM id="band2Slope" value="12 dB/oct"/>
+    <PARAM id="band2Stereo" value="Side"/>
+  </Parameters>
+</FathomPreset>

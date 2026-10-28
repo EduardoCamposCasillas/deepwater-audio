@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- De-esser con una banda dinámica: baja solo cuando llega una S. -->
+<FathomPreset formatVersion="1" name="Voz Autotune Sin Silbidos" category="Voces" author="Fathom">
+  <Notes>
+    Un de-esser hecho con EQ dinámico. La voz con autotune del reggaetón suele llevar mucho brillo y mucha compresión: las
+    S, las T y las CH salen como silbidos (sibilancia) entre 5 y 9 kHz. Un corte fijo ahí apagaría toda la voz; esta
+    banda solo baja cuando llega una S y vuelve enseguida.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 100 Hz, 12 dB/oct (limpieza).
+    - Banda 2, campana en 6.8 kHz con GANANCIA 0 dB y Q 2: en reposo no hace nada. DINÁMICO con RANGO −7 dB, ATAQUE 1 ms
+      (la S llega de golpe), LIBERACIÓN 60 ms (vuelve antes de la vocal que sigue) y UMBRAL AUTOMÁTICO: el umbral sigue el
+      nivel normal de esa zona (+3 dB), así que solo corta lo que sobresale, sin que tengas que ajustarlo a cada toma.
+    - Banda 3, shelf de agudos +1.5 dB desde 12 kHz: el aire que el de-esser no toca (más arriba de la S).
+
+    Pruébalo: SOLO en la banda 2 y muévela hasta donde la S de ESTA voz más molesta (5-9 kHz; las voces femeninas suelen
+    estar más arriba). Mira el medidor de la fila de la dinámica: tiene que moverse en las S y quedarse quieto en las
+    vocales. En el visor, la curva baja en vivo en cada S.
+    Cuándo NO usarlo: en una voz suave sin sibilancia (no hace nada útil), ni en un bus con platillos o hi-hats (también los
+    bajaría en cada golpe: un de-esser va en la voz sola).
+    Viene de: Fase 9 (EQ dinámico y umbral automático).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="100"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="12 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="6800"/>
+    <PARAM id="band2Gain" value="0"/>
+    <PARAM id="band2Q" value="2"/>
+    <PARAM id="band2Dynamic" value="On"/>
+    <PARAM id="band2DynRange" value="-7"/>
+    <PARAM id="band2Attack" value="1"/>
+    <PARAM id="band2Release" value="60"/>
+    <PARAM id="band2AutoThreshold" value="On"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="High Shelf"/>
+    <PARAM id="band3Frequency" value="12000"/>
+    <PARAM id="band3Gain" value="1.5"/>
+    <PARAM id="band3Q" value="0.71"/>
+  </Parameters>
+</FathomPreset>

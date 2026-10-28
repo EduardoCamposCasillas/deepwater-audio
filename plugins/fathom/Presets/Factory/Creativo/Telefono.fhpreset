@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Voz de llamada telefónica: solo de 400 Hz a 3.4 kHz. -->
+<FathomPreset formatVersion="1" name="Teléfono" category="Creativo" author="Fathom">
+  <Notes>
+    El efecto de "voz por teléfono" para una intro, un adlib o el puente antes del drop: una línea telefónica solo deja
+    pasar de ~300 Hz a ~3.4 kHz, y el oído lo reconoce al instante.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 400 Hz, 24 dB/oct: sin pecho.
+    - Banda 2, +4 dB en 1.6 kHz (Q 1.4): el tono nasal del parlante chico.
+    - Banda 3, corte de agudos en 3.4 kHz, 24 dB/oct: sin aire.
+    - Pierde unos 3 dB de sonoridad: para compararlo con el bypass, AUTO GAIN encendido.
+
+    Pruébalo: automatiza el BYPASS en FL para que la voz pase de teléfono a normal justo en el drop. O cambia la
+    PENDIENTE de los cortes a 48 dB/oct: más "digital"; a 12 dB/oct: más suave, casi una radio.
+    Cuándo NO usarlo: en toda la canción (cansa en un minuto), ni en una pista con graves que tienen que seguir sonando
+    (usa un envío a otra pista con el efecto).
+    Viene de: Fase 3 (cortes) y Fase 6 (auto gain para igualar el volumen).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="400"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="1600"/>
+    <PARAM id="band2Gain" value="4"/>
+    <PARAM id="band2Q" value="1.4"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="High Cut"/>
+    <PARAM id="band3Frequency" value="3400"/>
+    <PARAM id="band3Q" value="0.71"/>
+    <PARAM id="band3Slope" value="24 dB/oct"/>
+  </Parameters>
+</FathomPreset>

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bus de batería: sin el barro acumulado, con brillo y un poco de color. -->
+<FathomPreset formatVersion="1" name="Bus Batería Pegada" category="Buses" author="Fathom">
+  <Notes>
+    En el bus donde se juntan kick, clap, hi-hats y percusión. Cada elemento suma un poco de 300-500 Hz y juntos hacen
+    "barro"; este preset quita esa acumulación, abre arriba y pega el grupo con un color sutil.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 25 Hz, 24 dB/oct (infrasonidos).
+    - Banda 2, −2 dB en 400 Hz (Q 0.8, ancha): el barro acumulado.
+    - Banda 3, shelf de agudos +1.5 dB desde 9 kHz: brillo de todo el grupo.
+    - COLOR = Sutil: una saturación muy leve (armónicos a −57 dB a −12 dBFS) que "pega" los elementos como una consola.
+      Agrega 1.7 ms de latencia a 44.1 kHz (FL la compensa).
+    - Cero latencia en las bandas: en batería, la fase lineal produce pre-eco (un "fff" antes de cada golpe).
+
+    Pruébalo: alterna COLOR entre Limpio y Sutil con el bus sonando fuerte: la diferencia está en la densidad, no en el
+    volumen. Después compara el bus con y sin el preset en A/B.
+    Cuándo NO usarlo: si cada elemento ya está bien ecualizado (no hay barro que quitar), ni pongas el bus en FASE LINEAL
+    (pre-eco en los golpes).
+    Viene de: Fase 3, Fase 10 (por qué no fase lineal) y Fase 13 (color).
+  </Notes>
+  <Parameters>
+    <PARAM id="analogColor" value="Subtle"/>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="25"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="400"/>
+    <PARAM id="band2Gain" value="-2"/>
+    <PARAM id="band2Q" value="0.8"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="High Shelf"/>
+    <PARAM id="band3Frequency" value="9000"/>
+    <PARAM id="band3Gain" value="1.5"/>
+    <PARAM id="band3Q" value="0.71"/>
+  </Parameters>
+</FathomPreset>

@@ -5,6 +5,8 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include "deepwater/presets/Palette.h"
+
 // Colores de toda la interfaz en un solo sitio. La base es la de la suite (Undertow, Riptide, Ebb); el acento es un azul
 // de sonar: Fathom "sondea" el espectro.
 namespace fathom::gui::theme
@@ -56,5 +58,12 @@ inline juce::Colour bandColour (int band)
                                                        juce::Colour (0xffd4e157), juce::Colour (0xffffb74d), juce::Colour (0xffef6c6c),
                                                        juce::Colour (0xffec6fb0), juce::Colour (0xffb388ff) };
     return colours[static_cast<size_t> (band) % colours.size()];
+}
+
+// Fase 15: los colores de la barra, el navegador y el panel de guardar de los presets (libs/presets). Los presets del
+// usuario se marcan en ámbar (el del sidechain).
+[[nodiscard]] inline deepwater::presets::Palette presetPalette()
+{
+    return { background, panel, panelOutline, display, text, dimText, accent, spectrumSidechain };
 }
 } // namespace fathom::gui::theme

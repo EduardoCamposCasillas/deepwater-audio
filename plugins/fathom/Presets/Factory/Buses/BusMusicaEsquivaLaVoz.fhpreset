@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Los instrumentos bajan su presencia (en el centro) solo cuando canta la voz. -->
+<FathomPreset formatVersion="1" name="Bus Música Esquiva La Voz" category="Buses" author="Fathom">
+  <Notes>
+    En el bus de la música (acordes, pads, guitarra, piano), con la voz principal en el sidechain: cuando la voz canta, el
+    centro de los instrumentos baja 4 dB en la zona de la presencia (~3 kHz); cuando la voz calla, vuelven. La voz se
+    entiende sin subirla y los instrumentos suenan llenos en los huecos.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 30 Hz, 18 dB/oct (limpieza).
+    - Banda 2, campana en 3 kHz (Q 0.8, ancha) con GANANCIA 0 dB, solo en el MID (los costados no se tocan: el ancho
+      estéreo queda igual), DINÁMICO con DETECTOR = Sidechain, RANGO −4 dB, UMBRAL −36 dB, ATAQUE 10 ms y LIBERACIÓN 250 ms
+      (lenta: que no "respire" entre sílaba y sílaba).
+
+    Ruteo en FL: la pista de la voz con Sidechain to this track hacia la del bus de música, y en Fathom (engranaje →
+    Processing → Connections) la entrada Sidechain = la voz.
+
+    Pruébalo: mira el medidor de la banda 2 mientras canta: tiene que pintarse con la voz y soltarse en los silencios. Si
+    la voz es muy suave, baja el UMBRAL.
+    Cuándo NO usarlo: si la voz canta todo el tiempo sin pausas (los instrumentos quedan siempre abajo: mejor un corte fijo
+    de −2 dB), ni lo pongas en la pista de la voz.
+    Viene de: Fase 8 (mid) y Fase 9 (dinámica con sidechain).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="30"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="18 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="3000"/>
+    <PARAM id="band2Gain" value="0"/>
+    <PARAM id="band2Q" value="0.8"/>
+    <PARAM id="band2Stereo" value="Mid"/>
+    <PARAM id="band2Dynamic" value="On"/>
+    <PARAM id="band2DynRange" value="-4"/>
+    <PARAM id="band2Threshold" value="-36"/>
+    <PARAM id="band2Attack" value="10"/>
+    <PARAM id="band2Release" value="250"/>
+    <PARAM id="band2DynSource" value="Sidechain"/>
+  </Parameters>
+</FathomPreset>

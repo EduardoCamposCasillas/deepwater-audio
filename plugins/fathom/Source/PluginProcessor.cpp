@@ -593,7 +593,9 @@ void FathomAudioProcessor::pushTaps (AnalyzerTap& mid, AnalyzerTap& side, const 
 void FathomAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     // Se ejecuta en el hilo de mensajes (al guardar el proyecto de FL), no en el de audio.
-    if (auto xml = parameters.copyState().createXml())
+    auto state = parameters.copyState();
+    presetManager.writeStateProperties (state); // Fase 15: nombre del preset y si estaba modificado
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
@@ -611,6 +613,8 @@ void FathomAudioProcessor::setStateInformation (const void* data, int sizeInByte
                 if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter); ranged != nullptr && ranged->isDiscrete())
                     if (const float exact = ranged->convertTo0to1 (ranged->convertFrom0to1 (ranged->getValue())); exact != ranged->getValue())
                         ranged->setValueNotifyingHost (exact);
+
+            presetManager.stateRestored(); // Fase 15
         }
 }
 

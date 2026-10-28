@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hi-hats limpios abajo, sin la zona que raspa y con brillo arriba. -->
+<FathomPreset formatVersion="1" name="Hi-Hats Sin Aspereza" category="Percusión" author="Fathom">
+  <Notes>
+    Los hi-hats del dembow suenan todo el tiempo: si raspan, cansan el oído en un minuto. Este preset les quita lo que no
+    aportan abajo, baja la zona áspera y les da brillo arriba, donde no molestan.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 350 Hz, 24 dB/oct: abajo solo hay golpes de la baqueta o ruido del sample que ensucian
+      el kick y el 808 sin que se oigan.
+    - Banda 2, −3 dB en 4.5 kHz (Q 2): la aspereza (el sonido de "arena"). Es la zona donde el oído es más sensible.
+    - Banda 3, shelf de agudos +2 dB desde 11 kHz: el brillo y el aire del platillo.
+
+    Pruébalo: SOLO en la banda 2 y muévela entre 3 y 7 kHz: donde más raspa, ahí va. Escucha a volumen bajo (como lo
+    escucha la gente): la aspereza se nota más que el brillo.
+    Cuándo NO usarlo: en hats lo-fi a propósito (su carácter está en los medios), ni en un loop de percusión entera (el
+    corte de 350 Hz se come los tambores).
+    Viene de: Fase 3.
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="350"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="4500"/>
+    <PARAM id="band2Gain" value="-3"/>
+    <PARAM id="band2Q" value="2"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="High Shelf"/>
+    <PARAM id="band3Frequency" value="11000"/>
+    <PARAM id="band3Gain" value="2"/>
+    <PARAM id="band3Q" value="0.71"/>
+  </Parameters>
+</FathomPreset>

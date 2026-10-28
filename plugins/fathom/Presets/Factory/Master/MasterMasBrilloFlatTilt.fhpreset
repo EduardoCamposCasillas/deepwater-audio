@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Inclinar toda la mezcla: +0.3 dB por octava hacia los agudos. -->
+<FathomPreset formatVersion="1" name="Master Más Brillo Flat Tilt" category="Master" author="Fathom">
+  <Notes>
+    Una mezcla "oscura" o "brillante" casi nunca es una frecuencia: es la inclinación de todo el espectro. El flat tilt
+    gira el espectro alrededor de 1 kHz como un balancín: +0.3 dB por octava (+1.3 dB en 20 kHz, −1.5 dB en 30 Hz).
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 20 Hz, 24 dB/oct (infrasonidos).
+    - Banda 2, FLAT TILT con pivote en 1 kHz y GANANCIA +3 (en el flat tilt la ganancia × 0.1 = dB por octava).
+
+    Pruébalo: la inclinación del analizador (4.5 dB/oct) está puesta para que una mezcla comercial se vea casi plana. Pon
+    una canción de referencia en el sidechain: si tu mezcla cae más a la derecha que la referencia, está oscura y este
+    preset ayuda; si cae menos, apágalo. IGUALAR hace esa comparación por ti y crea las bandas.
+    Cuándo NO usarlo: si la mezcla ya es brillante, ni como arreglo de un instrumento opaco (súbele brillo a ese
+    instrumento).
+    Viene de: Fase 3 (flat tilt), Fase 5 (inclinación del analizador) y Fase 12 (igualar).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="20"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Flat Tilt"/>
+    <PARAM id="band2Frequency" value="1000"/>
+    <PARAM id="band2Gain" value="3"/>
+  </Parameters>
+</FathomPreset>

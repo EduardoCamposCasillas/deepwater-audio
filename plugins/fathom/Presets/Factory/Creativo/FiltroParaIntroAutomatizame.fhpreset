@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Un corte de agudos resonante para automatizar antes del drop. -->
+<FathomPreset formatVersion="1" name="Filtro Para Intro (Automatízame)" category="Creativo" author="Fathom">
+  <Notes>
+    El filtro de la intro: la canción suena "por debajo del agua" y se abre de golpe en el drop. Es un solo corte de agudos
+    para automatizar.
+
+    Cómo se construyó:
+    - Banda 1, corte de agudos en 600 Hz, 24 dB/oct, Q 1.2: la resonancia deja un pico en el corte que se oye barrer al
+      moverlo (como el filtro de un synth).
+
+    Automatizar en FL: mueve la FRECUENCIA de la banda 1 y en el menú de FL Tools → Last tweaked → Create automation clip.
+    Dibuja una subida de 600 Hz a 20 kHz en los 4 u 8 compases antes del drop. Las bandas suavizan cada cambio (20 ms):
+    no hay zipper aunque la curva tenga escalones. Para el efecto contrario (quitar graves), cambia la FORMA a Low Cut.
+
+    Pruébalo: sube la Q a 3 y barre a mano: la resonancia "canta". Con Q 0.71 el barrido es limpio.
+    Cuándo NO usarlo: como corte fijo de una pista (la resonancia colorea: para limpiar, Q 0.71), ni lo olvides encendido
+    en la mezcla final (a 600 Hz te quedas sin agudos).
+    Viene de: Fase 2 (suavizado sin zipper) y Fase 3 (cortes con resonancia).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="High Cut"/>
+    <PARAM id="band1Frequency" value="600"/>
+    <PARAM id="band1Q" value="1.2"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+  </Parameters>
+</FathomPreset>

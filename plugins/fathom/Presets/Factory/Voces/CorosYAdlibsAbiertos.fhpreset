@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mid/Side: los coros se abren a los lados y le dejan el centro a la voz. -->
+<FathomPreset formatVersion="1" name="Coros Y Adlibs Abiertos" category="Voces" author="Fathom">
+  <Notes>
+    Para el bus de coros, dobles y adlibs (grabados en estéreo o paneados a los lados). La voz principal vive en el centro;
+    los coros se abren hacia los costados y le dejan la presencia del centro libre.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 150 Hz, 18 dB/oct: los coros no necesitan pecho (lo pone la voz principal) y sus graves
+      enturbian.
+    - Banda 2, −3 dB en 2.8 kHz (Q 0.9) solo en el MID: el centro de los coros baja justo donde la voz principal tiene su
+      presencia. Así no se tapan.
+    - Banda 3, shelf de agudos +3 dB desde 7 kHz solo en el SIDE: lo que es distinto entre izquierda y derecha brilla más y
+      los coros se sienten más anchos, sin tocar el centro.
+
+    Pruébalo: en el analizador, CANALES = Mid + Side (el side en violeta). Alterna la banda 3: el violeta sube arriba de
+    7 kHz y el blanco no se mueve. Escucha la voz principal y los coros juntos con y sin la banda 2.
+    Cuándo NO usarlo: en coros mono (el side está vacío: la banda 3 no hace nada), ni confíes en el side para que se
+    escuchen: en mono (celular, muchos parlantes de discoteca) el side desaparece.
+    Viene de: Fase 8 (estéreo por banda y analizador M/S).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="150"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="18 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="2800"/>
+    <PARAM id="band2Gain" value="-3"/>
+    <PARAM id="band2Q" value="0.9"/>
+    <PARAM id="band2Stereo" value="Mid"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="High Shelf"/>
+    <PARAM id="band3Frequency" value="7000"/>
+    <PARAM id="band3Gain" value="3"/>
+    <PARAM id="band3Q" value="0.71"/>
+    <PARAM id="band3Stereo" value="Side"/>
+  </Parameters>
+</FathomPreset>

@@ -1623,3 +1623,109 @@ choque está en el centro de la mezcla o a los lados (prueba la banda del piano 
   mirar.
 - **Esperar ver un Fathom "bridged".** Si una instancia corre en otro proceso no aparece; quita el "bridged" en FL.
 - **Olvidar dónde está el deshacer.** Lo que editas de otra instancia se deshace en SU ventana.
+
+## Fase 15 — Presets con notas: recetas que se pueden abrir
+
+Fathom trae 20 presets de fábrica (más Init) en seis categorías: **Voces**, **Dembow** (el 808 y el kick),
+**Percusión**, **Buses**, **Master** y **Creativo**. Cada uno es una receta de las fases anteriores ya armada, con notas
+que explican qué hace cada banda, qué probar y cuándo NO usarlo. Un preset no es "el sonido correcto": es un punto de
+partida razonable que hay que afinar a TU pista (casi siempre, mover la frecuencia de una banda unos pocos Hz).
+
+### Conceptos aprendidos
+
+- **Un preset de EQ es una hipótesis, no una solución.** Un compresor o una reverb con un preset suenan parecido en
+  cualquier pista; un EQ no: el barro de tu voz puede estar en 240 Hz y el del preset en 280. Por eso las notas de cada
+  preset dicen QUÉ buscar con SOLO ("muévela entre 200 y 450 Hz: donde suena a cartón").
+- **La categoría dice dónde va.** "Bus Música Esquiva La Voz" va en el bus de los instrumentos y "808 Le Abre Paso Al
+  Kick" en el 808, aunque los dos "escuchan" otra pista (el sidechain).
+- **Por qué la SALIDA de los presets queda en 0 dB.** Se probó compensar el volumen de cada preset con la cuenta del
+  AUTO GAIN (ruido rosa con el peso K de BS.1770), y se descartó: en un 808, un corte en 6 kHz baja el ruido rosa 2 dB
+  pero al 808 no le quita nada (no tiene nada ahí), así que la "compensación" lo dejaría 2 dB más fuerte que el bypass.
+  El volumen correcto depende de la pista: para comparar, **AUTO GAIN** encendido (y para juzgar de verdad, a oído con
+  el volumen igualado).
+- **Lo que guarda un preset y lo que no.** Guarda las 24 bandas (todas, también las apagadas), la escala, la salida, el
+  balance, la polaridad, el auto gain, la respuesta analógica, el modo de fase y su calidad, y el color. NO guarda el
+  bypass (elegir un preset no prende ni apaga el plugin), la vista del analizador, el nombre de la instancia ni el otro
+  lado del A/B: un preset se carga en el lado que estás editando.
+- **Cargar un preset se deshace.** Ctrl+Z después de cargar vuelve a lo que tenías (un solo paso, aunque el preset cambie
+  100 parámetros). Sirve para "probar un preset y volver".
+- **El "*" del nombre.** Aparece en cuanto tocas algo del preset cargado (y se va si lo devuelves a como estaba). Viaja
+  con el proyecto de FL: al abrir el proyecto sabes de qué preset partiste y si lo cambiaste.
+- **Presets con latencia.** "Voz Resonancias Que Cambian" (46 ms a 44.1 kHz: la FFT de la dinámica espectral), "Master
+  Sub Mono Fase Lineal" (58 ms) y "Master Toque Final" (fase natural + color: 5.3 ms); los de color (Bus Batería, Radio
+  Vieja) suman 1.7 ms. FL la compensa en la reproducción; al grabar en vivo, se nota.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **Barra de presets** (arriba, a la derecha de FATHOM): las flechas ◀ ▶ pasan al anterior/siguiente (en el orden del
+  navegador); el nombre (con la categoría en azul y "*" si lo tocaste) abre el **navegador**; **GUARDAR** abre el panel de
+  guardar; **···** = Init, guardar como, abrir la carpeta de tus presets, volver a leerla.
+- **Navegador**: filtros (Todos, cada categoría, Mis presets), la lista (los tuyos marcados en ámbar) y las **notas** del
+  elegido. Un clic (o las flechas del teclado) ya carga, para escuchar rápido; doble clic o Enter carga y cierra. Tapa el
+  visor mientras está abierto.
+- **Guardar**: nombre, categoría, autor y notas. Si partiste de uno de fábrica, las notas empiezan con "Basado en «…»"
+  para que anotes qué cambiaste; si es uno tuyo, propone actualizarlo. Se guardan en Documentos\Fathom\Presets
+  (`.fhpreset`, XML legible: se puede abrir con el Bloc de notas).
+- **Pie de la ventana**: durante unos segundos, "Preset: nombre · categoría" o el aviso si un archivo tenía algo que no
+  se entendió.
+
+### Ejercicio de escucha guiado en FL Studio
+
+1. **El preset como hipótesis.** Una voz grabada (mejor si es tuya). Carga "Voz Limpieza Básica". AUTO GAIN encendido.
+   Alterna BYPASS: ¿mejor, peor o solo distinto?
+2. **Afinarlo.** SOLO en la banda 2 (el corte del barro) y barre entre 200 y 450 Hz. Donde la voz suene más a cartón,
+   deja la banda. Apaga el SOLO y compara otra vez con el bypass. El "*" aparece en el nombre.
+3. **Probar y volver.** Carga "Voz Autotune Sin Silbidos". Escucha las S. Ctrl+Z: vuelves a tu versión afinada del paso
+   2, entera.
+4. **A/B entre dos presets.** En A, tu versión; pasa a B y carga "Voz Resonancias Que Cambian". Alterna A/B con AUTO
+   GAIN. ¿Cuál deja la voz más clara sin que pierda presencia? (B tiene 46 ms de latencia: FL la compensa.)
+5. **Guardarlo.** GUARDAR con el nombre de la voz o del cantante, categoría Voces, y en las notas qué frecuencia del barro
+   encontraste. La próxima sesión con la misma voz empiezas desde ahí.
+
+### Receta: un dembow completo con los presets (y por qué cada uno)
+
+1. **808**: "808 Sub Limpio" (sin infrasonidos, sub en mono, sin cartón). Si en el celular no se oye, otra instancia
+   después con "808 Que Se Oye En El Celular" (o satúralo antes con Riptide).
+2. **Kick**: "Kick Dembow Con Pegada". Afina la banda 2 (el cuerpo) a la fundamental del kick con el analizador.
+3. **Kick contra 808**: en el 808, otra instancia con "808 Le Abre Paso Al Kick" y el kick en el sidechain. Ahora el 808
+   cede su sub solo durante el golpe del kick, sin bajar la nota entera.
+4. **Hi-hats y clap**: "Hi-Hats Sin Aspereza" y "Clap Snare Cuerpo Y Chasquido".
+5. **Voz**: "Voz Limpieza Básica" y, si silba, "Voz Autotune Sin Silbidos" después.
+6. **Instrumentos**: en el bus de la música, "Bus Música Esquiva La Voz" con la voz en el sidechain.
+7. **Master**: "Master Toque Final" y, si la mezcla suena oscura al lado de una referencia, "Master Más Brillo Flat Tilt".
+
+Por qué funciona: cada pista se queda con su zona (el 808 la nota, el kick el golpe, la voz la presencia) y las bandas
+dinámicas resuelven los choques solo cuando pasan, sin dejar la mezcla hueca el resto del tiempo. Con INSTANCIAS
+(Fase 14) se comprueba que los choques que quedan son chicos.
+
+### Reto sin receta
+
+Arma TU preset para el bus de batería de tu última canción: parte de "Bus Batería Pegada", afínalo escuchando la mezcla
+entera (no el bus solo) y guárdalo con notas que digan qué cambiaste y por qué. Pistas (si no sale): ¿el barro de tu
+batería está en 400 Hz o más abajo (escucha con SOLO)? ¿El color Sutil ayuda o ensucia los platillos? ¿Notas el brillo
+de 9 kHz con la voz sonando encima?
+
+### Vocabulario
+
+- **Preset de fábrica / de usuario**: los que vienen con el plugin (no se pueden pisar) y los tuyos (en Documentos).
+  **Ejemplo real**: los ingenieros guardan sus "puntos de partida" por cantante o por sala de grabación.
+- **Punto de partida (starting point)**: un ajuste que acerca, no que resuelve; se afina a la pista.
+- **De-esser**: un procesador que baja solo la sibilancia (S, T, CH) cuando aparece. **Ejemplo real**: casi toda voz
+  comercial de reggaetón lleva uno después del autotune y la compresión.
+- **Graves en mono (mono bass)**: dejar abajo de ~100-150 Hz solo el centro. **Ejemplo real**: los masters para discoteca
+  y para vinilo lo hacen siempre.
+- **Fundamental ausente**: el oído "oye" la nota grave aunque el parlante no la reproduzca, si escucha sus armónicos.
+  **Ejemplo real**: el 808 de un reggaetón se reconoce en el parlante de un celular.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Cargar y no afinar.** Las frecuencias del preset son típicas, no las de tu pista: mueve al menos la banda principal
+  con SOLO.
+- **Juzgar un preset más fuerte.** Si un preset sube el volumen, "suena mejor" por eso. AUTO GAIN encendido al comparar.
+- **Apilar presets de la misma zona.** "Voz Limpieza Básica" + "Coros Y Adlibs Abiertos" en la misma pista suman dos
+  cortes de graves y dos subidas de agudos: elige uno o junta sus bandas en una sola instancia.
+- **Usar un preset de master en una pista** (o al revés): los del master mueven ±1 dB; en una pista no se oyen. Los de
+  pista mueven 3-4 dB; en el master son demasiado.
+- **Olvidar el ruteo.** "808 Le Abre Paso Al Kick" y "Bus Música Esquiva La Voz" necesitan el sidechain: sin él aparece
+  "DINÁMICA CON SIDECHAIN: SIN CONECTAR" y la banda dinámica no hace nada.
+- **Presets con latencia al grabar.** Los de fase lineal y dinámica espectral, mejor después de grabar.

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Subir los armónicos del 808 para que se oiga en parlantes chicos. -->
+<FathomPreset formatVersion="1" name="808 Que Se Oye En El Celular" category="Dembow" author="Fathom">
+  <Notes>
+    Un parlante de celular no reproduce casi nada abajo de 100-150 Hz: el sub del 808 desaparece. Pero el oído reconstruye
+    una nota grave si escucha sus armónicos (la "fundamental ausente"). Este preset sube los armónicos que el 808 ya tiene
+    para que se siga oyendo la nota en un parlante chico.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 30 Hz, 18 dB/oct (limpieza).
+    - Banda 2, +3 dB en 110 Hz (Q 1.0, ancha): el segundo armónico de un 808 en A2 (55 Hz en FL); al ser ancha sirve para
+      las notas vecinas.
+    - Banda 3, +3 dB en 800 Hz (Q 1.2): el "gruñido", los armónicos de la saturación. Es lo que se oye en el celular.
+    - Banda 4, corte de agudos en 8 kHz, 12 dB/oct: lo que sube la banda 3 no tiene que traer ruido de arriba.
+
+    Pruébalo: en el analizador busca los picos del 808 arriba de 100 Hz (clic en un pico crea una campana justo ahí: así
+    afinas las bandas 2 y 3 a TU 808). Escucha con un solo parlante chico o con el celular, y con bypass.
+    Cuándo NO usarlo: en un 808 senoidal limpio (no hay armónicos que subir: el EQ solo sube lo que ya existe; satúralo
+    antes, p. ej. con Riptide "808 En El Celular"), ni si el 808 ya tapa la voz entre 800 Hz y 1 kHz.
+    Viene de: Fase 3 y Fase 5 (agarrar picos del analizador).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="30"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="18 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="110"/>
+    <PARAM id="band2Gain" value="3"/>
+    <PARAM id="band2Q" value="1"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="Bell"/>
+    <PARAM id="band3Frequency" value="800"/>
+    <PARAM id="band3Gain" value="3"/>
+    <PARAM id="band3Q" value="1.2"/>
+    <PARAM id="band4Enabled" value="On"/>
+    <PARAM id="band4Shape" value="High Cut"/>
+    <PARAM id="band4Frequency" value="8000"/>
+    <PARAM id="band4Q" value="0.71"/>
+    <PARAM id="band4Slope" value="12 dB/oct"/>
+  </Parameters>
+</FathomPreset>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- El primer EQ de una voz grabada en casa: quitar antes de sumar. -->
+<FathomPreset formatVersion="1" name="Voz Limpieza Básica" category="Voces" author="Fathom">
+  <Notes>
+    El primer EQ de una voz grabada en casa (antes del compresor): quita lo que sobra y suma solo un poco de presencia y
+    aire. Restar antes que sumar: dos de las cuatro bandas quitan.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 90 Hz, 18 dB/oct: el ruido del cuarto, los golpes al micrófono y el "pop" de las P y las
+      B viven abajo de la voz. La fundamental de una voz masculina grave baja hasta ~85-100 Hz: si cortas el pecho de la
+      voz, baja el corte a 70 Hz.
+    - Banda 2, −3 dB en 280 Hz (Q 1.2): el "barro" o la voz "encajonada" (efecto de proximidad: cantar pegado al micrófono
+      infla esta zona).
+    - Banda 3, +2 dB en 3.2 kHz (ancha, Q 0.9): presencia; las consonantes se entienden y la voz pasa por encima del beat.
+    - Banda 4, shelf de agudos +2.5 dB desde 10 kHz: aire (las respiraciones y el brillo de un micrófono caro).
+
+    Pruébalo: SOLO en la banda 2 y muévela entre 200 y 450 Hz: donde la voz suena más a caja de cartón, ahí va el corte (es
+    distinto en cada voz y cada cuarto). Después compara con BYPASS con AUTO GAIN encendido: con el volumen igualado no te
+    engaña el "más fuerte suena mejor".
+    Cuándo NO usarlo: en una voz ya brillante o con muchas S (el shelf de aire empeora la sibilancia: usa "Voz Autotune Sin
+    Silbidos"), ni en una voz grabada lejos del micrófono (no tiene barro que quitar: le quitarías cuerpo).
+    Viene de: Fase 3 (las formas) y Fase 6 (solo y auto gain).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="90"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="18 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="280"/>
+    <PARAM id="band2Gain" value="-3"/>
+    <PARAM id="band2Q" value="1.2"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="Bell"/>
+    <PARAM id="band3Frequency" value="3200"/>
+    <PARAM id="band3Gain" value="2"/>
+    <PARAM id="band3Q" value="0.9"/>
+    <PARAM id="band4Enabled" value="On"/>
+    <PARAM id="band4Shape" value="High Shelf"/>
+    <PARAM id="band4Frequency" value="10000"/>
+    <PARAM id="band4Gain" value="2.5"/>
+    <PARAM id="band4Q" value="0.71"/>
+  </Parameters>
+</FathomPreset>

@@ -2,7 +2,8 @@
 // proceso. El Standalone solo abre una instancia y sale recortado por el escalado de pantalla; esto dibuja el editor
 // fuera de pantalla, tal cual, para revisarlo sin abrir FL.
 //
-//   FathomUiSnapshot <carpeta>     guarda instancias-panel.png, instancias-banda.png y instancias-mouse.png
+//   FathomUiSnapshot <carpeta>     guarda instancias-panel.png, instancias-banda.png, instancias-mouse.png,
+//                                  presets-cargado.png y presets-navegador.png (Fase 15)
 //
 // Tres instancias ("808", "Kick" y "Voz") con señales sintéticas; la del 808 mira a las otras dos y edita la del kick.
 
@@ -20,6 +21,7 @@
 
 #include "Parameters.h"
 #include "PluginProcessor.h"
+#include "deepwater/presets/PresetBar.h"
 #include "gui/EqDisplay.h"
 
 namespace
@@ -188,6 +190,18 @@ int main (int argc, char* argv[])
         hover (*display, { plotX (shown.front().zones.front().centreHz), static_cast<float> (display->getHeight()) * 0.5f });
     loop.runDispatchLoopUntil (300);
     save (*editor, folder.getChildFile ("instancias-mouse.png"));
+
+    // Fase 15: un preset cargado (la barra con su categoría) y el navegador abierto con sus notas.
+    auto& presets = bass->getPresetManager();
+    for (const auto& preset : presets.getPresets())
+        if (preset.name == "808 Sub Limpio")
+            presets.load (preset);
+    loop.runDispatchLoopUntil (500);
+    save (*editor, folder.getChildFile ("presets-cargado.png"));
+    if (auto* bar = findChild<deepwater::presets::PresetBar> (*editor); bar != nullptr && bar->onToggleBrowser)
+        bar->onToggleBrowser();
+    loop.runDispatchLoopUntil (300);
+    save (*editor, folder.getChildFile ("presets-navegador.png"));
 
     running = false;
     audio.join();

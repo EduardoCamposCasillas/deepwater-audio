@@ -17,13 +17,24 @@ juce_add_plugin(Fathom
     VST3_CATEGORIES          Fx EQ
 )
 
-# Todo el código del plugin (también lo compila FathomInstanceTests).
+# Todo el código del plugin (también lo compilan FathomInstanceTests, FathomPresetTests y FathomUiSnapshot).
 set(FATHOM_PLUGIN_SOURCES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
+    Source/presets/FathomPresets.cpp
 )
 
 target_sources(Fathom PRIVATE ${FATHOM_PLUGIN_SOURCES})
+
+# --- Presets de fábrica (Fase 15) --------------------------------------------------
+# Los .fhpreset de Presets/Factory se compilan DENTRO del plugin (BinaryData.h), como en Undertow, Riptide y Ebb.
+# CONFIGURE_DEPENDS: un preset nuevo se detecta al compilar, sin reconfigurar a mano.
+file(GLOB_RECURSE FATHOM_FACTORY_PRESETS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Factory/*.fhpreset")
+juce_add_binary_data(FathomPresetData
+    HEADER_NAME BinaryData.h
+    NAMESPACE   BinaryData
+    SOURCES     ${FATHOM_FACTORY_PRESETS}
+)
 
 target_include_directories(Fathom PRIVATE Source)
 
@@ -37,7 +48,9 @@ target_compile_definitions(Fathom
 target_link_libraries(Fathom
     PRIVATE
         juce::juce_audio_utils         # incluye audio_processors, audio_devices, gui, etc.
+        FathomPresetData
         deepwater::dsp                 # librería DSP compartida de la suite (libs/dsp)
+        deepwater::presets             # presets de la suite (libs/presets)
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -75,11 +88,35 @@ if(FATHOM_BUILD_TESTS)
     target_link_libraries(FathomInstanceTests
         PRIVATE
             juce::juce_audio_utils
+            FathomPresetData
             deepwater::dsp
+            deepwater::presets
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
     )
     add_test(NAME FathomInstanceTests COMMAND FathomInstanceTests)
+
+    # Fase 15, con JUCE: los presets de fábrica (que se lean, sus notas, que suenen sin NaN ni reservas de memoria y
+    # con el volumen igualado), guardar/cargar, el estado del proyecto, el deshacer y cambiar de preset sonando.
+    juce_add_console_app(FathomPresetTests PRODUCT_NAME "FathomPresetTests")
+    target_sources(FathomPresetTests PRIVATE tests/PresetTests.cpp ${FATHOM_PLUGIN_SOURCES})
+    target_include_directories(FathomPresetTests PRIVATE Source)
+    target_compile_definitions(FathomPresetTests
+        PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            "JucePlugin_Name=\"Fathom\""
+    )
+    target_link_libraries(FathomPresetTests
+        PRIVATE
+            juce::juce_audio_utils
+            FathomPresetData
+            deepwater::dsp
+            deepwater::presets
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
+    )
+    add_test(NAME FathomPresetTests COMMAND FathomPresetTests)
 
     # Herramienta (no está en ctest): capturas PNG de la GUI con varias instancias sonando.
     #   FathomUiSnapshot <carpeta>
@@ -96,7 +133,9 @@ if(FATHOM_BUILD_TESTS)
     target_link_libraries(FathomUiSnapshot
         PRIVATE
             juce::juce_audio_utils
+            FathomPresetData
             deepwater::dsp
+            deepwater::presets
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
     )

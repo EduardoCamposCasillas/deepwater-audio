@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- EQ dinámico con sidechain: el 808 baja solo su sub cuando pega el kick. -->
+<FathomPreset formatVersion="1" name="808 Le Abre Paso Al Kick" category="Dembow" author="Fathom">
+  <Notes>
+    En el 808, con el kick en el sidechain: cuando pega el kick, el 808 baja SOLO la zona donde chocan (~60 Hz) y vuelve
+    enseguida. A diferencia de un ducking de volumen (Ebb), el resto del 808 (sus armónicos, su gruñido) no se mueve: la
+    nota del 808 se sigue oyendo entera.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 28 Hz, 24 dB/oct (limpieza).
+    - Banda 2, campana en 60 Hz (Q 1.5) con GANANCIA 0 dB: en reposo no hace nada. DINÁMICO con DETECTOR = Sidechain,
+      RANGO −6 dB, UMBRAL −30 dB (el kick lo pasa de sobra en cada golpe: baja todo el rango), ATAQUE 2 ms (baja apenas
+      llega el golpe) y LIBERACIÓN 80 ms (lo que dura su cuerpo).
+
+    Ruteo en FL: en el Mixer, elige la pista del kick y en la pista del 808 clic derecho en la flecha de envío → Sidechain to
+    this track. En Fathom (en el 808): engranaje del envoltorio → Processing → Connections, la entrada Sidechain = el kick.
+    Sin el ruteo aparece "DINÁMICA CON SIDECHAIN: SIN CONECTAR" y la banda no se mueve.
+
+    Pruébalo: SIDECHAIN visible en el analizador (ámbar) y afina la frecuencia de la banda 2 al pico grave del kick. Si
+    quieres que baje según lo fuerte que pega cada kick, sube el UMBRAL hasta que el medidor apenas lo cruce.
+    Cuándo NO usarlo: si el kick casi no tiene sub (no hay choque que arreglar), ni para que el 808 "bombee" como efecto
+    (eso es un ducking de volumen: Ebb).
+    Viene de: Fase 9 (EQ dinámico con sidechain).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="28"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="60"/>
+    <PARAM id="band2Gain" value="0"/>
+    <PARAM id="band2Q" value="1.5"/>
+    <PARAM id="band2Dynamic" value="On"/>
+    <PARAM id="band2DynRange" value="-6"/>
+    <PARAM id="band2Threshold" value="-30"/>
+    <PARAM id="band2Attack" value="2"/>
+    <PARAM id="band2Release" value="80"/>
+    <PARAM id="band2DynSource" value="Sidechain"/>
+  </Parameters>
+</FathomPreset>

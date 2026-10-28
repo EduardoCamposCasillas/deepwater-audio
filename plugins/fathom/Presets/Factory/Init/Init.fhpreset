@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- El punto de partida: las 24 bandas apagadas. -->
+<FathomPreset formatVersion="1" name="Init" category="Init" author="Fathom">
+  <Notes>
+    Las 24 bandas apagadas (cada una espera en su frecuencia, de 30 Hz a 16 kHz), salida a 0 dB, cero latencia, respuesta
+    analógica encendida y color limpio: el EQ no cambia nada (bit a bit).
+
+    Úsalo para empezar desde cero. Doble clic en el visor crea una banda donde clicas; clic en un pico del analizador
+    crea una campana justo en él.
+  </Notes>
+  <Parameters>
+  </Parameters>
+</FathomPreset>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Movimientos de 1 dB, anchos, con fase natural y color sutil. -->
+<FathomPreset formatVersion="1" name="Master Toque Final" category="Master" author="Fathom">
+  <Notes>
+    El EQ del master no arregla instrumentos: da el toque final a toda la mezcla con movimientos chicos y anchos (±1-2 dB).
+    Si necesitas más, el problema está en una pista: arréglalo ahí.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 20 Hz, 18 dB/oct: infrasonidos que gastan el limitador.
+    - Banda 2, shelf de graves +1 dB desde 90 Hz: peso.
+    - Banda 3, −1 dB en 300 Hz (Q 0.7, muy ancha): un poco menos de barro en todo.
+    - Banda 4, shelf de agudos +1.5 dB desde 12 kHz: aire.
+    - FASE = Natural: las bandas responden como un EQ analógico también arriba (magnitud y fase), con solo 3.6 ms de
+      latencia a 44.1 kHz. COLOR = Sutil (1.7 ms más). FL compensa las dos.
+
+    Pruébalo: ESCALA (en la columna de SALIDA) al 50 % y al 150 %: el mismo EQ más suave o más fuerte. Compara con BYPASS
+    con AUTO GAIN encendido: con tan poco, sin igualar el volumen no se puede juzgar. Y con una referencia: IGUALAR.
+    Cuándo NO usarlo: para arreglar un instrumento (hazlo en su pista), ni con la mezcla sin terminar (cada cambio en una
+    pista cambia lo que el master necesita).
+    Viene de: Fase 7 (respuesta analógica), Fase 10 (fase natural) y Fase 13 (color).
+  </Notes>
+  <Parameters>
+    <PARAM id="phaseMode" value="Natural Phase"/>
+    <PARAM id="analogColor" value="Subtle"/>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="20"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="18 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Low Shelf"/>
+    <PARAM id="band2Frequency" value="90"/>
+    <PARAM id="band2Gain" value="1"/>
+    <PARAM id="band2Q" value="0.71"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="Bell"/>
+    <PARAM id="band3Frequency" value="300"/>
+    <PARAM id="band3Gain" value="-1"/>
+    <PARAM id="band3Q" value="0.7"/>
+    <PARAM id="band4Enabled" value="On"/>
+    <PARAM id="band4Shape" value="High Shelf"/>
+    <PARAM id="band4Frequency" value="12000"/>
+    <PARAM id="band4Gain" value="1.5"/>
+    <PARAM id="band4Q" value="0.71"/>
+  </Parameters>
+</FathomPreset>

@@ -13,10 +13,25 @@ constexpr int footerHeight = 26;
 constexpr int controlsWidth = 110;
 constexpr int padding = 12;
 constexpr int framesPerSecond = 30;
+constexpr int titleWidth = 96;
+constexpr int presetBarWidth = 370; // Fase 15: entre el nombre y ANALÓGICA (donde estaba el subtítulo)
+constexpr juce::uint32 messageMilliseconds = 6000;
+
+std::unique_ptr<juce::PropertiesFile> openSettings()
+{
+    // %APPDATA%\Deepwater\Fathom.settings (en Windows). Solo guarda preferencias de la interfaz.
+    juce::PropertiesFile::Options options;
+    options.applicationName = "Fathom";
+    options.filenameSuffix = ".settings";
+    options.folderName = "Deepwater";
+    options.osxLibrarySubFolder = "Application Support";
+    return std::make_unique<juce::PropertiesFile> (options);
+}
 } // namespace
 
 FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p), display (p), bandPanel (p), curvePanel (p, display), instancesPanel (p, display), outputPanel (p)
+    : AudioProcessorEditor (p), processor (p), settings (openSettings()), display (p), bandPanel (p), curvePanel (p, display),
+      instancesPanel (p, display), outputPanel (p), presets (p.getPresetManager(), fathom::gui::theme::presetPalette(), settings.get())
 {
     setLookAndFeel (&lookAndFeel);
 
@@ -94,6 +109,11 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
     addAndMakeVisible (copySideButton);
     showCompareSide();
 
+    // Presets (Fase 15). Al final: el navegador y el panel de guardar quedan por encima de todo lo demás.
+    presets.onMessage = [this] (const juce::String& text) { showMessage (text); };
+    presets.addTo (*this);
+    presets.update();
+
     setSize (editorWidth, editorHeight);
     processor.setAnalyzerActive (true);
     lastFrameSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
@@ -106,6 +126,8 @@ FathomAudioProcessorEditor::~FathomAudioProcessorEditor()
     processor.setSoloBand (-1); // sin la ventana no se ve que hay un solo: no se deja sonando
     auto& tools = processor.getCurveTools(); // ídem con aprender (Fase 12)
     tools.learningReference = tools.learningCurrent = false;
+    if (settings != nullptr)
+        settings->saveIfNeeded();
     setLookAndFeel (nullptr);
 }
 
@@ -132,6 +154,19 @@ void FathomAudioProcessorEditor::timerCallback()
     analogButton.setAlpha (processor.getPhaseMode() == fathom::dsp::PhaseMode::natural ? 0.4f : 1.0f);
     undoButton.setEnabled (processor.getEditHistory().canUndo());
     redoButton.setEnabled (processor.getEditHistory().canRedo());
+    presets.update(); // nombre del preset y "*" si se tocó algo
+    if (message.isNotEmpty() && juce::Time::getMillisecondCounter() > messageExpiry)
+    {
+        message.clear();
+        repaint (getLocalBounds().removeFromBottom (footerHeight));
+    }
+}
+
+void FathomAudioProcessorEditor::showMessage (const juce::String& text)
+{
+    message = text;
+    messageExpiry = juce::Time::getMillisecondCounter() + messageMilliseconds;
+    repaint (getLocalBounds().removeFromBottom (footerHeight));
 }
 
 bool FathomAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
@@ -188,17 +223,23 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     auto header = getLocalBounds().removeFromTop (headerHeight).reduced (padding, 0);
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
-    g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
-    g.setColour (theme::dimText);
-    g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 14: otras instancias"), header, juce::Justification::centredLeft);
+    g.drawText ("FATHOM", header.removeFromLeft (titleWidth), juce::Justification::centredLeft);
 
+    // Pie: la ayuda del visor o, durante unos segundos, el último mensaje de los presets.
+    const auto footer = getLocalBounds().removeFromBottom (footerHeight);
+    if (message.isNotEmpty())
+    {
+        g.setColour (theme::accent);
+        g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        g.drawText (message, footer, juce::Justification::centred);
+        return;
+    }
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
     g.drawText (juce::String::fromUTF8 ("Doble clic = crear banda  \xc2\xb7  arrastrar = frecuencia/ganancia (Shift fino, Alt un "
                                         "eje)  \xc2\xb7  rueda = Q  \xc2\xb7  Ctrl+clic o rect\xc3\xa1ngulo = varias  \xc2\xb7  "
                                         "clic en un pico = banda  \xc2\xb7  clic derecho = men\xc3\xba (y SOLO)  \xc2\xb7  Ctrl+Z = deshacer"),
-                getLocalBounds().removeFromBottom (footerHeight), juce::Justification::centred);
+                footer, juce::Justification::centred);
 }
 
 void FathomAudioProcessorEditor::resized()
@@ -217,6 +258,8 @@ void FathomAudioProcessorEditor::resized()
     sideAButton.setBounds (header.removeFromRight (34));
     header.removeFromRight (24);
     analogButton.setBounds (header.removeFromRight (96));
+    header.removeFromLeft (titleWidth);
+    const auto presetBar = header.removeFromLeft (presetBarWidth);
 
     auto content = getLocalBounds().withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0);
     outputPanel.setBounds (content.removeFromRight (controlsWidth));
@@ -230,4 +273,7 @@ void FathomAudioProcessorEditor::resized()
     display.setBounds (content);
 
     analyzerPanel.setBounds (controls.withTrimmedTop (8));
+
+    // El navegador y el panel de guardar tapan todo lo de abajo de la cabecera (menos el pie, con los mensajes).
+    presets.setBounds (presetBar, getLocalBounds().withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0));
 }

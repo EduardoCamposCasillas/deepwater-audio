@@ -68,6 +68,11 @@ struct PresetFormat
     std::function<juce::ValueTree()> captureExtraState;
     std::function<juce::StringArray (const juce::ValueTree&)> applyExtraState;
 
+    // Opcional (nació con Fathom, Fase 15): se llaman antes y después de aplicar un preset (cargar, siguiente/anterior,
+    // Init). Fathom abre y cierra ahí un paso de su deshacer: cargar un preset se deshace con Ctrl+Z como cualquier
+    // edición. Sin ellos (Undertow, Riptide, Ebb) no cambia nada.
+    std::function<void()> beforeLoad, afterLoad;
+
     // Posición de una categoría en 'categories' (las desconocidas, en la última).
     [[nodiscard]] int categoryIndex (const juce::String& category) const;
 };

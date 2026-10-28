@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synths anchos con los graves en mono (y sin barro). -->
+<FathomPreset formatVersion="1" name="Bus Graves Mono" category="Buses" author="Fathom">
+  <Notes>
+    Para el bus de bajos y synths anchos (unison, chorus, pads estéreo): los graves en estéreo suenan grandes en audífonos,
+    pero en un sistema mono (discoteca, celular, parlante bluetooth) se cancelan en parte y el grave baja o cambia. Aquí los
+    graves quedan en mono y el resto conserva su ancho.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 20 Hz, 24 dB/oct (infrasonidos).
+    - Banda 2, corte de graves en 150 Hz, 24 dB/oct, solo en el SIDE: abajo de 150 Hz no queda nada distinto entre
+      izquierda y derecha.
+    - Banda 3, −1.5 dB en 250 Hz (Q 0.9): el barro que se junta cuando varios synths suenan a la vez.
+
+    Pruébalo: analizador en CANALES = Mid + Side: el violeta (side) se apaga abajo de 150 Hz. Escucha en mono (en el
+    Mixer de FL, la separación estéreo del master en mono) con y sin la banda 2.
+    Cuándo NO usarlo: en un pad atmosférico sin graves (no hace nada), ni subas el corte del side sobre ~300 Hz: el synth
+    pierde el ancho que lo hace grande.
+    Viene de: Fase 8 (estéreo por banda).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="20"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="24 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Low Cut"/>
+    <PARAM id="band2Frequency" value="150"/>
+    <PARAM id="band2Q" value="0.71"/>
+    <PARAM id="band2Slope" value="24 dB/oct"/>
+    <PARAM id="band2Stereo" value="Side"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="Bell"/>
+    <PARAM id="band3Frequency" value="250"/>
+    <PARAM id="band3Gain" value="-1.5"/>
+    <PARAM id="band3Q" value="0.9"/>
+  </Parameters>
+</FathomPreset>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Clap o snare: cuerpo, sin lo nasal, con chasquido. -->
+<FathomPreset formatVersion="1" name="Clap Snare Cuerpo Y Chasquido" category="Percusión" author="Fathom">
+  <Notes>
+    El clap o la caja del dembow (el "tá" del 4 y el contratiempo) necesita cuerpo para no sonar flaco y chasquido para
+    cortar la mezcla, sin el tono nasal que lo hace sonar a lata.
+
+    Cómo se construyó:
+    - Banda 1, corte de graves en 120 Hz, 18 dB/oct: le deja los graves al kick y al 808.
+    - Banda 2, +2 dB en 220 Hz (Q 1.4): el cuerpo.
+    - Banda 3, −3 dB en 800 Hz (Q 2): lo nasal, "de lata".
+    - Banda 4, shelf de agudos +2 dB desde 7.5 kHz: el chasquido de las palmas.
+
+    Pruébalo: compara en A/B: en B sube la banda 2 a +4 dB y alterna con AUTO GAIN encendido. Más cuerpo no siempre es
+    mejor: en una mezcla llena, el clap flaco a veces se oye más claro.
+    Cuándo NO usarlo: en un clap que ya es grueso (la banda 2 lo vuelve pesado), ni en una caja acústica grabada con
+    micrófono (su cuerpo y su "lata" están en otro lugar: búscalos con SOLO).
+    Viene de: Fase 3 y Fase 6 (A/B y auto gain).
+  </Notes>
+  <Parameters>
+    <PARAM id="band1Enabled" value="On"/>
+    <PARAM id="band1Shape" value="Low Cut"/>
+    <PARAM id="band1Frequency" value="120"/>
+    <PARAM id="band1Q" value="0.71"/>
+    <PARAM id="band1Slope" value="18 dB/oct"/>
+    <PARAM id="band2Enabled" value="On"/>
+    <PARAM id="band2Shape" value="Bell"/>
+    <PARAM id="band2Frequency" value="220"/>
+    <PARAM id="band2Gain" value="2"/>
+    <PARAM id="band2Q" value="1.4"/>
+    <PARAM id="band3Enabled" value="On"/>
+    <PARAM id="band3Shape" value="Bell"/>
+    <PARAM id="band3Frequency" value="800"/>
+    <PARAM id="band3Gain" value="-3"/>
+    <PARAM id="band3Q" value="2"/>
+    <PARAM id="band4Enabled" value="On"/>
+    <PARAM id="band4Shape" value="High Shelf"/>
+    <PARAM id="band4Frequency" value="7500"/>
+    <PARAM id="band4Gain" value="2"/>
+    <PARAM id="band4Q" value="0.71"/>
+  </Parameters>
+</FathomPreset>
