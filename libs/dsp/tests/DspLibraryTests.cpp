@@ -28,6 +28,7 @@
 #include "deepwater/dsp/FastMath.h"
 #include "deepwater/dsp/Fft.h"
 #include "deepwater/dsp/Halfband.h"
+#include "deepwater/dsp/HostClock.h"
 #include "deepwater/dsp/LevelMeter.h"
 #include "deepwater/dsp/Lfo.h"
 #include "deepwater/dsp/MatchedEq.h"
@@ -2317,6 +2318,246 @@ void testConvolverWorkAhead()
     CHECK (peak > 0.1f); // no es silencio
 }
 
+// --- Reloj musical (HostClock, venía de Ebb) ----------------------------------------------------------------------
+
+bool nearValue (double a, double b, double tolerance = 1.0e-9)
+{
+    return std::abs (a - b) <= tolerance;
+}
+
+bool sameClockPosition (dw::MusicalPosition p, int bar, int beat, int sixteenth)
+{
+    return p.bar == bar && p.beat == beat && p.sixteenth == sixteenth;
+}
+
+// Tamaños de bloque "al azar" pero repetibles (FL cambia el tamaño del bloque de un callback a otro).
+struct ClockBlockSizes
+{
+    std::uint32_t state = 12345;
+    int next (int maxSize) noexcept
+    {
+        state = state * 1664525u + 1013904223u;
+        return 1 + static_cast<int> ((state >> 8) % static_cast<std::uint32_t> (maxSize));
+    }
+};
+
+dw::TransportInfo hostPlayingAt (double ppq, double bpm, dw::TimeSignature signature = {})
+{
+    dw::TransportInfo info;
+    info.hasHost = true;
+    info.isPlaying = true;
+    info.bpm = bpm;
+    info.ppqPosition = ppq;
+    info.timeSignature = signature;
+    return info;
+}
+
+void testMusicalPosition()
+{
+    std::printf ("Posicion musical: 4/4, 3/4, 6/8, 7/8, inicio de compas del host, redondeo y pre-roll\n");
+
+    // 4/4: 9.5 negras = compás 3 (empieza en 8), tiempo 2, 3.ª semicorchea (media negra dentro del tiempo).
+    CHECK (sameClockPosition (dw::musicalPosition (0.0, { 4, 4 }), 1, 1, 1));
+    CHECK (sameClockPosition (dw::musicalPosition (9.5, { 4, 4 }), 3, 2, 3));
+    CHECK (sameClockPosition (dw::musicalPosition (15.99, { 4, 4 }), 4, 4, 4));
+    // 3/4: el compás dura 3 negras.
+    CHECK (sameClockPosition (dw::musicalPosition (7.0, { 3, 4 }), 3, 2, 1));
+    // 6/8: el compás dura 3 negras y cada tiempo es una corchea (2 semicorcheas).
+    CHECK (sameClockPosition (dw::musicalPosition (4.75, { 6, 8 }), 2, 4, 2));
+    // 7/8: 3.5 negras por compás.
+    CHECK (sameClockPosition (dw::musicalPosition (3.5, { 7, 8 }), 2, 1, 1));
+    CHECK (sameClockPosition (dw::musicalPosition (6.75, { 7, 8 }), 2, 7, 2));
+
+    // Paso de FL (semicorchea dentro del compás): la caja del dembow cae en los pasos 4, 7, 12 y 15.
+    CHECK (dw::musicalPosition (0.75, { 4, 4 }).step == 4);
+    CHECK (dw::musicalPosition (1.5, { 4, 4 }).step == 7);
+    CHECK (dw::musicalPosition (2.75, { 4, 4 }).step == 12);
+    CHECK (dw::musicalPosition (3.5, { 4, 4 }).step == 15);
+    CHECK (dw::musicalPosition (6.75, { 7, 8 }).step == 14); // 7/8 = 14 pasos
+
+    // Un host que entrega 3.9999999999 en vez de 4 (error de coma flotante) sigue estando en el compás 2.
+    CHECK (sameClockPosition (dw::musicalPosition (3.9999999999, { 4, 4 }), 2, 1, 1));
+
+    // Si el host dice dónde empezó el compás (p. ej. hubo un cambio de compás antes), se cuenta desde ahí.
+    const auto fromHost = dw::musicalPosition (11.25, { 3, 4 }, 10.0);
+    CHECK (fromHost.beat == 2 && fromHost.sixteenth == 2);
+    // Un inicio de compás incoherente (más de un compás atrás) se ignora.
+    CHECK (sameClockPosition (dw::musicalPosition (9.5, { 4, 4 }, 2.0), 3, 2, 3));
+
+    // Pre-roll (posición negativa, antes del compás 1) y compás inválido (denominador 3 → se usa 4/4).
+    CHECK (sameClockPosition (dw::musicalPosition (-1.0, { 4, 4 }), 0, 4, 1));
+    CHECK (sameClockPosition (dw::musicalPosition (9.5, { 4, 3 }), 3, 2, 3));
+}
+
+void testFreeRunningClock()
+{
+    std::printf ("Reloj libre (sin host): 120 BPM desde 0, continuo con cualquier tamano de bloque\n");
+
+    for (const double sampleRate : sampleRates)
+    {
+        dw::HostClock clock;
+        clock.prepare (sampleRate);
+        ClockBlockSizes sizes;
+        std::int64_t samples = 0;
+        bool continuous = true;
+        for (int block = 0; block < 2000; ++block)
+        {
+            const int numSamples = sizes.next (4096);
+            clock.beginBlock ({}, numSamples);
+            // La posición de este bloque = muestras transcurridas · negras por muestra (a 120 BPM, 2 negras/s).
+            continuous = continuous && nearValue (clock.blockStartPpq(), static_cast<double> (samples) * 2.0 / sampleRate, 1.0e-6);
+            samples += numSamples;
+        }
+        CHECK (continuous);
+        CHECK (clock.getSource() == dw::ClockSource::freeRunning);
+        CHECK (clock.isRunning());
+        CHECK (clock.jumpCount() == 0);
+        CHECK (nearValue (clock.bpm(), dw::HostClock::defaultBpm));
+    }
+}
+
+void testFollowsHost()
+{
+    std::printf ("Sigue al host: extrapola dentro del bloque, sin saltos falsos con bloques y tempos cambiantes\n");
+
+    for (const double sampleRate : sampleRates)
+    {
+        dw::HostClock clock;
+        clock.prepare (sampleRate);
+        ClockBlockSizes sizes;
+        double ppq = 0.0;
+        double bpm = 90.0;
+        bool falseJump = false;
+        bool extrapolates = true;
+        for (int block = 0; block < 3000; ++block)
+        {
+            // Cambios de tempo entre bloques (automatización): el host integra con el tempo que informó.
+            if (block % 100 == 0)
+                bpm = 70.0 + static_cast<double> ((block / 100) % 7) * 15.0;
+            const int numSamples = sizes.next (4096);
+            clock.beginBlock (hostPlayingAt (ppq, bpm), numSamples);
+            falseJump = falseJump || clock.jumpedThisBlock();
+
+            const double perSample = bpm / (60.0 * sampleRate);
+            extrapolates = extrapolates && nearValue (clock.ppqAt (numSamples / 2), ppq + (numSamples / 2) * perSample);
+            ppq += numSamples * perSample;
+        }
+        CHECK (! falseJump);
+        CHECK (extrapolates);
+        CHECK (clock.jumpCount() == 0);
+        CHECK (clock.getSource() == dw::ClockSource::host);
+    }
+}
+
+void testDetectsJumps()
+{
+    std::printf ("Detecta saltos del host (loop, salto adelante) y el arranque, no como salto\n");
+
+    dw::HostClock clock;
+    clock.prepare (48000.0);
+    constexpr int block = 480; // a 120 BPM y 48 kHz = 0.02 negras
+    constexpr double step = 0.02;
+
+    // Parado en el compás 5: todas las muestras en el mismo sitio.
+    dw::TransportInfo stopped;
+    stopped.hasHost = true;
+    stopped.bpm = 120.0;
+    stopped.ppqPosition = 16.0;
+    clock.beginBlock (stopped, block);
+    CHECK (clock.getSource() == dw::ClockSource::stopped);
+    CHECK (! clock.isRunning());
+    CHECK (nearValue (clock.ppqAt (0), 16.0) && nearValue (clock.ppqAt (block - 1), 16.0));
+
+    // Empieza a reproducir: es un arranque, no un salto.
+    clock.beginBlock (hostPlayingAt (16.0, 120.0), block);
+    CHECK (clock.startedThisBlock());
+    CHECK (! clock.jumpedThisBlock());
+    clock.beginBlock (hostPlayingAt (16.0 + step, 120.0), block);
+    CHECK (! clock.startedThisBlock() && ! clock.jumpedThisBlock());
+
+    // Loop de FL: vuelve 4 compases atrás.
+    clock.beginBlock (hostPlayingAt (0.0, 120.0), block);
+    CHECK (clock.jumpedThisBlock());
+    CHECK (clock.jumpCount() == 1);
+    clock.beginBlock (hostPlayingAt (step, 120.0), block);
+    CHECK (! clock.jumpedThisBlock());
+
+    // Salto adelante (clic en la línea de tiempo) y un error de redondeo mínimo que NO es un salto.
+    clock.beginBlock (hostPlayingAt (64.0, 120.0), block);
+    CHECK (clock.jumpedThisBlock() && clock.jumpCount() == 2);
+    clock.beginBlock (hostPlayingAt (64.0 + step + 1.0e-4, 120.0), block);
+    CHECK (! clock.jumpedThisBlock() && clock.jumpCount() == 2);
+
+    // El host deja de informar posición: el reloj libre sigue desde donde iba, sin volver a 0.
+    const double expected = 64.0 + 2.0 * step + 1.0e-4;
+    clock.beginBlock ({}, block);
+    CHECK (clock.getSource() == dw::ClockSource::freeRunning);
+    CHECK (nearValue (clock.blockStartPpq(), expected, 1.0e-9));
+}
+
+void testClockCatchUp()
+{
+    std::printf ("Reloj: una diferencia pequena con el host (tempo automatizado) se recupera sin retroceder ni saltar\n");
+
+    constexpr double sampleRate = 48000.0;
+    constexpr int block = 1024;
+    const double perSample = 120.0 / (60.0 * sampleRate);
+    for (const double difference : { 0.004, -0.004 }) // el host llega 0.004 negras detrás (tempo que baja) o delante
+    {
+        dw::HostClock clock;
+        clock.prepare (sampleRate);
+        clock.beginBlock (hostPlayingAt (8.0, 120.0), block);
+        const double ours = clock.ppqAt (block);
+        clock.beginBlock (hostPlayingAt (ours - difference, 120.0), block);
+        CHECK (! clock.jumpedThisBlock());
+        CHECK (nearValue (clock.ppqAt (0), ours)); // sigue desde donde iba
+
+        bool smooth = true;
+        for (int i = 1; i <= block; ++i)
+        {
+            const double step = clock.ppqAt (i) - clock.ppqAt (i - 1);
+            smooth = smooth && step >= perSample * 0.9 - 1.0e-12 && step <= perSample * 1.1 + 1.0e-12;
+        }
+        CHECK (smooth);
+        // Recuperada en 0.004 / (0.1 · negras por muestra) muestras = 960: desde ahí, la posición del host.
+        CHECK (nearValue (clock.ppqAt (970), ours - difference + 970 * perSample, 1.0e-12));
+    }
+
+    // Más que la tolerancia: es un salto (loop) y se va directo a la posición del host.
+    dw::HostClock clock;
+    clock.prepare (sampleRate);
+    clock.beginBlock (hostPlayingAt (8.0, 120.0), block);
+    clock.beginBlock (hostPlayingAt (clock.ppqAt (block) - 0.1, 120.0), block);
+    CHECK (clock.jumpedThisBlock());
+    CHECK (nearValue (clock.ppqAt (0), 8.0 + block * perSample - 0.1));
+}
+
+void testTempoAndSignatureValidation()
+{
+    std::printf ("Tempo y compas: valores absurdos del host se descartan o se limitan\n");
+
+    dw::HostClock clock;
+    clock.prepare (44100.0);
+
+    auto info = hostPlayingAt (0.0, 140.0, { 7, 8 });
+    clock.beginBlock (info, 64);
+    CHECK (nearValue (clock.bpm(), 140.0));
+    CHECK (clock.timeSignature().numerator == 7 && clock.timeSignature().denominator == 8);
+
+    info.bpm = 0.0;                    // sin tempo válido: se queda el anterior
+    info.timeSignature = dw::TimeSignature { 4, 3 }; // denominador imposible: se queda el anterior
+    clock.beginBlock (info, 64);
+    CHECK (nearValue (clock.bpm(), 140.0));
+    CHECK (clock.timeSignature().denominator == 8);
+
+    info.bpm = 5000.0;
+    clock.beginBlock (info, 64);
+    CHECK (nearValue (clock.bpm(), dw::HostClock::maxBpm));
+    info.bpm = std::nan ("");
+    clock.beginBlock (info, 64);
+    CHECK (nearValue (clock.bpm(), dw::HostClock::maxBpm));
+}
+
 } // namespace
 
 int main()
@@ -2368,6 +2609,12 @@ int main()
     testPartitionedConvolution();
     testConvolverCrossfade();
     testConvolverWorkAhead();
+    testMusicalPosition();
+    testFreeRunningClock();
+    testFollowsHost();
+    testDetectsJumps();
+    testClockCatchUp();
+    testTempoAndSignatureValidation();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de deepwater::dsp pasaron.\n");

@@ -64,7 +64,8 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
   usar), toma de señal lock-free audio → GUI (`AnalyzerTap.h`), buzón del último valor audio → GUI (`TripleBuffer.h`, venía de Ebb), analizador de
   espectro calibrado, fuera del audio, con picos afinados entre bins (`SpectrumAnalyzer.h`, venía de Riptide), `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de
   pico/RMS (`LevelMeter.h`), LFO con divisiones de tempo (`Lfo.h`, venía de Undertow), curva por puntos con tensión
-  (`BreakpointCurve.h`, venía de Ebb), seguidor de envolvente
+  (`BreakpointCurve.h`, venía de Ebb), reloj musical que sigue al host (posición por muestra, saltos y
+  loops, reloj libre, compás.tiempo.semicorchea; `HostClock.h`, venía de Ebb), seguidor de envolvente
   (`EnvelopeFollower.h`) y detector de golpes por umbral con histéresis y retención (`TransientDetector.h`, venía de Ebb).
 - Suavizado: usar `LinearRamp` (llega exacto al objetivo). `SmoothedParameter` tiene un bug conocido (nunca termina de
   llegar) y solo lo usa Undertow; arreglarlo cambiaría su sonido.

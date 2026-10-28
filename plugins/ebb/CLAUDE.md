@@ -47,7 +47,7 @@ envolventes, y el detector de transitorios (Fase 5) al compresor.
 Desde la raíz del repositorio (ver también los comandos generales en el `CLAUDE.md` raíz):
 ```
 cmake --build build --config Release --target Ebb_VST3      # solo el plugin
-build/plugins/ebb/Release/EbbTests.exe                      # tests del reloj y del motor (sin JUCE)
+build/plugins/ebb/Release/EbbTests.exe                      # tests del motor (sin JUCE)
 build/plugins/ebb/Release/EbbTests.exe --cpu                # tabla de CPU (Fase 9; mejor de 5, este equipo)
 build/plugins/ebb/Release/EbbTests.exe --fingerprint <txt>  # huella del sonido de 336 escenarios (antes/después de un cambio)
 build/plugins/ebb/EbbPresetTests_artefacts/Release/EbbPresetTests.exe   # presets (--verbose: tabla; --notes: notas)
@@ -64,7 +64,7 @@ plugins/ebb/
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     TransportSnapshot.h      # lo que el audio publica para la GUI en cada bloque (TripleBuffer)
-    dsp/HostClock.h          # reloj musical: posición del host por muestra, saltos, reloj libre; compás.tiempo.semicorchea
+    dsp/HostClock.h          # alias del reloj musical, que pasó a libs/dsp (deepwater/dsp/HostClock.h) con Tidechart
     dsp/TempoCurve.h         # modo tempo: divisiones, posición en el ciclo y la curva estirada a la duración (funciones puras)
     dsp/CurveShapes.h        # formas de fábrica (curvas por puntos) y cuál coincide con una curva dada
     dsp/Triggers.h           # modos de disparo (tempo, MIDI, audio), el disparo dentro del bloque, filtro y nombres de
@@ -80,7 +80,7 @@ plugins/ebb/
                              # respuesta en frecuencia de las bandas (BandView.h), visor en vivo (LiveView.h)
     presets/EbbPresets.h/.cpp  # formato propio (categorías, .ebpreset, bypass excluido, BinaryData) y curva ↔ <Curve>
   Presets/Factory/         # .ebpreset de fábrica por categoría (compilados dentro del plugin)
-  tests/EngineTests.cpp    # tests del reloj y del motor (sin JUCE); ProcessorRig = processBlock sin JUCE (CPU y huellas)
+  tests/EngineTests.cpp    # tests del motor (sin JUCE; los del reloj están en DeepwaterDspTests); ProcessorRig = processBlock sin JUCE (CPU y huellas)
   tests/PresetTests.cpp    # tests de presets (con JUCE: compila el procesador; dembow sintético por MIDI y sidechain)
 ```
 
