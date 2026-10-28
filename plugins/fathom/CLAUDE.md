@@ -192,6 +192,25 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
+Fase 16 EN CURSO. Paso 1 (CPU de las bandas IIR) hecho; falta probarlo en FL. Pendiente: repartir el trabajo de la
+convolución y de la STFT con bloques chicos (picos), GUI escalable, automatización extrema.
+- Medición nueva `FathomTests.exe --cpu` (también al final de los tests, solo informa): 24 bandas en cero latencia en 5
+  escenarios (campanas quietas, campanas automatizadas sin parar, cortes de 96 dB/oct, dinámicas, mid/side) a 44.1/256,
+  96/256, 44.1/32 y mono.
+- Ritmo de control (`Band::controlInterval` = 16): con las rampas moviéndose, el diseño se calcula cada 16 muestras y en
+  el medio se interpolan los coeficientes del SVF (`EqCascade::blend`); el último tramo termina justo en el destino. Solo
+  la dinámica moviéndose = el camino de la Fase 9, sin cambios. Cambia el CAMINO de una rampa (no a dónde llega): un
+  proyecto suena igual quieto; mientras se automatiza, la diferencia es de menos de 0.4 ms de trayectoria.
+- Librería: `StereoEqCascadeFilter` (L y R en un registro SSE2, bit a bit igual que dos `EqCascadeFilter`; también un
+  canal solo para mono/mid/side) y `EqCascade::blend` solo recorre las etapas en uso (mismo resultado).
+  `DeepwaterDspTests`: test nuevo de bit a bit con los coeficientes cambiando en cada muestra.
+- CPU (% de un núcleo, estéreo 44.1 kHz / 256; entre paréntesis 96 kHz), antes → después: campanas automatizadas
+  32.8 → 6.0 (66.7 → 12.0); cortes de 96 dB/oct 13.1 → 6.0 (30.6 → 13.9); dinámicas 6.2 → 3.5 (15.3 → 8.6); campanas
+  quietas 2.0 → 1.5; mid/side ~1.5 (la medición varía ±0.5).
+- Release con 0 warnings; FathomTests, FathomInstanceTests, FathomPresetTests y DeepwaterDspTests pasan; pluginval
+  strictness 10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 15
 Fase 15 COMPLETADA (2026-10-27). Probada por el usuario en FL Studio: funciona.
 - Sin parámetros nuevos ni cambios en el sonido (un proyecto de las Fases 1-14 suena igual). Lo que se guarda de nuevo
   en el proyecto son las propiedades del preset de libs/presets (`presetName`, `presetFactory`, `presetModified`); un

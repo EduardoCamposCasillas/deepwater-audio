@@ -132,9 +132,15 @@ constexpr bool isSpectral (const BandSettings& s) noexcept
 // Mover un filtro de golpe es un clic: los coeficientes saltan y el estado del filtro (lo que "recuerda" de las
 // muestras anteriores) de pronto no corresponde a la nueva respuesta. Por eso no se suavizan los coeficientes sino los
 // PARÁMETROS, cada uno en el dominio en que se oye: la frecuencia en octavas (log2 Hz: de 100 a 200 Hz tarda lo mismo
-// que de 5 a 10 kHz), la ganancia en dB y el Q en log (de 0.5 a 1 lo mismo que de 4 a 8). Mientras alguna rampa se
-// mueve, los coeficientes se recalculan en cada muestra (el SVF TPT es estable aunque cambien en cada muestra). Quietos,
-// no se recalcula nada.
+// que de 5 a 10 kHz), la ganancia en dB y el Q en log (de 0.5 a 1 lo mismo que de 4 a 8). Quietos, no se recalcula nada.
+//
+// Mientras alguna rampa se mueve (Fase 16), el diseño se calcula a "ritmo de control": cada 'controlInterval' muestras
+// se avanzan las rampas ese tramo, se diseña el punto donde terminan y en el medio se interpolan los coeficientes del
+// SVF (g, k y la mezcla) desde los de ahora (EqCascade::blend). Diseñar (tan, exp2, el matched) cuesta unas 16 veces
+// más que interpolar: con 24 bandas automatizadas, recalcular en cada muestra se llevaba un tercio de un núcleo. El
+// SVF es estable con cualquier g > 0 y k > 0, y entre dos valores positivos la recta también lo es; el tramo dura
+// 0.36 ms a 44.1 kHz, muy por debajo de la rampa de 20 ms: lo que cambia es el camino, no a dónde llega (el último
+// tramo termina justo en el destino, con los mismos coeficientes que la curva de la GUI).
 //
 // Encender, apagar o cambiar de forma o de pendiente no se puede suavizar así (un corte no "se convierte" en un shelf
 // ni 4 etapas en 2). Para eso la banda tiene un fundido 'mix': salida = entrada + mix·(filtrada − entrada), que es
@@ -154,13 +160,14 @@ constexpr bool isSpectral (const BandSettings& s) noexcept
 // de la banda. Recalcular el diseño en cada muestra costaría mucho con 24 bandas dinámicas; en cambio, cuando llega un
 // valor nuevo se calculan los coeficientes de ese punto y durante las 'dynamicInterval' muestras siguientes se interpolan
 // desde los de ahora (como al pasar de bilineal a analógica): el SVF sigue la rampa sin escalones. Si a la vez se mueve
-// otro ajuste, se recalcula todo en cada muestra como siempre.
+// otro ajuste, la dinámica entra en los tramos de control con lo demás.
 class Band
 {
 public:
     static constexpr int maxChannels = 2;
     static constexpr double rampSeconds = 0.02;
     static constexpr int dynamicInterval = 16; // muestras entre dos valores de la ganancia dinámica (0.36 ms a 44.1 kHz)
+    static constexpr int controlInterval = 16; // muestras entre dos diseños mientras se mueven las rampas (Fase 16)
 
     void prepare (double newSampleRate, const BandSettings& settings) noexcept
     {
@@ -207,6 +214,16 @@ public:
             mix.setTarget (pending.enabled ? 1.0f : 0.0f);
         }
         mix.next();
+        // A mitad de un tramo de control: interpolar hacia su final (en el último paso, el destino exacto).
+        if (segmentPosition < segmentLength)
+        {
+            ++segmentPosition;
+            cascade = segmentPosition == segmentLength
+                          ? segmentTo
+                          : deepwater::dsp::EqCascade::blend (segmentFrom, segmentTo,
+                                                              static_cast<float> (segmentPosition) / static_cast<float> (segmentLength));
+            return;
+        }
         if (staticSteady())
         {
             if (dynamicDb.isSteady())
@@ -222,13 +239,18 @@ public:
                 updateCoefficients();
             return;
         }
-        octaves.next();
-        gainDb.next();
-        logQ.next();
-        analogMix.next();
-        dynamicDb.next();
+        // Un tramo nuevo: las rampas avanzan hasta su final de una vez (o hasta que la última llega, así el último tramo
+        // termina justo en el destino) y se diseña ese punto.
         blendReady = false;
-        updateCoefficients();
+        const int length = std::min (controlInterval, std::max ({ octaves.remaining, gainDb.remaining, logQ.remaining, analogMix.remaining }));
+        for (int i = 0; i < length; ++i)
+            for (auto* ramp : { &octaves, &gainDb, &logQ, &analogMix, &dynamicDb })
+                ramp->next();
+        segmentFrom = cascade;
+        segmentTo = design (shape, slopeIndex, octaves.value, gainDb.value + dynamicDb.value, logQ.value, analogMix.value);
+        segmentLength = length;
+        segmentPosition = 1;
+        cascade = length == 1 ? segmentTo : deepwater::dsp::EqCascade::blend (segmentFrom, segmentTo, 1.0f / static_cast<float> (length));
     }
 
     // La ganancia dinámica en dB (Fase 9), sumada a la de la banda. Llega cada 'dynamicInterval' muestras y se alcanza
@@ -238,7 +260,9 @@ public:
         if (db == dynamicDb.target)
             return;
         dynamicDb.setTarget (db);
-        blendReady = staticSteady();
+        // A mitad de un tramo de control los coeficientes de ahora no son el punto de partida de la rampa: la dinámica
+        // entra en el tramo siguiente (o, si ya no hay otro, se recalcula en cada muestra hasta llegar).
+        blendReady = staticSteady() && segmentPosition == segmentLength;
         if (blendReady)
         {
             blendFrom = cascade;
@@ -251,10 +275,7 @@ public:
     {
         switch (placement)
         {
-            case Placement::stereo:
-                left = process (0, left);
-                right = process (1, right);
-                return;
+            case Placement::stereo: processPair (left, right); return;
             case Placement::left: left = process (0, left); return;
             case Placement::right: right = process (1, right); return;
             case Placement::mid:
@@ -289,7 +310,7 @@ public:
     {
         switch (placement)
         {
-            case Placement::stereo: return { process (0, left), process (1, right) };
+            case Placement::stereo: processPair (left, right); return { left, right };
             case Placement::left: return { process (0, left), 0.0f };
             case Placement::right: return { 0.0f, process (1, right) };
             case Placement::mid:
@@ -310,10 +331,16 @@ public:
 
     [[nodiscard]] float process (int channel, float x) noexcept
     {
-        const float wet = filters[static_cast<size_t> (channel)].process (x, cascade);
-        // Fuera del fundido no se mezcla: en 1 sale la banda tal cual (una campana en 0 dB = la entrada bit a bit).
-        const float m = mix.value;
-        return m == 1.0f ? wet : m == 0.0f ? x : x + (wet - x) * m;
+        return mixed (x, filter.process (channel, x, cascade));
+    }
+
+    // Los dos canales a la vez (Fase 16: SIMD; el mismo resultado que dos process()).
+    void processPair (float& left, float& right) noexcept
+    {
+        float wetLeft = left, wetRight = right;
+        filter.processPair (wetLeft, wetRight, cascade);
+        left = mixed (left, wetLeft);
+        right = mixed (right, wetRight);
     }
 
     // La respuesta de una banda con estos ajustes, ya quieta (apagada = nada). La GUI la usa para dibujar la curva: son
@@ -370,6 +397,13 @@ public:
     [[nodiscard]] Placement getPlacement() const noexcept { return placement; }
 
 private:
+    // Fuera del fundido no se mezcla: en 1 sale la banda tal cual (una campana en 0 dB = la entrada bit a bit).
+    [[nodiscard]] float mixed (float x, float wet) const noexcept
+    {
+        const float m = mix.value;
+        return m == 1.0f ? wet : m == 0.0f ? x : x + (wet - x) * m;
+    }
+
     // {octavas, dB, log2 Q}.
     static std::array<float, 3> targetsFor (const BandSettings& s) noexcept
     {
@@ -455,8 +489,8 @@ private:
         analogMix.snap (pending.analog ? 1.0f : 0.0f);
         dynamicDb.snap (dynamicDb.target);
         blendReady = false;
-        for (auto& filter : filters)
-            filter.reset();
+        segmentPosition = segmentLength = 0;
+        filter.reset();
         updateCoefficients();
     }
 
@@ -490,9 +524,11 @@ private:
     deepwater::dsp::LinearRamp dynamicDb; // Fase 9: la ganancia dinámica (rampa de 'dynamicInterval' muestras)
     deepwater::dsp::EqCascade blendFrom, blendTo; // los extremos de esa rampa, si nada más se mueve
     bool blendReady = false;
+    deepwater::dsp::EqCascade segmentFrom, segmentTo; // Fase 16: el tramo de control en curso
+    int segmentLength = 0, segmentPosition = 0;
     deepwater::dsp::FlatTiltDesign flatTilt;
     deepwater::dsp::EqCascade cascade;
-    std::array<deepwater::dsp::EqCascadeFilter, maxChannels> filters;
+    deepwater::dsp::StereoEqCascadeFilter filter; // L y R (mono, mid y side usan el canal 0)
 };
 
 } // namespace fathom::dsp

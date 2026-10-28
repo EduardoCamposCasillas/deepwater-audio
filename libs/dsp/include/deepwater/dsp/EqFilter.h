@@ -6,6 +6,7 @@
 #include <complex>
 #include <numbers>
 
+#include "deepwater/dsp/Simd.h"
 #include "deepwater/dsp/Svf.h"
 
 namespace deepwater::dsp
@@ -229,12 +230,13 @@ struct EqCascade
         return stageQ;
     }
 
-    // Etapa por etapa (las dos cascadas tienen que tener la misma estructura). Ver EqCoefficients::blend.
+    // Etapa por etapa (las dos cascadas tienen que tener la misma estructura). Ver EqCoefficients::blend. Solo las que
+    // se usan: las que sobran son identidad en las dos y quedan identidad.
     static EqCascade blend (const EqCascade& from, const EqCascade& to, float t) noexcept
     {
         EqCascade cascade;
         cascade.numStages = std::max (from.numStages, to.numStages);
-        for (size_t i = 0; i < cascade.stages.size(); ++i)
+        for (size_t i = 0; i < static_cast<size_t> (cascade.numStages); ++i)
             cascade.stages[i] = EqCoefficients::blend (from.stages[i], to.stages[i], t);
         return cascade;
     }
@@ -351,6 +353,81 @@ public:
 
 private:
     std::array<EqFilter, EqCascade::maxStages> stages;
+};
+
+// La misma cascada para DOS canales con los mismos coeficientes (una banda estéreo). Con SSE2, L y R van en el mismo
+// registro: cada instrucción hace la cuenta de los dos (las etapas en serie no se pueden repartir, los canales sí). Las
+// operaciones son las del SVF escalar en el mismo orden y SSE2 redondea igual que un float: el resultado es el de dos
+// EqCascadeFilter, bit a bit. También procesa un canal solo (mono, mid, side): el estado de cada canal es el mismo.
+class StereoEqCascadeFilter
+{
+public:
+    void reset() noexcept
+    {
+        for (auto& stage : state)
+            stage = {};
+    }
+
+    void processPair (float& left, float& right, const EqCascade& cascade) noexcept
+    {
+#if DEEPWATER_SSE2
+        __m128 x = _mm_setr_ps (left, right, 0.0f, 0.0f);
+        for (int i = 0; i < cascade.numStages; ++i)
+        {
+            const auto& c = cascade.stages[static_cast<size_t> (i)];
+            auto& s = state[static_cast<size_t> (i)];
+            const __m128 g = _mm_set1_ps (c.svf.g);
+            __m128 s1 = _mm_setr_ps (s[0], s[1], 0.0f, 0.0f);
+            __m128 s2 = _mm_setr_ps (s[2], s[3], 0.0f, 0.0f);
+            const __m128 highPass = _mm_mul_ps (_mm_sub_ps (_mm_sub_ps (x, _mm_mul_ps (_mm_set1_ps (c.svf.g + c.svf.k), s1)), s2),
+                                                _mm_set1_ps (c.svf.a1));
+            const __m128 v1 = _mm_mul_ps (g, highPass);
+            const __m128 bandPass = _mm_add_ps (v1, s1);
+            s1 = _mm_add_ps (bandPass, v1);
+            const __m128 v2 = _mm_mul_ps (g, bandPass);
+            const __m128 lowPass = _mm_add_ps (v2, s2);
+            s2 = _mm_add_ps (lowPass, v2);
+            x = _mm_add_ps (_mm_add_ps (_mm_add_ps (_mm_mul_ps (_mm_set1_ps (c.dry), x), _mm_mul_ps (_mm_set1_ps (c.bandPass), bandPass)),
+                                        _mm_mul_ps (_mm_set1_ps (c.lowPass), lowPass)),
+                            _mm_mul_ps (_mm_set1_ps (c.highPass), highPass));
+            alignas (16) std::array<float, 4> s1Out, s2Out;
+            _mm_store_ps (s1Out.data(), s1);
+            _mm_store_ps (s2Out.data(), s2);
+            s = { s1Out[0], s1Out[1], s2Out[0], s2Out[1] };
+        }
+        left = _mm_cvtss_f32 (x);
+        right = _mm_cvtss_f32 (_mm_shuffle_ps (x, x, 1));
+#else
+        left = process (0, left, cascade);
+        right = process (1, right, cascade);
+#endif
+    }
+
+    [[nodiscard]] float process (int channel, float x, const EqCascade& cascade) noexcept
+    {
+        const auto ch = static_cast<size_t> (channel);
+        for (int i = 0; i < cascade.numStages; ++i)
+        {
+            const auto& c = cascade.stages[static_cast<size_t> (i)];
+            auto& s = state[static_cast<size_t> (i)];
+            float& s1 = s[ch];
+            float& s2 = s[2 + ch];
+            // La misma cuenta que SvfStage::process + EqFilter::process.
+            const float highPass = (x - (c.svf.g + c.svf.k) * s1 - s2) * c.svf.a1;
+            const float v1 = c.svf.g * highPass;
+            const float bandPass = v1 + s1;
+            s1 = bandPass + v1;
+            const float v2 = c.svf.g * bandPass;
+            const float lowPass = v2 + s2;
+            s2 = lowPass + v2;
+            x = c.dry * x + c.bandPass * bandPass + c.lowPass * lowPass + c.highPass * highPass;
+        }
+        return x;
+    }
+
+private:
+    // Por etapa: {s1 de L, s1 de R, s2 de L, s2 de R}.
+    std::array<std::array<float, 4>, EqCascade::maxStages> state {};
 };
 
 } // namespace deepwater::dsp

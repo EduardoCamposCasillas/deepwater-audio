@@ -976,6 +976,63 @@ void testFlatTilt()
     CHECK (exact);
 }
 
+// Fase 16 de Fathom: la cascada estéreo (SIMD) = dos cascadas escalares, bit a bit, con los coeficientes cambiando.
+void testStereoCascadeIsBitExact()
+{
+    std::printf ("EQ: la cascada estereo (L y R en un registro SSE) = dos cascadas escalares bit a bit; un canal solo tambien\n");
+
+    unsigned seed = 4242;
+    auto random = [&seed] {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<double> (seed >> 8) / 16777216.0;
+    };
+    dw::StereoEqCascadeFilter stereo;
+    std::array<dw::EqCascadeFilter, 2> scalar;
+    bool exact = true, monoExact = true;
+    for (int i = 0; i < 50000; ++i)
+    {
+        const double hz = 20.0 * std::pow (1000.0, random());
+        const double q = 0.1 * std::pow (200.0, random());
+        dw::EqCascade cascade;
+        switch ((i / 300) % 4)
+        {
+            case 0: cascade = dw::EqCascade::single (dw::EqCoefficients::bell (hz, q, -24.0 + 48.0 * random(), 48000.0)); break;
+            case 1: cascade = dw::EqCascade::butterworthHighPass (hz, 16, q, 48000.0); break;
+            case 2: cascade = dw::EqCascade::butterworthLowPass (hz, 1 + (i % 16), q, 48000.0); break;
+            default: cascade = dw::EqCascade::single (dw::EqCoefficients::highShelf (hz, q, 12.0, 48000.0)); break;
+        }
+        const auto left = static_cast<float> (2.0 * random() - 1.0), right = static_cast<float> (2.0 * random() - 1.0);
+        const bool pair = i % 1000 < 900;
+        float l = left, r = right;
+        if (pair)
+            stereo.processPair (l, r, cascade);
+        else
+        {
+            // Un tramo por canal (mono / mid / side): el mismo estado sigue.
+            l = stereo.process (0, l, cascade);
+            r = stereo.process (1, r, cascade);
+        }
+        const bool same = l == scalar[0].process (left, cascade) && r == scalar[1].process (right, cascade);
+        if (pair)
+            exact = exact && same;
+        else
+            monoExact = monoExact && same;
+    }
+    CHECK (exact);
+    CHECK (monoExact);
+
+    // blend solo recorre las etapas en uso: las demás quedan identidad (igual que antes).
+    const auto a = dw::EqCascade::single (dw::EqCoefficients::bell (1000.0, 1.0, 6.0, 48000.0));
+    const auto b = dw::EqCascade::single (dw::EqCoefficients::bell (2000.0, 2.0, -6.0, 48000.0));
+    const auto mid = dw::EqCascade::blend (a, b, 0.5f);
+    CHECK (mid.numStages == 1);
+    bool identity = true;
+    for (size_t i = 1; i < mid.stages.size(); ++i)
+        identity = identity && mid.stages[i].dry == 1.0f && mid.stages[i].bandPass == 0.0f && mid.stages[i].lowPass == 0.0f
+                   && mid.stages[i].highPass == 0.0f;
+    CHECK (identity);
+}
+
 void testEqShapesAreStableWhenModulated()
 {
     std::printf ("EQ: todas las formas estables con todo saltando en cada muestra (96 dB/oct, Q 40, +-30 dB, Nyquist)\n");
@@ -2190,6 +2247,7 @@ int main()
     testButterworthCuts();
     testFlatTilt();
     testEqShapesAreStableWhenModulated();
+    testStereoCascadeIsBitExact();
     testMatchedEqAgainstAnalog();
     testMatchedEqExactPoints();
     testMatchedEqOnTheSvf();

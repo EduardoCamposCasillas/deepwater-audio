@@ -9,6 +9,7 @@
 #include <complex>
 #include <cstdint>
 #include <cstdio>
+#include <string_view>
 #include <tuple>
 #include <thread>
 #include <vector>
@@ -3289,8 +3290,88 @@ void testCollisions()
     CHECK (after.second.empty());
 }
 
-int main()
+// ---- Fase 16: CPU -----------------------------------------------------------------------------------------------------
+
+// Los escenarios de la medición: lo peor que se le puede pedir al motor con cero latencia.
+enum class CpuCase
 {
+    bellsStill,    // 24 campanas quietas
+    bellsMoving,   // 24 campanas con la frecuencia y la ganancia automatizadas sin parar
+    cutsStill,     // 24 cortes de 96 dB/oct (8 etapas cada uno)
+    dynamic,       // 24 campanas dinámicas
+    midSide,       // 24 campanas, la mitad mid y la mitad side
+};
+
+Engine::BandArray cpuBands (CpuCase which, float wobble)
+{
+    Engine::BandArray bands {};
+    for (int b = 0; b < Engine::numBands; ++b)
+    {
+        auto& band = bands[static_cast<size_t> (b)];
+        const float hz = 30.0f * std::pow (2.0f, 0.4f * static_cast<float> (b));
+        band = shapedBand (Shape::bell, hz * (1.0f + 0.3f * wobble), (b % 2 == 0 ? 4.0f : -4.0f) * (1.0f + wobble), 2.0f);
+        if (which == CpuCase::cutsStill)
+        {
+            band.shape = b % 2 == 0 ? Shape::lowCut : Shape::highCut;
+            band.frequency = b % 2 == 0 ? 20.0f + static_cast<float> (b) : 20000.0f - 100.0f * static_cast<float> (b);
+            band.slopeIndex = static_cast<int> (slopes.size()) - 1;
+        }
+        if (which == CpuCase::dynamic)
+        {
+            band.dynamics.enabled = true;
+            band.dynamics.thresholdDb = -40.0f;
+        }
+        if (which == CpuCase::midSide)
+            band.placement = b % 2 == 0 ? Placement::mid : Placement::side;
+    }
+    return bands;
+}
+
+// % de un núcleo de procesar 5 s de ruido estéreo (o mono) en bloques de 'blockSize'.
+double measureCpu (CpuCase which, double sampleRate, int numChannels, int blockSize)
+{
+    Engine engine;
+    engine.prepare (sampleRate, false, 0.0f, cpuBands (which, 0.0f));
+    const auto n = static_cast<size_t> (5.0 * sampleRate);
+    auto left = whiteNoise (n, 1), right = whiteNoise (n, 2);
+    const auto start = std::chrono::steady_clock::now();
+    int block = 0;
+    for (size_t i = 0; i + static_cast<size_t> (blockSize) <= n; i += static_cast<size_t> (blockSize), ++block)
+    {
+        if (which == CpuCase::bellsMoving)
+        {
+            const auto bands = cpuBands (which, static_cast<float> (std::sin (0.05 * block)));
+            for (int b = 0; b < Engine::numBands; ++b)
+                engine.setBand (b, bands[static_cast<size_t> (b)]);
+        }
+        float* channels[] { left.data() + i, right.data() + i };
+        engine.process (channels, numChannels, blockSize);
+    }
+    const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+    return 100.0 * seconds / 5.0;
+}
+
+void testCpu()
+{
+    std::printf ("CPU: 24 bandas, cero latencia (solo informa; %% de un nucleo, 5 s de ruido)\n");
+    const std::array<std::pair<CpuCase, const char*>, 5> cases { { { CpuCase::bellsStill, "campanas quietas  " },
+                                                                    { CpuCase::bellsMoving, "campanas moviendo" },
+                                                                    { CpuCase::cutsStill, "cortes 96 dB/oct " },
+                                                                    { CpuCase::dynamic, "dinamicas        " },
+                                                                    { CpuCase::midSide, "mid/side         " } } };
+    for (const auto& [which, name] : cases)
+        std::printf ("  %s  estereo 44.1k/256 %5.2f %%  96k/256 %5.2f %%  44.1k/32 %5.2f %%  mono 44.1k/256 %5.2f %%\n", name,
+                     measureCpu (which, 44100.0, 2, 256), measureCpu (which, 96000.0, 2, 256), measureCpu (which, 44100.0, 2, 32),
+                     measureCpu (which, 44100.0, 1, 256));
+}
+
+int main (int argc, char** argv)
+{
+    if (argc > 1 && std::string_view (argv[1]) == "--cpu")
+    {
+        testCpu();
+        return 0;
+    }
     testPassthroughIsBitExact();
     testOutputGain();
     testBypassFadeHasNoClicks();
@@ -3362,6 +3443,7 @@ int main()
     testInstanceRegistry();
     testCriticalBands();
     testCollisions();
+    testCpu();
 
     if (failures > 0)
     {
