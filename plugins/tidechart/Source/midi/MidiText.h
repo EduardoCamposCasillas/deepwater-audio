@@ -3,18 +3,17 @@
 #include <array>
 #include <string>
 
+#include "deepwater/theory/Text.h"
 #include "midi/NoteTracker.h"
 
 namespace tidechart::midi
 {
 
-// Nombre de una nota como lo escribe FL Studio: C5 = 60 (el Do central), A5 = 69 (La 440 Hz). Con sostenidos: los
-// nombres según la tonalidad (Si♭ en Fa mayor, no La♯) llegan con libs/theory en la Fase 2.
+// Nombre de una nota como lo escribe FL Studio: C5 = 60 (el Do central), A5 = 69 (La 440 Hz), con sostenidos como su
+// Piano Roll. Los nombres según la tonalidad (Si♭ en Fa mayor, no La♯) los da libs/theory (midiNoteName con una Key).
 [[nodiscard]] inline std::string flNoteName (int note)
 {
-    static constexpr std::array<const char*, 12> names { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    note &= 0x7f;
-    return std::string (names[static_cast<std::size_t> (note % 12)]) + std::to_string (note / 12);
+    return deepwater::theory::midiNoteName (note & 0x7f);
 }
 
 // Un mensaje en palabras, para el monitor de la GUI (el canal va aparte).

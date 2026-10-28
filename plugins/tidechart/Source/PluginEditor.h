@@ -4,16 +4,17 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "gui/ChordView.h"
 #include "gui/MidiMonitorView.h"
 #include "gui/SoundingKeyboardView.h"
 #include "gui/TransportView.h"
 
 class TidechartAudioProcessor;
 
-// GUI. Fase 1, funcional (la definitiva llega en la Fase 8):
+// GUI funcional (la definitiva llega en la Fase 8):
 //   cabecera:  TIDECHART | pánico | bypass
 //   reloj del host (posición, tempo, compás, loop, saltos)
-//   SUENA AHORA: teclado con las notas que suenan en el receptor y cuántas
+//   SUENA AHORA: teclado con las notas que suenan en el receptor y cuántas; debajo, el ACORDE que forman (Fase 2)
 //   monitor MIDI: ENTRADA | SALIDA (los últimos eventos de cada lado)
 //   pie: cómo rutear la salida en FL
 // Un temporizador a 30 cuadros por segundo recoge lo que publicó el audio.
@@ -33,6 +34,7 @@ private:
 
     tidechart::gui::TransportView transportView;
     tidechart::gui::SoundingKeyboardView keyboardView;
+    tidechart::gui::ChordView chordView;
     tidechart::gui::MidiMonitorView inputMonitor;
     tidechart::gui::MidiMonitorView outputMonitor;
     juce::TextButton panicButton;

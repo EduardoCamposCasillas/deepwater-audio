@@ -21,12 +21,15 @@ libs/
   presets/              # presets de la suite deepwater::presets (con JUCE): formato XML, biblioteca, barra y navegador
     include/deepwater/presets/   # headers:  #include "deepwater/presets/PresetPanel.h"
     src/
+  theory/               # teoría musical deepwater::theory (sin JUCE ni GUI), con tests: notas, escalas, acordes, grados
+    include/deepwater/theory/    # headers:  #include "deepwater/theory/Chord.h"
+    src/  tests/
 plugins/
   undertow/             # sintetizador wavetable
   riptide/              # saturador
   ebb/                  # ducker para sidechain
   fathom/               # EQ paramétrico con analizador
-  tidechart/            # herramienta MIDI de acordes y melodías (su teoría irá en libs/theory)
+  tidechart/            # herramienta MIDI de acordes y melodías (su teoría está en libs/theory)
   <plugin>/             # cada plugin: CMakeLists.txt, Source/, tests/, CLAUDE.md, APRENDIZAJE.md
 scripts/
   null_test.py          # resta dos carpetas de WAV (verificar que un refactor no cambia el sonido)
@@ -91,6 +94,18 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 - Un plugin nuevo: `Source/presets/<Plugin>Presets.cpp` con su `format()`, `Presets/Factory/<Categoría>/*.<ext>`
   compilados con `juce_add_binary_data`, y un `<Plugin>PresetTests` (ver los de Riptide).
 
+## Librería de teoría musical (`libs/theory`, namespace `deepwater::theory`)
+- Nació con Tidechart (Fase 2). Sin JUCE ni GUI, C++20 estándar, tests en `DeepwaterTheoryTests` (ctest). La va a
+  reutilizar un servidor MCP para que Claude componga dentro de FL: valores puros y deterministas, nada de estado global,
+  lo aleatorio (cuando llegue) con semilla explícita. Detalle y reglas en el `CLAUDE.md` de Tidechart.
+- Headers (sin reservar memoria, aptos para el audio): `Pitch.h` (clase de altura, nota escrita = letra + alteración,
+  intervalos con número y semitonos, `Notation` con C5 = 60 como FL), `Scale.h` (10 modos, `Key`, escritura de la
+  tonalidad y de notas fuera de ella), `Chord.h` (catálogo de 38 tipos con alias y sufijo romano; `Chord` con bajo =
+  inversión o slash, `midiNotes`), `Harmony.h` (acordes diatónicos, números romanos, funciones T/S/D, préstamo modal),
+  `StaticVector.h`. En `src/`: `Text.h` (texto ida y vuelta de notas, tonalidades, acordes, romanos y progresiones) y
+  `ChordFinder.h` (reconocer acordes por sus notas).
+- El orden del catálogo de acordes es parte del formato: no reordenar ni insertar en medio (lo nuevo, al final).
+
 ## Plan de plugins (orden acordado)
 | # | Plugin | Referencia de nivel | Estado |
 |---|--------|---------------------|--------|
@@ -98,7 +113,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | ✅ Terminado |
 | 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | ✅ Terminado |
 | 4 | Fathom — EQ paramétrico con analizador (24 bandas, dinámico, M/S, fase lineal, dinámica espectral) | FabFilter Pro-Q 4 | ✅ Terminado |
-| 5 | Tidechart — herramienta MIDI de acordes y melodías por tonalidad (paleta, progresiones, ritmos como el dembow, melodías y bajos) | Scaler 3, Captain Chords | En curso (Fase 1) |
+| 5 | Tidechart — herramienta MIDI de acordes y melodías por tonalidad (paleta, progresiones, ritmos como el dembow, melodías y bajos) | Scaler 3, Captain Chords | En curso (Fase 2) |
 | 6 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
 | 7 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
 | 8 | Reverb algorítmica (FDN, difusión, modulación; modos vintage y espacial) | Valhalla VintageVerb, Supermassive | Pendiente |

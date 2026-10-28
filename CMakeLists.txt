@@ -32,6 +32,7 @@ endif()
 # --- Librerías compartidas ------------------------------------------------------
 add_subdirectory(libs/dsp)
 add_subdirectory(libs/presets)
+add_subdirectory(libs/theory)
 
 # --- Plugins -------------------------------------------------------------------
 add_subdirectory(plugins/undertow)

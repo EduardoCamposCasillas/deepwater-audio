@@ -68,6 +68,7 @@ Desde la raíz del repositorio (ver también los comandos generales en el `CLAUD
 cmake --build build --config Release --target Tidechart_VST3       # solo el plugin
 build/plugins/tidechart/Release/TidechartTests.exe                 # etapa MIDI sin JUCE
 build/plugins/tidechart/TidechartProcessorTests_artefacts/Release/TidechartProcessorTests.exe   # procesador completo
+build/libs/theory/Release/DeepwaterTheoryTests.exe                 # libs/theory
 ```
 - VST3: `build/plugins/tidechart/Tidechart_artefacts/Release/VST3/Tidechart.vst3`.
 - Standalone: `build/plugins/tidechart/Tidechart_artefacts/Release/Standalone/Tidechart.exe` (sin host: reloj libre a
@@ -76,7 +77,7 @@ build/plugins/tidechart/TidechartProcessorTests_artefacts/Release/TidechartProce
 ## Estructura
 ```
 plugins/tidechart/
-  CMakeLists.txt             # plugin (IS_SYNTH, MIDI de entrada y salida) y tests; enlaza deepwater::dsp
+  CMakeLists.txt             # plugin (IS_SYNTH, MIDI de entrada y salida) y tests; enlaza deepwater::dsp y ::theory
   Source/
     PluginProcessor.h/.cpp   # parámetros, estado, processBlock (MidiBuffer ↔ MidiStage), PlayHead, publicación a la GUI
     PluginEditor.h/.cpp      # GUI
@@ -87,7 +88,8 @@ plugins/tidechart/
                              # desde cualquier hilo y atendidos en la muestra 0 del bloque siguiente
     midi/EventLog.h          # cola lock-free audio → GUI de los eventos que entran y salen (el monitor)
     midi/MidiText.h          # nombres de nota como FL (C5 = 60) y descripción de mensajes para el monitor
-    gui/                     # tema, reloj del host (TransportView), teclado de lo que suena, monitor MIDI
+    gui/                     # tema, reloj del host (TransportView), teclado de lo que suena, acorde que suena
+                             # (ChordView, con libs/theory), monitor MIDI
   tests/MidiTests.cpp        # etapa MIDI sin JUCE (contra un receptor modelo independiente)
   tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte, reservas)
 ```
@@ -109,6 +111,19 @@ plugins/tidechart/
   - Nombres de nota como FL (C5 = MIDI 60, A5 = 440 Hz), configurable.
 - Lo que corre en el audio (consultar la progresión publicada, el patrón) va en headers y no reserva memoria; lo pesado
   (generar una melodía, detectar la tonalidad de muchos compases) corre fuera del audio o en pasos acotados.
+- Decisiones de la Fase 2 (no cambiarlas sin pensar en lo que depende de ellas):
+  - Notas ESCRITAS (letra + alteración), no solo teclas: los intervalos llevan número y semitonos, y así C + 3.ª menor
+    = E♭ y F♯7 = F♯ A♯ C♯ E sin tablas de enarmónicos. Lo que llega por MIDI (solo teclas) se escribe con
+    `spellInKey` (en la escala, como en ella; fuera, ♭2 ♭3 ♯4 ♭6 ♭7 respecto de la mayor de la tónica) o, sin
+    tonalidad, con la escritura de menos alteraciones (empate → sostenidos, como el Piano Roll de FL).
+  - Romanos con la alteración medida contra la escala MAYOR de la tónica (convención pop/jazz: "i–♭VI–♭III–♭VII"); la
+    mayúscula dice la tercera y el resto del tipo va en un sufijo propio de cada tipo del catálogo (`romanSuffix`).
+    Sin inversiones ni dominantes secundarias en el texto romano todavía (la inversión es cosa del voicing, Fase 4).
+  - Funciones T/S/D simplificadas por grado: I iii vi ♭III → T; ii IV ♭II ♭VI → S; V vii ♭VII → D.
+  - `Chord::midiNotes(rootNote)`: la fundamental en la tecla pulsada, posición cerrada; en una inversión los tonos por
+    debajo del bajo suben una octava; un bajo ajeno va debajo de todo. Es el voicing base de la Fase 3.
+  - Reconocer acordes: coincidencia exacta de clases de altura o, con 3+ notas, sin la 5.ª justa; se ordena exacta >
+    fundamental en el bajo > tipo más común (orden del catálogo). Por eso el orden del catálogo no se toca.
 
 ## Requisitos propios (además de los del raíz)
 - Ninguna nota colgada, en ningún caso (ver arriba).
@@ -152,6 +167,24 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 2 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (la fila ACORDE con acordes tocados).
+- `libs/theory` creada (`deepwater::theory`, en el CMake raíz tras `libs/presets`): `Pitch.h`, `Scale.h` (mayor,
+  dórico, frigio, lidio, mixolidio, menor, locrio, menor armónica, menor melódica, frigio dominante), `Chord.h`
+  (38 tipos: tríadas, sus, 5, séptimas, 6, add9/add11, 9/11/13, alteradas 7♭9 7♯9 7♯5 7♭5 maj7♯5 maj7♯11 y m7♭9),
+  `Harmony.h`, `StaticVector.h`; `Text.h` y `ChordFinder.h` con su código en `src/`. Al leer acepta ♭/♯ o b/#, °/o,
+  ø/h, Δ/^ y –/-.
+- `DeepwaterTheoryTests` (11 grupos): escritura e intervalos; nombres de nota con C5 = 60 y C4 = 60, ida y vuelta de
+  las 128 notas; las 12 tónicas × 10 modos (letras consecutivas, la escritura de menos alteraciones); integridad del
+  catálogo (alias, sufijos romanos y conjuntos de notas únicos); tonos escritos; ida y vuelta de >3000 símbolos (todos
+  los tipos × 21 fundamentales × inversiones y bajo ajeno × ASCII/Unicode); voicings MIDI; grados diatónicos de cada
+  modo en tríadas y séptimas; progresiones del contexto (i–♭VI–♭III–♭VII, andaluza, i–♭II, I–♭VI–♭VII–I) e ida y vuelta
+  de todos los romanos; funciones y préstamo modal; reconocer acordes (C6 vs Am7 según el bajo, sin 5.ª, cada tipo e
+  inversión del catálogo).
+- Plugin: `flNoteName` usa la librería (mismo texto). GUI: fila ACORDE bajo SUENA AHORA (`gui/ChordView.h`): nombre del
+  acorde que suena (Unicode), inversión con el tono del bajo, cada nota con su función (E♭5 (♭3)), otras lecturas; con
+  2 notas, el intervalo en palabras. Corre en la GUI y solo recalcula si cambian las notas.
+- Release con 0 warnings; ctest 14/14; pluginval strictness 10 ampliado: SUCCESS.
+
 Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por puertos MIDI): funciona.
 - Antes de empezar: `HostClock` de Ebb pasó a `libs/dsp` (`deepwater/dsp/HostClock.h`, sus 6 tests a
   `DeepwaterDspTests`; Ebb lo usa con alias). Ebb idéntico: `EbbTests --fingerprint`, 336 hashes iguales.
@@ -177,4 +210,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 2 (`libs/theory`).
+Siguiente: que el usuario pruebe la Fase 2 en FL; después, Fase 3 (paleta de acordes y un acorde por tecla).

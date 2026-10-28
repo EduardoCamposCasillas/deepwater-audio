@@ -16,7 +16,7 @@ que usa y un cuaderno (`APRENDIZAJE.md`) con ejercicios de escucha, recetas y vo
 | 2 | [Riptide](plugins/riptide) | Saturador: 6 modos (cinta, bulbo, transistor, clip, rectificador, wavefold), tono PRE/POST, paralelo con auto gain, hasta 4 bandas, envolvente y LFO, 26 presets con notas | Decapitator, Saturn 2 | ✅ Terminado |
 | 3 | [Ebb](plugins/ebb) | Ducker / modulador de volumen para sidechain: curvas sincronizadas al tempo, disparo por MIDI o por audio (para patrones irregulares como el dembow), editor de curvas y ducking solo en graves | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | ✅ Terminado |
 | 4 | [Fathom](plugins/fathom) | EQ paramétrico de 24 bandas con analizador: todas las formas y pendientes, edición sobre el espectro, estéreo L/R/Mid/Side, EQ dinámico, fase lineal, dinámica espectral e igualación | FabFilter Pro-Q 4 | ✅ Terminado |
-| 5 | [Tidechart](plugins/tidechart) | Herramienta MIDI de acordes y melodías por tonalidad: paleta de acordes, progresiones con conducción de voces y préstamo modal, ritmos de acordes (dembow y variantes), detección de tonalidad, melodías y bajos, arrastrar al Piano Roll | Scaler 3, Captain Chords | En curso (Fase 1) |
+| 5 | [Tidechart](plugins/tidechart) | Herramienta MIDI de acordes y melodías por tonalidad: paleta de acordes, progresiones con conducción de voces y préstamo modal, ritmos de acordes (dembow y variantes), detección de tonalidad, melodías y bajos, arrastrar al Piano Roll | Scaler 3, Captain Chords | En curso (Fase 2) |
 | 6 | Compresor | Estilos limpio y FET/1176 | FabFilter Pro-C 2, 1176 | Pendiente |
 | 7 | Delay | Sync, ping-pong, filtros y modulación en el feedback | Valhalla Delay | Pendiente |
 | 8 | Reverb | Algorítmica (FDN, difusión, modulación); modos vintage y espacial | Valhalla VintageVerb, Supermassive | Pendiente |
@@ -35,11 +35,13 @@ libs/dsp/          deepwater::dsp, la librería DSP compartida (sin JUCE): overs
                    retardo, SIMD, FFT, analizador de espectro, medidores, LFO, seguidor de envolvente y buzón audio → GUI.
                    Con tests
 libs/presets/      deepwater::presets (con JUCE): formato XML de presets, biblioteca, barra, navegador y guardar
+libs/theory/       deepwater::theory, teoría musical (sin JUCE): notas bien escritas, escalas y modos, acordes e
+                   inversiones, grados en números romanos, funciones armónicas, reconocer acordes. Con tests
 plugins/undertow/  sintetizador wavetable
 plugins/riptide/   saturador
 plugins/ebb/       ducker para sidechain
 plugins/fathom/    EQ paramétrico con analizador
-plugins/tidechart/ herramienta MIDI de acordes y melodías (su teoría irá en libs/theory, sin JUCE)
+plugins/tidechart/ herramienta MIDI de acordes y melodías (su teoría está en libs/theory)
 scripts/           null_test.py: compara dos renders para comprobar que un cambio no alteró el sonido
                    level_match.py: iguala la sonoridad (LUFS) de varias versiones para compararlas a oído o a ciegas
 ```

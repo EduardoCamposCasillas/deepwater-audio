@@ -41,6 +41,7 @@ target_link_libraries(Tidechart
     PRIVATE
         juce::juce_audio_utils         # incluye audio_processors, audio_devices, gui, etc.
         deepwater::dsp                 # librería compartida de la suite (libs/dsp): el reloj del host, el buzón a la GUI
+        deepwater::theory              # teoría musical (libs/theory): nombres de nota, acordes, escalas, grados
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -55,7 +56,7 @@ if(TIDECHART_BUILD_TESTS)
     # Tests de la etapa MIDI sin JUCE (NoteTracker, MidiStage, EventLog, nombres de nota).
     add_executable(TidechartTests tests/MidiTests.cpp)
     target_include_directories(TidechartTests PRIVATE Source)
-    target_link_libraries(TidechartTests PRIVATE deepwater::dsp)
+    target_link_libraries(TidechartTests PRIVATE deepwater::dsp deepwater::theory)
 
     if(MSVC)
         target_compile_options(TidechartTests PRIVATE /W4 /permissive- /utf-8)
@@ -80,6 +81,7 @@ if(TIDECHART_BUILD_TESTS)
         PRIVATE
             juce::juce_audio_utils
             deepwater::dsp
+            deepwater::theory
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
     )

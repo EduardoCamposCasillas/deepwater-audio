@@ -106,3 +106,120 @@ estas cuentas en un motor de teoría (escalas, acordes, grados).
 - Dos instancias de Tidechart con el mismo Output port: sus notas se mezclan en los instrumentos que escuchan ese
   puerto. Usa un número distinto por función (acordes 1, bajo 2, melodía 3).
 - Tidechart no suena por sí mismo: sin un instrumento escuchando su puerto, el silencio es lo esperado.
+
+## Fase 2 — El motor de teoría: escalas, acordes y grados
+
+Esta fase construye el "cerebro" musical de Tidechart (`libs/theory`): sabe qué notas tiene cada escala, cómo se
+arma cualquier acorde, cómo se llama, qué papel juega en una tonalidad y de qué modo viene si "no pertenece". Todavía
+no genera notas (eso es la Fase 3), pero ya **escucha**: la fila **ACORDE** nombra lo que suena mientras tocas.
+
+### Conceptos aprendidos
+
+- **Clase de altura vs. nota escrita.** Para el piano, Re♯ y Mi♭ son la misma tecla (la misma *clase de altura*:
+  todas las Mi♭ de todas las octavas). Para la música no: en Si mayor la nota es **Re♯** (la 3.ª de Si) y en Do menor es
+  **Mi♭** (la 3.ª menor de Do). La regla: **cada escala usa las 7 letras una vez**. Fa mayor es F G A **B♭** C D E: si
+  escribieras A♯ tendrías dos "A" y ninguna "B". Por eso Tidechart guarda letra + alteración, y los intervalos llevan
+  dos datos: cuántas letras sube (3.ª = 3 letras) y cuántos semitonos (menor = 3, mayor = 4).
+- **Intervalos que dan el carácter.** La **3.ª** decide mayor (4 semitonos, brillante) o menor (3, oscuro). La
+  **5.ª justa** (7) es el "pegamento" neutro: por eso se puede omitir sin que el acorde cambie de nombre. La **7.ª
+  menor** (10) añade movimiento (blues, R&B, la dominante); la **7.ª mayor** (11), un brillo que flota (maj7, el sonido
+  "chill"). El **tritono** (6 semitonos) es el intervalo más inestable: está dentro de toda dominante (en G7, Si–Fa) y
+  pide resolver.
+- **Escalas y modos.** Un modo es la escala mayor empezando en otra nota, y cada uno tiene **una nota que lo
+  distingue**: dórico = menor con 6.ª mayor (menos triste, más "groove"); **frigio = menor con ♭2** (el semitono encima
+  de la tónica: oscuro, español, el del perreo más tenso); lidio = mayor con ♯4 (soñador, de película); mixolidio =
+  mayor con ♭7 (rock, "mayor relajado"); eólico = el menor natural; locrio = con 5.ª disminuida (casi no se usa como
+  tonalidad). La **menor armónica** sube la 7.ª para tener sensible (el Mi mayor en La menor: el V que tira de vuelta
+  al i) y el **frigio dominante** es su 5.º modo: ♭2 con 3.ª mayor, el sonido árabe / flamenco.
+- **Acordes = terceras apiladas.** 1–3–5 es la tríada; sumando otra 3.ª, 1–3–5–7 (séptima); otra más, la 9.ª; luego
+  11.ª y 13.ª. Los **sus** cambian la 3.ª por la 2.ª o la 4.ª (sin 3.ª no es ni mayor ni menor: ambiguo, abierto); los
+  **add** suman una nota sin la 7.ª (add9 = color sin sonar a jazz); **6** suma la 6.ª. En el reggaetón y el R&B, m7, m9
+  y maj7 son el pan de cada día; en el trap y el perreo oscuro, menores a secas y el ♭2 frigio.
+- **Inversiones.** Las mismas notas con otra en el bajo: C/E (1.ª inversión, la 3.ª abajo) suena más ligero, "en
+  camino"; C/G (2.ª, la 5.ª abajo) es inestable. El bajo cambia hasta el **nombre**: C E G A con Do abajo es **C6**; con
+  La abajo es **Am7**. La fila ACORDE lo muestra en "también:".
+- **Grados en números romanos.** Describen el acorde por su posición en la tonalidad: mayúscula = mayor, minúscula =
+  menor, ° = disminuido, ø7 = semidisminuido, + = aumentado. **i–♭VI–♭III–♭VII** es la misma progresión en La menor
+  (Am F C G) que en Do♯ menor (C♯m A E B): aprender los grados es aprender todas las tonalidades a la vez. La ♭ se mide
+  contra la escala **mayor** de la tónica: en menor, el acorde de la 6.ª nota es ♭VI.
+- **Funciones armónicas.** **Tónica** (casa: I, vi, iii, ♭III), **subdominante** (salir de casa: ii, IV, ♭VI, ♭II) y
+  **dominante** (tensión que pide volver: V, vii°, ♭VII). Una progresión cuenta una historia T → S → D → T. ♭VII–i es
+  la "cadencia modal": vuelve a casa sin sensible, más suave que V–i, y es de las que más se oyen en el pop latino.
+- **Préstamo modal.** Usar en Do mayor un acorde de Do menor (u otro modo con la misma tónica): **♭VI** (A♭), **♭VII**
+  (B♭) y **iv** (Fm) son los clásicos. Suenan épicos o melancólicos porque traen notas oscuras (A♭, E♭, B♭) a un
+  contexto brillante. El motor dice de qué modos viene cada acorde (A♭ en Do: frigio, eólico, locrio, menor armónica).
+
+### Qué muestra la fila ACORDE
+
+- **Nombre** del acorde que suena en el instrumento (lo que salió de Tidechart), con ♭ y ♯ bien escritos (E♭, no D♯,
+  cuando el acorde lo pide). Si hay un bajo distinto de la fundamental: C/E.
+- **Inversión** y qué tono está en el bajo ("1.ª inversión (bajo: 3)"), o "sin 5.ª" si la omitiste.
+- **Cada nota** con su función dentro del acorde: E♭5 (♭3), B♭5 (♭7), D6 (9)...
+- **También:** otras formas de llamar a las mismas notas.
+- Con **dos notas**, el intervalo en palabras (3.ª menor, tritono...). Con una, su nombre.
+
+### Ejercicio guiado: construir y nombrar en FL
+
+Con el ruteo de la Fase 1 (Tidechart → puerto 1 → Undertow o FLEX con un piano o un pad):
+
+1. En el Piano Roll de Tidechart escribe **C5 E5 G5** a la vez (un acorde de 1 compás) y dale play en loop: ACORDE dice
+   **C**, estado fundamental, C5 (1) E5 (3) G5 (5).
+2. Baja **E5 a D#5**: ACORDE dice **Cm** y escribe la nota como **E♭5 (♭3)**, no D♯, aunque el Piano Roll diga D#.
+   Escucha: una sola tecla un semitono abajo y todo se oscurece.
+3. Agrega **A#5** (B♭): **Cm7**. Agrega **D6**: **Cm9**. Quita G5: sigue siendo Cm9, "sin 5.ª". Mira cómo cada nota
+   nueva aparece con su número.
+4. Ahora C5 E5 G5 **A5**: **C6**. Baja el A5 una octava (A4) para que quede en el bajo: **Am7**, y en "también:"
+   aparece C6/A. Mismas notas, otro acorde: lo decide el bajo.
+5. Inversiones: escribe **E5 G5 C6** (C/E) y luego **G4 C5 E5** (C/G). Escucha cuál descansa y cuál quiere ir a otro
+   lado.
+6. Modos: escribe **E4 + F4** (el ♭2 de Mi frigio) y luego E4 + F#4. La fila dice "intervalo de 2.ª menor" y "2.ª
+   mayor". La 2.ª menor sobre la tónica es todo el carácter del frigio.
+
+### Receta: la progresión del reggaetón, por grados
+
+Escribe en La menor, un acorde por compás, en posición cerrada desde A4: **Am – F – C – G** (i–♭VI–♭III–♭VII). Mira
+la fila ACORDE en cada compás. Por qué funciona: i (tónica) → ♭VI (subdominante, el más emocional: trae la ♭6, Fa) →
+♭III (tónica relativa, alivio) → ♭VII (dominante modal que vuelve a i sin cerrar del todo: por eso el loop nunca
+termina y aguanta 3 minutos repitiéndose). Cambia **G** por **E** (V, de la menor armónica, con Sol♯): el final tira
+mucho más fuerte hacia Am. Más dramático, menos "loop".
+
+### Reto (sin receta)
+
+Pasa la idea a **Mi frigio** (grados i ♭II ♭III iv v° ♭VI ♭vii) y escribe una progresión de **2 acordes** que use el
+♭II y suene oscura (el dembow llega en la Fase 4; mientras, ponlo con el FPC). Pistas: 1) el ♭II de Mi es Fa mayor.
+2) Prueba Em – F y luego Em – Fmaj7. 3) Para aún más tensión, Em con el ♭2 encima: E G B D F (la fila la llama Em7♭9).
+
+### Análisis de canciones
+
+- **"Despacito"** (Luis Fonsi y Daddy Yankee): el loop **Bm – G – D – A**. Leído en Si menor es **i–♭VI–♭III–♭VII**,
+  la receta de arriba; leído en Re mayor es vi–IV–I–V. Es la misma progresión vista desde dos tónicas: lo que decide
+  cuál es "la casa" es dónde descansan la melodía y el bajo. El pop y el reggaetón comparten esqueleto; la diferencia
+  está en el modo que se siente y en el ritmo.
+- **Cadencia andaluza** (i–♭VII–♭VI–V; en La menor, Am G F E): la de "Hit the Road Jack" y de medio flamenco. El bajo
+  baja por grados hasta un V mayor (con el Sol♯ de la armónica). En un puente, esa caída es inconfundible.
+- Ejercicio: elige una canción de reggaetón o trap latino que te guste, toca sus acordes en el Piano Roll de Tidechart
+  (de oído o con una transcripción) y apunta qué nombres e inversiones salen en la fila ACORDE. ¿Usa séptimas? ¿Algún
+  acorde fuera de la escala (préstamo)?
+
+### Vocabulario
+
+- **Clase de altura (pitch class)**: la nota sin la octava (todas las Do).
+- **Enarmónico**: dos nombres para la misma tecla (D♯ = E♭). En "Despacito" (Si menor) la 5.ª de Si se escribe F♯.
+- **Intervalo**: la distancia entre dos notas; **tritono**: 6 semitonos, el más tenso.
+- **Modo**: una escala con una nota característica (el ♭2 del frigio, el ♯4 del lidio).
+- **Tríada / séptima / extensiones (9, 11, 13)**: acordes de 3, 4 y más notas apiladas por terceras.
+- **sus / add**: cambiar la 3.ª por la 2.ª o la 4.ª / añadir una nota sin la 7.ª.
+- **Inversión**: el acorde con otro tono en el bajo; **slash chord**: C/E, o con un bajo ajeno, F/G.
+- **Grado / número romano**: el acorde por su posición en la tonalidad (♭VI, V7, iiø7).
+- **Tónica, subdominante, dominante**: reposo, alejamiento, tensión.
+- **Préstamo modal (modal interchange)**: un acorde de otro modo con la misma tónica (♭VI y ♭VII en mayor).
+- **Sensible (leading tone)**: la 7.ª a un semitono de la tónica (Sol♯ en La menor armónica), la que tira hacia casa.
+
+### Errores comunes
+
+- Fiarse del nombre del Piano Roll: FL siempre dice sostenidos (D#5). En Do menor esa nota es E♭: la fila ACORDE da el
+  nombre musical.
+- Pensar que el acorde depende solo de las notas: el **bajo** lo cambia (C6 / Am7). Si la fila dice algo inesperado,
+  mira qué nota está más abajo.
+- Llenar todo de 9.ª, 11.ª y 13.ª: en el reggaetón el ritmo necesita espacio. Las extensiones lucen en pads y keys
+  suaves; para un pluck que lleva el dembow, tríadas o m7 suelen funcionar mejor.
