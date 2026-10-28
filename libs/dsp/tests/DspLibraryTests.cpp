@@ -2187,8 +2187,9 @@ void testPartitionedConvolution()
 void testConvolverCrossfade()
 {
     std::printf ("Convolucion particionada: el kernel nuevo se funde en un bloque sin saltos (sin fundido, salta)\n");
-    // Con una entrada constante y el kernel que pasa de ×1 a ×0.5 con fundido: la salida baja en línea recta a lo largo
-    // de un bloque, sin saltos, y después se queda en 0.5. Sin fundido, salta de golpe.
+    // Con una entrada constante y el kernel que pasa de ×1 a ×0.5 con fundido: la salida baja en S a lo largo de un
+    // bloque (pendiente 0 en los dos extremos, como mucho 1.5 veces la de la recta en el medio), sin saltos, y después se
+    // queda en 0.5. Sin fundido, salta de golpe.
     constexpr int partition = 32;
     std::vector<float> one { 1.0f }, half { 0.5f };
     dw::ConvolutionKernel a, b;
@@ -2218,7 +2219,15 @@ void testConvolverCrossfade()
         CHECK (std::abs (out[static_cast<size_t> (4 * partition) - 1] - 1.0f) < 1.0e-6f);
         CHECK (std::abs (out.back() - 0.5f) < 1.0e-6f);
         if (fade)
-            CHECK (biggestStep < 0.5f / partition + 1.0e-5f);
+        {
+            CHECK (biggestStep < 1.5f * 0.5f / partition + 1.0e-5f);
+            // En S: los primeros y los últimos pasos del fundido son mucho más chicos que el del medio.
+            const auto at = [&out] (int i) { return out[static_cast<size_t> (i)]; };
+            const int start = 4 * partition; // pedido en el bloque 3, se calcula al completarlo y sale en el siguiente
+            CHECK (std::abs (at (start + 1) - at (start)) < 0.3f * 0.5f / partition);
+            CHECK (std::abs (at (start + partition - 1) - at (start + partition - 2)) < 0.3f * 0.5f / partition);
+            CHECK (std::abs (at (start + partition / 2) - at (start + partition / 2 - 1)) > 1.4f * 0.5f / partition);
+        }
         else
             CHECK (biggestStep > 0.49f);
     }

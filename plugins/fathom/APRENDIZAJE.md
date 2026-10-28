@@ -1184,7 +1184,7 @@ armónico que chilla en una vocal con autotune, la "o" de una voz que se llena d
   Con dos ventanas de Hann y un hop de N/4, las ventanas al cuadrado suman 1.5 en todas partes: sin cambios, la suma es
   la señal. La segunda ventana suaviza el borde de cada tramo: un cambio de ganancia de un tramo al siguiente se funde a
   lo largo de 46 ms, sin clic.
-- **El precio: latencia y lentitud.** Un tramo necesita 2048 muestras antes de salir: **46 ms de latencia** (FL la
+- **El precio: latencia y lentitud.** Un tramo necesita 2048 muestras antes de salir: **46 ms de latencia** (58 ms desde la Fase 16, que suma un hop para repartir el cálculo; FL la
   compensa; se suma a la del modo de fase). Y la ganancia cambia como mucho cada 11.6 ms y "ve" 46 ms a la vez: para un
   transitorio (el ataque de un snare, una "t"), la dinámica normal es más rápida. A cambio, la espectral es **casi un
   lookahead**: el tramo que decide la ganancia es el mismo que se procesa.
@@ -1197,7 +1197,7 @@ armónico que chilla en una vocal con autotune, la "o" de una voz que se llena d
 - **Umbral automático, versión espectral.** Sigue el nivel típico de la zona entera (su energía, como el RMS de la Fase
   9) + 3 dB: solo actúan las frecuencias que, ellas solas, suenan más fuerte que toda la zona de costumbre. Lo que es
   "siempre así" se queda.
-- **Bit a bit cuando no hace nada.** Mientras ninguna frecuencia pasa el umbral, la salida es la entrada retrasada 46 ms
+- **Bit a bit cuando no hace nada.** Mientras ninguna frecuencia pasa el umbral, la salida es la entrada retrasada (46 ms; 58 desde la Fase 16)
   tal cual (no la suma de tramos, que se le parece hasta el redondeo). Medido en los tests: idéntica muestra a muestra.
 
 ### Qué hace cada control (y qué muestra la pantalla)
@@ -1213,7 +1213,7 @@ armónico que chilla en una vocal con autotune, la "o" de una voz que se llena d
 - **En el visor**: la curva de la banda muestra lo que mueve cada frecuencia AHORA: "dientes" donde corta, con la curva
   en reposo punteada; la curva blanca total los incluye. El punto blanco sobre la línea del rango marca la frecuencia que
   más se movió. La etiqueta del nodo dice "espectral −6.0 dB (ahora −4.2 dB)".
-- **La latencia** de la columna de SALIDA suma los 46 ms en cuanto una banda es espectral. Encender la primera o apagar
+- **La latencia** de la columna de SALIDA suma los 46 ms (58 desde la Fase 16) en cuanto una banda es espectral. Encender la primera o apagar
   la última cambia la latencia: hay un fundido de 20 ms entre la salida sin y con retraso (un instante de las dos
   mezcladas, sin clic), como al cambiar de modo de fase.
 - CPU (5 bandas dinámicas sobre ruido, estéreo, 44.1 kHz): 5 espectrales ≈ 5 normales (3.4 % de un núcleo); a 96 kHz,
@@ -1272,7 +1272,7 @@ separados? ¿Qué ventaja tiene que el corte sea por frecuencia y no de toda la 
 - **Transitorios**: una "t", el ataque del snare o el golpe del kick son más rápidos que un tramo de 46 ms; para eso, la
   dinámica normal (o un compresor).
 - **Graves bajo ~150 Hz**: la resolución no alcanza; el corte se oye borroso. Dinámica normal o una campana estática.
-- **Mientras grabas o tocas en vivo**: 46 ms de latencia se sienten.
+- **Mientras grabas o tocas en vivo**: 58 ms de latencia se sienten.
 - **En el master "por las dudas"**: un supresor que corta todo el tiempo aplana el carácter de la mezcla; primero busca
   la resonancia con SOLO y úsalo solo donde hace falta.
 
@@ -1651,7 +1651,7 @@ partida razonable que hay que afinar a TU pista (casi siempre, mover la frecuenc
   100 parámetros). Sirve para "probar un preset y volver".
 - **El "*" del nombre.** Aparece en cuanto tocas algo del preset cargado (y se va si lo devuelves a como estaba). Viaja
   con el proyecto de FL: al abrir el proyecto sabes de qué preset partiste y si lo cambiaste.
-- **Presets con latencia.** "Voz Resonancias Que Cambian" (46 ms a 44.1 kHz: la FFT de la dinámica espectral), "Master
+- **Presets con latencia.** "Voz Resonancias Que Cambian" (58 ms a 44.1 kHz desde la Fase 16: la FFT de la dinámica espectral), "Master
   Sub Mono Fase Lineal" (58 ms) y "Master Toque Final" (fase natural + color: 5.3 ms); los de color (Bus Batería, Radio
   Vieja) suman 1.7 ms. FL la compensa en la reproducción; al grabar en vivo, se nota.
 
@@ -1678,7 +1678,7 @@ partida razonable que hay que afinar a TU pista (casi siempre, mover la frecuenc
 3. **Probar y volver.** Carga "Voz Autotune Sin Silbidos". Escucha las S. Ctrl+Z: vuelves a tu versión afinada del paso
    2, entera.
 4. **A/B entre dos presets.** En A, tu versión; pasa a B y carga "Voz Resonancias Que Cambian". Alterna A/B con AUTO
-   GAIN. ¿Cuál deja la voz más clara sin que pierda presencia? (B tiene 46 ms de latencia: FL la compensa.)
+   GAIN. ¿Cuál deja la voz más clara sin que pierda presencia? (B tiene 58 ms de latencia: FL la compensa.)
 5. **Guardarlo.** GUARDAR con el nombre de la voz o del cantante, categoría Voces, y en las notas qué frecuencia del barro
    encontraste. La próxima sesión con la misma voz empiezas desde ahí.
 
@@ -1729,3 +1729,113 @@ de 9 kHz con la voz sonando encima?
 - **Olvidar el ruteo.** "808 Le Abre Paso Al Kick" y "Bus Música Esquiva La Voz" necesitan el sidechain: sin él aparece
   "DINÁMICA CON SIDECHAIN: SIN CONECTAR" y la banda dinámica no hace nada.
 - **Presets con latencia al grabar.** Los de fase lineal y dinámica espectral, mejor después de grabar.
+
+## Fase 16 — Pulido: CPU, picos, tamaño de la ventana y automatización extrema
+
+Esta fase no agrega sonidos nuevos: hace que Fathom aguante lo que le pide una sesión real (24 bandas, automatización
+rápida, buffers chicos, 96 kHz) y que la ventana se adapte a tu pantalla. Casi todo es invisible cuando funciona; por
+eso el aprendizaje aquí es entender **qué hace que un plugin "corte"** y cómo evitarlo en tus sesiones.
+
+### Conceptos aprendidos
+
+- **El buffer y el callback.** FL no le pasa el audio al plugin muestra a muestra sino en bloques (el *buffer*, en
+  Opciones → Audio). Con un buffer de 256 a 44.1 kHz, el plugin tiene 5.8 ms para devolver cada bloque; con 32, apenas
+  0.73 ms. Buffer chico = menos latencia al tocar o grabar, pero menos margen para calcular.
+- **Promedio contra pico.** El medidor de CPU de FL muestra el promedio, pero lo que corta el audio es el **peor
+  bloque**. Si un callback de cada 32 tarda tres veces su tiempo, el audio se corta aunque el promedio diga 5 %. Antes
+  de esta fase, la fase lineal y la dinámica espectral hacían todo su cálculo de golpe una vez cada 512 muestras: con
+  buffers chicos a 96 kHz, ese bloque se llevaba 2 a 3.5 veces su tiempo. Ahora el trabajo se reparte entre todos los
+  bloques: el peor queda por debajo de la mitad de su tiempo.
+- **Repartir sin latencia (fase lineal).** La convolución multiplica cada trozo del filtro por la entrada de hace unos
+  bloques. Esa entrada vieja ya se conoce mientras llega la nueva, así que esa parte se va calculando de a poco; en el
+  borde solo queda lo que depende de lo último que llegó.
+- **Repartir con latencia (dinámica espectral).** En la STFT todo el cálculo de un tramo depende de lo último que llegó:
+  no hay nada que adelantar. La única forma de repartirlo es esperar un poco más: un *hop* (11.6 ms). La espectral pasó
+  de 46 a 58 ms de latencia. Es un intercambio: un poco más de retraso (que FL compensa) a cambio de no cortar nunca.
+- **Ritmo de control.** Mientras una banda se mueve, recalcular su filtro en cada muestra es caro (funciones como tan y
+  exp). Ahora se calcula cada 16 muestras (0.36 ms) y en el medio se interpolan sus coeficientes. El oído no distingue la
+  diferencia; la CPU sí: 24 bandas automatizadas pasaron de un tercio de un núcleo a un 6 %.
+- **SIMD.** El procesador puede hacer la misma cuenta sobre varios números con una sola instrucción. Los canales
+  izquierdo y derecho de una banda estéreo hacen exactamente las mismas cuentas, así que van juntos: los cortes de
+  96 dB/oct cuestan la mitad. El resultado es idéntico, bit a bit.
+- **Fase lineal y automatización rápida.** Un filtro de fase lineal no se puede "mover" muestra a muestra: se reemplaza
+  por otro un bloque a la vez y se funde del viejo al nuevo. Con el fundido en línea recta, los fundidos encadenados
+  dejaban un siseo agudo muy bajo al automatizar muy rápido; ahora el fundido es una curva en S y el siseo bajó de
+  −65 dB a −110 dB (inaudible). Aun así, la fase lineal reacciona por bloques: para automatización rápida, cero
+  latencia sigue siendo la elección natural.
+- **Cómo se prueba "extremo".** Un programa de tests mueve los 369 parámetros al azar en cada bloque, en bloques de 1 a
+  1024 muestras, a las cuatro frecuencias de muestreo, en mono y estéreo, y después comprueba que al dejar todo plano la
+  salida vuelva a ser la entrada exacta (nada quedó roto). Otro barre bandas de 20 Hz a 20 kHz diez veces por segundo y
+  mide que no aparezca nada en los agudos (un clic de 1 % aparecería 40 dB por encima del límite). Otro hace sonar el
+  audio en tiempo real mientras otro hilo carga presets, cambia A/B, deshace y carga el proyecto, como cuando tocas la
+  ventana mientras FL reproduce.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **Botón de zoom** (abajo a la derecha, "100 %"): agranda todo por igual, también la letra (70 a 200 %). Para pantallas
+  grandes o para leer de lejos. En su menú, **Tamaño del diseño** vuelve a la ventana original.
+- **Esquina inferior derecha** (arrastrar): agranda la ventana, pero lo que crece es el **visor** (y el panel de la banda
+  a lo ancho); la cabecera y las columnas de la derecha quedan iguales. Más visor = más resolución para ver el analizador
+  y para poner un nodo justo en una resonancia.
+- Las dos cosas se guardan con el proyecto, y una instancia nueva abre con lo último que usaste.
+- **Latencia** (abajo en la columna de SALIDA): con una banda espectral ahora suma 58 ms (44.1 kHz).
+
+### Ejercicio de escucha guiado en FL Studio
+
+1. **Ver el pico, no el promedio.** Abre el medidor de rendimiento de FL (la ventana de CPU de la barra de arriba). Pon
+   el buffer en 128 y luego en 32 (Opciones → Audio). Con un Fathom con fase lineal en calidad Maximum, reproduce: el
+   promedio casi no cambia, pero si algo cortara lo oirías como chasquidos o huecos. Ahora no debería cortar.
+2. **El costo de mover.** Una pista con un loop de batería, Fathom con 8 campanas. Automatiza la frecuencia de cuatro
+   con un LFO rápido (Fruity Formula Controller o un patrón de automatización en zigzag). Mira la CPU: sube, pero poco.
+3. **Fase lineal contra cero latencia, automatizando.** El mismo barrido rápido sobre un 808 sostenido, primero en cero
+   latencia y después en fase lineal (calidad Media), con el volumen igualado (AUTO GAIN). En cero latencia el barrido
+   sigue la automatización al instante; en lineal, el cambio llega por bloques. Las dos suenan limpias; en lineal se oye
+   el pre-eco si el corte es angosto y grave.
+4. **Ventana grande.** Arrastra la esquina hasta que el visor ocupe casi toda la pantalla y busca una resonancia de una
+   voz con el analizador en resolución Muy alta. Con más píxeles por octava, los picos se separan y el nodo se pone justo.
+
+### Receta: una sesión pesada sin cortes
+
+1. **Mientras grabas o tocas**: buffer chico (64-128), Fathom en **cero latencia** y sin bandas espectrales en las pistas
+   que monitoreas (las dos cosas agregan latencia que no se puede compensar en vivo).
+2. **Mientras mezclas**: buffer grande (512-1024). Ahí no importa la latencia, y fase lineal, natural y espectral tienen
+   todo el margen que quieran.
+3. **Automatización rápida** (barridos, filtros de intro): en **cero latencia** (o natural). La fase lineal es para
+   ajustes quietos en buses y master.
+4. **96 kHz** duplica el trabajo de todo: úsalo solo si tu proyecto lo pide.
+
+Por qué funciona: la latencia y la CPU solo molestan cuando tocas en vivo; mezclando, FL compensa la latencia y un
+buffer grande le da a cada bloque mucho tiempo.
+
+### Reto sin receta
+
+Arma el proyecto más pesado que puedas con Fathom: 8 instancias, cada una con 24 bandas, algunas en fase lineal Maximum,
+algunas con bandas espectrales, todo a 96 kHz. Encuentra el buffer más chico con el que FL reproduce sin cortes. Pistas
+(si no sale): ¿qué instancia pesa más (apágalas de a una)? ¿Cambia algo si pasas la fase lineal de Maximum a Media? ¿Y
+si las bandas espectrales pasan a dinámicas normales?
+
+### Vocabulario
+
+- **Buffer (tamaño de bloque)**: cuántas muestras procesa el plugin de una vez. **Ejemplo real**: los productores
+  graban con 64-128 y mezclan con 1024 o más.
+- **Dropout / xrun / crackle**: el corte o chasquido cuando un bloque no llega a tiempo. **Ejemplo real**: el crujido
+  que aparece en FL cuando el medidor de CPU se pone rojo.
+- **PDC (compensación de latencia)**: el host retrasa las demás pistas lo mismo que el plugin con latencia, para que todo
+  siga alineado. **Ejemplo real**: por eso un EQ de fase lineal en el master no desfasa la mezcla en FL.
+- **Ritmo de control (control rate)**: calcular algo más despacio que el audio (cada N muestras) cuando el oído no nota la
+  diferencia. **Ejemplo real**: los sintetizadores como Serum o Vital actualizan así sus moduladores.
+- **SIMD**: una instrucción, varios datos. **Ejemplo real**: por eso un plugin moderno con 24 bandas puede pesar menos
+  que uno viejo con 6.
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Mirar solo el promedio de CPU.** Un 10 % que corta y un 30 % que no corta existen: lo que importa es el peor bloque.
+  Si oyes crujidos, sube el buffer antes de quitar plugins.
+- **Fase lineal o espectral en una pista que monitoreas al grabar.** Su latencia no se puede compensar en vivo: el
+  cantante se oye tarde.
+- **Automatizar rápido en fase lineal.** Funciona y no hace clic, pero reacciona por bloques. Para efectos de barrido,
+  cero latencia.
+- **Trabajar a 96 kHz "porque suena mejor".** Fathom ya corrige el aplastamiento de los agudos a 44.1 (respuesta
+  analógica, Fase 7): a 96 kHz todo pesa el doble para una diferencia que en un EQ casi no se oye.
+- **Agrandar con el zoom cuando lo que quieres es más visor.** El zoom agranda también los paneles; para ver más
+  analizador, arrastra la esquina.

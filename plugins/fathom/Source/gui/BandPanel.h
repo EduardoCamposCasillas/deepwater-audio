@@ -134,7 +134,7 @@ public:
             "d\xc3\xb3nde mirar y el RANGO, cu\xc3\xa1nto puede moverse cada frecuencia. Para lo que cambia con las notas: la "
             "resonancia de una sola nota del 808, el arm\xc3\xb3nico que silba en una vocal. Ojo: el umbral se compara con cada "
             "frecuencia sola (un tono lee su pico; un ruido reparte su energ\xc3\xad" "a y cada franja lee mucho menos).\n"
-            "Agrega 46 ms de latencia (el host la compensa) y reacciona cada ~12 ms: para golpes r\xc3\xa1pidos, la din\xc3\xa1mica "
+            "Agrega 58 ms de latencia (el host la compensa) y reacciona cada ~12 ms: para golpes r\xc3\xa1pidos, la din\xc3\xa1mica "
             "normal. Solo campanas y shelves."));
         addAndMakeVisible (spectralButton);
 

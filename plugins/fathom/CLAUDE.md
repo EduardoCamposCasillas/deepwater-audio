@@ -64,6 +64,8 @@ Desde la raíz del repositorio (ver también los comandos generales en el `CLAUD
 ```
 cmake --build build --config Release --target Fathom_VST3      # solo el plugin
 build/plugins/fathom/Release/FathomTests.exe                    # tests del motor (sin JUCE)
+build/plugins/fathom/Release/FathomTests.exe --cpu              # Fase 16: solo la medición de CPU (promedio y peor callback)
+build/plugins/fathom/FathomAutomationTests_artefacts/Release/FathomAutomationTests.exe  # Fase 16: automatización extrema
 build/plugins/fathom/FathomInstanceTests_artefacts/Release/FathomInstanceTests.exe   # Fase 14: varias instancias (JUCE)
 build/plugins/fathom/FathomUiSnapshot_artefacts/Release/FathomUiSnapshot.exe <carpeta> # capturas PNG de la GUI
 build/plugins/fathom/FathomPresetTests_artefacts/Release/FathomPresetTests.exe [--verbose|--notes]  # Fase 15: presets
@@ -132,7 +134,10 @@ plugins/fathom/
                            # edición y del analizador, del registro de instancias y de los choques (sin JUCE)
   tests/InstanceTests.cpp  # Fase 14, con JUCE: varios procesadores completos en el mismo proceso
   tests/PresetTests.cpp    # Fase 15, con JUCE: presets de fábrica, cargar/guardar, estado, deshacer, A/B y audio
+  tests/AutomationTests.cpp # Fase 16, con JUCE: caos de parámetros, barridos sin clic y el audio con la GUI a la vez
+  tests/AllocationCounter.h # el contador de reservas de memoria del audio (PresetTests y AutomationTests)
   tests/UiSnapshot.cpp     # herramienta (no es test): capturas PNG del editor con varias instancias sonando
+                           # (también con el visor agrandado y con zoom)
 ```
 
 ## Aprendizaje de mezcla (igual de importante que el código)
@@ -192,8 +197,29 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 16 EN CURSO. Pasos 1-3 (CPU de las bandas IIR, picos de la convolución y de la STFT espectral) probados en FL:
-funcionan. Paso 4 (GUI escalable) hecho; falta probarlo en FL. Pendiente: automatización extrema.
+Fase 16 HECHA (2026-10-28); falta que el usuario pruebe en FL el paso 5. Pasos 1-4 (CPU de las bandas IIR, picos de
+la convolución y de la STFT espectral, GUI escalable) probados en FL: funcionan.
+- Paso 5 (automatización extrema): `FathomAutomationTests` (nuevo, con JUCE, en ctest, ~35 s) sobre el procesador
+  completo, con los parámetros cambiados como el host (`setValueNotifyingHost`). (1) Caos: hasta 40 parámetros al azar
+  por bloque (1 de cada 50, los 369), bloques de 1 a 1024 (también 1 y 7), 4 sample rates, mono/estéreo, con y sin
+  sidechain, offline: sin NaN, sin reservas, latencia entre 0 y la máxima; el pico no se acota (24 campanas de +30 dB
+  apiladas con escala 200 % suben +80 dB de verdad): después, todo por defecto y 3 s más, el último segundo = la entrada
+  bit a bit (se recupera de todo). (2) Barridos: 3 campanas (una mid) 20 Hz-20 kHz-20 Hz en 100 ms con ganancia ±18 y Q
+  0.3-10 + un corte de 96 dB/oct moviéndose, cada 32 muestras, sobre un seno de 110 Hz, en los 3 modos de fase a 44.1 y
+  96: lo que pasa sobre 6 kHz (pasa altos de 8 polos) < −90 dB del pico; calibrado: un escalón de ganancia de 1 % pone
+  −50 dB. Medido: cero latencia −100/−102, natural −97/−100, lineal −109/−110 (quieto −123/−126). (3) Hilos: audio en
+  tiempo real en su hilo (a ritmo real, bloques de 64) mientras el hilo de mensajes hace ~700 acciones en 4 s
+  (parámetros con gestos, presets, A/B, copiar, deshacer/rehacer, guardar/cargar el proyecto): sin NaN, sin reservas,
+  el audio no se cuelga.
+- Lo que encontró: con el fundido RECTO entre kernels de la convolución, la fase lineal barriendo dejaba −65 dB sobre
+  6 kHz (12 dB debajo del clic de 1 %): los quiebres de pendiente entre fundidos encadenados. `Convolver.h` funde ahora
+  en S (smoothstep): −110 dB. El test de fundido de la librería comprueba la S (pasos de los bordes < 0.3 de la recta,
+  el del medio > 1.4).
+- `tests/AllocationCounter.h` (nuevo): el contador de reservas (reemplazo de operator new/delete), compartido por
+  FathomPresetTests y FathomAutomationTests.
+- Latencia de la espectral (58 ms) actualizada en el tooltip de ESPECTRAL, en las notas de "Voz Resonancias Que
+  Cambian" y en APRENDIZAJE.md.
+- Release con 0 warnings; ctest de Fathom y la librería 5/5; pluginval strictness 10 ampliado: SUCCESS.
 - Paso 4: todo el editor vive en `Content` (como Riptide, Ebb y Undertow), dibujado con `AffineTransform::scale (zoom)`.
   Dos cosas distintas: ZOOM (70-200 %, botón en el pie a la derecha, al lado de la esquina) escala todo; arrastrar la
   esquina cambia el tamaño LÓGICO del contenido (ventana ÷ zoom, de 1082 × 714 a 2600 × 1600): crecen el visor y, a lo

@@ -10,12 +10,12 @@
     - Banda 1, corte de graves en 90 Hz, 12 dB/oct.
     - Banda 2, campana ancha (Q 0.5: de ~1 a ~5 kHz) en 2.2 kHz con GANANCIA 0 dB, DINÁMICO + ESPECTRAL, RANGO −6 dB, ATAQUE
       5 ms, LIBERACIÓN 120 ms y UMBRAL AUTOMÁTICO: en cada frecuencia de la zona, lo que pasa del nivel típico +3 dB baja.
-    - Latencia: 46 ms a 44.1 kHz (la de la FFT). FL la compensa sola en la mezcla.
+    - Latencia: 58 ms a 44.1 kHz (la de la FFT). FL la compensa sola en la mezcla.
 
     Pruébalo: mira el visor mientras canta: la curva de la banda se llena de "dientes" que se mueven con las notas (cada
     diente es una frecuencia que se está bajando). Alterna ESPECTRAL: sin él, toda la campana baja junta y la voz pierde
     presencia.
-    Cuándo NO usarlo: para grabar o monitorear en vivo (46 ms de latencia se notan al cantar), ni si la resonancia está
+    Cuándo NO usarlo: para grabar o monitorear en vivo (58 ms de latencia se notan al cantar), ni si la resonancia está
     siempre en la misma frecuencia (ahí un corte fijo angosto es más simple y no gasta CPU).
     Viene de: Fase 11 (dinámica espectral).
   </Notes>

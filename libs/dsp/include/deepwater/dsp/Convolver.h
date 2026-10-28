@@ -381,12 +381,16 @@ private:
                 fft.inverse (output.otherRe.data(), output.otherIm.data(), otherBlock.data());
             else
                 std::fill (otherBlock.begin(), otherBlock.end(), 0.0f);
-            // Fundido lineal a lo largo del bloque: la última muestra ya es el kernel nuevo entero.
+            // Fundido en S (smoothstep) a lo largo del bloque: la última muestra ya es el kernel nuevo entero. Con un
+            // fundido recto, un EQ que cambia de kernel en cada bloque quiebra la pendiente de la salida en cada borde
+            // (un siseo agudo con automatización muy rápida); en S la pendiente es 0 en los dos extremos y los fundidos
+            // encadenados empalman suaves (Fase 16 de Fathom).
             const float step = 1.0f / static_cast<float> (partitionSize);
             for (int j = 0; j < partitionSize; ++j)
             {
                 const float a = block[static_cast<size_t> (partitionSize + j)], b = otherBlock[static_cast<size_t> (partitionSize + j)];
-                output.fifo[static_cast<size_t> (j)] = a + (b - a) * (static_cast<float> (j + 1) * step);
+                const float t = static_cast<float> (j + 1) * step;
+                output.fifo[static_cast<size_t> (j)] = a + (b - a) * (t * t * (3.0f - 2.0f * t));
             }
         }
         audible = pending != nullptr ? pending : current;

@@ -118,6 +118,29 @@ if(FATHOM_BUILD_TESTS)
     )
     add_test(NAME FathomPresetTests COMMAND FathomPresetTests)
 
+    # Fase 16, con JUCE: automatización extrema sobre el procesador completo (todos los parámetros al azar, barridos
+    # rápidos sin clics y el audio en tiempo real mientras el hilo de mensajes cambia presets, A/B, deshacer y el proyecto).
+    juce_add_console_app(FathomAutomationTests PRODUCT_NAME "FathomAutomationTests")
+    target_sources(FathomAutomationTests PRIVATE tests/AutomationTests.cpp ${FATHOM_PLUGIN_SOURCES})
+    target_include_directories(FathomAutomationTests PRIVATE Source)
+    target_compile_definitions(FathomAutomationTests
+        PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            JUCE_MODAL_LOOPS_PERMITTED=1   # runDispatchLoopUntil: los temporizadores del procesador corren
+            "JucePlugin_Name=\"Fathom\""
+    )
+    target_link_libraries(FathomAutomationTests
+        PRIVATE
+            juce::juce_audio_utils
+            FathomPresetData
+            deepwater::dsp
+            deepwater::presets
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
+    )
+    add_test(NAME FathomAutomationTests COMMAND FathomAutomationTests)
+
     # Herramienta (no está en ctest): capturas PNG de la GUI con varias instancias sonando.
     #   FathomUiSnapshot <carpeta>
     juce_add_console_app(FathomUiSnapshot PRODUCT_NAME "FathomUiSnapshot")
