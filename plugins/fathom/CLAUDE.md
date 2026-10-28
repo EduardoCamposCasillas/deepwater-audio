@@ -192,7 +192,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 15 IMPLEMENTADA (2026-10-27), pendiente de probar en FL Studio.
+Fase 15 COMPLETADA (2026-10-27). Probada por el usuario en FL Studio: funciona.
 - Sin parámetros nuevos ni cambios en el sonido (un proyecto de las Fases 1-14 suena igual). Lo que se guarda de nuevo
   en el proyecto son las propiedades del preset de libs/presets (`presetName`, `presetFactory`, `presetModified`); un
   proyecto antiguo abre como "Sin nombre" sin "*".
