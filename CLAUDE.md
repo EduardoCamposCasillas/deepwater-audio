@@ -26,6 +26,7 @@ plugins/
   riptide/              # saturador
   ebb/                  # ducker para sidechain
   fathom/               # EQ paramétrico con analizador
+  tidechart/            # herramienta MIDI de acordes y melodías (pendiente; su teoría irá en libs/theory)
   <plugin>/             # cada plugin: CMakeLists.txt, Source/, tests/, CLAUDE.md, APRENDIZAJE.md
 scripts/
   null_test.py          # resta dos carpetas de WAV (verificar que un refactor no cambia el sonido)
@@ -95,12 +96,16 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | ✅ Terminado |
 | 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | ✅ Terminado |
 | 4 | Fathom — EQ paramétrico con analizador (24 bandas, dinámico, M/S, fase lineal, dinámica espectral) | FabFilter Pro-Q 4 | ✅ Terminado |
-| 5 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
-| 6 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
-| 7 | Reverb algorítmica (FDN, difusión, modulación; modos vintage y espacial) | Valhalla VintageVerb, Supermassive | Pendiente |
+| 5 | Tidechart — herramienta MIDI de acordes y melodías por tonalidad (paleta, progresiones, ritmos como el dembow, melodías y bajos) | Scaler 3, Captain Chords | Pendiente |
+| 6 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
+| 7 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
+| 8 | Reverb algorítmica (FDN, difusión, modulación; modos vintage y espacial) | Valhalla VintageVerb, Supermassive | Pendiente |
 
 - Ebb va antes del compresor porque es más simple (una curva de ganancia, sin detector de nivel continuo en su
   modo principal) y reutiliza las envolventes y el suavizado de `libs/dsp`.
+- Tidechart es un plugin MIDI sin DSP: sirve como cambio de ritmo entre efectos (teoría musical, composición y GUI en
+  vez de filtros y niveles). Su motor de teoría va en `libs/theory` (`deepwater::theory`, sin JUCE ni GUI, con tests)
+  porque después lo va a reutilizar un servidor MCP para que Claude componga dentro de FL Studio.
 - El delay va antes de la reverb porque reutiliza sus piezas (buffers circulares, filtros, modulación).
 - Cada plugin nuevo empieza moviendo a `libs/dsp` lo reutilizable que haya construido el anterior.
 - Al iniciar un plugin nuevo, crear su carpeta con su `CLAUDE.md` (hoja de ruta por fases) y su `APRENDIZAJE.md`.
