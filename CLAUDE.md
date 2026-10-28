@@ -53,13 +53,13 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 
 ## Librería compartida (`libs/dsp`, namespace `deepwater::dsp`)
 - Contiene: oversampling halfband ×2 (`Halfband.h`) y en cascada ×2–×16 alrededor de una curva, con latencia entera
-  (`Oversampler.h`; los dos con versión en bloque, idéntica bit a bit y unas 2 veces más rápida), filtro DC (`DcBlocker.h`), SVF TPT/ZDF (`Svf.h`), filtros de EQ sobre el SVF con su respuesta en frecuencia exacta (`EqFilter.h`, de Fathom: campana, shelves, tilt, notch, pasa banda, all-pass, cortes Butterworth de 1 a 16 polos con resonancia y flat tilt, en cascadas de hasta 8 etapas), las mismas formas con la magnitud del
+  (`Oversampler.h`; los dos con versión en bloque, idéntica bit a bit y unas 2 veces más rápida), filtro DC (`DcBlocker.h`), SVF TPT/ZDF (`Svf.h`), filtros de EQ sobre el SVF con su respuesta en frecuencia exacta (`EqFilter.h`, de Fathom: campana, shelves, tilt, notch, pasa banda, all-pass, cortes Butterworth de 1 a 16 polos con resonancia y flat tilt, en cascadas de hasta 8 etapas; `StereoEqCascadeFilter` procesa L y R juntos con SSE2, bit a bit igual), las mismas formas con la magnitud del
   prototipo analógico también cerca de Nyquist y sin latencia (`MatchedEq.h`, de Fathom: diseño "matched" a la Vicanek sobre el mismo SVF, con los
   prototipos `AnalogBiquad`/`AnalogCascade` para medir), crossover Linkwitz-Riley y divisor multibanda
   (`Crossover.h`), filtro de 1 polo TPT y tilt EQ (`OnePole.h`), suavizado de parámetros y fundidos
   (`Smoothing.h`), línea de retardo con lectura lineal, cúbica y Lagrange (`DelayLine.h`), SIMD SSE2 (`Simd.h`),
   `fastTanh` (`FastMath.h`), FFT (`Fft.h`, clara, fuera del audio) y FFT real para el audio (`RealFft.h`, de Fathom),
-  convolución por FFT particionada con fundido entre kernels (`Convolver.h`, de Fathom: la fase lineal; la reverb la va a
+  convolución por FFT particionada con fundido en S entre kernels y el trabajo repartido en bloques chicos (`Convolver.h`, de Fathom: la fase lineal; la reverb la va a
   usar), toma de señal lock-free audio → GUI (`AnalyzerTap.h`), buzón del último valor audio → GUI (`TripleBuffer.h`, venía de Ebb), analizador de
   espectro calibrado, fuera del audio, con picos afinados entre bins (`SpectrumAnalyzer.h`, venía de Riptide), `midiNoteToHz` (`Pitch.h`), dB ↔ ganancia (`Decibels.h`), medidores de
   pico/RMS (`LevelMeter.h`), LFO con divisiones de tempo (`Lfo.h`, venía de Undertow), curva por puntos con tensión
@@ -94,7 +94,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 | 1 | Undertow — sintetizador wavetable (FM, warp, unison, matriz de modulación, FX) | Serum 2, Vital | ✅ Terminado (ampliación en curso: cuerda pulsada) |
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | ✅ Terminado |
 | 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | ✅ Terminado |
-| 4 | Fathom — EQ paramétrico con analizador (24 bandas, dinámico, M/S, fase lineal, dinámica espectral) | FabFilter Pro-Q 4 | En curso (Fase 16) |
+| 4 | Fathom — EQ paramétrico con analizador (24 bandas, dinámico, M/S, fase lineal, dinámica espectral) | FabFilter Pro-Q 4 | ✅ Terminado |
 | 5 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
 | 6 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
 | 7 | Reverb algorítmica (FDN, difusión, modulación; modos vintage y espacial) | Valhalla VintageVerb, Supermassive | Pendiente |

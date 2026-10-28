@@ -193,11 +193,11 @@ fábrica incluyen notas de para qué sirven y por qué.
 - [x] Fase 14 — Otras instancias: ver el espectro de las demás instancias de Fathom del proyecto y marcar dónde chocan
       (enmascaramiento); editarlas desde aquí.
 - [x] Fase 15 — Presets con notas educativas (voces, 808 y kick del dembow, percusión, buses, master).
-- [ ] Fase 16 — Pulido: CPU (24 bandas con SIMD, coeficientes), GUI escalable, pluginval estricto, pruebas de
+- [x] Fase 16 — Pulido: CPU (24 bandas con SIMD, coeficientes), GUI escalable, pluginval estricto, pruebas de
       automatización extrema.
 
 ## Estado actual
-Fase 16 HECHA (2026-10-28); falta que el usuario pruebe en FL el paso 5. Pasos 1-4 (CPU de las bandas IIR, picos de
+Fase 16 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio: funciona. FATHOM TERMINADO. Pasos 1-4 (CPU de las bandas IIR, picos de
 la convolución y de la STFT espectral, GUI escalable) probados en FL: funcionan.
 - Paso 5 (automatización extrema): `FathomAutomationTests` (nuevo, con JUCE, en ctest, ~35 s) sobre el procesador
   completo, con los parámetros cambiados como el host (`setValueNotifyingHost`). (1) Caos: hasta 40 parámetros al azar
