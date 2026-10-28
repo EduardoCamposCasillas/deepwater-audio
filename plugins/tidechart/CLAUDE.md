@@ -138,7 +138,7 @@ plugins/tidechart/
       añadido al CMake raíz. Passthrough del MIDI, lectura del tempo y la posición del host mostrados en una GUI
       funcional, sin notas colgadas. Ruteo en FL Studio comprobado. Tests y pluginval. Decidir antes: el nombre y su
       `PLUGIN_CODE`.
-- [ ] Fase 2 — `libs/theory`: escalas, modos, construcción de acordes (triadas, séptimas, extensiones, sus, add),
+- [x] Fase 2 — `libs/theory`: escalas, modos, construcción de acordes (triadas, séptimas, extensiones, sus, add),
       funciones armónicas e inversiones; nombres de notas y acordes; con tests.
 - [ ] Fase 3 — Paleta de acordes por tonalidad y modo; tocar un acorde completo con una sola tecla.
 - [ ] Fase 4 — Constructor de progresiones: voicings, inversiones automáticas con buena conducción de voces, patrones
@@ -167,7 +167,7 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 2 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (la fila ACORDE con acordes tocados).
+Fase 2 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (la fila ACORDE con acordes tocados): funciona.
 - `libs/theory` creada (`deepwater::theory`, en el CMake raíz tras `libs/presets`): `Pitch.h`, `Scale.h` (mayor,
   dórico, frigio, lidio, mixolidio, menor, locrio, menor armónica, menor melódica, frigio dominante), `Chord.h`
   (38 tipos: tríadas, sus, 5, séptimas, 6, add9/add11, 9/11/13, alteradas 7♭9 7♯9 7♯5 7♭5 maj7♯5 maj7♯11 y m7♭9),
@@ -210,4 +210,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 2 en FL; después, Fase 3 (paleta de acordes y un acorde por tecla).
+Siguiente: Fase 3 (paleta de acordes y un acorde por tecla).
