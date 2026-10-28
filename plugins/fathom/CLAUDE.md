@@ -65,6 +65,7 @@ Desde la raíz del repositorio (ver también los comandos generales en el `CLAUD
 cmake --build build --config Release --target Fathom_VST3      # solo el plugin
 build/plugins/fathom/Release/FathomTests.exe                    # tests del motor (sin JUCE)
 build/plugins/fathom/FathomInstanceTests_artefacts/Release/FathomInstanceTests.exe   # Fase 14: varias instancias (JUCE)
+build/plugins/fathom/FathomUiSnapshot_artefacts/Release/FathomUiSnapshot.exe <carpeta> # capturas PNG de la GUI
 ```
 - VST3: `build/plugins/fathom/Fathom_artefacts/Release/VST3/Fathom.vst3`.
 - Standalone: `build/plugins/fathom/Fathom_artefacts/Release/Standalone/Fathom.exe`.
@@ -126,6 +127,7 @@ plugins/fathom/
                            # analógico, de la
                            # edición y del analizador, del registro de instancias y de los choques (sin JUCE)
   tests/InstanceTests.cpp  # Fase 14, con JUCE: varios procesadores completos en el mismo proceso
+  tests/UiSnapshot.cpp     # herramienta (no es test): capturas PNG del editor con varias instancias sonando
 ```
 
 ## Aprendizaje de mezcla (igual de importante que el código)
@@ -212,7 +214,7 @@ Fase 14 COMPLETADA (2026-10-27). Falta probarla en FL Studio.
   de la que mira). Oyente de la lista: si la editable se borra, cierra el gesto a medias y la olvida. Mira
   (`startWatching`) mientras haya alguna que se vea o el panel esté abierto.
 - Visor: botón INSTANCIAS (`Tool::instances`, como IGUALAR/DIBUJAR; los nodos propios se siguen editando). Choques =
-  columnas coral (alfa ∝ choque²) detrás de todo y una barra de 5 px del color de la otra en las zonas; espectros de las
+  columnas coral (alfa 0.32 · choque; con choque² y 0.16 casi no se veían) detrás de todo y una barra de 5 px del color de la otra en las zonas; espectros de las
   otras = líneas de su color; la editable = curva punteada de su color y nodos de 6.5 px con su número (arrastrar con
   Shift/Alt, rueda = Q, doble clic = apagar, clic derecho = apagar / dejar de editarla); los propios tienen prioridad.
   Nota "EDITANDO: NOMBRE"; sobre un choque, la lectura de arriba dice "choca con X (tú +4.0 dB)", "(X +3.0 dB)" o
@@ -229,7 +231,9 @@ Fase 14 COMPLETADA (2026-10-27). Falta probarla en FL Studio.
   (pista, puesto a mano, guardado en el estado), la toma solo con alguien mirando, choques entre dos pistas de verdad
   (73-132 Hz, +2.5 dB; se apagan al cortar en la que mira), editar otra (su deshacer; su curva +6.00 dB en su nodo),
   borrarla a mitad de un gesto, y abrir/cerrar la ventana con una que se va.
-- GUI: sin captura (el Standalone es una sola instancia): revisar en FL con Fathom en dos o más pistas.
+- GUI revisada con capturas de `FathomUiSnapshot` (herramienta nueva, fuera de ctest: tres instancias sonando en el mismo
+  proceso, el editor dibujado fuera de pantalla a PNG; sirve para revisar la GUI en las próximas fases). Se vio que la
+  sombra de los choques casi no se notaba y se subió.
 - Release con 0 warnings; FathomTests y FathomInstanceTests: todos pasan; ctest 8/9: UndertowTests falló en su test de
   CPU (el del resonador, como en la Fase 13; ni Undertow ni `libs/` cambiaron); pluginval strictness 10 ampliado: SUCCESS.
 

@@ -2406,7 +2406,7 @@ private:
 
     // ---- Fase 14: otras instancias -------------------------------------------------------------------------------------
 
-    // Los choques: columnas coral (más opacas donde más chocan) y, en las zonas que cuentan, una barra del color de la
+    // Los choques: columnas coral (más opacas donde más chocan: hasta 32 %) y, en las zonas que cuentan, una barra del color de la
     // otra instancia en el borde de abajo.
     void paintCollisions (juce::Graphics& g) const
     {
@@ -2421,7 +2421,7 @@ private:
             for (size_t i = 0; i < points; ++i)
                 if (const float amount = other.collision[i]; amount > 0.2f)
                 {
-                    g.setColour (theme::collision.withAlpha (0.16f * amount * amount));
+                    g.setColour (theme::collision.withAlpha (0.32f * amount));
                     g.fillRect (juce::Rectangle<float> (plot.getX() + step * (static_cast<float> (i) - 0.5f), plot.getY(), step, plot.getHeight()));
                 }
             g.setColour (other.colour.withAlpha (0.9f));

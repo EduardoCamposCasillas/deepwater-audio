@@ -80,4 +80,24 @@ if(FATHOM_BUILD_TESTS)
             juce::juce_recommended_warning_flags
     )
     add_test(NAME FathomInstanceTests COMMAND FathomInstanceTests)
+
+    # Herramienta (no está en ctest): capturas PNG de la GUI con varias instancias sonando.
+    #   FathomUiSnapshot <carpeta>
+    juce_add_console_app(FathomUiSnapshot PRODUCT_NAME "FathomUiSnapshot")
+    target_sources(FathomUiSnapshot PRIVATE tests/UiSnapshot.cpp ${FATHOM_PLUGIN_SOURCES})
+    target_include_directories(FathomUiSnapshot PRIVATE Source)
+    target_compile_definitions(FathomUiSnapshot
+        PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            JUCE_MODAL_LOOPS_PERMITTED=1   # runDispatchLoopUntil: los temporizadores del editor corren
+            "JucePlugin_Name=\"Fathom\""
+    )
+    target_link_libraries(FathomUiSnapshot
+        PRIVATE
+            juce::juce_audio_utils
+            deepwater::dsp
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
+    )
 endif()
