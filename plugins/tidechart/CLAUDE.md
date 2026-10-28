@@ -165,7 +165,7 @@ plugins/tidechart/
       `PLUGIN_CODE`.
 - [x] Fase 2 — `libs/theory`: escalas, modos, construcción de acordes (triadas, séptimas, extensiones, sus, add),
       funciones armónicas e inversiones; nombres de notas y acordes; con tests.
-- [ ] Fase 3 — Paleta de acordes por tonalidad y modo; tocar un acorde completo con una sola tecla.
+- [x] Fase 3 — Paleta de acordes por tonalidad y modo; tocar un acorde completo con una sola tecla.
 - [ ] Fase 4 — Constructor de progresiones: voicings, inversiones automáticas con buena conducción de voces, patrones
       rítmicos de acordes (incluyendo dembow y variantes), préstamo modal.
 - [ ] Fase 5 — Detección de tonalidad a partir del MIDI entrante.
@@ -192,7 +192,7 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 3 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (paleta y acordes con una tecla).
+Fase 3 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (paleta y acordes con una tecla): funciona.
 - Etapa MIDI: `ChordTrigger.h` (`chordForKey`, `chordForDegree`, `chordAtRoot`; slots con sus notas y cuenta de notas
   compartidas) y `MidiStage` con `setChordSettings` (por bloque), `requestPreview` (cualquier hilo) y las transiciones
   bypass ↔ acordes. Sin JUCE.
@@ -251,5 +251,5 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 3 en FL; después, Fase 4 (progresiones, conducción de voces, ritmos de
+Siguiente: Fase 4 (progresiones, conducción de voces, ritmos de
 acordes como el dembow, préstamo modal).
