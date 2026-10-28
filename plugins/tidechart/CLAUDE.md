@@ -85,11 +85,13 @@ plugins/tidechart/
     TransportSnapshot.h      # lo que el audio publica para la GUI en cada bloque (TripleBuffer): reloj y notas que suenan
     midi/NoteTracker.h       # mensajes cortos y la cuenta de lo que suena por canal y nota (releaseAll = los note-off que faltan)
     midi/MidiStage.h         # la etapa MIDI sin JUCE: todo lo que sale pasa por emit (contado); apagar y pánico pedidos
-                             # desde cualquier hilo y atendidos en la muestra 0 del bloque siguiente
+                             # desde cualquier hilo y atendidos en la muestra 0 del bloque siguiente; bypass ↔ acordes
+    midi/ChordTrigger.h      # Fase 3: qué acorde dispara cada tecla (teclas blancas = grados / notas de la escala) y los
+                             # acordes que suenan, cada uno con SUS notas, con cuenta de notas compartidas
     midi/EventLog.h          # cola lock-free audio → GUI de los eventos que entran y salen (el monitor)
     midi/MidiText.h          # nombres de nota como FL (C5 = 60) y descripción de mensajes para el monitor
-    gui/                     # tema, reloj del host (TransportView), teclado de lo que suena, acorde que suena
-                             # (ChordView, con libs/theory), monitor MIDI
+    gui/                     # tema, reloj del host (TransportView), paleta (ChordPaletteView), teclado de lo que suena,
+                             # acorde que suena (ChordView, con libs/theory), teoría en español (TheoryNames), monitor MIDI
   tests/MidiTests.cpp        # etapa MIDI sin JUCE (contra un receptor modelo independiente)
   tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte, reservas)
 ```
@@ -124,6 +126,29 @@ plugins/tidechart/
     debajo del bajo suben una octava; un bajo ajeno va debajo de todo. Es el voicing base de la Fase 3.
   - Reconocer acordes: coincidencia exacta de clases de altura o, con 3+ notas, sin la 5.ª justa; se ordena exacta >
     fundamental en el bajo > tipo más común (orden del catálogo). Por eso el orden del catálogo no se toca.
+
+- Decisiones de la Fase 3:
+  - Parámetros nuevos (versionHint 2, el orden de sus listas es parte del formato): `keyTonic` (0..11, por defecto 9 =
+    La), `keyMode` (orden de `Mode`, por defecto eólico), `chordSize` (tríadas / séptimas), `keyMapping` (teclas blancas =
+    grados / notas de la escala), `chordBass`. La tónica es una tecla: la escritura la decide `standardKey` con el modo.
+  - Activo = acordes; bypass = passthrough. La tecla que dispara no suena sola (el modo "con la nota" queda para más
+    adelante si hace falta); lo que no es nota pasa igual. Una tecla que no dispara nada (negra, fuera de la escala) no
+    sale. Cambiar entre bypass y acordes apaga en la muestra 0 lo del modo que se deja (al salir del bypass, las notas que
+    pasaron: su note-off llegaría con los acordes activos y ya no saldría).
+  - Teclas blancas: la tónica cae entre F♯ de la octava de abajo y F de la octava de la tecla (en La menor, C5 = A4 C5 E5).
+    Notas de la escala: la fundamental en la tecla pulsada. Posición cerrada (`Chord::midiNotes`); "+ Bajo" = la
+    fundamental una octava abajo. Velocidad y canal, los de la tecla.
+  - Cada acorde guarda sus notas (slot = canal × tecla, más uno para la paleta): soltar no recalcula nada, así que
+    cambiar parámetros con teclas abajo no cuelga notas. Notas compartidas entre acordes: cuenta de referencias por
+    canal y nota; el note-off sale con el último, y un acorde nuevo re-ataca las que ya sonaban (off + on en la misma
+    muestra). El instrumento nunca recibe dos note-on seguidos de la misma nota.
+  - Los acordes siguen la regla de las notas que pasan: suenan mientras la tecla está abajo y los apaga su note-off (el
+    host lo manda al parar, saltar y hacer loop). Pánico, reinicio del audio y cargar el estado apagan todo y olvidan los
+    acordes; el note-off tardío de su tecla no manda nada.
+  - Paleta: la GUI pide un grado (atómico, −1 = soltar) y el audio lo toca en la muestra 0 del bloque siguiente, canal 1,
+    velocidad 100, en la octava de C5. El audio publica los grados que suenan (`heldDegrees`) para encender los pads.
+  - El MIDI de salida puede ser más grande que el de entrada (3–5 notas por tecla). Se arma en un buffer propio de
+    16 KB; si el del host (2048 bytes en el wrapper VST3 de JUCE) se queda chico crece una vez y conserva su tamaño.
 
 ## Requisitos propios (además de los del raíz)
 - Ninguna nota colgada, en ningún caso (ver arriba).
@@ -167,6 +192,22 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 3 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (paleta y acordes con una tecla).
+- Etapa MIDI: `ChordTrigger.h` (`chordForKey`, `chordForDegree`, `chordAtRoot`; slots con sus notas y cuenta de notas
+  compartidas) y `MidiStage` con `setChordSettings` (por bloque), `requestPreview` (cualquier hilo) y las transiciones
+  bypass ↔ acordes. Sin JUCE.
+- Procesador: 5 parámetros nuevos (versionHint 2), `currentChordSettings`, `previewChord`; `heldDegrees` en el snapshot.
+- GUI 900 × 740: PALETA bajo el reloj (tónica, modo, tríadas/séptimas, teclas, + Bajo; 7 pads con grado, acorde,
+  función con color y tecla; mantener pulsado = escuchar, arrastrar = encadenar; la escala y el carácter del modo).
+  ACORDE usa la tonalidad: grado, función y préstamo modal. Revisada con captura del Standalone (pad pulsado: Em, v).
+- Tests: `TidechartTests` +3 (acordes por tecla en 12 tónicas × 10 modos × tríada/séptima × 2 modos de tecla × bajo
+  × 128 teclas; la etapa con notas compartidas, cambiar ajustes con la tecla abajo, bypass, paleta y apagar; 10
+  semillas al azar con todo cambiando: nunca dos note-on seguidos de una nota, silencio al soltar).
+  `TidechartProcessorTests`: el passthrough en bypass y los acordes contra una etapa de referencia a 4 sample rates ×
+  8 tamaños de bloque × mono/estéreo; apagados en los dos modos; bypass a mitad de un acorde; parámetros (Mi frigio,
+  séptimas, bajo, notas de la escala) y paleta; estado del proyecto con los parámetros nuevos.
+- Release con 0 warnings; ctest 14/14; pluginval strictness 10 ampliado: SUCCESS.
+
 Fase 2 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (la fila ACORDE con acordes tocados): funciona.
 - `libs/theory` creada (`deepwater::theory`, en el CMake raíz tras `libs/presets`): `Pitch.h`, `Scale.h` (mayor,
   dórico, frigio, lidio, mixolidio, menor, locrio, menor armónica, menor melódica, frigio dominante), `Chord.h`
@@ -210,4 +251,5 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 3 (paleta de acordes y un acorde por tecla).
+Siguiente: que el usuario pruebe la Fase 3 en FL; después, Fase 4 (progresiones, conducción de voces, ritmos de
+acordes como el dembow, préstamo modal).

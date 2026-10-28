@@ -1,5 +1,5 @@
-// Tests de Tidechart sin JUCE: la etapa MIDI (contar lo que suena, apagarlo, passthrough), la cola de eventos hacia la
-// GUI y los nombres de nota. Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la condición.
+// Tests de Tidechart sin JUCE: la etapa MIDI (contar lo que suena, apagarlo, passthrough, un acorde por tecla), la cola
+// de eventos hacia la GUI y los nombres de nota. Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la condición.
 
 #include <algorithm>
 #include <array>
@@ -7,9 +7,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstddef>
+#include <optional>
 #include <thread>
 #include <vector>
 
+#include "deepwater/theory/Text.h"
+#include "midi/ChordTrigger.h"
 #include "midi/EventLog.h"
 #include "midi/MidiStage.h"
 #include "midi/MidiText.h"
@@ -317,6 +320,305 @@ void testRequestsFromAnotherThread()
     CHECK (stage.releaseCount() <= static_cast<std::uint32_t> (requested.load()) + 1);
 }
 
+// --- Fase 3: un acorde por tecla ------------------------------------------------------------------------------------
+
+namespace th = deepwater::theory;
+
+std::vector<int> notesOf (const std::optional<TriggeredChord>& chord)
+{
+    if (! chord)
+        return {};
+    std::vector<int> notes (chord->notes.begin(), chord->notes.end());
+    std::sort (notes.begin(), notes.end());
+    return notes;
+}
+
+using Notes = std::vector<int>;
+
+void testChordForKey()
+{
+    std::printf ("Acordes por tecla: teclas blancas = grados, notas de la escala, septimas, bajo, cualquier tonalidad\n");
+
+    ChordSettings am; // La menor, tríadas, teclas blancas
+    am.enabled = true;
+    CHECK (notesOf (chordForKey (60, am)) == (Notes { 57, 60, 64 })); // C5 → i = Am (A4 C5 E5)
+    CHECK (notesOf (chordForKey (62, am)) == (Notes { 59, 62, 65 })); // D5 → ii° = Bdim
+    CHECK (notesOf (chordForKey (67, am)) == (Notes { 64, 67, 71 })); // G5 → v = Em
+    CHECK (notesOf (chordForKey (71, am)) == (Notes { 67, 71, 74 })); // B5 → VII = G
+    CHECK (notesOf (chordForKey (48, am)) == (Notes { 45, 48, 52 })); // una octava abajo, lo mismo
+    CHECK (th::chordSymbol (chordForKey (65, am)->chord) == "Dm");    // F5 → iv
+    CHECK (th::chordSymbol (chordForKey (69, am)->chord) == "F");     // A5 → VI
+    CHECK (chordForKey (69, am)->degree == 5);
+    CHECK (! chordForKey (61, am)); // negra: nada
+    CHECK (! chordForKey (70, am));
+
+    auto am7 = am;
+    am7.size = th::ChordSize::seventh;
+    CHECK (notesOf (chordForKey (60, am7)) == (Notes { 57, 60, 64, 67 }));     // Am7
+    CHECK (notesOf (chordForKey (71, am7)) == (Notes { 67, 71, 74, 77 }));     // G7 (el ♭VII7)
+    CHECK (th::chordSymbol (chordForKey (62, am7)->chord) == "Bm7b5");
+    auto bass = am7;
+    bass.bass = true;
+    CHECK (notesOf (chordForKey (60, bass)) == (Notes { 45, 57, 60, 64, 67 })); // A3 abajo
+
+    ChordSettings c;
+    c.enabled = true;
+    c.key = { th::notes::C, th::Mode::ionian };
+    CHECK (notesOf (chordForKey (60, c)) == (Notes { 60, 64, 67 })); // C
+    CHECK (notesOf (chordForKey (71, c)) == (Notes { 71, 74, 77 })); // vii° = Bdim
+
+    // F♯ mayor: la tónica queda debajo del Do (F♯4), no una octava arriba.
+    ChordSettings fs;
+    fs.enabled = true;
+    fs.key = th::standardKey (6, th::Mode::ionian);
+    CHECK (notesOf (chordForKey (60, fs)) == (Notes { 54, 58, 61 }));
+    CHECK (th::chordSymbol (chordForKey (60, fs)->chord) == "F#");
+
+    // Notas de la escala, en Mi frigio: F = el ♭II mayor con la fundamental en la tecla; lo de fuera, nada.
+    ChordSettings phrygian;
+    phrygian.enabled = true;
+    phrygian.key = { th::notes::E, th::Mode::phrygian };
+    phrygian.mapping = KeyMapping::scaleNotes;
+    CHECK (notesOf (chordForKey (64, phrygian)) == (Notes { 64, 67, 71 })); // Em
+    CHECK (notesOf (chordForKey (65, phrygian)) == (Notes { 65, 69, 72 })); // F
+    CHECK (chordForKey (65, phrygian)->degree == 1);
+    CHECK (! chordForKey (66, phrygian)); // F♯ no está en Mi frigio
+
+    // Todas las tonalidades, modos, tamaños, modos de tecla y bajo, en las 128 teclas: notas dentro de 0..127, las
+    // clases de altura del acorde, y el grado que dice cada modo de tecla.
+    bool ok = true;
+    for (int tonic = 0; tonic < 12; ++tonic)
+        for (int m = 0; m < th::modeCount; ++m)
+            for (int variant = 0; variant < 8; ++variant)
+            {
+                ChordSettings s;
+                s.enabled = true;
+                s.key = th::standardKey (tonic, static_cast<th::Mode> (m));
+                s.size = (variant & 1) != 0 ? th::ChordSize::seventh : th::ChordSize::triad;
+                s.mapping = (variant & 2) != 0 ? KeyMapping::scaleNotes : KeyMapping::whiteKeys;
+                s.bass = (variant & 4) != 0;
+                for (int note = 0; note < 128; ++note)
+                {
+                    const auto chord = chordForKey (note, s);
+                    const int expectedDegree = s.mapping == KeyMapping::whiteKeys ? whiteKeyDegree (note) : s.key.degreeOf (note % 12);
+                    if (! chord)
+                    {
+                        // Solo puede faltar si la tecla no es un grado o si el acorde entero cae fuera de 0..127.
+                        ok = ok && (expectedDegree < 0 || note < 12 || note > 115);
+                        continue;
+                    }
+                    ok = ok && chord->degree == expectedDegree;
+                    const auto mask = th::chordMask (chord->chord.root.pitchClass(), chord->chord.type);
+                    for (const int n : chord->notes)
+                        ok = ok && n >= 0 && n < 128 && (mask & (1u << (n % 12))) != 0;
+                    ok = ok && chord->chord == *th::diatonicChord (s.key, chord->degree, s.size);
+                    if (s.mapping == KeyMapping::scaleNotes && ! s.bass)
+                        ok = ok && chord->notes[0] == note; // la fundamental, en la tecla pulsada
+                }
+            }
+    CHECK (ok);
+}
+
+// Un receptor que además recuerda cuántos note-on seguidos recibió una nota (el máximo): con los acordes activos
+// nunca debe pasar de 1, o un note-off apagaría una nota que otro acorde sigue usando.
+struct ChordRig
+{
+    MidiStage stage;
+    Receiver receiver;
+    std::vector<Event> out;
+    int maxPerNote = 0;
+
+    void sink (const std::uint8_t* data, int size, int at)
+    {
+        out.push_back ({ std::vector<std::uint8_t> (data, data + size), at });
+        receiver.receive (data, size);
+        if (size == 3 && (data[0] & 0xf0) == 0x90 && data[2] > 0 && stage.getChordSettings().enabled)
+            maxPerNote = std::max (maxPerNote, receiver.held[static_cast<size_t> (data[0] & 0x0f)][data[1]]);
+    }
+    void begin (const ChordSettings& settings)
+    {
+        out.clear();
+        stage.setChordSettings (settings);
+        stage.beginBlock ([this] (const std::uint8_t* d, int s, int at) { sink (d, s, at); });
+    }
+    void send (std::vector<std::uint8_t> bytes, int at = 0)
+    {
+        stage.process (bytes.data(), static_cast<int> (bytes.size()), at, [this] (const std::uint8_t* d, int s, int t) { sink (d, s, t); });
+    }
+};
+
+Event on (int note, int at, int velocity = 100) { return { { 0x90, static_cast<std::uint8_t> (note), static_cast<std::uint8_t> (velocity) }, at }; }
+Event off (int note, int at) { return { { 0x80, static_cast<std::uint8_t> (note), 0 }, at }; }
+
+void testChordStage()
+{
+    std::printf ("MidiStage con acordes: una tecla = un acorde, notas compartidas, cambiar ajustes con la tecla abajo, "
+                 "bypass, paleta y apagar\n");
+
+    ChordSettings am;
+    am.enabled = true;
+    ChordRig rig;
+    rig.begin (am);
+    CHECK (rig.out.empty());
+
+    // C5 → Am: tres note-on en la muestra de la tecla, con su velocidad; la tecla misma no sale aparte.
+    rig.send ({ 0x90, 60, 90 }, 5);
+    CHECK (rig.out == (std::vector<Event> { { { 0x90, 57, 90 }, 5 }, { { 0x90, 60, 90 }, 5 }, { { 0x90, 64, 90 }, 5 } }));
+    CHECK (rig.stage.getChords().heldDegrees() == 0b1);
+
+    // E5 → C (C E G) con Am todavía abajo: C y E se vuelven a atacar (off + on), G entra.
+    rig.out.clear();
+    rig.send ({ 0x90, 64, 100 }, 6);
+    CHECK (rig.out == (std::vector<Event> { off (60, 6), on (60, 6), off (64, 6), on (64, 6), on (67, 6) }));
+    CHECK (rig.stage.getChords().heldDegrees() == 0b101);
+
+    // Soltar C5: solo se apaga A (C y E las sigue usando el acorde de C).
+    rig.out.clear();
+    rig.send ({ 0x80, 60, 0 }, 7);
+    CHECK (rig.out == (std::vector<Event> { off (57, 7) }));
+    rig.out.clear();
+    rig.send ({ 0x90, 64, 0 }, 8); // note-on con velocidad 0 = note-off
+    CHECK (rig.out == (std::vector<Event> { off (60, 8), off (64, 8), off (67, 8) }));
+    CHECK (rig.receiver.sounding() == 0 && rig.stage.getChords().activeCount() == 0);
+
+    // Cambiar la tonalidad con la tecla abajo: al soltar se apagan las notas que sonaron, no las del acorde nuevo.
+    rig.send ({ 0x90, 60, 100 });
+    auto cMajor = am;
+    cMajor.key = { th::notes::C, th::Mode::ionian };
+    cMajor.size = th::ChordSize::seventh;
+    rig.begin (cMajor);
+    CHECK (rig.out.empty());
+    rig.send ({ 0x80, 60, 0 }, 3);
+    CHECK (rig.out == (std::vector<Event> { off (57, 3), off (60, 3), off (64, 3) }));
+
+    // Negras: nada. Lo que no es una nota pasa igual.
+    rig.out.clear();
+    rig.send ({ 0x90, 61, 100 });
+    rig.send ({ 0x80, 61, 0 });
+    CHECK (rig.out.empty());
+    rig.send ({ 0xb0, 64, 127 }, 9);
+    CHECK (rig.out == (std::vector<Event> { { { 0xb0, 64, 127 }, 9 } }));
+
+    // La misma tecla dos veces sin soltar: el acorde se repite (no se duplica) y un note-off lo apaga.
+    rig.begin (am);
+    rig.send ({ 0x90, 60, 100 });
+    rig.send ({ 0x90, 60, 80 });
+    rig.send ({ 0x80, 60, 0 });
+    CHECK (rig.receiver.sounding() == 0);
+    rig.out.clear();
+    rig.send ({ 0x80, 60, 0 }); // el segundo note-off no hace nada
+    CHECK (rig.out.empty());
+
+    // Bypass: entrar apaga los acordes en la muestra 0; en bypass las teclas pasan tal cual; salir apaga esas.
+    rig.send ({ 0x90, 60, 100 });
+    auto bypass = am;
+    bypass.enabled = false;
+    rig.begin (bypass);
+    CHECK (rig.out == (std::vector<Event> { off (57, 0), off (60, 0), off (64, 0) }));
+    rig.out.clear();
+    rig.send ({ 0x90, 62, 70 }, 4);
+    CHECK (rig.out == (std::vector<Event> { { { 0x90, 62, 70 }, 4 } }));
+    rig.begin (am);
+    CHECK (rig.out == (std::vector<Event> { off (62, 0) }));
+    rig.out.clear();
+    rig.send ({ 0x80, 62, 0 });
+    rig.send ({ 0x80, 60, 0 });
+    CHECK (rig.out.empty());
+    CHECK (rig.receiver.sounding() == 0);
+
+    // La paleta: suena en la muestra 0 del bloque siguiente, en el canal 1, en la octava del C5; cambiar de grado
+    // suelta el anterior; −1 lo apaga. En bypass no suena.
+    rig.stage.requestPreview (0);
+    rig.begin (am);
+    CHECK (rig.out == (std::vector<Event> { on (57, 0), on (60, 0), on (64, 0) }));
+    rig.stage.requestPreview (4);
+    rig.begin (am);
+    CHECK (rig.out == (std::vector<Event> { off (57, 0), off (60, 0), off (64, 0), on (64, 0), on (67, 0), on (71, 0) }));
+    CHECK (rig.stage.getChords().heldDegrees() == 0b10000);
+    rig.begin (am);
+    CHECK (rig.out.empty()); // sin cambios, nada
+    rig.stage.requestPreview (-1);
+    rig.begin (am);
+    CHECK (rig.out == (std::vector<Event> { off (64, 0), off (67, 0), off (71, 0) }));
+    rig.stage.requestPreview (2);
+    rig.begin (bypass);
+    CHECK (rig.out.empty());
+    rig.stage.requestPreview (-1);
+
+    // Apagar (reinicio del audio): todo en la muestra 0 y los acordes se olvidan; el note-off tardío no manda nada.
+    rig.begin (am);
+    rig.send ({ 0x90, 60, 100 });
+    rig.send ({ 0x91, 67, 100 });
+    rig.stage.requestRelease();
+    rig.begin (am);
+    CHECK (rig.out.size() == 6);
+    CHECK (rig.receiver.sounding() == 0 && rig.stage.getChords().activeCount() == 0);
+    rig.out.clear();
+    rig.send ({ 0x80, 60, 0 });
+    CHECK (rig.out.empty());
+    CHECK (rig.maxPerNote == 1);
+}
+
+ChordSettings randomSettings (Random& random, bool enabled)
+{
+    ChordSettings s;
+    s.enabled = enabled;
+    s.key = th::standardKey (random.upTo (12), static_cast<th::Mode> (random.upTo (th::modeCount)));
+    s.size = random.upTo (2) == 0 ? th::ChordSize::triad : th::ChordSize::seventh;
+    s.mapping = random.upTo (2) == 0 ? KeyMapping::whiteKeys : KeyMapping::scaleNotes;
+    s.bass = random.upTo (2) == 0;
+    return s;
+}
+
+void testChordStageRandom()
+{
+    std::printf ("MidiStage con acordes al azar (10 semillas): ajustes, bypass, paleta y apagados cambiando a mitad de "
+                 "las notas; nunca dos note-on seguidos de la misma nota y, al soltar todo, silencio\n");
+
+    for (std::uint32_t seed = 1; seed <= 10; ++seed)
+    {
+        Random random { seed * 104729u };
+        ChordRig rig;
+        auto settings = randomSettings (random, true);
+        bool matchesTracker = true;
+
+        for (int block = 0; block < 3000; ++block)
+        {
+            if (random.upTo (40) == 0)
+                settings = randomSettings (random, settings.enabled);
+            if (random.upTo (150) == 0)
+                settings.enabled = ! settings.enabled;
+            if (random.upTo (30) == 0)
+                rig.stage.requestPreview (random.upTo (8) - 1);
+            if (random.upTo (300) == 0)
+                rig.stage.requestRelease();
+            if (random.upTo (600) == 0)
+                rig.stage.requestPanic();
+            rig.begin (settings);
+            const int events = random.upTo (5);
+            for (int e = 0; e < events; ++e)
+            {
+                const auto event = randomEvent (random, e);
+                rig.send (event.bytes, event.sample);
+            }
+            matchesTracker = matchesTracker && rig.receiver.sounding() == rig.stage.getSounding().soundingCount();
+        }
+        CHECK (matchesTracker);
+        CHECK (rig.maxPerNote <= 1);
+
+        // Fin: acordes activos, todas las teclas sueltas, la paleta suelta. No hace falta pedir que se apague nada.
+        settings.enabled = true;
+        rig.stage.requestPreview (-1);
+        rig.begin (settings);
+        for (int channel = 0; channel < 3; ++channel)
+            for (int note = 48; note < 60; ++note)
+                rig.send ({ static_cast<std::uint8_t> (0x80 | channel), static_cast<std::uint8_t> (note), 0 });
+        CHECK (rig.stage.getChords().activeCount() == 0);
+        CHECK (rig.receiver.sounding() == 0);
+        CHECK (rig.stage.getSounding().soundingCount() == 0);
+    }
+}
+
 void testEventLog()
 {
     std::printf ("EventLog: orden, lleno = descarta sin esperar, y un productor y un consumidor en hilos distintos\n");
@@ -380,6 +682,9 @@ int main()
     testRepeatedNoteNeedsTwoOffs();
     testPanic();
     testRequestsFromAnotherThread();
+    testChordForKey();
+    testChordStage();
+    testChordStageRandom();
     testEventLog();
     testNoteNames();
 

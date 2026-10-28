@@ -11,14 +11,18 @@
 
 #include "deepwater/theory/ChordFinder.h"
 #include "deepwater/theory/Text.h"
+#include "deepwater/theory/Harmony.h"
 #include "gui/Theme.h"
+#include "gui/TheoryNames.h"
 
 namespace tidechart::gui
 {
 
 // El acorde que forman las notas que suenan, con el motor de libs/theory (Fase 2): su nombre (C6 o Am7 según el bajo),
 // la inversión, cada nota con su función en el acorde (E♭5 = ♭3) y otras lecturas posibles de las mismas notas. Con dos
-// notas, el intervalo. Corre en el hilo de la GUI y solo recalcula cuando cambian las notas.
+// notas, el intervalo. Desde la Fase 3, con la tonalidad de la paleta: las notas se escriben como en ella, y el acorde
+// dice su grado en números romanos, su función y, si se sale de la escala, de qué modos con la misma tónica viene
+// (préstamo modal). Corre en el hilo de la GUI y solo recalcula cuando cambian las notas o la tonalidad.
 class ChordView final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
@@ -38,6 +42,16 @@ public:
         if (notes == current)
             return;
         current = std::move (notes);
+        describe();
+        repaint();
+    }
+
+    void setKey (const deepwater::theory::Key& newKey)
+    {
+        if (hasKey && newKey == key)
+            return;
+        key = newKey;
+        hasKey = true;
         describe();
         repaint();
     }
@@ -93,7 +107,7 @@ private:
             return;
         }
 
-        const auto readings = th::findChords (current);
+        const auto readings = hasKey ? th::findChords (current, key) : th::findChords (current);
         if (readings.empty())
         {
             std::string notes;
@@ -111,13 +125,34 @@ private:
         const auto& chord = best.chord;
         name = utf8 (th::chordSymbol (chord, notation));
 
-        // La inversión: qué tono del acorde está en el bajo.
+        // El grado en la tonalidad y su función; fuera de la escala, de dónde se tomó prestado.
         std::string text;
+        if (hasKey)
+        {
+            const auto numeral = th::romanNumeralFor (chord, key);
+            text = th::romanNumeralText (numeral, notation) + " ("
+                 + names::functionName (th::harmonicFunction (numeral)).toStdString() + ")";
+            if (! th::isDiatonic (chord, key))
+            {
+                const auto modes = th::modesContaining (chord, key.tonic);
+                if (modes.empty())
+                    text += ", fuera de la escala";
+                else
+                {
+                    text += ", prestado de";
+                    for (std::size_t i = 0; i < modes.size() && i < 3; ++i)
+                        text += (i == 0 ? " " : ", ") + names::modeName (modes[i]).toStdString();
+                }
+            }
+            text += "   \xc2\xb7   ";
+        }
+
+        // La inversión: qué tono del acorde está en el bajo.
         const int inversion = chord.inversion();
         if (inversion == 0)
-            text = "estado fundamental";
+            text += "estado fundamental";
         else
-            text = std::to_string (inversion) + ".\xc2\xaa inversi\xc3\xb3n (bajo: "
+            text += std::to_string (inversion) + ".\xc2\xaa inversi\xc3\xb3n (bajo: "
                  + th::degreeLabel (chord.info().tones[static_cast<std::size_t> (inversion)], notation) + ")";
         if (best.omitsFifth)
             text += ", sin 5.\xc2\xaa";
@@ -156,6 +191,8 @@ private:
     }
 
     std::vector<int> current;
+    deepwater::theory::Key key;
+    bool hasKey = false;
     juce::String name;
     juce::String detail { juce::String::fromUTF8 ("toca 3 notas o m\xc3\xa1s (o un power chord: fundamental + 5.\xc2\xaa) y aqu\xc3\xad aparece su nombre") };
 };

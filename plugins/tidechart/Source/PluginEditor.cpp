@@ -12,16 +12,18 @@ juce::String utf8 (const char* text)
 }
 
 constexpr int editorWidth = 900;
-constexpr int editorHeight = 600;
+constexpr int editorHeight = 740;
 } // namespace
 
 TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProcessor& p)
     : AudioProcessorEditor (&p),
       processor (p),
+      paletteView (p.getParameters(), [&p] (int degree) { p.previewChord (degree); }),
       inputMonitor (utf8 ("ENTRADA  \xe2\x80\x94  lo que llega a Tidechart"), theme::input),
       outputMonitor (utf8 ("SALIDA  \xe2\x80\x94  lo que va al instrumento"), theme::accent)
 {
     addAndMakeVisible (transportView);
+    addAndMakeVisible (paletteView);
     addAndMakeVisible (keyboardView);
     addAndMakeVisible (chordView);
     addAndMakeVisible (inputMonitor);
@@ -38,8 +40,8 @@ TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProc
 
     bypassButton.setButtonText ("Bypass");
     bypassButton.setClickingTogglesState (true);
-    bypassButton.setTooltip (utf8 ("Deja pasar el MIDI tal cual. Es el mismo bypass que el de FL. Tidechart todav\xc3\xad" "a no transforma "
-                                   "nada (los acordes con una tecla llegan en la Fase 3), as\xc3\xad que suena igual."));
+    bypassButton.setTooltip (utf8 ("Deja pasar el MIDI tal cual, sin acordes: cada tecla suena sola. Es el mismo bypass que el de FL. "
+                                   "Al activarlo o quitarlo se apaga lo que sonaba."));
     bypassButton.setColour (juce::TextButton::buttonColourId, theme::control);
     bypassButton.setColour (juce::TextButton::buttonOnColourId, theme::warning);
     bypassButton.setColour (juce::TextButton::textColourOffId, theme::text);
@@ -67,11 +69,12 @@ void TidechartAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("TIDECHART", header.removeFromLeft (150), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (utf8 ("acordes y melod\xc3\xad" "as por tonalidad  \xc2\xb7  Fase 2: teor\xc3\xad" "a musical"), header, juce::Justification::centredLeft);
+    g.drawText (utf8 ("acordes y melod\xc3\xad" "as por tonalidad  \xc2\xb7  Fase 3: un acorde por tecla"), header, juce::Justification::centredLeft);
 
     // Paneles detrás del reloj y del teclado.
     g.setColour (theme::panel);
     g.fillRoundedRectangle (transportView.getBounds().expanded (10, 4).toFloat(), 6.0f);
+    g.fillRoundedRectangle (paletteView.getBounds().expanded (10, 6).toFloat(), 6.0f);
     g.fillRoundedRectangle (keyboardView.getBounds().getUnion (chordView.getBounds()).withTop (keyboardTitleArea.getY()).expanded (10, 6).toFloat(), 6.0f);
 
     auto title = keyboardTitleArea;
@@ -113,6 +116,9 @@ void TidechartAudioProcessorEditor::resized()
     transportView.setBounds (area.removeFromTop (40).reduced (10, 0));
     area.removeFromTop (18);
 
+    paletteView.setBounds (area.removeFromTop (146).reduced (10, 0));
+    area.removeFromTop (18);
+
     auto keyboard = area.removeFromTop (136).reduced (10, 0);
     keyboardTitleArea = keyboard.removeFromTop (20);
     keyboard.removeFromTop (4);
@@ -137,9 +143,13 @@ void TidechartAudioProcessorEditor::timerCallback()
         transportView.setSnapshot (transport);
         keyboardView.setSounding (transport.soundingChannels);
         chordView.setSounding (transport.soundingChannels);
+        paletteView.update (processor.currentChordSettings (transport.bypassed), transport.heldDegrees);
         if (std::make_tuple (transport.soundingCount, transport.releases, transport.bypassed) != before)
             repaint (keyboardTitleArea);
     }
+
+    // La tonalidad para nombrar el acorde que suena (aunque el audio no publique nada nuevo, p. ej. con FL parado).
+    chordView.setKey (processor.currentChordSettings (transport.bypassed).key);
 
     processor.drainMidiLog ([this] (const tidechart::midi::LoggedEvent& event) {
         (event.output ? outputMonitor : inputMonitor).add (event, transport);

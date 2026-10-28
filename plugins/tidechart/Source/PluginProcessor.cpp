@@ -13,7 +13,13 @@ TidechartAudioProcessor::TidechartAudioProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "TidechartState", createParameterLayout())
 {
-    bypassParam = parameters.getRawParameterValue (tidechart::params::bypass);
+    namespace id = tidechart::params;
+    bypassParam = parameters.getRawParameterValue (id::bypass);
+    keyTonicParam = parameters.getRawParameterValue (id::keyTonic);
+    keyModeParam = parameters.getRawParameterValue (id::keyMode);
+    chordSizeParam = parameters.getRawParameterValue (id::chordSize);
+    keyMappingParam = parameters.getRawParameterValue (id::keyMapping);
+    chordBassParam = parameters.getRawParameterValue (id::chordBass);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (tidechart::params::bypass));
     jassert (bypassParameter != nullptr);
     outputMidi.ensureSize (reservedMidiBytes);
@@ -24,7 +30,40 @@ juce::AudioProcessorValueTreeState::ParameterLayout TidechartAudioProcessor::cre
     namespace id = tidechart::params;
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bypass, id::versionHintPhase1 }, "Bypass", false));
+
+    // Fase 3. Los nombres van en ASCII (los muestra el host); la GUI usa los suyos con ♯ y ♭. El orden de las listas
+    // es parte del formato del proyecto: no reordenar.
+    const juce::StringArray tonics { "C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B" };
+    const juce::StringArray modes { "Major (ionian)", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Minor (aeolian)", "Locrian",
+                                    "Harmonic minor", "Melodic minor", "Phrygian dominant" };
+    jassert (modes.size() == deepwater::theory::modeCount);
+    // La menor por defecto: el punto de partida del reggaetón.
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::keyTonic, id::versionHintPhase3 }, "Key", tonics, 9));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::keyMode, id::versionHintPhase3 }, "Mode", modes,
+                                                              static_cast<int> (deepwater::theory::Mode::aeolian)));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::chordSize, id::versionHintPhase3 }, "Chords",
+                                                              juce::StringArray { "Triads", "Sevenths" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::keyMapping, id::versionHintPhase3 }, "Keys",
+                                                              juce::StringArray { "White keys = degrees", "Scale notes" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::chordBass, id::versionHintPhase3 }, "Bass", false));
     return layout;
+}
+
+tidechart::midi::ChordSettings TidechartAudioProcessor::currentChordSettings (bool bypassed) const noexcept
+{
+    namespace th = deepwater::theory;
+    const auto choice = [] (const std::atomic<float>* p, int count) {
+        return juce::jlimit (0, count - 1, juce::roundToInt (p->load (std::memory_order_relaxed)));
+    };
+    tidechart::midi::ChordSettings settings;
+    settings.enabled = ! bypassed;
+    // standardKey escribe la tónica con menos alteraciones PARA ESE MODO: la tecla 10 es Si♭ en mayor (2 ♭; La♯ mayor
+    // tendría dobles sostenidos) y en menor (5 ♭ contra 7 ♯). Si empatan (Mi♭ / Re♯ menor, 6 y 6), sostenidos, como FL.
+    settings.key = th::standardKey (choice (keyTonicParam, 12), static_cast<th::Mode> (choice (keyModeParam, th::modeCount)));
+    settings.size = choice (chordSizeParam, 2) == 0 ? th::ChordSize::triad : th::ChordSize::seventh;
+    settings.mapping = choice (keyMappingParam, 2) == 0 ? tidechart::midi::KeyMapping::whiteKeys : tidechart::midi::KeyMapping::scaleNotes;
+    settings.bass = chordBassParam->load (std::memory_order_relaxed) >= 0.5f;
+    return settings;
 }
 
 void TidechartAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -70,8 +109,8 @@ void TidechartAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& bu
     processMidi (buffer, midi, true);
 }
 
-// Fase 1: bypass y activo hacen lo mismo (todo pasa tal cual). Desde la Fase 3, en bypass las notas de entrada pasarán
-// sin transformar y las generadas que suenen recibirán su note-off.
+// En bypass el MIDI pasa tal cual; activo, cada tecla dispara un acorde. Al cambiar de uno a otro, la etapa apaga lo que
+// sonaba del modo anterior en la muestra 0.
 void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, bool bypassed) noexcept
 {
     juce::ScopedNoDenormals noDenormals;
@@ -89,6 +128,7 @@ void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juc
         midiLog.push ({ message, static_cast<std::uint16_t> (size), true, clock.ppqAt (sample) });
     };
 
+    stage.setChordSettings (currentChordSettings (bypassed));
     stage.beginBlock (sink);
     const int lastSample = juce::jmax (0, numSamples - 1);
     for (const auto metadata : midi)
@@ -155,6 +195,7 @@ void TidechartAudioProcessor::publishTransport (int numSamples, bool bypassed) n
     snapshot.soundingCount = sounding.soundingCount();
     snapshot.releases = stage.releaseCount();
     snapshot.bypassed = bypassed;
+    snapshot.heldDegrees = stage.getChords().heldDegrees();
     transportBox.write (snapshot);
 }
 
@@ -169,7 +210,7 @@ void TidechartAudioProcessor::setStateInformation (const void* data, int sizeInB
     if (const auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (parameters.state.getType()))
             parameters.replaceState (juce::ValueTree::fromXml (*xml));
-    // Cargar un proyecto cambia lo que el plugin hace con las notas (desde la Fase 3): lo que suena se apaga.
+    // Cargar un proyecto cambia lo que el plugin hace con las notas (otra tonalidad, otros acordes): lo que suena se apaga.
     stage.requestRelease();
 }
 

@@ -25,4 +25,5 @@ struct TransportSnapshot
     int soundingCount = 0;
     std::uint32_t releases = 0; // cuántas veces se apagó todo (pánico, reinicio del audio, cargar un proyecto)
     bool bypassed = false;
+    std::uint8_t heldDegrees = 0; // los grados de los acordes de una tecla que suenan (bit d = grado d, 0..6)
 };

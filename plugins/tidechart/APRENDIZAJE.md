@@ -223,3 +223,133 @@ Pasa la idea a **Mi frigio** (grados i ♭II ♭III iv v° ♭VI ♭vii) y escri
   mira qué nota está más abajo.
 - Llenar todo de 9.ª, 11.ª y 13.ª: en el reggaetón el ritmo necesita espacio. Las extensiones lucen en pads y keys
   suaves; para un pluck que lleva el dembow, tríadas o m7 suelen funcionar mejor.
+
+## Fase 3 — La paleta: un acorde por tecla
+
+Tidechart deja de solo escuchar: ahora **toca**. Eliges una tonalidad y un modo, la **PALETA** muestra los 7 acordes
+que salen de esa escala, y cada tecla que le llega (del Piano Roll o de un teclado) dispara un acorde entero. Se
+compone con una sola línea de notas, una por acorde, y cambiar de tonalidad o de modo cambia todos los acordes a la vez.
+
+### Conceptos aprendidos
+
+- **Acordes diatónicos.** Apilar terceras *dentro de la escala*: desde cada nota, la nota que está 2 lugares más
+  arriba en la escala y la que está 4 lugares más arriba (y 6 lugares, para la séptima). Sin salirte de las 7 notas
+  aparecen solos los 7 acordes "de la casa". Unos salen mayores y otros menores porque la escala no es pareja: sus
+  terceras tienen 3 o 4 semitonos según dónde caigan. En La menor: **i ii° ♭III iv v ♭VI ♭VII** (Am Bdim C Dm Em F G).
+  En Do mayor: I ii iii IV V vi vii° (C Dm Em F G Am Bdim). Son **las mismas 7 notas**: La menor es la relativa de Do
+  mayor, solo cambia dónde está la casa.
+- **El modo cambia la paleta entera.** Con la tónica en La, pasar de menor a **dórico** cambia una nota (F → F♯), y
+  con ella tres acordes: el iv (Dm) pasa a **IV (D)**, el ♭VI (F) a **vi° (F♯dim)** y el ii° (Bdim) a **ii (Bm)**. A
+  **frigio**: el ii° pasa a **♭II (B♭)**, el acorde más oscuro del menor. A **menor armónica**: el v (Em) pasa a
+  **V (E)**, la dominante con sensible. Probarlo en la paleta es la forma más rápida de oír qué hace cada modo.
+- **Grados = transportar gratis.** Con "Teclas blancas = grados", la tecla C es siempre el I (o la i), D el ii... en
+  **cualquier** tonalidad. Una progresión escrita como C–A–E–B (i–♭VI–♭III–♭VII) suena en La menor como Am F C G. Si
+  cambias la tónica a Re, suena Dm B♭ F C sin mover una nota del Piano Roll. Es pensar en grados, como un músico de
+  sesión: "es un uno-seis-tres-siete en Re".
+- **Funciones con color.** Cada acorde lleva una franja: **verde agua = tónica** (reposo), **lavanda = subdominante**
+  (salir de casa), **naranja = dominante** (tensión que pide volver). Una progresión que funciona suele recorrer los
+  tres colores. Una que se queda en uno (solo tónicas) se siente estática, y eso a veces es justo lo que se busca en un
+  loop de reggaetón.
+- **Tríadas y séptimas.** La séptima diatónica le da a cada grado su color de 4 notas: en menor, **i m7**, **♭III maj7**,
+  **iv m7**, **♭VI maj7**, **♭VII 7**. Ese es el sonido del R&B y del reggaetón "romántico": el mismo esqueleto con más
+  carne.
+- **Voicing de partida.** La fundamental va en la tecla y las demás notas encima, lo más juntas posible (*posición
+  cerrada*). Con "+ Bajo" se suma la fundamental una octava abajo: el acorde suena más lleno y el bajo deja claro cuál
+  es. Elegir las inversiones para que las voces se muevan poco entre un acorde y el siguiente es la Fase 4.
+
+### Qué hace cada control
+
+- **Tónica** (A, B♭, F♯...): la nota "de casa". La escritura (B♭ o A♯) la decide sola, según el modo, con las menos
+  alteraciones posibles.
+- **Modo**: qué notas tiene la escala. Debajo de los acordes se ven las 7 notas y el carácter del modo en una frase.
+- **Tríadas / Séptimas**: acordes de 3 o 4 notas.
+- **Teclas blancas = grados**: C = I, D = ii, E = iii, F = IV, G = V, A = vi, B = vii (las mayúsculas y minúsculas
+  dependen del modo). Las negras no suenan. La octava de la tecla decide la octava del acorde (C5 dispara la tónica cerca
+  de C5).
+- **Notas de la escala**: cada nota de la escala dispara su acorde con la fundamental en esa misma tecla (en La menor,
+  A = Am, C = C). Las notas que están fuera de la escala no suenan. Sirve para tocar "a ojo" sobre un teclado.
+- **+ Bajo**: la fundamental una octava abajo.
+- **Los 7 pads**: grado en números romanos, nombre del acorde, función y la tecla que lo dispara. **Mantén pulsado** un
+  pad para escuchar el acorde (sale por el puerto MIDI, igual que las teclas). **Arrastra** de un pad a otro para
+  encadenarlos. Se enciende el que suena, venga del ratón o del Piano Roll.
+- **ACORDE** (abajo) ahora conoce la tonalidad: dice el grado y su función ("♭VI (subdominante)"), escribe las notas
+  como en la escala y, si tocas algo fuera de ella en bypass, dice de qué modo viene ("prestado de frigio...").
+- **Bypass**: las teclas vuelven a pasar tal cual (la Fase 1). Activarlo o quitarlo apaga lo que sonaba.
+
+### Ejercicio guiado: componer con una línea
+
+Con el ruteo de siempre (Tidechart → puerto 1 → un pad o un piano en Undertow o FLEX):
+
+1. Tidechart en **A, menor (eólico), Tríadas, Teclas blancas**. Pasa el ratón por los pads manteniendo pulsado: escucha
+   el i (casa), el iv (melancólico), el v (débil, sin sensible) y el ♭VI (el más emotivo).
+2. En el Piano Roll de Tidechart escribe **C5 – A5 – E5 – B5**, una nota por compás, en loop: suena **Am – F – C – G**.
+   Mira cómo se encienden los pads y lo que dice ACORDE en cada compás.
+3. Sin tocar el Piano Roll, cambia la tónica a **D**: Dm – B♭ – F – C. Después a **F♯**: F♯m – D – A – E. Es la misma
+   canción en otra tonalidad, a la altura que pida la voz.
+4. Vuelve a La y cambia el modo a **dórico**: el ♭VI (A5) se vuelve **F♯dim**. Ese acorde suena raro en este loop:
+   cada modo tiene progresiones que le quedan bien y otras que no.
+5. Cambia a **menor armónica**: G5 dispara **E** (V) en vez de Em. Escribe C5 – G5 en loop (i–V): la vuelta a casa
+   tira mucho más fuerte.
+6. Pasa a **Séptimas** y activa **+ Bajo**: el mismo loop suena a R&B. Compara con tríadas a volumen parecido.
+
+### Receta: perreo oscuro en dos acordes
+
+**E, frigio, Tríadas, + Bajo**. En el Piano Roll, solo dos teclas: **C5** (i = Em) y **D5** (♭II = F). Escribe el
+golpe del dembow con las notas, en **3 + 3 + 2**: cuenta 8 semicorcheas por medio compás (dos tiempos) y pon un golpe
+corto (una semicorchea) en la **1.ª, la 4.ª y la 7.ª**. Son 6 golpes por compás. Dos compases de Em y dos de F. Por qué funciona: el ♭II está a un semitono de la tónica, así que
+el bajo (E → F → E) se mueve lo mínimo y crea la máxima tensión. El ritmo repetido sostiene la canción aunque solo
+haya dos acordes. Para más oscuridad, pon el F solo en el último golpe del 4.º compás: el oído espera volver a Em y
+el ♭II aparece como una sombra. Con una tecla por golpe, escribir el ritmo de los acordes es escribir una sola línea
+de notas.
+
+### Reto (sin receta)
+
+Escribe **8 compases** en La menor con teclas blancas que cuenten una historia T → S → D → T (mira los colores) y
+terminen de forma que pidan volver al principio. Después escucha el mismo Piano Roll en **dórico**, **frigio** y
+**menor armónica**, y anota qué acorde cambió en cada caso y si mejoró o empeoró la progresión.
+Pistas: 1) una historia mínima es i – iv – v – i (C F G C). 2) Para que el final pida volver, termina en un acorde de
+dominante (naranja), no en la i. 3) En menor armónica, el V del compás 8 es el que más tira hacia el compás 1.
+
+### Teoría aplicada: por qué la paleta de menor no es "la de mayor, pero triste"
+
+La menor y Do mayor tienen las mismas 7 notas y los mismos 7 acordes. Lo que cambia es **cuál es la casa**: en La
+menor, Am es el reposo y C es un "alivio" (♭III, tónica relativa); en Do mayor, C es el reposo y Am es la "melancolía"
+(vi). Por eso "Despacito" se puede leer de las dos formas (Fase 2). El bajo, el primer y el último acorde del loop y
+dónde descansa la melodía deciden la casa. Si quieres que suene menor, empieza y termina en la i, y ponla en los
+tiempos fuertes.
+
+### Análisis de canciones
+
+- **"Oye como va"** (Tito Puente, popularizada por Santana): todo el tema es un vaivén entre **Am7 y D9**. En la paleta
+  es **A dórico**, i – IV (C5 y F5 con séptimas). El IV **mayor** dentro de un tono menor es la marca del dórico: el
+  F♯ le da la luz que el eólico (Dm, iv) no tiene. Pruébalo: mismo Piano Roll en eólico y en dórico.
+- **i – ♭VI – ♭III – ♭VII** (C A E B en teclas blancas): el loop de la Fase 2, ahora con una nota por acorde. Es la
+  base de cientos de temas de reggaetón y pop latino. Escucha cómo el ♭VII (naranja) empuja de vuelta a la i sin
+  sensible: cierra "a medias", por eso aguanta el loop.
+- Busca un tema de perreo oscuro que te guste, encuentra su tónica (la nota a la que todo vuelve) y prueba en la
+  paleta eólico contra frigio: si en algún momento aparece un acorde un semitono por encima de la tónica, es frigio.
+
+### Vocabulario
+
+- **Acorde diatónico**: el que se arma solo con notas de la escala (los 7 de la paleta).
+- **Grado**: la posición del acorde en la escala (i, ♭VI...), independiente de la tonalidad.
+- **Relativa**: la tonalidad mayor y la menor con las mismas notas (Do mayor ↔ La menor, Fa mayor ↔ Re menor).
+- **Transportar**: llevar una canción a otra tonalidad sin cambiar los grados (paso 3 del ejercicio).
+- **Posición cerrada**: las notas del acorde lo más juntas posible encima de la fundamental.
+- **Disparo (trigger)**: una nota que no suena ella misma sino que hace sonar otra cosa (aquí, un acorde).
+- **Vamp**: un vaivén de 1 o 2 acordes que se repite toda la sección ("Oye como va", la receta del frigio).
+
+### Errores comunes
+
+- **No suena nada con las negras.** Con "Teclas blancas = grados" las negras no disparan nada, y con "Notas de la
+  escala" tampoco las notas que no están en la escala. Es a propósito: así nunca se cuela un acorde fuera de la tonalidad.
+- **Cambiar la tonalidad con una nota sostenida y no oír el cambio.** El acorde que ya suena se queda como está hasta
+  que se suelta la tecla, y el siguiente ya sale en la tonalidad nueva. Así cambiar un parámetro nunca deja notas
+  colgadas.
+- **Notas que se solapan en el Piano Roll.** Si una nota empieza antes de que termine la anterior, los dos acordes
+  suenan juntos un instante. Las notas que comparten se vuelven a atacar, una sola vez. Para un cambio limpio, que cada
+  nota termine donde empieza la siguiente.
+- **Demasiado grave con "+ Bajo".** En la octava 4 o más abajo, el bajo extra se mete con el 808. Usa "+ Bajo" en pads y
+  keys solos, o sube el acorde una octava.
+- **Pensar que el modo es solo "más triste" o "más alegre".** Cada modo tiene progresiones propias: el ♭II es del
+  frigio, el IV mayor en menor es del dórico, el V mayor en menor es de la armónica. La paleta enseña cuáles son.

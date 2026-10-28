@@ -13,8 +13,9 @@
 
 // Herramienta MIDI: recibe notas (del Piano Roll o de un teclado) y emite MIDI hacia otro instrumento. No genera audio:
 // su salida estéreo siempre es silencio (FL espera al menos una salida en un generador).
-// Fase 1: el MIDI pasa tal cual (passthrough) por la etapa que garantiza que ninguna nota queda colgada (MidiStage), y
-// se lee la posición del host (HostClock) para mostrarla en la GUI.
+// Fase 1: el MIDI pasa por la etapa que garantiza que ninguna nota queda colgada (MidiStage), y se lee la posición del
+// host (HostClock) para mostrarla en la GUI. Fase 3: cada tecla dispara un acorde de la tonalidad elegida (en bypass,
+// el MIDI pasa tal cual), y la paleta de la GUI hace sonar los acordes con el ratón.
 // El MIDI está en tidechart::midi (sin JUCE); aquí solo se conectan los buffers de JUCE, los parámetros y la GUI.
 class TidechartAudioProcessor final : public juce::AudioProcessor
 {
@@ -65,6 +66,12 @@ public:
     // Cualquier hilo: el botón de pánico. Al principio del bloque siguiente se apaga todo lo que suena.
     void panic() noexcept { stage.requestPanic(); }
 
+    // Cualquier hilo: la paleta hace sonar el acorde del grado 0..6 (−1 = soltarlo), desde el bloque siguiente.
+    void previewChord (int degree) noexcept { stage.requestPreview (degree); }
+
+    // Los ajustes de acordes que dicen los parámetros ahora mismo (la tonalidad escrita según el modo).
+    tidechart::midi::ChordSettings currentChordSettings (bool bypassed) const noexcept;
+
     // Contadores de notas (note-on) que entraron y salieron, para comprobar el ruteo en FL.
     std::uint32_t notesIn() const noexcept { return notesInCount.load (std::memory_order_relaxed); }
     std::uint32_t notesOut() const noexcept { return notesOutCount.load (std::memory_order_relaxed); }
@@ -78,6 +85,11 @@ private:
 
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* bypassParam = nullptr;
+    std::atomic<float>* keyTonicParam = nullptr;
+    std::atomic<float>* keyModeParam = nullptr;
+    std::atomic<float>* chordSizeParam = nullptr;
+    std::atomic<float>* keyMappingParam = nullptr;
+    std::atomic<float>* chordBassParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     tidechart::midi::MidiStage stage;
