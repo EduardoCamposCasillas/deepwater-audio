@@ -8,6 +8,7 @@
 #include "deepwater/dsp/HostClock.h"
 #include "deepwater/dsp/TripleBuffer.h"
 #include "midi/EventLog.h"
+#include "midi/KeyListener.h"
 #include "midi/MidiStage.h"
 #include "TransportSnapshot.h"
 
@@ -16,7 +17,8 @@
 // Fase 1: el MIDI pasa por la etapa que garantiza que ninguna nota queda colgada (MidiStage), y se lee la posición del
 // host (HostClock) para mostrarla en la GUI. Fase 3: cada tecla dispara un acorde de la tonalidad elegida (en bypass,
 // el MIDI pasa tal cual), y la paleta de la GUI hace sonar los acordes con el ratón. Fase 4: la progresión (guardada en
-// el proyecto), sincronizada con el host, con voicing y ritmo.
+// el proyecto), sincronizada con el host, con voicing y ritmo. Fase 5: escuchar el MIDI que entra para detectar la
+// tonalidad (mientras escucha, el MIDI pasa tal cual).
 // El MIDI está en tidechart::midi (sin JUCE); aquí solo se conectan los buffers de JUCE, los parámetros y la GUI.
 class TidechartAudioProcessor final : public juce::AudioProcessor
 {
@@ -84,6 +86,12 @@ public:
     // La de fábrica: i–♭VI–♭III–♭VII, un compás cada uno (el esqueleto del reggaetón).
     static deepwater::theory::Progression defaultProgression();
 
+    // Detección de tonalidad (Fase 5). Cualquier hilo: empezar a escuchar (de cero) o dejar de escuchar. Mientras
+    // escucha, el MIDI pasa tal cual, como en bypass (se oye lo que se toca), y lo que entra se acumula en la evidencia
+    // que publica el snapshot. No es un parámetro ni se guarda: es una acción, no un ajuste del proyecto.
+    void setListening (bool shouldListen) noexcept { listenRequested.store (shouldListen, std::memory_order_release); }
+    bool isListening() const noexcept { return listenRequested.load (std::memory_order_acquire); }
+
     // Contadores de notas (note-on) que entraron y salieron, para comprobar el ruteo en FL.
     std::uint32_t notesIn() const noexcept { return notesInCount.load (std::memory_order_relaxed); }
     std::uint32_t notesOut() const noexcept { return notesOutCount.load (std::memory_order_relaxed); }
@@ -116,6 +124,9 @@ private:
     std::atomic<std::uint32_t> progressionChanges { 0 };
 
     tidechart::midi::MidiStage stage;
+    tidechart::midi::KeyListener keyListener;
+    std::atomic<bool> listenRequested { false };
+    bool listening = false; // lo que el audio está haciendo (cambia al principio de un bloque)
     deepwater::dsp::HostClock clock;
     // Aquí se arma la salida de cada bloque, que después se copia al buffer del host.
     juce::MidiBuffer outputMidi;

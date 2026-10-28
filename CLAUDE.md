@@ -104,8 +104,10 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
   inversión o slash, `midiNotes`), `Harmony.h` (acordes diatónicos, números romanos, funciones T/S/D, préstamo modal y
   la lista de acordes prestados), `Voicing.h` (conducción de voces: estado fundamental, cerrado y drop 2),
   `Rhythm.h` (patrones de acordes en semicorcheas: dembow y variantes), `Progression.h` (pasos = grado + tiempos, el paso
-  en cada semicorchea, voicing de toda la progresión), `StaticVector.h`. En `src/`: `Text.h` (texto ida y vuelta de
-  notas, tonalidades, acordes, romanos y progresiones), `ChordFinder.h` (reconocer acordes por sus notas) y
+  en cada semicorchea, voicing de toda la progresión), `KeyDetection.h` (detección de tonalidad: perfiles por modo,
+  correlación, votos de "casa" al empezar cada frase, ranking de las 120 tonalidades y su confianza),
+  `StaticVector.h`. En `src/`: `Text.h` (texto ida y vuelta de notas, tonalidades, acordes, romanos y progresiones),
+  `ChordFinder.h` (reconocer acordes por sus notas), `keyEvidence` (la evidencia de tonalidad de una lista de notas) y
   `renderProgression` (la progresión como notas en el tiempo: lo mismo que toca Tidechart en vivo).
 - El orden del catálogo de acordes y de `rhythmPatterns` es parte del formato: no reordenar ni insertar en medio (lo
   nuevo, al final).
@@ -117,7 +119,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | ✅ Terminado |
 | 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | ✅ Terminado |
 | 4 | Fathom — EQ paramétrico con analizador (24 bandas, dinámico, M/S, fase lineal, dinámica espectral) | FabFilter Pro-Q 4 | ✅ Terminado |
-| 5 | Tidechart — herramienta MIDI de acordes y melodías por tonalidad (paleta, progresiones, ritmos como el dembow, melodías y bajos) | Scaler 3, Captain Chords | En curso (Fase 4) |
+| 5 | Tidechart — herramienta MIDI de acordes y melodías por tonalidad (paleta, progresiones, ritmos como el dembow, melodías y bajos) | Scaler 3, Captain Chords | En curso (Fase 5) |
 | 6 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
 | 7 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
 | 8 | Reverb algorítmica (FDN, difusión, modulación; modos vintage y espacial) | Valhalla VintageVerb, Supermassive | Pendiente |

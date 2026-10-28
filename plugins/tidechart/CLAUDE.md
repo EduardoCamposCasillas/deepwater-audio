@@ -89,11 +89,14 @@ plugins/tidechart/
     midi/ChordTrigger.h      # Fase 3: qué acorde dispara cada tecla (teclas blancas = grados / notas de la escala) y los
                              # acordes que suenan, cada uno con SUS notas, con cuenta de notas compartidas. Fase 4:
                              # cualquier grado escrito (chordForNumeral), voicing (withVoicing), códigos de la paleta
+    midi/KeyListener.h       # Fase 5: escucha lo que entra y suma la evidencia de la tonalidad (duraciones, bajo, votos
+                             # de "casa" al empezar cada frase), exacta a la muestra y sin reservar memoria
     midi/EventLog.h          # cola lock-free audio → GUI de los eventos que entran y salen (el monitor)
     midi/MidiText.h          # nombres de nota como FL (C5 = 60) y descripción de mensajes para el monitor
     gui/                     # tema, reloj del host (TransportView), paleta + prestados (ChordPaletteView), progresión
                              # (ProgressionView, ProgressionTemplates), teclado de lo que suena, acorde que suena
-                             # (ChordView, con libs/theory), teoría en español (TheoryNames), monitor MIDI
+                             # (ChordView, con libs/theory), teoría en español (TheoryNames), monitor MIDI, detección
+                             # de tonalidad (KeyDetectView: escuchar, resultado con su porqué, alternativas, histograma)
   tests/MidiTests.cpp        # etapa MIDI sin JUCE (contra un receptor modelo independiente)
   tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte,
                              # progresión, reservas); --snapshot <png> pinta la GUI fuera de pantalla para revisarla
@@ -186,6 +189,26 @@ plugins/tidechart/
     `RomanNumeral` empaquetado). Prestados: los 8 primeros de `borrowedChords`; "Agregar con clic" los suma a la
     progresión. Plantillas: progresión + modo (la tónica no cambia).
 
+- Decisiones de la Fase 5:
+  - `libs/theory`: `KeyDetection.h` (+ `src/KeyDetection.cpp`: `keyEvidence` de una lista de `NoteEvent`, para el MCP y
+    como oráculo de los tests). Krumhansl-Schmuckler: correlación de Pearson entre lo escuchado (12 clases de altura,
+    pesadas por duración; la nota más grave de cada tramo suma otra vez) y el perfil de cada una de las 120
+    tonalidades. Perfil genérico por papel, medias de Krumhansl-Kessler mayor y menor: tónica 6.34, 5.ª justa 4.97,
+    3.ª 4.88, resto de la escala 3.56, fuera 2.55 (sirve para los 10 modos).
+  - Relativas (Am F C G hace sonar más el Do que el La): votos de "casa" = la nota más grave de las que empiezan cerca
+    del inicio de cada frase de 8 compases (de −1/8 a +1/4 de negra; desde el compás 1, y cada vuelta del loop o cada
+    play cuenta como otra frase); sin host reproduciendo, un voto para la más grave de las primeras notas (50 ms). La
+    parte de los votos que cae en la tónica suma hasta 0.25. Empates → modo más común (eólico, jónico, dórico, frigio,
+    mixolidio, armónica, lidio, frigio dominante, melódica, locrio).
+  - Confianza por el margen con la segunda: ≥ 0.035 clara, ≥ 0.015 probable, menos dudosa; menos de 3 clases de altura
+    (o menos de 1 s escuchado, en la GUI) = nada. Lo que queda segundo suele ser el modo vecino de la misma tónica (una
+    nota distinta: ~0.04 de margen cuando esa nota suena).
+  - "Escuchar" no es un parámetro ni se guarda: un atómico del procesador. Mientras escucha el MIDI pasa tal cual (los
+    ajustes de la etapa van como en bypass, con las mismas transiciones que apagan lo del otro modo); cada vez que se
+    enciende empieza de cero; al apagarlo lo escuchado queda publicado. El audio solo suma (`KeyListener`) y publica la
+    evidencia en el snapshot; la GUI ordena las tonalidades (`rankKeys`, 120 × 12, solo si cambió). "Usar" pone
+    `keyTonic` y `keyMode` con su gesto.
+
 ## Requisitos propios (además de los del raíz)
 - Ninguna nota colgada, en ningún caso (ver arriba).
 - Un acorde por tecla: la tecla que dispara un acorde no suena además sola, salvo que se pida (modo "con la nota").
@@ -228,6 +251,29 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 5 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (escuchar acordes y melodías, Usar).
+- `libs/theory`: `KeyDetection.h` (perfiles, `profileCorrelation`, `rankKeys`, `keyConfidence`, `sameNotes`,
+  `phraseCueIndex`) y `keyEvidence` en `src/KeyDetection.cpp`. `DeepwaterTheoryTests` +1 grupo: perfiles de los 10
+  modos, evidencia de notas (duración, bajo, votos), ventanas de frase, relativas sin votos (empate → La menor, luego
+  Do mayor; el reggaetón sin votos sale Do mayor), 8 progresiones del contexto (reggaetón, pop, i–♭II frigio, dórico,
+  armónica, mixolidio, frigio dominante, lidio) en las 12 tónicas con al menos confianza "probable", la andaluza y una
+  melodía sin votos.
+- Plugin: `midi/KeyListener.h`; el procesador con `setListening` (atómico), la evidencia en el snapshot; GUI 900 × 960
+  con la fila TONALIDAD (`gui/KeyDetectView.h`) y "ESCUCHANDO" en SUENA AHORA. Revisada con `--snapshot` (después de
+  escuchar i–♭II en Mi frigio: E frigio, clara; "lo que las separa es B contra B♭"; alternativas E locrio, E frigio
+  dominante, E menor).
+- Tests: `TidechartTests` +1 (en vivo = `keyEvidence` con bloques al azar, un voto por vuelta del loop, la primera nota
+  con FL parado, el bajo doble, note-off sueltos, CC 123, reset). `TidechartProcessorTests` +1 (escuchando pasa el MIDI
+  tal cual y detecta Mi frigio a 4 sample rates × bloques 1/64/512/4096/variable, sin reservas; al dejar de escuchar
+  apaga lo que pasó y vuelven los acordes; lo escuchado se conserva; volver a escuchar empieza de cero).
+- `chordBass` pasó de `AudioParameterBool` a `AudioParameterChoice` (Off / On): el Bool guarda el valor crudo del host
+  (0.6) y el estado lo redondea (1), y pluginval con `--randomise` fallaba en "Bass not restored" (ya pasaba en la
+  Fase 4, con otras semillas). En el proyecto se guarda igual (0 / 1). Ebb tiene un Bool igual (`velocity`).
+- Release con 0 warnings; ctest 14/14; pluginval strictness 10 ampliado con `--randomise`: SUCCESS (también con las 3
+  semillas que fallaban).
+- Pendiente para más adelante: detectar cambios de tonalidad dentro de una canción (ventana deslizante) y detectar
+  desde lo que hay en la progresión, no solo desde el MIDI que entra.
+
 Fase 4 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (progresión sincronizada, dembow, conducción
 de voces, prestados): funciona.
 - `libs/theory`: `Voicing.h`, `Rhythm.h`, `Progression.h` (+ `src/Progression.cpp`: `renderProgression`) y
@@ -316,5 +362,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 5 (detección de tonalidad a partir del MIDI
-entrante).
+Siguiente: que el usuario pruebe la Fase 5 en FL; después, Fase 6 (generador de melodías y líneas de bajo).

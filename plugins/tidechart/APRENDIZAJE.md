@@ -505,3 +505,123 @@ más aguda del acorde se mueve poco, y una melodía que va por encima tiene su e
   hay tonalidad que colorear: la canción suena perdida. Uno o dos por progresión, en el sitio donde quieres el efecto.
 - **Abierto en graves.** Con la tecla en C3 o más abajo, el drop 2 deja una 3.ª grave que embarra con el bajo. Súbelo
   de octava o usa voicing cerrado.
+
+## Fase 5 — Detectar la tonalidad: ¿dónde está la casa?
+
+Hasta aquí tú le decías a Tidechart la tonalidad. Ahora puede **escucharla**: le das play a una melodía o a unos
+acordes (o tocas en el teclado) y te dice en qué tonalidad y modo están, qué tan segura está, **por qué**, y qué otras
+lecturas hay. Con **Usar** la pone en la paleta. Sirve para trabajar sobre algo que ya existe: un sample, una melodía
+que se te ocurrió, una canción que quieres estudiar.
+
+### Conceptos aprendidos
+
+- **El histograma de notas.** Lo primero es contar cuánto suena cada una de las 12 notas (sin importar la octava),
+  pesado por la **duración**: una nota larga cuenta más que una de paso. El bajo cuenta doble, porque suele decir la
+  fundamental. Es la fila de barras de TONALIDAD.
+- **El perfil de una tonalidad.** En una tonalidad no suenan todas las notas igual: la **tónica** es la que más, después
+  la **5.ª** y la **3.ª** (la tríada de tónica), después el resto de la escala, y lo que está fuera casi nada. Ese dibujo
+  es el "perfil". Lo midieron Krumhansl y Kessler (1982) preguntando a oyentes cuánto "encajaba" cada nota después de
+  escuchar una tonalidad; Tidechart usa sus valores medios por papel (tónica, 5.ª, 3.ª, escala, fuera), así sirve para
+  cualquiera de los 10 modos.
+- **Correlación.** Para cada una de las 120 tonalidades (12 tónicas × 10 modos) se mide cuánto se parece tu histograma a
+  su perfil: ¿suben y bajan juntos? Es la **correlación de Pearson** (1 = mismo dibujo, 0 = nada que ver). Gana la que
+  más se parece. Es el método de Krumhansl y Schmuckler, el clásico de la detección de tonalidad.
+- **El problema de las relativas.** **La menor y Do mayor tienen las mismas 7 notas.** Peor: en i–♭VI–♭III–♭VII (Am F C
+  G) el **Do suena más que el La** (está en Am, en F y en C). Con solo el histograma, la progresión del reggaetón sale
+  como Do mayor (vi–IV–I–V). Lo que hace que la oigas en La menor no es *qué* notas suenan sino **dónde se apoya** la
+  música: empieza y vuelve a Am.
+- **El voto de "casa".** Por eso Tidechart escucha además **la nota más grave al empezar cada frase** (cada 8 compases
+  desde el compás 1, y en cada vuelta del loop de FL). Cada frase es un voto para esa nota; si los votos caen en la
+  tónica de una candidata, esta suma puntos. Con FL parado (tocando en vivo), vota la nota más grave de lo primero que
+  tocas. Son los puntos naranjas sobre las barras.
+- **Misma tónica, otro modo.** Lo que suele quedar segundo es el modo vecino con la misma tónica: La menor contra La
+  frigio, que se diferencian en **una sola nota** (Si contra Si♭). Si esa nota sonó, decide; si nunca sonó, las dos
+  son igual de posibles, y Tidechart te lo dice ("lo que las separa es B contra B♭").
+- **Confianza.** *Clara*, *probable* o *dudosa* según cuánto le gana la primera a la segunda. Dudosa no quiere decir
+  error: quiere decir que faltan notas para decidir, o que de verdad es ambigua (y ahí decides tú, a oído).
+
+### Qué hace cada control
+
+- **Escuchar.** Mientras está encendido, Tidechart **deja pasar el MIDI tal cual** (como en bypass: oyes lo que tocas,
+  la paleta y la progresión no suenan) y acumula lo que entra. Cada vez que lo enciendes empieza de cero. Al apagarlo,
+  el resultado se queda en pantalla y vuelven los acordes.
+- **El resultado.** La tonalidad, su confianza y, debajo, el porqué: las 3 notas que más sonaron con su papel (tónica,
+  ♭2, 5...) y qué la separa de la segunda opción (si es su relativa, o si es otro modo con la misma tónica).
+- **Usar.** Pone la tónica y el modo en la paleta (y en la progresión, que está en grados: se transporta sola).
+- **o también.** Las 3 siguientes. Clic = usar esa.
+- **Las barras.** Cuánto sonó cada nota. En color las de la escala detectada; la tónica en turquesa; gris lo de fuera.
+  El punto naranja: votos de "casa".
+
+### Ejercicio guiado: que adivine la del reggaetón
+
+1. Rutea Tidechart a un piano como siempre. En el Piano Roll **de Tidechart** escribe a mano **Am – F – C – G**, un
+   compás cada uno (tríadas en C5 y el bajo en C4: A, F, C, G). Loop de 4 compases.
+2. Pulsa **Escuchar** y dale play desde el compás 1. Oyes los acordes tal cual (Tidechart no los cambia). A los pocos
+   segundos aparece **A menor (eólico)**, *clara*, con un punto naranja sobre el La. Lee la explicación: Do mayor tiene
+   las mismas notas; decide el bajo al empezar cada frase.
+3. Mueve el loop para que empiece en el **C** (C – G – Am – F) y vuelve a encender Escuchar (empieza de cero). Ahora
+   sale **Do mayor**: las mismas notas, otra casa. Así de importante es dónde empieza la frase para el oído.
+4. Cambia los acordes a **Am – Dm – E – Am** (el E mayor: E G♯ B) y vuelve a escuchar: sale **La menor armónica** (el G♯
+   es la sensible). Mira las barras: el G♯ ahora está en la escala y el G natural no sonó.
+5. Ahora solo **Am – B♭** alternados (i–♭II): sale **La frigio** (el B♭ es el ♭2). Una sola nota cambia el modo.
+6. Pulsa **Usar** y apaga Escuchar: la paleta queda en La frigio y ya puedes tocar sus acordes.
+
+### Receta: sacar la tonalidad de un sample
+
+Tienes un loop de guitarra o de piano (audio) y quieres acompañarlo. 1) Escucha el sample y tararea las notas
+largas; tócalas en el teclado o escríbelas en el Piano Roll de Tidechart (no hace falta el ritmo exacto: notas
+largas). 2) La nota en la que "descansa" el sample, ponla al principio y en el grave. 3) Escuchar → mira el resultado y
+las alternativas. 4) Prueba la primera con **Usar**: toca los pads de la paleta encima del sample. Si un acorde choca,
+prueba la alternativa (casi siempre el mismo modo con la otra nota que los separa). Por qué funciona: el sample tiene un
+"perfil" como cualquier música; las notas largas y el grave pesan más, igual que para el oído.
+
+### Reto (sin receta)
+
+Escribe una melodía de 8 compases (sin acordes) que Tidechart detecte como **Re dórico**, no como Re menor ni como Do
+mayor. Antes, piensa en papel qué notas tiene que tener. Pistas: 1) Re dórico y Do mayor tienen las mismas notas: ¿qué
+hace que la casa sea Re? 2) Re dórico y Re menor se diferencian en una nota: ¿cuál, y cuánto tiene que sonar? 3) Que la
+melodía empiece en una nota grave en el compás 1 y vuelva a ella.
+
+### Teoría aplicada: tónica y "centro tonal"
+
+Las 7 notas de una escala no dicen la tonalidad por sí solas: son el **material**. La tonalidad es el material más un
+**centro**: la nota a la que todo vuelve. Lo que crea el centro es la **jerarquía**: la tónica en los tiempos fuertes,
+al principio y al final de las frases, en el bajo, y sus vecinas (5.ª y 3.ª) sosteniéndola. Por eso con las mismas
+notas de Do mayor puedes hacer música en La menor, en Re dórico o en Mi frigio: cambia **dónde te apoyas**. Y por eso el
+reggaetón en menor funciona tan bien con loops de 4 acordes: el loop vuelve a la i en cada vuelta, y ese regreso
+constante fija la casa aunque el ♭III suene tanto como la i.
+
+### Análisis de canciones
+
+- **"Despacito"**: Bm – G – D – A. Las notas de Si menor son las de Re mayor; el ♭III (D) suena tanto como la i. ¿Por
+  qué la oímos en Si menor? Empieza en Bm y vuelve a Bm cada 4 compases. Escribe los acordes en el Piano Roll y pídeselo
+  a Tidechart; luego empieza el loop en D y compara.
+- **"Tusa"** (Karol G y Nicki Minaj): Fm – D♭ – A♭ – E♭ (i–♭VI–♭III–♭VII en Fa menor). La misma progresión que
+  "Despacito" en otra tónica: la detección cambia la tónica, pero los grados (y la explicación) son los mismos.
+- **"Oye cómo va"** (Tito Puente / Santana): Am7 – D7, un vamp de dos acordes. El F♯ del D7 lo hace **dórico**, no menor.
+  Tócalo y mira qué nota marca Tidechart como la diferencia con La menor.
+- Ejercicio: elige un perreo oscuro que te guste, escribe 4 compases de su bajo y la melodía principal en el Piano Roll
+  y pídele la tonalidad. ¿Es menor natural o frigio? ¿Qué nota lo decide?
+
+### Vocabulario
+
+- **Tonalidad / centro tonal**: la nota "casa" de una música y la escala que la rodea.
+- **Relativas**: dos tonalidades con las mismas notas y distinta tónica (La menor y Do mayor; Mi frigio y Do mayor).
+- **Paralelas**: misma tónica, distinto modo (La menor y La mayor; La menor y La frigio).
+- **Perfil tonal**: cuánto se espera que suene cada nota en una tonalidad.
+- **Histograma de notas**: cuánto sonó cada una de las 12 notas.
+- **Correlación**: qué tanto dos listas de números suben y bajan juntas (de −1 a 1).
+- **Frase**: un tramo musical que se siente completo (en el pop y el reggaetón, 4 u 8 compases).
+
+### Errores comunes
+
+- **Escuchar solo la melodía.** Una melodía sola tiene pocas notas y a veces se queda en 5 (pentatónica): es
+  ambigua de verdad entre varias tonalidades. Si puedes, dale también el bajo o los acordes.
+- **Empezar el loop en cualquier sitio.** El voto de "casa" se toma en el compás 1 de cada frase de 8 compases (y en el
+  inicio de cada vuelta del loop). Si tu loop empieza a mitad de la progresión, la casa que oye Tidechart es otra.
+- **Creerle a ciegas.** El resultado es una propuesta con su porqué. Si dice *dudosa*, o si la alternativa te suena
+  mejor, manda tu oído: toca la tónica propuesta encima de la música; si suena a "final", es la casa.
+- **Dejar Escuchar encendido.** Mientras escucha, Tidechart no hace acordes (el MIDI pasa tal cual). Si de pronto "no
+  suenan los acordes", mira si dice ESCUCHANDO en SUENA AHORA.
+- **Mezclar dos canciones.** Lo escuchado se acumula. Si cambias de sample o de sección (o la canción modula), apaga y
+  vuelve a encender Escuchar para empezar de cero.

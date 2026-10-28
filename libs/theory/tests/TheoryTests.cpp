@@ -4,7 +4,9 @@
 // Los ejemplos salen del contexto de Tidechart: menor natural y frigio, cadencia andaluza, préstamo modal, séptimas y
 // novenas, además del pop de referencia.
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <set>
@@ -15,6 +17,7 @@
 #include "deepwater/theory/Chord.h"
 #include "deepwater/theory/ChordFinder.h"
 #include "deepwater/theory/Harmony.h"
+#include "deepwater/theory/KeyDetection.h"
 #include "deepwater/theory/Pitch.h"
 #include "deepwater/theory/Progression.h"
 #include "deepwater/theory/Rhythm.h"
@@ -873,6 +876,121 @@ void testBorrowedChords()
             }
     CHECK (ok);
 }
+
+// Una progresión renderizada (16 compases de 4/4, con bajo, conducción de voces y dembow, como la tocaría Tidechart).
+KeyRanking rankProgression (const Progression& progression, const Key& k, bool withCues = true)
+{
+    RenderOptions options;
+    options.style = VoicingStyle::voiceLed;
+    options.tonicNote = tonicNoteNear (k, 60);
+    options.bass = true;
+    options.rhythm = 4;
+    options.loops = 64 / progression.totalBeats();
+    auto evidence = keyEvidence (renderProgression (progression, k, options));
+    if (! withCues)
+        evidence.tonicCue = {};
+    return rankKeys (evidence);
+}
+
+void testKeyDetection()
+{
+    std::printf ("Deteccion de tonalidad: perfiles, evidencia de notas, progresiones del contexto en las 12 tonicas, relativas\n");
+
+    // Los perfiles: la tónica pesa más que todo, la 5.ª justa y la 3.ª después, lo de fuera de la escala lo mínimo.
+    for (int m = 0; m < modeCount; ++m)
+    {
+        const auto mode = static_cast<Mode> (m);
+        const auto profile = keyProfile (mode);
+        CHECK (*std::max_element (profile.begin(), profile.end()) == profile[0]);
+        CHECK (profile[static_cast<std::size_t> (modeInfo (mode).semitones[2])] == 4.88);
+        CHECK (std::abs (profileCorrelation (profile, profile, 0) - 1.0) < 1e-12);
+        for (int pc = 0; pc < 12; ++pc)
+            CHECK ((profile[static_cast<std::size_t> (pc)] > 2.55) == (Key { notes::C, mode }.contains (pc)));
+    }
+    CHECK (keyProfile (Mode::locrian)[7] == 2.55 && keyProfile (Mode::locrian)[6] == 3.56);
+    CHECK (profileCorrelation (std::array<double, 12> {}, keyProfile (Mode::ionian), 0) == 0.0);
+
+    // La evidencia de unas notas: C4 de 0 a 2 y E4 de 1 a 3. Do suena 2 y es el bajo 2; Mi suena 2 y es el bajo 1.
+    // El voto de la frase es para Do (la más grave de las que empiezan en el 0).
+    const std::vector<NoteEvent> two { { 48, 0.0, 2.0, 100 }, { 52, 1.0, 2.0, 100 } };
+    auto evidence = keyEvidence (two);
+    CHECK (evidence.pitchWeight[0] == 4.0 && evidence.pitchWeight[4] == 3.0 && evidence.totalWeight() == 7.0);
+    CHECK (evidence.tonicCue[0] == 1.0 && evidence.totalCues() == 1.0 && evidence.distinctPitchClasses() == 2);
+    CHECK (keyConfidence (evidence, rankKeys (evidence)) == KeyConfidence::none);
+    CHECK (keyConfidence (KeyEvidence {}, rankKeys (KeyEvidence {})) == KeyConfidence::none);
+    CHECK (phraseCueIndex (0.0, 32.0) == 0 && phraseCueIndex (-0.1, 32.0) == 0 && phraseCueIndex (31.9, 32.0) == 1);
+    CHECK (phraseCueIndex (32.2, 32.0) == 1 && phraseCueIndex (32.3, 32.0) == -1 && phraseCueIndex (16.0, 32.0) == -1);
+    CHECK (phraseCueIndex (-1.0, 32.0) == -1 && phraseCueIndex (0.0, 0.0) == -1);
+    CHECK (sameNotes (key ("A minor"), key ("C major")) && sameNotes (key ("E phrygian"), key ("C major")));
+    CHECK (! sameNotes (key ("A minor"), key ("A dorian")) && ! sameNotes (key ("A minor"), key ("A harmonic minor")));
+
+    // Las 7 notas de Do mayor con el mismo peso y sin votos: los 6 modos con 5.ª justa empatan, y gana el más común
+    // (La menor, luego Do mayor). Por eso hace falta saber dónde está la casa.
+    KeyEvidence flat;
+    for (int pc : { 0, 2, 4, 5, 7, 9, 11 })
+        flat.pitchWeight[static_cast<std::size_t> (pc)] = 1.0;
+    const auto flatRanking = rankKeys (flat);
+    CHECK (flatRanking[0].key == key ("A minor") && flatRanking[1].key == key ("C major"));
+    CHECK (keyConfidence (flat, flatRanking) == KeyConfidence::doubtful);
+
+    // Las progresiones del contexto, en las 12 tónicas: la tonalidad en la que se escribieron es la primera.
+    struct Case
+    {
+        const char* progression;
+        Mode mode;
+    };
+    const Case cases[] {
+        { "i bVI bIII bVII", Mode::aeolian },  // el reggaetón: Am F C G
+        { "I V vi IV", Mode::ionian },         // el pop: C G Am F
+        { "i bII", Mode::phrygian },           // el perreo oscuro: Em F
+        { "i7 IV7", Mode::dorian },            // R&B / funk: Dm7 G7
+        { "i iv V i", Mode::harmonicMinor },   // el V mayor de la armónica: Am Dm E Am
+        { "I bVII IV I", Mode::mixolydian },   // C B♭ F C
+        { "I bII", Mode::phrygianDominant },   // flamenco: E F
+        { "I II", Mode::lydian },              // el ♯4 del II: F G
+    };
+    for (const auto& c : cases)
+    {
+        bool ok = true;
+        double worstMargin = 1.0;
+        for (int tonic = 0; tonic < 12; ++tonic)
+        {
+            const Key k = standardKey (tonic, c.mode);
+            const auto ranking = rankProgression (progressionOf (c.progression), k);
+            ok = ok && ranking[0].key == k;
+            worstMargin = std::min (worstMargin, ranking[0].score - ranking[1].score);
+            if (ranking[0].key != k)
+                std::printf ("    %s en %s: salio %s\n", c.progression, keyName (k).c_str(), keyName (ranking[0].key).c_str());
+        }
+        // Lo que queda segundo es el modo vecino de la misma tónica (una nota distinta): al menos "probable".
+        CHECK (ok && worstMargin >= likelyMargin);
+    }
+
+    // Sin los votos de "casa", la del reggaetón sale como su relativa mayor (Am F C G = vi IV I V en Do): el Do suena
+    // más que el La. Con los votos, La menor y con un margen claro.
+    const auto reggaeton = progressionOf ("i bVI bIII bVII");
+    CHECK (rankProgression (reggaeton, key ("A minor"), false)[0].key == key ("C major"));
+    const auto withCues = rankProgression (reggaeton, key ("A minor"));
+    CHECK (withCues[0].key == key ("A minor") && withCues[0].cue == 1.0 && withCues[0].score - withCues[1].score >= clearMargin);
+
+    // La cadencia andaluza (Am G F E): casa en La, menor o armónica.
+    const auto andalusian = rankProgression (progressionOf ("i bVII bVI V"), key ("A harmonic minor"));
+    CHECK (andalusian[0].key.tonic == notes::A && (andalusian[0].key.mode == Mode::aeolian || andalusian[0].key.mode == Mode::harmonicMinor));
+
+    // Una melodía que no empieza en una frase (sin votos): solo el perfil. Do mayor con la tónica y la 5.ª largas.
+    std::vector<NoteEvent> melody;
+    double t = 1.0;
+    for (const auto& [note, length] : std::vector<std::pair<int, double>> { { 60, 2.0 }, { 62, 0.5 }, { 64, 1.0 }, { 65, 0.5 }, { 67, 2.0 },
+                                                                            { 69, 0.5 }, { 71, 0.5 }, { 72, 2.0 }, { 67, 1.0 }, { 64, 1.0 }, { 60, 2.0 } })
+    {
+        melody.push_back ({ note, t, length, 100 });
+        t += length;
+    }
+    evidence = keyEvidence (melody);
+    CHECK (evidence.totalCues() == 0.0);
+    const auto melodyRanking = rankKeys (evidence);
+    CHECK (melodyRanking[0].key == key ("C major") && keyConfidence (evidence, melodyRanking) != KeyConfidence::none);
+}
 } // namespace
 
 int main()
@@ -892,6 +1010,7 @@ int main()
     testRhythmPatterns();
     testProgressions();
     testBorrowedChords();
+    testKeyDetection();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de teoria pasaron.\n");

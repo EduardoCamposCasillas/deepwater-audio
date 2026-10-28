@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "deepwater/dsp/HostClock.h"
+#include "deepwater/theory/KeyDetection.h"
 
 // Lo que el audio publica para la GUI en cada bloque: el estado del reloj musical y de las notas que suenan. Va entero
 // en un TripleBuffer para que la GUI nunca mezcle datos de dos bloques (p. ej. el compás de uno con la posición del
@@ -31,4 +32,9 @@ struct TransportSnapshot
     std::int8_t progressionStep = -1; // el paso en la posición actual (−1 = progresión vacía)
     bool progressionSounding = false; // una tecla la está haciendo sonar
     std::int8_t rhythmStep = -1;      // la semicorchea del patrón (−1 = sostenido o host parado)
+
+    // Fase 5: la detección de tonalidad. Lo escuchado desde que se empezó a escuchar (se conserva al dejar de escuchar).
+    bool listening = false;
+    deepwater::theory::KeyEvidence keyEvidence;
+    double heardSeconds = 0.0; // cuánto tiempo sonó algo
 };

@@ -81,7 +81,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout TidechartAudioProcessor::cre
                                                               juce::StringArray { "Triads", "Sevenths" }, 0));
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::keyMapping, id::versionHintPhase3 }, "Keys",
                                                               juce::StringArray { "White keys = degrees", "Scale notes" }, 0));
-    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::chordBass, id::versionHintPhase3 }, "Bass", false));
+    // Una lista de 2 opciones y no un AudioParameterBool: el Bool guarda tal cual el valor que le manda el host (0.6) y
+    // en el estado lo redondea (1), así que al restaurar no vuelve el mismo valor (pluginval lo detecta). La lista
+    // redondea al recibirlo. En el proyecto se guarda igual que antes (0 o 1).
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::chordBass, id::versionHintPhase3 }, "Bass",
+                                                              juce::StringArray { "Off", "On" }, 0));
 
     // Fase 4. Por defecto, lo de la Fase 3: cada tecla su acorde, en estado fundamental y sostenido.
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::playMode, id::versionHintPhase4 }, "Play",
@@ -120,6 +124,7 @@ void TidechartAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBl
 {
     currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     clock.prepare (currentSampleRate);
+    keyListener.prepare (currentSampleRate);
     outputMidi.ensureSize (reservedMidiBytes);
     snapshot.sampleRate = currentSampleRate;
     snapshot.blockSize = samplesPerBlock;
@@ -160,7 +165,7 @@ void TidechartAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& bu
 }
 
 // En bypass el MIDI pasa tal cual; activo, cada tecla dispara un acorde. Al cambiar de uno a otro, la etapa apaga lo que
-// sonaba del modo anterior en la muestra 0.
+// sonaba del modo anterior en la muestra 0. Escuchando (detección de tonalidad) pasa tal cual, como en bypass.
 void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, bool bypassed) noexcept
 {
     juce::ScopedNoDenormals noDenormals;
@@ -168,6 +173,12 @@ void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juc
     buffer.clear(); // no genera audio
 
     clock.beginBlock (readHostTransport(), numSamples);
+
+    const bool listen = listenRequested.load (std::memory_order_acquire);
+    if (listen && ! listening)
+        keyListener.reset(); // cada vez que se empieza a escuchar, de cero
+    listening = listen;
+    keyListener.beginBlock (&clock);
 
     outputMidi.clear(); // conserva la capacidad (no libera memoria)
     auto sink = [&] (const std::uint8_t* data, int size, int sample) {
@@ -181,7 +192,7 @@ void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juc
     // La progresión publicada por la GUI (read copia la última aunque no haya nada nuevo: son pocos bytes).
     progressionBox.read (audioProgression);
     stage.setProgression (audioProgression);
-    stage.setChordSettings (currentChordSettings (bypassed));
+    stage.setChordSettings (currentChordSettings (bypassed || listening));
     stage.beginBlock (sink, &clock);
     const int lastSample = juce::jmax (0, numSamples - 1);
     for (const auto metadata : midi)
@@ -191,10 +202,14 @@ void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juc
         if (message.isNoteOn())
             notesInCount.fetch_add (1, std::memory_order_relaxed);
         midiLog.push ({ message, static_cast<std::uint16_t> (metadata.numBytes), false, clock.ppqAt (sample) });
+        if (listening)
+            keyListener.observe (message, sample);
         stage.process (metadata.data, metadata.numBytes, sample, sink);
     }
     // Los cambios de acorde y los golpes del ritmo que caen después del último evento.
     stage.endBlock (numSamples, sink);
+    if (listening)
+        keyListener.endBlock (numSamples);
 
     // La salida se copia al buffer del host. clear() conserva su capacidad, y el host lo reserva para lo que trae (el
     // wrapper VST3 de JUCE, 2048 bytes): mientras salga lo mismo que entra no reserva memoria. (Intercambiarlos con
@@ -254,6 +269,9 @@ void TidechartAudioProcessor::publishTransport (int numSamples, bool bypassed) n
     snapshot.progressionStep = static_cast<std::int8_t> (stage.progressionStep());
     snapshot.progressionSounding = stage.progressionSounding();
     snapshot.rhythmStep = static_cast<std::int8_t> (stage.rhythmStep());
+    snapshot.listening = listening;
+    snapshot.keyEvidence = keyListener.evidence();
+    snapshot.heardSeconds = keyListener.heardSeconds();
     transportBox.write (snapshot);
 }
 

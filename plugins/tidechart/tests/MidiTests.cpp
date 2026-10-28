@@ -2,6 +2,7 @@
 // de eventos hacia la GUI y los nombres de nota. Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la condición.
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -12,10 +13,12 @@
 #include <vector>
 
 #include "deepwater/dsp/HostClock.h"
+#include "deepwater/theory/KeyDetection.h"
 #include "deepwater/theory/Progression.h"
 #include "deepwater/theory/Text.h"
 #include "midi/ChordTrigger.h"
 #include "midi/EventLog.h"
+#include "midi/KeyListener.h"
 #include "midi/MidiStage.h"
 #include "midi/MidiText.h"
 #include "midi/NoteTracker.h"
@@ -1040,6 +1043,150 @@ void testTimedRandom()
     }
 }
 
+// El oyente de la detección de tonalidad con un host de prueba (120 BPM, 48 kHz: una negra = 24000 muestras), en
+// bloques al azar. 'loopBeats' > 0 = FL hace loop de esas negras.
+struct ListenRig
+{
+    KeyListener listener;
+    deepwater::dsp::HostClock clock;
+    long long position = 0;
+    double ppq = 0.0;
+    bool playing = true;
+    double loopBeats = 0.0;
+
+    ListenRig()
+    {
+        clock.prepare (48000.0);
+        listener.prepare (48000.0);
+    }
+
+    // 'events' en muestras absolutas y en orden.
+    void runUntil (long long until, Random& random, const std::vector<Event>& events)
+    {
+        std::size_t next = 0;
+        while (position < until)
+        {
+            int n = static_cast<int> (std::min<long long> (1 + random.upTo (2048), until - position));
+            if (loopBeats > 0.0 && playing) // el bloque no cruza el final del loop (FL lo parte ahí)
+            {
+                const double left = loopBeats - ppq;
+                n = std::min (n, std::max (1, static_cast<int> (std::llround (left * 24000.0))));
+            }
+            deepwater::dsp::TransportInfo info;
+            info.hasHost = true;
+            info.isPlaying = playing;
+            info.bpm = 120.0;
+            info.ppqPosition = ppq;
+            clock.beginBlock (info, n);
+            listener.beginBlock (&clock);
+            for (; next < events.size() && events[next].sample < position + n; ++next)
+            {
+                const auto& e = events[next];
+                listener.observe (readShortMessage (e.bytes.data(), static_cast<int> (e.bytes.size())), static_cast<int> (e.sample - position));
+            }
+            listener.endBlock (n);
+            position += n;
+            if (playing)
+            {
+                ppq += n / 24000.0;
+                if (loopBeats > 0.0 && ppq >= loopBeats - 1e-9)
+                    ppq = 0.0;
+            }
+        }
+    }
+};
+
+// Las notas de renderProgression como eventos (los note-off primero si caen en la misma muestra que un note-on).
+std::vector<Event> eventsOf (const std::vector<th::NoteEvent>& notes, long long offset = 0)
+{
+    std::vector<Event> events;
+    for (const auto& n : notes)
+    {
+        events.push_back (on (n.note, static_cast<int> (offset + std::llround (n.start * 24000.0)), n.velocity));
+        events.push_back (off (n.note, static_cast<int> (offset + std::llround ((n.start + n.length) * 24000.0))));
+    }
+    std::stable_sort (events.begin(), events.end(), [] (const Event& a, const Event& b) {
+        return a.sample != b.sample ? a.sample < b.sample : (a.bytes[0] & 0xf0) == 0x80 && (b.bytes[0] & 0xf0) != 0x80;
+    });
+    return events;
+}
+
+void testKeyListener()
+{
+    std::printf ("Oyente de tonalidad: en vivo = keyEvidence de las mismas notas (bloques al azar), votos en cada vuelta del "
+                 "loop, la primera nota con FL parado, el bajo doble, note-off sueltos, CC 123, empezar de cero\n");
+
+    // La del reggaetón con bajo, conducción de voces y dembow, 16 compases (dos frases), escuchada en vivo: la misma
+    // evidencia que keyEvidence de sus notas (en segundos: 2 negras por segundo) y sale La menor.
+    const th::Key aMinor { th::notes::A, th::Mode::aeolian };
+    th::RenderOptions options;
+    options.style = th::VoicingStyle::voiceLed;
+    options.bass = true;
+    options.rhythm = 4;
+    options.loops = 4;
+    const auto notes = th::renderProgression (progressionOf ("i bVI bIII bVII"), aMinor, options);
+    const auto offline = th::keyEvidence (notes);
+    for (const std::uint32_t seed : { 1u, 2u, 3u })
+    {
+        Random random { seed };
+        ListenRig rig;
+        rig.runUntil (64LL * 24000 + 100, random, eventsOf (notes));
+        const auto& live = rig.listener.evidence();
+        bool same = live.tonicCue == offline.tonicCue;
+        for (std::size_t pc = 0; pc < 12; ++pc)
+            same = same && std::abs (live.pitchWeight[pc] * 2.0 - offline.pitchWeight[pc]) < 1e-6;
+        CHECK (same);
+        CHECK (offline.tonicCue[9] == 2.0 && offline.totalCues() == 2.0); // el La al empezar cada frase
+        CHECK (th::rankKeys (live)[0].key == aMinor);
+        // El dembow tiene silencios: suena algo en 6 golpes de media negra de cada 4 tiempos (3 de 4 tiempos = 24 s).
+        CHECK (std::abs (rig.listener.heardSeconds() - 24.0) < 1e-6);
+    }
+
+    // FL en loop de 4 compases: cada vuelta pasa por el compás 1 y vota (3 vueltas, 3 votos para La).
+    {
+        Random random { 9 };
+        ListenRig rig;
+        rig.loopBeats = 16.0;
+        options.loops = 1;
+        const auto once = th::renderProgression (progressionOf ("i bVI bIII bVII"), aMinor, options);
+        std::vector<Event> events;
+        for (int pass = 0; pass < 3; ++pass)
+            for (const auto& e : eventsOf (once, pass * 16LL * 24000))
+                events.push_back (e);
+        rig.runUntil (3LL * 16 * 24000, random, events);
+        CHECK (rig.listener.evidence().tonicCue[9] == 3.0 && rig.listener.evidence().totalCues() == 3.0);
+    }
+
+    // FL parado (tocando en vivo): vota solo la más grave de las primeras notas (dentro de 50 ms). G3 y, 20 ms después,
+    // E3: el voto pasa a Mi. Lo que se toca después no vota.
+    {
+        Random random { 4 };
+        ListenRig rig;
+        rig.playing = false;
+        rig.ppq = 5.3;
+        rig.runUntil (48000LL * 2, random, { on (55, 100), on (52, 1060), on (59, 1500), off (55, 24000), off (52, 24000),
+                                             off (59, 24000), on (40, 30000), off (40, 40000) });
+        const auto& e = rig.listener.evidence();
+        CHECK (e.tonicCue[4] == 1.0 && e.totalCues() == 1.0);
+        // La más grave suena el doble: E3 de 1060 a 24000 + el bajo; G3 desde 100 (solo, de bajo, hasta 1060).
+        CHECK (std::abs (e.pitchWeight[4] - 2.0 * (24000 - 1060) / 48000.0 - 2.0 * (40000 - 30000) / 48000.0) < 1e-9);
+        CHECK (std::abs (e.pitchWeight[7] - ((24000 - 100) + (1060 - 100)) / 48000.0) < 1e-9);
+        CHECK (std::abs (rig.listener.heardSeconds() - ((24000 - 100) + (40000 - 30000)) / 48000.0) < 1e-9);
+    }
+
+    // Note-off sin note-on: no cuenta. CC 123 suelta el canal. reset() olvida todo.
+    {
+        Random random { 5 };
+        ListenRig rig;
+        rig.playing = false;
+        rig.runUntil (48000, random, { off (60, 10), on (60, 100), { { 0xb0, 123, 0 }, 24100 }, off (60, 30000) });
+        const auto& e = rig.listener.evidence();
+        CHECK (std::abs (e.pitchWeight[0] - 2.0 * 24000 / 48000.0) < 1e-9 && e.totalWeight() == e.pitchWeight[0]);
+        rig.listener.reset();
+        CHECK (rig.listener.evidence() == th::KeyEvidence {} && rig.listener.heardSeconds() == 0.0);
+    }
+}
+
 void testEventLog()
 {
     std::printf ("EventLog: orden, lleno = descarta sin esperar, y un productor y un consumidor en hilos distintos\n");
@@ -1111,6 +1258,7 @@ int main()
     testProgressionFollowsHost();
     testRhythmOnKeys();
     testTimedRandom();
+    testKeyListener();
     testEventLog();
     testNoteNames();
 

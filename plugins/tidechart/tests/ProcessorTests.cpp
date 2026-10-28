@@ -16,7 +16,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
 
+#include "deepwater/theory/KeyDetection.h"
 #include "deepwater/theory/Progression.h"
+#include "deepwater/theory/Text.h"
 #include "Parameters.h"
 #include "PluginProcessor.h"
 
@@ -614,6 +616,104 @@ void testProgression()
     processor->setPlayHead (nullptr);
 }
 
+// Las notas de renderProgression como eventos de JUCE a 120 BPM (una negra = 'samplesPerBeat'), note-off primero.
+std::vector<Event> eventsOf (const std::vector<deepwater::theory::NoteEvent>& notes, double samplesPerBeat, int channel = 1)
+{
+    std::vector<Event> events;
+    for (const auto& n : notes)
+    {
+        events.push_back ({ juce::MidiMessage::noteOn (channel, n.note, static_cast<juce::uint8> (n.velocity)), std::llround (n.start * samplesPerBeat) });
+        events.push_back ({ juce::MidiMessage::noteOff (channel, n.note), std::llround ((n.start + n.length) * samplesPerBeat) });
+    }
+    std::stable_sort (events.begin(), events.end(), [] (const Event& a, const Event& b) {
+        return a.sample != b.sample ? a.sample < b.sample : a.message.isNoteOff() && ! b.message.isNoteOff();
+    });
+    return events;
+}
+
+void testKeyDetection()
+{
+    std::printf ("Deteccion de tonalidad: escuchando, el MIDI pasa tal cual y se detecta (Mi frigio con FL reproduciendo, a 4 "
+                 "sample rates y bloques de cualquier tamano); al dejar de escuchar vuelven los acordes; empezar de cero\n");
+    namespace th = deepwater::theory;
+
+    const th::Key ePhrygian { th::notes::E, th::Mode::phrygian };
+    th::RenderOptions options;
+    options.style = th::VoicingStyle::voiceLed;
+    options.tonicNote = th::tonicNoteNear (ePhrygian, 60);
+    options.bass = true;
+    options.rhythm = 4;
+    th::Progression progression; // i–♭II de un compás cada uno
+    for (const char* numeral : { "i", "bII" })
+        progression.steps.push_back ({ *th::parseRomanNumeral (numeral), 4 });
+
+    for (const double sampleRate : { 44100.0, 48000.0, 88200.0, 96000.0 })
+        for (const int blockSize : { 1, 64, 512, 4096, 0 })
+        {
+            // Con bloques de 1 muestra, solo 2 compases (es lento); el resto, los 16.
+            const double samplesPerBeat = sampleRate / 2.0;
+            const double beats = blockSize == 1 ? 8.0 : 64.0;
+            options.loops = static_cast<int> (beats / 8.0); // 16 compases = dos frases
+            const auto input = eventsOf (th::renderProgression (progression, ePhrygian, options), samplesPerBeat);
+            auto processor = makeProcessor (sampleRate, 4096);
+            TestHead head;
+            processor->setPlayHead (&head);
+            Rig rig (*processor, 2, 4096);
+            processor->setListening (true);
+
+            juce::Random random (static_cast<juce::int64> (sampleRate) + blockSize);
+            std::vector<Event> output;
+            const auto length = static_cast<juce::int64> (beats * samplesPerBeat) + 10;
+            while (rig.position < length)
+            {
+                const int n = static_cast<int> (std::min<juce::int64> (blockSize > 0 ? blockSize : 1 + random.nextInt (4096), length - rig.position));
+                for (const auto& e : rig.run (input, n))
+                    output.push_back (e);
+                head.ppq += n / samplesPerBeat;
+            }
+            const juce::String where = juce::String (sampleRate) + " Hz, bloques de " + juce::String (blockSize);
+            bool same = output.size() == input.size();
+            for (size_t i = 0; same && i < output.size(); ++i)
+                same = sameEvent (output[i], input[i]);
+            check (same, "escuchando, el MIDI pasa tal cual (" + where + ")");
+            const auto snapshot = snapshotOf (*processor);
+            const auto ranking = th::rankKeys (snapshot.keyEvidence);
+            check (snapshot.listening && ranking[0].key == ePhrygian && th::keyConfidence (snapshot.keyEvidence, ranking) != th::KeyConfidence::none,
+                   "detecta Mi frigio (" + where + "): " + juce::String (th::keyName (ranking[0].key)));
+            check (snapshot.heardSeconds > 0.7 * beats / 2.0 && snapshot.soundingCount == 0, "lo escuchado y nada colgado (" + where + ")");
+            check (rig.allocations == 0 && rig.silent, "escuchando: sin reservas de memoria y en silencio (" + where + ")");
+            processor->setPlayHead (nullptr);
+        }
+
+    // Al dejar de escuchar vuelven los acordes; lo escuchado se conserva. Una tecla abajo al cambiar no queda colgada.
+    auto processor = makeProcessor (48000.0, 512);
+    Rig rig (*processor, 2, 512);
+    processor->setListening (true);
+    auto out = rig.run ({ { juce::MidiMessage::noteOn (1, 64, static_cast<juce::uint8> (90)), 10 },
+                          { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (90)), 20 } }, 512);
+    check (out.size() == 2, "escuchando: las dos notas pasan solas");
+    for (int i = 0; i < 100; ++i)
+        rig.run ({}, 512);
+    const auto heard = snapshotOf (*processor).keyEvidence;
+    check (heard.pitchWeight[0] > 0.0 && heard.pitchWeight[4] > 0.0 && heard.tonicCue[0] == 1.0, "lo escuchado (Do es el bajo y la primera)");
+    processor->setListening (false);
+    out = rig.run ({}, 512);
+    check (out.size() == 2 && out[0].message.isNoteOff() && out[1].message.isNoteOff() && out[0].sample == rig.position - 512,
+           "al dejar de escuchar, lo que paso se apaga en la muestra 0");
+    out = rig.run ({ { juce::MidiMessage::noteOn (1, 62, static_cast<juce::uint8> (90)), rig.position + 5 } }, 512);
+    check (out.size() == 3, "sin escuchar, una tecla vuelve a disparar un acorde");
+    auto snapshot = snapshotOf (*processor);
+    check (! snapshot.listening && snapshot.keyEvidence == heard, "lo escuchado se conserva al dejar de escuchar");
+    out = rig.run ({ { juce::MidiMessage::noteOff (1, 62), rig.position + 5 }, { juce::MidiMessage::noteOff (1, 60), rig.position + 6 },
+                     { juce::MidiMessage::noteOff (1, 64), rig.position + 7 } }, 512);
+    check (snapshotOf (*processor).soundingCount == 0, "nada colgado al cambiar entre escuchar y acordes");
+    processor->setListening (true);
+    rig.run ({}, 512);
+    snapshot = snapshotOf (*processor);
+    check (snapshot.listening && snapshot.keyEvidence == th::KeyEvidence {} && snapshot.heardSeconds == 0.0, "volver a escuchar empieza de cero");
+    check (rig.allocations == 0, "escuchar y dejar de escuchar: reservas de memoria: " + juce::String (rig.allocations));
+}
+
 void testLayoutsAndState()
 {
     std::printf ("Buses (sin entradas, salida mono o estereo), estado del proyecto y monitor de la GUI\n");
@@ -689,18 +789,41 @@ void testLayoutsAndState()
 }
 } // namespace
 
-// Pinta el editor fuera de pantalla en un PNG, con FL "reproduciendo" la progresión con dembow en el compás 2 (para
-// revisar la GUI sin capturar la pantalla):  TidechartProcessorTests --snapshot gui.png
+// Pinta el editor fuera de pantalla en un PNG, con FL "reproduciendo" la progresión con dembow en el compás 2 y la
+// detección después de escuchar i–♭II en Mi frigio (para revisar la GUI sin capturar la pantalla):  TidechartProcessorTests --snapshot gui.png
 int saveSnapshot (const juce::File& file)
 {
+    namespace th = deepwater::theory;
     auto processor = makeProcessor (48000.0, 512);
+    TestHead head;
+    processor->setPlayHead (&head);
+    Rig rig (*processor, 2, 512);
+
+    // Antes, la detección escuchó 16 compases de i–♭II en Mi frigio (con bajo y dembow).
+    const th::Key ePhrygian { th::notes::E, th::Mode::phrygian };
+    th::Progression listened;
+    for (const char* numeral : { "i", "bII" })
+        listened.steps.push_back ({ *th::parseRomanNumeral (numeral), 4 });
+    th::RenderOptions options;
+    options.style = th::VoicingStyle::voiceLed;
+    options.tonicNote = th::tonicNoteNear (ePhrygian, 60);
+    options.bass = true;
+    options.rhythm = 4;
+    options.loops = 8;
+    const auto input = eventsOf (th::renderProgression (listened, ePhrygian, options), 24000.0);
+    processor->setListening (true);
+    while (rig.position < 64 * 24000 + 10)
+    {
+        rig.run (input, 512);
+        head.ppq += 512.0 / 24000.0;
+    }
+    processor->setListening (false);
+
     setParameter (*processor, tidechart::params::playMode, 1.0f);
     setParameter (*processor, tidechart::params::rhythm, 4.0f);
     setParameter (*processor, tidechart::params::voicing, 1.0f);
-    TestHead head;
     head.ppq = 4.0;
-    processor->setPlayHead (&head);
-    Rig rig (*processor, 2, 512);
+    rig.position = 0;
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor->createEditor());
     for (int block = 0; block < 6; ++block)
     {
@@ -730,6 +853,7 @@ int main (int argc, char* argv[])
     testChords();
     testTransport();
     testProgression();
+    testKeyDetection();
     testLayoutsAndState();
 
     if (failures == 0)
