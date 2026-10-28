@@ -192,8 +192,17 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 16 EN CURSO. Paso 1 (CPU de las bandas IIR) probado en FL: funciona. Pasos 2 y 3 (picos de la convolución y de
-la STFT espectral) hechos; falta probarlos en FL. Pendiente: GUI escalable, automatización extrema.
+Fase 16 EN CURSO. Pasos 1-3 (CPU de las bandas IIR, picos de la convolución y de la STFT espectral) probados en FL:
+funcionan. Paso 4 (GUI escalable) hecho; falta probarlo en FL. Pendiente: automatización extrema.
+- Paso 4: todo el editor vive en `Content` (como Riptide, Ebb y Undertow), dibujado con `AffineTransform::scale (zoom)`.
+  Dos cosas distintas: ZOOM (70-200 %, botón en el pie a la derecha, al lado de la esquina) escala todo; arrastrar la
+  esquina cambia el tamaño LÓGICO del contenido (ventana ÷ zoom, de 1082 × 714 a 2600 × 1600): crecen el visor y, a lo
+  ancho, el panel de la banda; la cabecera y las dos columnas no. Sin proporción fija. El menú del zoom tiene "Tamaño del
+  diseño". Al cambiar el zoom el contenido no cambia (`keepContentSize`: la ventana lo sigue, también al poner los
+  límites nuevos). Se guardan en el estado del proyecto (propiedades `uiZoom`, `uiWidth`, `uiHeight`, fuera de presets,
+  A/B y deshacer) y en `Fathom.settings` para instancias nuevas; la primera vez, el mayor zoom ≤ 100 % que cabe. La
+  ayuda del pie se recorta a la izquierda del zoom. `FathomUiSnapshot` fija 100 % y el diseño, y guarda también
+  tamano-grande.png (1500 × 950) y zoom-130.png.
 - Paso 3 (decidido con el usuario: +1 hop de latencia antes que optimizar sin cambiarla o dejarlo): la etapa espectral
   retrasa N + hop (`SpectralSizes::latency`: 2560 muestras = 58 ms a 44.1, 53 ms a 48; el doble de muestras a 88.2/96).
   El tramo que se completa se calcula por pasos a lo largo del hop siguiente (`FrameWork`: FFT de cada canal, cada una

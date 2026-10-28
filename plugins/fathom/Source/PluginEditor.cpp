@@ -16,6 +16,17 @@ constexpr int framesPerSecond = 30;
 constexpr int titleWidth = 96;
 constexpr int presetBarWidth = 370; // Fase 15: entre el nombre y ANALÓGICA (donde estaba el subtítulo)
 constexpr juce::uint32 messageMilliseconds = 6000;
+// Fase 16: zoom (escala de todo) y tamaño lógico del contenido (el visor crece).
+constexpr float minZoom = 0.7f;
+constexpr float maxZoom = 2.0f;
+constexpr std::array<int, 9> zoomSteps { 70, 80, 90, 100, 115, 130, 150, 175, 200 };
+constexpr int maxContentWidth = 2600, maxContentHeight = 1600;
+constexpr int zoomButtonWidth = 56;
+constexpr int resizeCornerWidth = 22;
+constexpr int zoomButtonArea = resizeCornerWidth + zoomButtonWidth + 6; // lo que ocupa a la derecha del pie
+constexpr const char* zoomPropertyId = "uiZoom"; // propiedades del estado (se guardan con el proyecto de FL) y preferencias
+constexpr const char* widthPropertyId = "uiWidth";
+constexpr const char* heightPropertyId = "uiHeight";
 
 std::unique_ptr<juce::PropertiesFile> openSettings()
 {
@@ -34,19 +45,27 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
       instancesPanel (p, display), outputPanel (p), presets (p.getPresetManager(), fathom::gui::theme::presetPalette(), settings.get())
 {
     setLookAndFeel (&lookAndFeel);
+    addAndMakeVisible (content);
+    content.onPaint = [this] (juce::Graphics& g) { paintContent (g); };
+    content.onResized = [this] { layOutContent(); };
 
-    addAndMakeVisible (display);
-    addAndMakeVisible (bandPanel);
+    zoomButton.setTooltip (juce::String::fromUTF8 ("Zoom: agranda todo (tambi\xc3\xa9n la letra). Para ver el visor m\xc3\xa1s "
+                                                   "grande sin agrandar lo dem\xc3\xa1s, arrastra la esquina inferior derecha."));
+    zoomButton.onClick = [this] { showZoomMenu(); };
+    content.addAndMakeVisible (zoomButton);
+
+    content.addAndMakeVisible (display);
+    content.addAndMakeVisible (bandPanel);
     // Elegir una banda (en el selector del panel, con un clic en su nodo o al crearla en el visor) la muestra en los dos.
     display.onBandFocused = [this] (int band) { selectBand (band); };
     bandPanel.onBandChosen = [this] (int band) { selectBand (band); };
     // Fase 12: IGUALAR o DIBUJAR cambian el panel de abajo (el de la banda vuelve al salir).
-    addChildComponent (curvePanel);
-    addChildComponent (instancesPanel); // Fase 14
+    content.addChildComponent (curvePanel);
+    content.addChildComponent (instancesPanel); // Fase 14
     display.onToolChanged = [this] (fathom::gui::EqDisplay::Tool tool) { showTool (tool); };
 
     // El analizador: lo que se elige en el panel se guarda en el proyecto y lo usa el visor.
-    addAndMakeVisible (analyzerPanel);
+    content.addAndMakeVisible (analyzerPanel);
     analyzerPanel.onViewChanged = [this] {
         processor.setAnalyzerView (analyzerPanel.getView());
         showAnalyzerView (analyzerPanel.getView());
@@ -63,16 +82,16 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
     undoButton.onClick = [this] { processor.getEditHistory().undo(); };
     redoButton.onClick = [this] { processor.getEditHistory().redo(); };
     for (auto* button : { &undoButton, &redoButton })
-        addAndMakeVisible (*button);
+        content.addAndMakeVisible (*button);
     setWantsKeyboardFocus (true);
 
     bypassButton.setClickingTogglesState (true);
     bypassButton.setTooltip (juce::String::fromUTF8 ("Escuchar la se\xc3\xb1" "al original. Es el mismo bypass que el de FL "
                                                      "y entra con un fundido de 20 ms (sin clics)."));
-    addAndMakeVisible (bypassButton);
+    content.addAndMakeVisible (bypassButton);
     bypassAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), fathom::params::bypass, bypassButton);
 
-    addAndMakeVisible (outputPanel);
+    content.addAndMakeVisible (outputPanel);
 
     // Fase 7: respuesta analógica o bilineal (para escuchar y ver qué corrige; con A/B se comparan a volumen igual).
     analogButton.setClickingTogglesState (true);
@@ -84,7 +103,7 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
         "se hunde de golpe al llegar a Nyquist. Los dos sin latencia. Mira la curva al alternar: abajo de ~5 kHz casi no "
         "cambia. Con A/B y AUTO GAIN se comparan a o\xc3\xad" "do. Con FASE NATURAL no hace falta: siempre es la "
         "anal\xc3\xb3gica (y adem\xc3\xa1s con su fase)."));
-    addAndMakeVisible (analogButton);
+    content.addAndMakeVisible (analogButton);
     analogAttachment = std::make_unique<ButtonAttachment> (processor.getParameters(), fathom::params::analogResponse, analogButton);
 
     // Comparación A/B: dos versiones completas del EQ; un clic en la otra letra cambia (sin clic en el audio).
@@ -101,20 +120,55 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
                 processor.switchCompareSide();
             showCompareSide();
         };
-        addAndMakeVisible (*button);
+        content.addAndMakeVisible (*button);
     }
     copySideButton.setTooltip (juce::String::fromUTF8 ("Copiar el lado activo al otro (los dos quedan iguales): para partir de "
                                                        "lo que tienes y probar una variaci\xc3\xb3n."));
     copySideButton.onClick = [this] { processor.copyToOtherSide(); };
-    addAndMakeVisible (copySideButton);
+    content.addAndMakeVisible (copySideButton);
     showCompareSide();
 
     // Presets (Fase 15). Al final: el navegador y el panel de guardar quedan por encima de todo lo demás.
     presets.onMessage = [this] (const juce::String& text) { showMessage (text); };
-    presets.addTo (*this);
+    presets.addTo (content);
     presets.update();
 
-    setSize (editorWidth, editorHeight);
+    // Tamaño: 1.º el del proyecto; 2.º el último que usó el usuario; 3.º el diseño, con el mayor zoom (≤ 100 %) que cabe.
+    const auto& state = processor.getParameters().state;
+    float startZoom = 0.0f;
+    int width = editorWidth, height = editorHeight;
+    if (state.hasProperty (zoomPropertyId))
+    {
+        startZoom = static_cast<float> (state.getProperty (zoomPropertyId));
+        width = state.getProperty (widthPropertyId, editorWidth);
+        height = state.getProperty (heightPropertyId, editorHeight);
+    }
+    else if (settings != nullptr && settings->containsKey (zoomPropertyId))
+    {
+        startZoom = static_cast<float> (settings->getDoubleValue (zoomPropertyId, 1.0));
+        width = settings->getIntValue (widthPropertyId, editorWidth);
+        height = settings->getIntValue (heightPropertyId, editorHeight);
+    }
+    else
+    {
+        startZoom = 1.0f;
+        if (const auto* screen = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        {
+            const auto area = screen->userBounds.toFloat();
+            startZoom = juce::jmin (1.0f, 0.92f * area.getWidth() / editorWidth, 0.88f * area.getHeight() / editorHeight);
+        }
+        startZoom = std::floor (startZoom * 20.0f) / 20.0f; // en pasos de 5 %
+    }
+    zoom = juce::jlimit (minZoom, maxZoom, startZoom);
+    content.setSize (juce::jlimit (editorWidth, maxContentWidth, width), juce::jlimit (editorHeight, maxContentHeight, height));
+    setResizable (true, true);
+    keepContentSize = true; // los límites y el primer tamaño siguen al contenido
+    updateResizeLimits();
+    setSize (juce::roundToInt (content.getWidth() * zoom), juce::roundToInt (content.getHeight() * zoom));
+    resized(); // por si el tamaño ya era ese (setSize no llamaría a resized)
+    keepContentSize = false;
+    rememberSize = true;
+
     processor.setAnalyzerActive (true);
     lastFrameSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
     startTimerHz (framesPerSecond);
@@ -158,7 +212,7 @@ void FathomAudioProcessorEditor::timerCallback()
     if (message.isNotEmpty() && juce::Time::getMillisecondCounter() > messageExpiry)
     {
         message.clear();
-        repaint (getLocalBounds().removeFromBottom (footerHeight));
+        content.repaint (content.getLocalBounds().removeFromBottom (footerHeight));
     }
 }
 
@@ -166,7 +220,7 @@ void FathomAudioProcessorEditor::showMessage (const juce::String& text)
 {
     message = text;
     messageExpiry = juce::Time::getMillisecondCounter() + messageMilliseconds;
-    repaint (getLocalBounds().removeFromBottom (footerHeight));
+    content.repaint (content.getLocalBounds().removeFromBottom (footerHeight));
 }
 
 bool FathomAudioProcessorEditor::keyPressed (const juce::KeyPress& key)
@@ -217,16 +271,21 @@ void FathomAudioProcessorEditor::showAnalyzerView (const fathom::analysis::ViewS
 
 void FathomAudioProcessorEditor::paint (juce::Graphics& g)
 {
+    g.fillAll (fathom::gui::theme::background);
+}
+
+void FathomAudioProcessorEditor::paintContent (juce::Graphics& g)
+{
     using namespace fathom::gui;
     g.fillAll (theme::background);
 
-    auto header = getLocalBounds().removeFromTop (headerHeight).reduced (padding, 0);
+    auto header = content.getLocalBounds().removeFromTop (headerHeight).reduced (padding, 0);
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
     g.drawText ("FATHOM", header.removeFromLeft (titleWidth), juce::Justification::centredLeft);
 
-    // Pie: la ayuda del visor o, durante unos segundos, el último mensaje de los presets.
-    const auto footer = getLocalBounds().removeFromBottom (footerHeight);
+    // Pie: la ayuda del visor o, durante unos segundos, el último mensaje de los presets (a la izquierda del zoom).
+    const auto footer = content.getLocalBounds().removeFromBottom (footerHeight).withTrimmedRight (zoomButtonArea).withTrimmedLeft (padding);
     if (message.isNotEmpty())
     {
         g.setColour (theme::accent);
@@ -244,7 +303,79 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
 
 void FathomAudioProcessorEditor::resized()
 {
-    auto header = getLocalBounds().removeFromTop (headerHeight).reduced (padding, 8);
+    // La ventana = el contenido × el zoom. Al cambiar el zoom el contenido no cambia (la ventana lo sigue); al arrastrar
+    // la esquina, el contenido pasa a medir la ventana ÷ el zoom (el visor crece).
+    content.setTransform (juce::AffineTransform::scale (zoom));
+    if (! keepContentSize)
+    {
+        const int width = juce::jlimit (editorWidth, maxContentWidth, juce::roundToInt (static_cast<float> (getWidth()) / zoom));
+        const int height = juce::jlimit (editorHeight, maxContentHeight, juce::roundToInt (static_cast<float> (getHeight()) / zoom));
+        // Redondear ida y vuelta puede mover un píxel: si la ventana ya es la del contenido, se deja como está.
+        if (getWidth() != juce::roundToInt (static_cast<float> (content.getWidth()) * zoom)
+            || getHeight() != juce::roundToInt (static_cast<float> (content.getHeight()) * zoom))
+            content.setSize (width, height);
+    }
+    zoomButton.setButtonText (juce::String (juce::roundToInt (zoom * 100.0f)) + " %");
+
+    // Se recuerda en el proyecto y como preferencia para la próxima instancia.
+    if (! rememberSize)
+        return;
+    auto state = processor.getParameters().state;
+    state.setProperty (zoomPropertyId, zoom, nullptr);
+    state.setProperty (widthPropertyId, content.getWidth(), nullptr);
+    state.setProperty (heightPropertyId, content.getHeight(), nullptr);
+    if (settings != nullptr)
+    {
+        settings->setValue (zoomPropertyId, zoom);
+        settings->setValue (widthPropertyId, content.getWidth());
+        settings->setValue (heightPropertyId, content.getHeight());
+    }
+}
+
+void FathomAudioProcessorEditor::updateResizeLimits()
+{
+    setResizeLimits (juce::roundToInt (editorWidth * zoom), juce::roundToInt (editorHeight * zoom),
+                     juce::roundToInt (maxContentWidth * zoom), juce::roundToInt (maxContentHeight * zoom));
+}
+
+void FathomAudioProcessorEditor::setZoom (float newZoom)
+{
+    zoom = juce::jlimit (minZoom, maxZoom, newZoom);
+    keepContentSize = true; // los límites nuevos y el tamaño nuevo siguen al contenido
+    updateResizeLimits();
+    setSize (juce::roundToInt (static_cast<float> (content.getWidth()) * zoom), juce::roundToInt (static_cast<float> (content.getHeight()) * zoom));
+    resized(); // por si el tamaño no cambió (setSize no llamaría a resized)
+    keepContentSize = false;
+}
+
+void FathomAudioProcessorEditor::showZoomMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Zoom");
+    const int current = juce::roundToInt (zoom * 100.0f);
+    for (const int step : zoomSteps)
+        menu.addItem (step, juce::String (step) + " %", true, step == current);
+    menu.addSeparator();
+    menu.addItem (1, juce::String::fromUTF8 ("Tama\xc3\xb1o del dise\xc3\xb1o (visor chico)"),
+                  content.getWidth() != editorWidth || content.getHeight() != editorHeight);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&zoomButton),
+                        [safeThis = juce::Component::SafePointer<FathomAudioProcessorEditor> (this)] (int result) {
+                            if (safeThis == nullptr || result <= 0)
+                                return;
+                            if (result == 1)
+                            {
+                                safeThis->content.setSize (editorWidth, editorHeight);
+                                safeThis->setZoom (safeThis->zoom);
+                            }
+                            else
+                                safeThis->setZoom (static_cast<float> (result) / 100.0f);
+                        });
+}
+
+void FathomAudioProcessorEditor::layOutContent()
+{
+    const auto bounds = content.getLocalBounds();
+    auto header = bounds.withHeight (headerHeight).reduced (padding, 8);
     bypassButton.setBounds (header.removeFromRight (90));
     header.removeFromRight (24);
     redoButton.setBounds (header.removeFromRight (84));
@@ -261,19 +392,23 @@ void FathomAudioProcessorEditor::resized()
     header.removeFromLeft (titleWidth);
     const auto presetBar = header.removeFromLeft (presetBarWidth);
 
-    auto content = getLocalBounds().withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0);
-    outputPanel.setBounds (content.removeFromRight (controlsWidth));
-    content.removeFromRight (padding);
-    auto controls = content.removeFromRight (controlsWidth);
-    content.removeFromRight (padding);
-    bandPanel.setBounds (content.removeFromBottom (bandPanelHeight));
+    // El zoom, abajo a la derecha, al lado de la esquina para redimensionar (que dibuja la ventana encima).
+    zoomButton.setBounds (bounds.withTop (bounds.getBottom() - footerHeight).withTrimmedRight (resizeCornerWidth).reduced (0, 3)
+                              .removeFromRight (zoomButtonWidth));
+
+    auto area = bounds.withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0);
+    outputPanel.setBounds (area.removeFromRight (controlsWidth));
+    area.removeFromRight (padding);
+    auto controls = area.removeFromRight (controlsWidth);
+    area.removeFromRight (padding);
+    bandPanel.setBounds (area.removeFromBottom (bandPanelHeight));
     curvePanel.setBounds (bandPanel.getBounds());
     instancesPanel.setBounds (bandPanel.getBounds());
-    content.removeFromBottom (padding);
-    display.setBounds (content);
+    area.removeFromBottom (padding);
+    display.setBounds (area);
 
     analyzerPanel.setBounds (controls.withTrimmedTop (8));
 
     // El navegador y el panel de guardar tapan todo lo de abajo de la cabecera (menos el pie, con los mensajes).
-    presets.setBounds (presetBar, getLocalBounds().withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0));
+    presets.setBounds (presetBar, bounds.withTrimmedTop (headerHeight).withTrimmedBottom (footerHeight).reduced (padding, 0));
 }

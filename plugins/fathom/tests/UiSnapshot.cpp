@@ -13,6 +13,7 @@
 #include <functional>
 #include <memory>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -163,6 +164,14 @@ int main (int argc, char* argv[])
     settings.setShown (voice->getInstanceId(), true);
     settings.setEditable (kick->getInstanceId());
 
+    // Fase 16: siempre al 100 % y con el tamaño del diseño (sin depender de la pantalla ni de lo que se usó antes).
+    const auto setSize = [&] (double zoom, int width, int height) {
+        auto state = bass->getParameters().state;
+        state.setProperty ("uiZoom", zoom, nullptr);
+        state.setProperty ("uiWidth", width, nullptr);
+        state.setProperty ("uiHeight", height, nullptr);
+    };
+    setSize (1.0, 1082, 714);
     std::unique_ptr<juce::AudioProcessorEditor> editor (bass->createEditor());
     editor->setVisible (true);
     auto* display = findChild<fathom::gui::EqDisplay> (*editor);
@@ -202,6 +211,21 @@ int main (int argc, char* argv[])
         bar->onToggleBrowser();
     loop.runDispatchLoopUntil (300);
     save (*editor, folder.getChildFile ("presets-navegador.png"));
+
+    // Fase 16: el contenido agrandado (el visor crece; la cabecera y las columnas no) y con zoom.
+    if (auto* bar = findChild<deepwater::presets::PresetBar> (*editor); bar != nullptr && bar->onToggleBrowser)
+        bar->onToggleBrowser(); // cierra el navegador
+    for (const auto& [zoom, width, height, name] : { std::tuple { 1.0, 1500, 950, "tamano-grande.png" },
+                                                     std::tuple { 1.3, 1082, 714, "zoom-130.png" } })
+    {
+        editor.reset();
+        setSize (zoom, width, height);
+        editor.reset (bass->createEditor());
+        editor->setVisible (true);
+        loop.runDispatchLoopUntil (1500);
+        std::printf ("  %s: ventana %d x %d\n", name, editor->getWidth(), editor->getHeight());
+        save (*editor, folder.getChildFile (name));
+    }
 
     running = false;
     audio.join();
