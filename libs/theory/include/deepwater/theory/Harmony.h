@@ -129,4 +129,56 @@ enum class HarmonicFunction
     }
 }
 
+// --- Acordes prestados (Fase 4 de Tidechart) -------------------------------------------------------------------------
+// Los acordes de los modos paralelos (misma tónica) que NO están en la tonalidad, listos para usar en una progresión.
+// Cada uno con su grado en la tonalidad y el modo del que se tomó. Ordenados por lo habitual del préstamo: primero los
+// modos de los que más se toma (para una tonalidad mayor, el menor natural: iv, ♭VI, ♭VII, ♭III; para una menor, el
+// dórico, el frigio y la menor armónica: IV, ♭II, V), y dentro de cada modo por grado; los disminuidos y aumentados,
+// más difíciles de usar, al final. Sin repetidos: un acorde que está en varios modos aparece con el primero.
+struct BorrowedChord
+{
+    Chord chord;
+    RomanNumeral numeral;
+    Mode source = Mode::aeolian;
+};
+
+[[nodiscard]] constexpr StaticVector<BorrowedChord, 64> borrowedChords (const Key& key, ChordSize size = ChordSize::triad) noexcept
+{
+    // La tonalidad es "mayor" si su 3.ª es mayor.
+    const bool majorFamily = modeInfo (key.mode).semitones[2] == 4;
+    constexpr std::array<Mode, 9> fromMajor { Mode::aeolian, Mode::mixolydian, Mode::dorian, Mode::phrygian, Mode::harmonicMinor,
+                                              Mode::lydian, Mode::melodicMinor, Mode::locrian, Mode::ionian };
+    constexpr std::array<Mode, 9> fromMinor { Mode::dorian, Mode::phrygian, Mode::harmonicMinor, Mode::ionian, Mode::mixolydian,
+                                              Mode::melodicMinor, Mode::lydian, Mode::locrian, Mode::aeolian };
+    const auto& order = majorFamily ? fromMajor : fromMinor;
+
+    const auto unstable = [] (const Chord& c) {
+        for (const auto& tone : c.info().tones)
+            if (tone.number == 5 && tone.semitones != 7)
+                return true; // 5.ª disminuida o aumentada
+        return false;
+    };
+
+    StaticVector<BorrowedChord, 64> result;
+    for (int pass = 0; pass < 2; ++pass)
+        for (const Mode source : order)
+        {
+            if (source == key.mode)
+                continue;
+            const Key parallel { key.tonic, source };
+            for (int degree = 0; degree < 7; ++degree)
+            {
+                const auto chord = diatonicChord (parallel, degree, size);
+                if (! chord || isDiatonic (*chord, key) || unstable (*chord) != (pass == 1))
+                    continue;
+                bool seen = false;
+                for (const auto& other : result)
+                    seen = seen || (other.chord.root.pitchClass() == chord->root.pitchClass() && other.chord.type == chord->type);
+                if (! seen)
+                    result.push_back ({ *chord, romanNumeralFor (*chord, key), source });
+            }
+        }
+    return result;
+}
+
 } // namespace deepwater::theory

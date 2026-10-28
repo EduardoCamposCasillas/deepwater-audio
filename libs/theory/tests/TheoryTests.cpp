@@ -16,8 +16,11 @@
 #include "deepwater/theory/ChordFinder.h"
 #include "deepwater/theory/Harmony.h"
 #include "deepwater/theory/Pitch.h"
+#include "deepwater/theory/Progression.h"
+#include "deepwater/theory/Rhythm.h"
 #include "deepwater/theory/Scale.h"
 #include "deepwater/theory/Text.h"
+#include "deepwater/theory/Voicing.h"
 
 namespace
 {
@@ -613,6 +616,263 @@ void testChordFinder()
             }
         }
 }
+// --- Fase 4: voicings, ritmos, progresiones y préstamo modal ---------------------------------------------------------
+
+std::vector<int> notesOf (const Voicing& v)
+{
+    return { v.begin(), v.end() };
+}
+
+Progression progressionOf (const char* text, std::vector<int> beats = {})
+{
+    Progression p;
+    const auto numerals = parseProgression (text);
+    CHECK (numerals.has_value());
+    if (numerals)
+        for (std::size_t i = 0; i < numerals->size(); ++i)
+            p.steps.push_back ({ (*numerals)[i], i < beats.size() ? beats[i] : 4 });
+    return p;
+}
+
+void testVoiceLeading()
+{
+    std::printf ("Conduccion de voces: I-IV-V-I con las inversiones de libro, notas comunes quietas, drop 2, piso del bajo\n");
+
+    const Chord cMajor = chord ("C"), fMajor = chord ("F"), gMajor = chord ("G");
+    constexpr int centre = 2 * 60 + 7; // la tríada de Do desde C5
+    CHECK (notesOf (voiceChord (cMajor, 60, VoicingStyle::rootPosition, centre)) == (std::vector<int> { 60, 64, 67 }));
+
+    // El primero (sin anterior) queda en el centro: estado fundamental. F, con el Do quieto: C F A (2.ª inversión);
+    // G: B D G (1.ª); y de vuelta a C E G. Cada voz se mueve 2 semitonos como mucho.
+    const auto i = voiceChord (cMajor, 60, VoicingStyle::voiceLed, centre);
+    const auto iv = voiceChord (fMajor, 65, VoicingStyle::voiceLed, centre, &i);
+    const auto v = voiceChord (gMajor, 67, VoicingStyle::voiceLed, centre, &iv);
+    const auto back = voiceChord (cMajor, 60, VoicingStyle::voiceLed, centre, &v);
+    CHECK (notesOf (i) == (std::vector<int> { 60, 64, 67 }));
+    CHECK (notesOf (iv) == (std::vector<int> { 60, 65, 69 }));
+    CHECK (notesOf (v) == (std::vector<int> { 59, 62, 67 }));
+    CHECK (notesOf (back) == (std::vector<int> { 60, 64, 67 }));
+    CHECK (voiceMovement (i, iv) == 3 && voiceMovement (iv, v) == 6 && voiceMovement (v, back) == 3);
+    // En estado fundamental, las mismas voces recorren 15 y 6.
+    CHECK (voiceMovement (i, fMajor.midiNotes (65)) == 15);
+    CHECK (voiceMovement (fMajor.midiNotes (65), gMajor.midiNotes (67)) == 6);
+
+    // Am → F: comparten A y C, que no se mueven; solo E sube a F.
+    const auto am = voiceChord (chord ("Am"), 57, VoicingStyle::voiceLed, 2 * 57 + 7);
+    CHECK (notesOf (voiceChord (fMajor, 65, VoicingStyle::voiceLed, 2 * 57 + 7, &am)) == (std::vector<int> { 57, 60, 65 }));
+
+    // Distinto número de notas: cada nota con la más cercana del otro acorde.
+    Voicing triad, seventh;
+    for (const int n : { 60, 64, 67 })
+        triad.push_back (n);
+    for (const int n : { 60, 64, 67, 70 })
+        seventh.push_back (n);
+    CHECK (voiceMovement (triad, seventh) == 3);
+
+    // Drop 2 y el estilo abierto: más de una octava entre las voces de fuera.
+    CHECK (notesOf (dropTwo (triad)) == (std::vector<int> { 52, 60, 67 }));
+    const auto open = voiceChord (cMajor, 60, VoicingStyle::open, centre);
+    CHECK (open.size() == 3 && open[2] - open[0] > 12);
+
+    // El piso: con bajo en C4 (48), ninguna voz baja hasta él.
+    const auto aboveBass = voiceChord (cMajor, 60, VoicingStyle::voiceLed, 2 * 50 + 7, nullptr, 48);
+    CHECK (! aboveBass.empty() && aboveBass[0] > 48);
+
+    // Todas las tonalidades, modos y grados (tríadas y séptimas), en los tres estilos y encadenados: las notas son las
+    // del acorde (las mismas clases de altura, todas), de grave a agudo, y el centro no se aleja más de la ventana.
+    bool ok = true;
+    for (int tonic = 0; tonic < 12; ++tonic)
+        for (int m = 0; m < modeCount; ++m)
+            for (const auto size : { ChordSize::triad, ChordSize::seventh })
+                for (int style = 0; style < voicingStyleCount; ++style)
+                {
+                    const Key k = standardKey (tonic, static_cast<Mode> (m));
+                    const int tonicNote = tonicNoteNear (k, 60);
+                    Voicing previous;
+                    for (int d = 0; d < 7; ++d)
+                    {
+                        const auto c = diatonicChord (k, d, size);
+                        const int root = tonicNote + modeInfo (k.mode).semitones[static_cast<std::size_t> (d)];
+                        const auto voiced = voiceChord (*c, root, static_cast<VoicingStyle> (style), tonicCentre2 (tonicNote),
+                                                        previous.empty() ? nullptr : &previous);
+                        std::uint16_t mask = 0;
+                        for (std::size_t n = 0; n < voiced.size(); ++n)
+                        {
+                            mask = static_cast<std::uint16_t> (mask | (1u << (voiced[n] % 12)));
+                            ok = ok && (n == 0 || voiced[n - 1] < voiced[n]);
+                        }
+                        ok = ok && mask == chordMask (c->root.pitchClass(), c->type) && static_cast<int> (voiced.size()) == c->toneCount();
+                        if (style != 0)
+                        {
+                            const int distance = voiced[0] + voiced[voiced.size() - 1] - tonicCentre2 (tonicNote);
+                            ok = ok && distance <= 2 * voicingWindow && distance >= -2 * voicingWindow;
+                        }
+                        previous = voiced;
+                    }
+                }
+    CHECK (ok);
+}
+
+void testRhythmPatterns()
+{
+    std::printf ("Patrones ritmicos: golpes dentro del patron y sin solaparse, el dembow 3+3+2 y sus variantes\n");
+
+    CHECK (rhythmPattern (0).steps == 0 && rhythmPattern (0).name == "sustain");
+    CHECK (&rhythmPattern (99) == &rhythmPattern (0));
+    std::set<std::string> names;
+    for (int i = 0; i < rhythmPatternCount; ++i)
+    {
+        const auto& pattern = rhythmPattern (i);
+        names.insert (std::string (pattern.name));
+        int end = 0;
+        for (int h = 0; h < pattern.hitCount; ++h)
+        {
+            const auto& hit = pattern.hits[static_cast<std::size_t> (h)];
+            CHECK (hit.start >= end && hit.length >= 1 && hit.start + hit.length <= pattern.steps);
+            CHECK (hit.accent >= 1 && hit.accent <= 127);
+            end = hit.start + hit.length;
+            CHECK (hitAt (pattern, hit.start) == &hit);
+        }
+    }
+    CHECK (static_cast<int> (names.size()) == rhythmPatternCount);
+
+    const auto starts = [] (const char* name) {
+        std::vector<int> result;
+        for (const auto& pattern : rhythmPatterns)
+            if (pattern.name == name)
+                for (int h = 0; h < pattern.hitCount; ++h)
+                    result.push_back (pattern.hits[static_cast<std::size_t> (h)].start);
+        return result;
+    };
+    // 3+3+2 dos veces por compás; en corcheas, una vez.
+    CHECK (starts ("dembow") == (std::vector<int> { 0, 3, 6, 8, 11, 14 }));
+    CHECK (starts ("dembow long") == (std::vector<int> { 0, 6, 12 }));
+    CHECK (starts ("dembow offbeat") == (std::vector<int> { 3, 6, 11, 14 }));
+    CHECK (starts ("dembow shifted") == (std::vector<int> { 0, 2, 5, 8, 10, 13 }));
+
+    const auto& dembow = rhythmPattern (4);
+    CHECK (dembow.name == "dembow");
+    CHECK (hitAt (dembow, 1) == &dembow.hits[0]);
+    CHECK (hitAt (dembow, 2) == nullptr);
+    CHECK (patternStep (dembow, 35) == 3);
+    CHECK (patternStep (dembow, -1) == 15);
+}
+
+void testProgressions()
+{
+    std::printf ("Progresiones: pasos en el tiempo, la vuelta, voicing de toda la progresion y sus notas en el tiempo\n");
+
+    const auto reggaeton = progressionOf ("i bVI bIII bVII");
+    CHECK (reggaeton.totalBeats() == 16);
+    CHECK (reggaeton.stepAt (0) == 0 && reggaeton.stepAt (15) == 0 && reggaeton.stepAt (16) == 1 && reggaeton.stepAt (63) == 3);
+    CHECK (reggaeton.stepAt (64) == 0 && reggaeton.stepAt (-1) == 3);
+    const auto uneven = progressionOf ("i bII i bVII", { 4, 2, 2, 8 });
+    CHECK (uneven.totalBeats() == 16 && uneven.stepStart (2) == 24 && uneven.stepAt (23) == 1 && uneven.stepAt (24) == 2);
+    CHECK (Progression {}.stepAt (5) == -1 && Progression {}.totalBeats() == 0);
+    CHECK (Progression::clampBeats (0) == 1 && Progression::clampBeats (99) == maxStepBeats);
+
+    const Key aMinor = key ("A minor");
+    CHECK (tonicNoteNear (aMinor, 60) == 57);
+    CHECK (tonicNoteNear (standardKey (6, Mode::ionian), 60) == 54);
+    CHECK (rootNoteFor ({ 6, -1, 0 }, 57) == 65); // ♭VI desde A4 = F5
+    CHECK (rootNoteFor ({ 1, 0, 0 }, 57) == 57);
+
+    // La del reggaetón en La menor con conducción de voces: Am, F con A y C quietas, C/G, G; la vuelta G → Am también es
+    // corta. En estado fundamental, cada cambio salta.
+    const auto voiced = voiceProgression (reggaeton, aMinor, VoicingStyle::voiceLed, 57, false);
+    CHECK (notesOf (voiced[0].upper) == (std::vector<int> { 57, 60, 64 }));
+    CHECK (notesOf (voiced[1].upper) == (std::vector<int> { 57, 60, 65 }));
+    CHECK (notesOf (voiced[2].upper) == (std::vector<int> { 55, 60, 64 }));
+    CHECK (notesOf (voiced[3].upper) == (std::vector<int> { 55, 59, 62 }));
+    CHECK (chordSymbol (voiced[1].chord) == "F" && voiced[1].rootNote == 65);
+    const auto plain = voiceProgression (reggaeton, aMinor, VoicingStyle::rootPosition, 57, true);
+    CHECK (notesOf (plain[1].upper) == (std::vector<int> { 65, 69, 72 }) && plain[1].bassNote == 53);
+    const auto withBass = plain[1].notes();
+    CHECK ((std::vector<int> (withBass.begin(), withBass.end()) == std::vector<int> { 53, 65, 69, 72 }));
+    int ledMovement = 0, rootMovement = 0;
+    for (std::size_t s = 0; s < 4; ++s)
+    {
+        ledMovement += voiceMovement (voiced[s].upper, voiced[(s + 1) % 4].upper);
+        rootMovement += voiceMovement (plain[s].upper, plain[(s + 1) % 4].upper);
+    }
+    CHECK (ledMovement == 12 && rootMovement > 2 * ledMovement);
+    // Con bajo, las voces nunca bajan hasta él.
+    const auto ledBass = voiceProgression (reggaeton, aMinor, VoicingStyle::voiceLed, 57, true);
+    for (std::size_t s = 0; s < 4; ++s)
+        CHECK (ledBass[s].bassNote >= 0 && ledBass[s].upper[0] > ledBass[s].bassNote);
+
+    // Las notas en el tiempo. Sostenido: un acorde por paso.
+    RenderOptions options;
+    auto events = renderProgression (reggaeton, aMinor, options);
+    CHECK (events.size() == 12);
+    CHECK (events.size() == 12 && events[0] == (NoteEvent { 57, 0.0, 4.0, 100 }) && events[3] == (NoteEvent { 65, 4.0, 4.0, 100 }));
+    // Dembow: 6 golpes de media negra por compás, con sus acentos.
+    options.rhythm = 4;
+    options.velocity = 110;
+    events = renderProgression (reggaeton, aMinor, options);
+    CHECK (events.size() == 4 * 6 * 3);
+    std::vector<double> firstBar;
+    for (const auto& e : events)
+        if (e.note == 57 && e.start < 4.0)
+        {
+            firstBar.push_back (e.start);
+            CHECK (e.length == 0.5);
+        }
+    CHECK ((firstBar == std::vector<double> { 0.0, 0.75, 1.5, 2.0, 2.75, 3.5 }));
+    CHECK (events.size() > 3 && events[0].velocity == 110 && events[3].velocity == accentedVelocity (110, 85));
+    // Un cambio de paso dentro de un golpe ataca el acorde nuevo ahí mismo: i (1 tiempo) y ♭VI (3), dembow largo (golpe
+    // de 5 semicorcheas en 0): Am de 0 a 1, F de 1 a 1.25.
+    options.rhythm = 5;
+    options.velocity = 100;
+    events = renderProgression (progressionOf ("i bVI", { 1, 3 }), aMinor, options);
+    CHECK (events.size() >= 6 && events[0] == (NoteEvent { 57, 0.0, 1.0, 100 }) && events[3] == (NoteEvent { 65, 1.0, 0.25, 100 }));
+    // Dos vueltas = el doble; vacía = nada.
+    options = {};
+    options.loops = 2;
+    CHECK (renderProgression (reggaeton, aMinor, options).size() == 24);
+    CHECK (renderProgression ({}, aMinor, options).empty());
+}
+
+void testBorrowedChords()
+{
+    std::printf ("Prestamo modal: los acordes de los modos paralelos que no estan en la tonalidad, en orden de uso\n");
+
+    const auto symbols = [] (const Key& k, int count) {
+        std::string text;
+        const auto borrowed = borrowedChords (k);
+        for (int i = 0; i < count && i < static_cast<int> (borrowed.size()); ++i)
+            text += (text.empty() ? "" : " ") + chordSymbol (borrowed[static_cast<std::size_t> (i)].chord) + "="
+                    + romanNumeralText (borrowed[static_cast<std::size_t> (i)].numeral);
+        return text;
+    };
+    // Do mayor: lo del menor paralelo primero (i, ♭III, iv, v, ♭VI, ♭VII).
+    CHECK_TEXT (symbols (key ("C major"), 6), "Cm=i Eb=bIII Fm=iv Gm=v Ab=bVI Bb=bVII");
+    CHECK (borrowedChords (key ("C major"))[0].source == Mode::aeolian);
+    // La menor: ii y IV del dórico, ♭II y ♭vii del frigio, el V de la armónica.
+    CHECK_TEXT (symbols (key ("A minor"), 5), "Bm=ii D=IV Bb=bII Gm=bvii E=V");
+    CHECK (borrowedChords (key ("A minor"))[2].source == Mode::phrygian);
+
+    // En todas las tonalidades y modos: ninguno es de la tonalidad, sin repetidos, cada uno es de su modo de origen y su
+    // número romano lleva de vuelta al acorde.
+    bool ok = true;
+    for (int tonic = 0; tonic < 12; ++tonic)
+        for (int m = 0; m < modeCount; ++m)
+            for (const auto size : { ChordSize::triad, ChordSize::seventh })
+            {
+                const Key k = standardKey (tonic, static_cast<Mode> (m));
+                const auto borrowed = borrowedChords (k, size);
+                ok = ok && ! borrowed.empty();
+                for (std::size_t i = 0; i < borrowed.size(); ++i)
+                {
+                    const auto& b = borrowed[i];
+                    ok = ok && ! isDiatonic (b.chord, k) && isDiatonic (b.chord, Key { k.tonic, b.source }) && b.source != k.mode;
+                    ok = ok && chordFor (b.numeral, k).root.pitchClass() == b.chord.root.pitchClass() && chordFor (b.numeral, k).type == b.chord.type;
+                    for (std::size_t j = 0; j < i; ++j)
+                        ok = ok && ! (borrowed[j].chord.root.pitchClass() == b.chord.root.pitchClass() && borrowed[j].chord.type == b.chord.type);
+                }
+            }
+    CHECK (ok);
+}
 } // namespace
 
 int main()
@@ -628,6 +888,10 @@ int main()
     testRomanNumerals();
     testHarmonicFunctions();
     testChordFinder();
+    testVoiceLeading();
+    testRhythmPatterns();
+    testProgressions();
+    testBorrowedChords();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de teoria pasaron.\n");

@@ -2,8 +2,12 @@
 #include "PluginEditor.h"
 #include "Parameters.h"
 
+#include "deepwater/theory/Text.h"
+
 namespace
 {
+constexpr const char* progressionTag = "Progression";
+
 // Bytes reservados para el MIDI de salida de un bloque (un mensaje de 3 bytes ocupa 9). Si un bloque trajera más, el
 // MidiBuffer crecería una vez (reservando memoria) y desde ahí conserva esa capacidad.
 constexpr int reservedMidiBytes = 16384;
@@ -20,9 +24,41 @@ TidechartAudioProcessor::TidechartAudioProcessor()
     chordSizeParam = parameters.getRawParameterValue (id::chordSize);
     keyMappingParam = parameters.getRawParameterValue (id::keyMapping);
     chordBassParam = parameters.getRawParameterValue (id::chordBass);
+    playModeParam = parameters.getRawParameterValue (id::playMode);
+    voicingParam = parameters.getRawParameterValue (id::voicing);
+    rhythmParam = parameters.getRawParameterValue (id::rhythm);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (tidechart::params::bypass));
     jassert (bypassParameter != nullptr);
     outputMidi.ensureSize (reservedMidiBytes);
+    setProgression (defaultProgression());
+}
+
+deepwater::theory::Progression TidechartAudioProcessor::defaultProgression()
+{
+    namespace th = deepwater::theory;
+    th::Progression result;
+    for (const auto& numeral : { th::RomanNumeral { 1, 0, th::chordType ("m") }, th::RomanNumeral { 6, -1, th::chordType ("") },
+                                 th::RomanNumeral { 3, -1, th::chordType ("") }, th::RomanNumeral { 7, -1, th::chordType ("") } })
+        result.steps.push_back ({ numeral, 4 });
+    return result;
+}
+
+deepwater::theory::Progression TidechartAudioProcessor::getProgression() const
+{
+    const juce::ScopedLock lock (progressionLock);
+    return progression;
+}
+
+void TidechartAudioProcessor::setProgression (const deepwater::theory::Progression& newProgression)
+{
+    {
+        const juce::ScopedLock lock (progressionLock);
+        progression = newProgression;
+        for (auto& step : progression.steps)
+            step.beats = deepwater::theory::Progression::clampBeats (step.beats);
+        progressionBox.write (progression);
+    }
+    progressionChanges.fetch_add (1, std::memory_order_acq_rel);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout TidechartAudioProcessor::createParameterLayout()
@@ -46,6 +82,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout TidechartAudioProcessor::cre
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::keyMapping, id::versionHintPhase3 }, "Keys",
                                                               juce::StringArray { "White keys = degrees", "Scale notes" }, 0));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::chordBass, id::versionHintPhase3 }, "Bass", false));
+
+    // Fase 4. Por defecto, lo de la Fase 3: cada tecla su acorde, en estado fundamental y sostenido.
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::playMode, id::versionHintPhase4 }, "Play",
+                                                              juce::StringArray { "Keys: one chord each", "Progression (synced)" }, 0));
+    const juce::StringArray voicings { "Root position", "Voice leading", "Open (drop 2)" };
+    jassert (voicings.size() == deepwater::theory::voicingStyleCount);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::voicing, id::versionHintPhase4 }, "Voicing", voicings, 0));
+    const juce::StringArray rhythms { "Sustain", "Quarters", "Eighths", "Offbeat", "Dembow", "Dembow long", "Dembow offbeat",
+                                      "Dembow shifted", "Dembow gaps" };
+    jassert (rhythms.size() == deepwater::theory::rhythmPatternCount);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::rhythm, id::versionHintPhase4 }, "Rhythm", rhythms, 0));
     return layout;
 }
 
@@ -63,6 +110,9 @@ tidechart::midi::ChordSettings TidechartAudioProcessor::currentChordSettings (bo
     settings.size = choice (chordSizeParam, 2) == 0 ? th::ChordSize::triad : th::ChordSize::seventh;
     settings.mapping = choice (keyMappingParam, 2) == 0 ? tidechart::midi::KeyMapping::whiteKeys : tidechart::midi::KeyMapping::scaleNotes;
     settings.bass = chordBassParam->load (std::memory_order_relaxed) >= 0.5f;
+    settings.playMode = choice (playModeParam, 2) == 0 ? tidechart::midi::PlayMode::keys : tidechart::midi::PlayMode::progression;
+    settings.voicing = static_cast<th::VoicingStyle> (choice (voicingParam, th::voicingStyleCount));
+    settings.rhythm = choice (rhythmParam, th::rhythmPatternCount);
     return settings;
 }
 
@@ -128,8 +178,11 @@ void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juc
         midiLog.push ({ message, static_cast<std::uint16_t> (size), true, clock.ppqAt (sample) });
     };
 
+    // La progresión publicada por la GUI (read copia la última aunque no haya nada nuevo: son pocos bytes).
+    progressionBox.read (audioProgression);
+    stage.setProgression (audioProgression);
     stage.setChordSettings (currentChordSettings (bypassed));
-    stage.beginBlock (sink);
+    stage.beginBlock (sink, &clock);
     const int lastSample = juce::jmax (0, numSamples - 1);
     for (const auto metadata : midi)
     {
@@ -140,6 +193,8 @@ void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juc
         midiLog.push ({ message, static_cast<std::uint16_t> (metadata.numBytes), false, clock.ppqAt (sample) });
         stage.process (metadata.data, metadata.numBytes, sample, sink);
     }
+    // Los cambios de acorde y los golpes del ritmo que caen después del último evento.
+    stage.endBlock (numSamples, sink);
 
     // La salida se copia al buffer del host. clear() conserva su capacidad, y el host lo reserva para lo que trae (el
     // wrapper VST3 de JUCE, 2048 bytes): mientras salga lo mismo que entra no reserva memoria. (Intercambiarlos con
@@ -196,20 +251,48 @@ void TidechartAudioProcessor::publishTransport (int numSamples, bool bypassed) n
     snapshot.releases = stage.releaseCount();
     snapshot.bypassed = bypassed;
     snapshot.heldDegrees = stage.getChords().heldDegrees();
+    snapshot.progressionStep = static_cast<std::int8_t> (stage.progressionStep());
+    snapshot.progressionSounding = stage.progressionSounding();
+    snapshot.rhythmStep = static_cast<std::int8_t> (stage.rhythmStep());
     transportBox.write (snapshot);
 }
 
+// La progresión va en el estado como un elemento propio, legible: <Progression><Step chord="bVI" beats="4"/>...</Progression>.
+// El grado en texto romano (ida y vuelta probada en libs/theory) y no como índices: así un preset o el servidor MCP la
+// pueden escribir a mano.
 void TidechartAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     if (const auto xml = parameters.copyState().createXml())
+    {
+        auto* element = xml->createNewChildElement (progressionTag);
+        for (const auto& step : getProgression().steps)
+        {
+            auto* stepElement = element->createNewChildElement ("Step");
+            stepElement->setAttribute ("chord", juce::String (deepwater::theory::romanNumeralText (step.numeral)));
+            stepElement->setAttribute ("beats", step.beats);
+        }
         copyXmlToBinary (*xml, destData);
+    }
 }
 
 void TidechartAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (const auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (parameters.state.getType()))
+        {
+            // Un proyecto de antes de la Fase 4 no trae progresión: la de fábrica.
+            auto loaded = defaultProgression();
+            if (auto* element = xml->getChildByName (progressionTag))
+            {
+                loaded.steps.clear();
+                for (auto* stepElement : element->getChildWithTagNameIterator ("Step"))
+                    if (const auto numeral = deepwater::theory::parseRomanNumeral (stepElement->getStringAttribute ("chord").toStdString()))
+                        loaded.steps.push_back ({ *numeral, stepElement->getIntAttribute ("beats", 4) });
+                xml->removeChildElement (element, true); // no es un parámetro: fuera del árbol del APVTS
+            }
+            setProgression (loaded);
             parameters.replaceState (juce::ValueTree::fromXml (*xml));
+        }
     // Cargar un proyecto cambia lo que el plugin hace con las notas (otra tonalidad, otros acordes): lo que suena se apaga.
     stage.requestRelease();
 }

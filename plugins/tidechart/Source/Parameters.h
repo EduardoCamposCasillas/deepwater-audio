@@ -14,7 +14,13 @@ inline constexpr const char* chordSize = "chordSize";   // 0 = tríadas, 1 = sé
 inline constexpr const char* keyMapping = "keyMapping"; // 0 = teclas blancas = grados, 1 = notas de la escala
 inline constexpr const char* chordBass = "chordBass";   // agregar la fundamental una octava abajo
 
+// Fase 4: la progresión, el voicing y el ritmo de los acordes.
+inline constexpr const char* playMode = "playMode"; // 0 = cada tecla su acorde, 1 = cualquier tecla toca la progresión
+inline constexpr const char* voicing = "voicing";   // el orden de deepwater::theory::VoicingStyle
+inline constexpr const char* rhythm = "rhythm";     // el orden de deepwater::theory::rhythmPatterns
+
 // Versión en la que apareció cada parámetro (VST3 la usa para ordenar los parámetros entre versiones del plugin).
 inline constexpr int versionHintPhase1 = 1;
 inline constexpr int versionHintPhase3 = 2;
+inline constexpr int versionHintPhase4 = 3;
 } // namespace tidechart::params

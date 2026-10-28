@@ -87,13 +87,16 @@ plugins/tidechart/
     midi/MidiStage.h         # la etapa MIDI sin JUCE: todo lo que sale pasa por emit (contado); apagar y pánico pedidos
                              # desde cualquier hilo y atendidos en la muestra 0 del bloque siguiente; bypass ↔ acordes
     midi/ChordTrigger.h      # Fase 3: qué acorde dispara cada tecla (teclas blancas = grados / notas de la escala) y los
-                             # acordes que suenan, cada uno con SUS notas, con cuenta de notas compartidas
+                             # acordes que suenan, cada uno con SUS notas, con cuenta de notas compartidas. Fase 4:
+                             # cualquier grado escrito (chordForNumeral), voicing (withVoicing), códigos de la paleta
     midi/EventLog.h          # cola lock-free audio → GUI de los eventos que entran y salen (el monitor)
     midi/MidiText.h          # nombres de nota como FL (C5 = 60) y descripción de mensajes para el monitor
-    gui/                     # tema, reloj del host (TransportView), paleta (ChordPaletteView), teclado de lo que suena,
-                             # acorde que suena (ChordView, con libs/theory), teoría en español (TheoryNames), monitor MIDI
+    gui/                     # tema, reloj del host (TransportView), paleta + prestados (ChordPaletteView), progresión
+                             # (ProgressionView, ProgressionTemplates), teclado de lo que suena, acorde que suena
+                             # (ChordView, con libs/theory), teoría en español (TheoryNames), monitor MIDI
   tests/MidiTests.cpp        # etapa MIDI sin JUCE (contra un receptor modelo independiente)
-  tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte, reservas)
+  tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte,
+                             # progresión, reservas); --snapshot <png> pinta la GUI fuera de pantalla para revisarla
 ```
 
 ## Librería de teoría musical (`libs/theory`, namespace `deepwater::theory`)
@@ -150,6 +153,39 @@ plugins/tidechart/
   - El MIDI de salida puede ser más grande que el de entrada (3–5 notas por tecla). Se arma en un buffer propio de
     16 KB; si el del host (2048 bytes en el wrapper VST3 de JUCE) se queda chico crece una vez y conserva su tamaño.
 
+- Decisiones de la Fase 4:
+  - `libs/theory`: `Voicing.h` (`voiceChord`: todas las inversiones en 5 octavas; gana la que menos mueve las voces —
+    emparejadas de grave a agudo— ×4 más la distancia al centro; el centro = la tríada de tónica y no se aleja más de
+    ±7 semitonos; empate → estado fundamental), `Rhythm.h` (9 patrones en semicorcheas; el orden es formato),
+    `Progression.h` (pasos = `RomanNumeral` + tiempos 1..16, máximo 8 pasos; `stepAt` desde el principio de la
+    canción; `voiceProgression` en dos pasadas para que la vuelta del loop también se mueva poco; `renderProgression`,
+    las notas en el tiempo, es el oráculo de los tests y será lo que se arrastre al Piano Roll en la Fase 7) y
+    `borrowedChords` en `Harmony.h` (por orden de uso: de una mayor, el eólico primero; de una menor, dórico, frigio,
+    armónica; disminuidos y aumentados al final).
+  - Parámetros nuevos (versionHint 3, el orden de sus listas es formato): `playMode` (teclas / progresión), `voicing`
+    (estado fundamental / conducción de voces / abierto drop 2), `rhythm` (índice de `rhythmPatterns`). Por defecto lo
+    de la Fase 3: teclas, estado fundamental, sostenido. Con esos valores la salida es idéntica a la de la Fase 3.
+  - Progresión = datos del proyecto, no parámetros: en el procesador (con un lock solo entre la GUI y
+    setStateInformation; el audio nunca lo toma) y publicada al audio por `TripleBuffer<Progression>`. En el estado,
+    elemento `<Progression><Step chord="bVI" beats="4"/>` (romano ASCII: legible y escribible por presets y el MCP),
+    fuera del árbol del APVTS. Proyecto sin progresión (Fase 3) → la de fábrica, i–♭VI–♭III–♭VII de 4 tiempos.
+  - Lo que suena es una función de la posición: en cada semicorchea (detectada por muestra con `HostClock::ppqAt`, con
+    un margen de 1e-6 para el redondeo del host) se compara lo que debería sonar con lo que suena: se ataca si no suena,
+    si cambió el paso, las notas o el canal, o si empieza un golpe; se suelta en un silencio del patrón. Saltos, loops,
+    tempo y editar la progresión mientras suena salen solos. La progresión y el patrón se cuentan desde el compás 1.
+    Host parado → sin ritmo (sostenido, para escuchar esa posición). Solo se recorren las muestras si algo depende del
+    tiempo (si no, una cuenta por evento).
+  - Modo progresión: cualquier tecla abajo la hace sonar; canal, octava (C5 = el registro de la paleta) y velocidad de
+    la última; suena mientras quede una abajo. Modo teclas: las teclas abajo (hasta 64) se recuerdan para volver a
+    atacar su acorde en cada golpe (recalculado con los ajustes de ese momento: el slot guarda sus notas, así que nada
+    se cuelga). Cambiar entre teclas y progresión apaga todo y olvida las teclas (su note-off tardío no hace nada).
+  - Voicing en el modo teclas y la paleta: desde las voces del último acorde de una tecla o de la paleta. El bajo
+    ("+ Bajo") sigue siendo la fundamental una octava abajo; ninguna voz baja hasta él. La progresión se voicea entera
+    con su tónica (cache que se recalcula si cambian la progresión, los ajustes o la octava).
+  - Paleta: un solo atómico con un código (0 = nada, 1..7 = grado con el tamaño de los ajustes, ≥1000 = cualquier
+    `RomanNumeral` empaquetado). Prestados: los 8 primeros de `borrowedChords`; "Agregar con clic" los suma a la
+    progresión. Plantillas: progresión + modo (la tónica no cambia).
+
 ## Requisitos propios (además de los del raíz)
 - Ninguna nota colgada, en ningún caso (ver arriba).
 - Un acorde por tecla: la tecla que dispara un acorde no suena además sola, salvo que se pida (modo "con la nota").
@@ -192,6 +228,35 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 4 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (progresión sincronizada, dembow, conducción
+de voces, prestados).
+- `libs/theory`: `Voicing.h`, `Rhythm.h`, `Progression.h` (+ `src/Progression.cpp`: `renderProgression`) y
+  `borrowedChords` en `Harmony.h`. `DeepwaterTheoryTests` +4 grupos: I–IV–V–I con las inversiones de libro (C F A,
+  B D G), notas comunes quietas, drop 2, piso del bajo, todas las tonalidades × modos × tamaños × estilos (notas del
+  acorde, centro en la ventana); integridad de los patrones y el dembow 3+3+2; pasos en el tiempo, voicing de la del
+  reggaetón (movimiento total 12 contra >24 en estado fundamental), render con acentos y cambio de paso dentro de un
+  golpe; prestados de Do mayor y La menor en orden y en todas las tonalidades (ninguno diatónico, sin repetidos).
+- Etapa MIDI: `MidiStage` con el tiempo (`beginBlock (sink, &clock)`, `process`, `endBlock`), modo progresión, ritmo
+  en los dos modos, voicing, prestados en la paleta. Sin JUCE. Con los ajustes por defecto, idéntica a la Fase 3 (sus
+  tests pasan sin cambios).
+- Procesador: 3 parámetros (versionHint 3), progresión en el estado y en un `TripleBuffer`, `previewNumeral`; el
+  snapshot publica el paso, si suena y la semicorchea del patrón.
+- GUI 900 × 840: PALETA con la fila PRESTADOS (8, con su modo de origen) y PROGRESIÓN (teclas / progresión, ritmo,
+  voicing; plantillas, texto romano editable, "Agregar con clic", vaciar; 8 pasos con grado, acorde, función, tiempos
+  y "de frigio" si es prestado; mantener = escuchar; clic derecho = duración, tipo, mover, duplicar, quitar; rueda =
+  tiempos; el paso de la posición de FL encendido; tira de 16 semicorcheas con el patrón y la actual). Revisada con
+  `--snapshot` (FL en el compás 2: ♭VI suena como F/A, el dembow marca su semicorchea).
+- Tests: `TidechartTests` +5 (voicing por teclas y paleta, prestados, códigos de la paleta; la progresión en vivo =
+  `renderProgression` muestra a muestra en 9 ritmos × 3 voicings × bajo, con bloques al azar; salto, loop, tempo,
+  parado, dos teclas, cambiar de modo, editar y vaciar la progresión, apagar; ritmo en el modo teclas; 10 semillas al
+  azar con todo cambiando: nunca dos note-on seguidos, silencio al soltar). `TidechartProcessorTests` +1: la
+  progresión con un host = `renderProgression` a 4 sample rates × bloques 1/7/64/512/4096/variable sin reservas,
+  editarla mientras suena, el snapshot; estado con progresión (legible, no se duplica, proyecto de la Fase 3 → la de
+  fábrica).
+- Release con 0 warnings; ctest 14/14; pluginval strictness 10 ampliado: SUCCESS.
+- Pendiente para más adelante: pedal en el bajo por paso (lo cubrirán las líneas de bajo de la Fase 6), más de 8
+  pasos y arrastrar pasos (Fase 8), ritmos para compases que no sean de 4/4.
+
 Fase 3 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (paleta y acordes con una tecla): funciona.
 - Etapa MIDI: `ChordTrigger.h` (`chordForKey`, `chordForDegree`, `chordAtRoot`; slots con sus notas y cuenta de notas
   compartidas) y `MidiStage` con `setChordSettings` (por bloque), `requestPreview` (cualquier hilo) y las transiciones
@@ -251,5 +316,5 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 4 (progresiones, conducción de voces, ritmos de
-acordes como el dembow, préstamo modal).
+Siguiente: que el usuario pruebe la Fase 4 en FL; después, Fase 5 (detección de tonalidad a partir del MIDI
+entrante).

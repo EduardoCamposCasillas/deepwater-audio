@@ -26,4 +26,9 @@ struct TransportSnapshot
     std::uint32_t releases = 0; // cuántas veces se apagó todo (pánico, reinicio del audio, cargar un proyecto)
     bool bypassed = false;
     std::uint8_t heldDegrees = 0; // los grados de los acordes de una tecla que suenan (bit d = grado d, 0..6)
+
+    // Fase 4: dónde está la canción en la progresión y en el patrón rítmico.
+    std::int8_t progressionStep = -1; // el paso en la posición actual (−1 = progresión vacía)
+    bool progressionSounding = false; // una tecla la está haciendo sonar
+    std::int8_t rhythmStep = -1;      // la semicorchea del patrón (−1 = sostenido o host parado)
 };

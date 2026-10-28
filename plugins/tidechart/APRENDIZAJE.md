@@ -353,3 +353,155 @@ tiempos fuertes.
   keys solos, o sube el acorde una octava.
 - **Pensar que el modo es solo "más triste" o "más alegre".** Cada modo tiene progresiones propias: el ♭II es del
   frigio, el IV mayor en menor es del dórico, el V mayor en menor es de la armónica. La paleta enseña cuáles son.
+
+## Fase 4 — La progresión: voces que caminan, el dembow y acordes prestados
+
+Hasta aquí cada acorde sonaba solo, en estado fundamental, mientras durara la tecla. Ahora Tidechart **compone en el
+tiempo**: una **progresión** de hasta 8 pasos que sigue a FL compás a compás, con un **ritmo** de acordes (el dembow y
+sus variantes) y un **voicing** que mueve las voces lo menos posible. La paleta suma una fila de **acordes prestados**
+de otros modos, y cada clic puede ir armando la progresión.
+
+### Conceptos aprendidos
+
+- **Voicing.** El acorde dice *qué* notas suenan; el voicing dice *en qué octava y en qué orden*. Am puede ser A C E,
+  C E A, E A C, abierto en dos octavas... Todas son "Am", pero suenan distinto: más grave o más brillante, más junto o
+  más ancho.
+- **Conducción de voces.** Piensa cada nota del acorde como una voz de un coro. En estado fundamental, de Am a F cada
+  voz salta (A→F, C→A, E→C). Con conducción de voces se busca, de todas las inversiones, la que obliga a moverse
+  **lo menos posible**: Am (A C E) → F como **A C F**. A y C se quedan quietas (son **notas comunes** de los dos
+  acordes) y solo E sube un semitono a F. La progresión del reggaetón queda así: **A C E → A C F → G C E → G B D**,
+  12 semitonos de movimiento en total contra más del doble en estado fundamental. Suena más suave, más "producido",
+  y deja espacio a la melodía.
+- **Inversiones automáticas.** Las inversiones no se eligen a mano: salen solas de buscar el camino corto. F como
+  A C F es la **1.ª inversión** (la 3.ª abajo: F/A, lo verás en la fila ACORDE); C como G C E es la **2.ª** (C/G). En
+  Do mayor, el clásico I–IV–V–I sale como C E G → C F A → B D G → C E G: cada voz se mueve 2 semitonos como mucho.
+- **Abierto (drop 2).** Se toma el voicing cerrado y la 2.ª voz desde arriba baja una octava: C E G → E3 C G. Las
+  mismas notas, más separadas: más ancho, de pad o de piano de balada. En graves, en cambio, se embarra: úsalo en
+  registros medios.
+- **Ritmo de acordes.** Un patrón son golpes sobre 16 semicorcheas por compás. El **dembow** es **3+3+2**: en cada
+  medio compás, golpes en las semicorcheas 1, 4 y 7 (contando desde 1): *boom - - ch - - boom - | boom - - ch - -
+  boom -*. Es el **tresillo** de la habanera, que viene del Caribe y está en el reggae, el dancehall y el reggaetón.
+  Sus variantes: **largo** (el 3+3+2 estirado a todo el compás, en corcheas: los acordes respiran), **a contratiempo**
+  (solo el "ch": los acordes contestan al bombo en vez de pisarlo), **desplazado** (movido una corchea: mismo dibujo,
+  otro apoyo) y **con huecos** (deja aire para la voz).
+- **Acento.** Cada golpe tiene su fuerza (un % de la velocidad de la tecla): en el dembow, el primero de cada mitad
+  pega más. Un instrumento que responde a la velocidad (un piano, un pluck con filtro por velocidad) hace que el patrón
+  "baile" en vez de sonar a máquina.
+- **La progresión como una pista más.** El paso que suena depende solo de **dónde está la canción**: la progresión se
+  cuenta desde el compás 1 y se repite. Si saltas al compás 7 o haces loop de una sección, suena el acorde de ese
+  compás, igual que el resto de pistas. Con FL parado no hay ritmo: el acorde suena sostenido para que lo escuches.
+- **Préstamo modal en la práctica.** La fila **PRESTADOS** muestra los acordes de los modos con la misma tónica que no
+  están en tu escala, ordenados por lo que más se usa. En **La menor**: **ii (Bm)** y **IV (D)** del dórico, **♭II
+  (B♭)** del frigio, **V (E)** de la menor armónica. En **Do mayor**: **iv (Fm)**, **♭VI (A♭)**, **♭VII (B♭)** del
+  menor. Un prestado trae una nota de fuera (el F♯ del IV dórico, el B♭ del ♭II frigio): por eso "colorea".
+- **Mediante cromática.** Dos acordes mayores (o menores) cuyas fundamentales están a una 3.ª, con notas cambiadas
+  que no son de la escala: I–III en mayor (C–E). Ni del modo ni prestados del modo paralelo: Tidechart los marca como
+  "cromático". Suenan a cine, a sorpresa.
+
+### Qué hace cada control
+
+- **Teclas / Progresión.** *Teclas*: cada tecla dispara su acorde, como en la Fase 3 (ahora con ritmo y voicing).
+  *Progresión*: **cualquier tecla abajo** hace sonar la progresión siguiendo a FL. La octava de la tecla elige el
+  registro (C5 = el de la paleta; C4, una octava abajo) y su velocidad, la fuerza. En el Piano Roll basta **una nota
+  larga** donde quieras acordes.
+- **Ritmo.** Sostenido (el acorde dura su paso), negras, corcheas, contratiempo y las 5 variantes del dembow. La tira
+  RITMO dibuja el patrón (más claro = más acento) y marca la semicorchea en la que va FL.
+- **Voicing.** Estado fundamental (la Fase 3: cada acorde salta), conducción de voces, abierto.
+- **Plantillas.** Progresiones para empezar, cada una con su modo y una frase de por qué funciona.
+- **El texto romano.** La progresión escrita: *i ♭VI ♭III ♭VII*. Se puede escribir y pulsar Enter: `i bVI bIII bVII`,
+  `i bII`, `Imaj7 IV7 iv9`. Minúscula = menor, `b` = bemol, `o` = disminuido, `+` = aumentado, y el tipo detrás (7, maj7,
+  9, sus2...).
+- **Agregar con clic.** Encendido, cada clic en un pad de la paleta (también en los prestados) lo agrega al final.
+- **Los pasos.** Grado, acorde, función (color), tiempos y, si es prestado, de qué modo. Mantener pulsado = escuchar.
+  **Clic derecho**: duración (1 a 16 tiempos), tipo de acorde (sus2, add9, maj7, m9...), mover, duplicar, quitar.
+  **Rueda**: un tiempo más o menos. El paso donde está FL se enciende.
+- **PRESTADOS.** Mantener pulsado = escuchar; pasa el ratón para leer de dónde viene.
+
+### Ejercicio guiado: del bloque al coro
+
+Ruteo de siempre (Tidechart → puerto 1 → un piano o un pad en Undertow o FLEX). Tidechart en **A, menor (eólico),
+Tríadas**.
+
+1. En PROGRESIÓN elige **Progresión (sigue a FL)**, ritmo **Sostenido**, voicing **Estado fundamental**. En el Piano
+   Roll de Tidechart escribe **una sola nota C5 de 4 compases**, y loop de 4 compases. Play: Am – F – C – G, un compás
+   cada uno. Mira el teclado de SUENA AHORA: los bloques saltan de un lado a otro.
+2. Cambia a **Conducción de voces** (puedes hacerlo con FL sonando). Escucha: los acordes ahora "se deslizan". Mira el
+   teclado: las teclas encendidas casi no se mueven. En ACORDE aparecen **F/A** y **C/G**: las inversiones que eligió.
+3. **Abierto**: más ancho. Compara los tres a volumen parecido con el mismo sonido. ¿Cuál deja más espacio para una
+   voz?
+4. Ritmo **Dembow (3+3+2)**. Pon un bombo en el FPC en las semicorcheas 1 y 9 de cada compás y una caja en 4, 7, 12 y
+   15. Los acordes quedan cosidos a la batería. Prueba **Dembow a contratiempo**: los acordes caen solo en los huecos
+   del bombo (llamada y respuesta).
+5. Mueve la nota del Piano Roll a **C4**: la progresión entera baja una octava. A **C6**, sube.
+6. Haz loop solo del compás 3: suena siempre **C** (el ♭III), porque la progresión sigue la posición de la canción.
+
+### Receta: perreo oscuro con un prestado
+
+**E, frigio**, Plantilla **Perreo oscuro (i–♭II)**, voicing **Conducción de voces**, **+ Bajo**, ritmo **Dembow
+largo**. Una nota C5 larga en el Piano Roll. Em (E G B) y F (F A C) se alternan y cada voz sube un semitono o un tono y
+vuelve; el bajo sube y baja un semitono: tensión pura. Ahora el giro: enciende **Agregar con clic**, toca el pad de la
+**i** (Em) y después, en PRESTADOS, el **V (B)**, de la menor armónica. Progresión: i – ♭II – i – V.
+Por qué funciona: el ♭II tira hacia abajo (F → E, un semitono) y el V tira hacia arriba (D♯ → E, la sensible): la
+tónica queda apretada entre dos semitonos, el sonido del perreo más oscuro y del flamenco. Con el dembow largo los
+acordes respiran y dejan el centro para la voz.
+
+### Reto (sin receta)
+
+Arma **a mano, con Agregar con clic**, una progresión de 4 pasos en **Do mayor** que use **dos prestados** distintos
+y termine pidiendo volver al principio. Ponle el ritmo y el voicing que mejor le queden. Antes, escríbela en papel en
+números romanos. Pistas: 1) el ♭VI (A♭) y el ♭VII (B♭) del menor son la pareja épica: ♭VI – ♭VII – I cierra como en
+una película. 2) El iv (Fm) justo antes del I es la "cadencia plagal menor": nostálgica. 3) Si el último paso es un
+acorde naranja (dominante), el loop pide volver.
+
+### Teoría aplicada: por qué la conducción de voces suena "mejor"
+
+El oído sigue **líneas**, no bloques. Cuando las voces se mueven poco, cada una forma una pequeña melodía (A → A → G →
+G en la voz de abajo de la progresión del reggaetón; E → F → E → D arriba) y la armonía se oye como un movimiento
+continuo. Las notas comunes hacen de pegamento entre acordes. Cuando todo salta, el oído oye golpes separados. Por eso
+los pianistas y los arreglistas tocan así casi siempre, y por eso el **estado fundamental** se reserva para cuando se
+quiere fuerza bruta (power chords, un piano martillado). Una consecuencia práctica: con conducción de voces, la nota
+más aguda del acorde se mueve poco, y una melodía que va por encima tiene su espacio.
+
+### Análisis de canciones
+
+- **"Dem Bow"** (Shabba Ranks, 1990): de su ritmo (producido por Steely & Clevie) sale el nombre del patrón. Escucha la
+  caja en el 3+3+2 y compárala con la tira RITMO en **Dembow**. El reggaetón tomó ese ritmo y lo hizo base de todo un
+  género. El dembow dominicano lo acelera y lo hace más seco.
+- **"Despacito"**: Bm – G – D – A en loop, i–♭VI–♭III–♭VII en Si menor. Pon la plantilla **Reggaetón** con tónica **B**,
+  conducción de voces y **Dembow largo**: es el esqueleto armónico y rítmico. Luego cambia a **Sostenido**: sin el
+  ritmo, la misma armonía suena a balada.
+- **"Creep"** (Radiohead): G – B – C – Cm, **I – III – IV – iv** (la plantilla **Mediante**). El B mayor (III) es una
+  mediante cromática con un D♯ fuera de la escala; el Cm (iv) es un prestado del menor. Dos colores "de fuera" en
+  cuatro acordes: de ahí la sensación rara y triste.
+- Ejercicio: toma un tema de reggaetón que te guste, saca su tónica y sus acordes (de oído o con una transcripción) y
+  escríbelos en el texto romano. ¿Cuáles salen como prestados? ¿Qué ritmo de la lista se parece más al de sus acordes?
+
+### Vocabulario
+
+- **Voicing**: cómo se reparten las notas de un acorde (orden y octavas).
+- **Conducción de voces (voice leading)**: pasar de un acorde a otro moviendo cada voz lo menos posible.
+- **Notas comunes**: las que comparten dos acordes seguidos (Am y F comparten A y C).
+- **Posición cerrada / abierta**: las voces lo más juntas posible / repartidas en más de una octava.
+- **Drop 2**: bajar una octava la 2.ª voz desde arriba de un voicing cerrado (muy usado en piano y guitarra de jazz).
+- **Tresillo / 3+3+2**: el patrón de 8 semicorcheas agrupadas en 3, 3 y 2, la base del dembow.
+- **Contratiempo**: los golpes en las partes débiles (el "y" de cada tiempo).
+- **Anticipación**: un golpe justo antes del tiempo fuerte que adelanta lo que viene (el último golpe de "Dembow con
+  huecos").
+- **Préstamo modal / acorde prestado**: un acorde de otro modo con la misma tónica.
+- **Mediante cromática**: dos acordes con las fundamentales a una 3.ª y notas fuera de la escala (I – III mayor).
+
+### Errores comunes
+
+- **"No suena nada" en modo Progresión.** Hace falta una tecla abajo: una nota larga en el Piano Roll de Tidechart (o
+  mantener una tecla). Sin nota, la progresión avanza en silencio (lo ves en el paso encendido).
+- **"Suena otro acorde del que esperaba".** La progresión se cuenta desde el compás 1 de la canción. Si tu sección
+  empieza en el compás 6 y la progresión dura 4 compases, el compás 6 es su paso 2. Haz que las secciones empiecen en
+  múltiplos del largo de la progresión, o ajusta las duraciones.
+- **Dembow que no cuadra con la batería.** Los patrones son de 4/4, con 16 semicorcheas por compás. En otro compás no
+  van a cuadrar. Y si el swing de FL está activo, la batería se corre y los acordes no.
+- **Usar el estado fundamental en un pad largo.** Cada cambio salta y el pad "late". Para pads y keys, conducción de
+  voces; el estado fundamental, para plucks con mucha pegada o cuando el bajo de la mano izquierda ya lo hace el 808.
+- **Llenar la progresión de prestados.** Un prestado colorea porque es la excepción. Con tres en cuatro acordes ya no
+  hay tonalidad que colorear: la canción suena perdida. Uno o dos por progresión, en el sitio donde quieres el efecto.
+- **Abierto en graves.** Con la tecla en C3 o más abajo, el drop 2 deja una 3.ª grave que embarra con el bajo. Súbelo
+  de octava o usa voicing cerrado.

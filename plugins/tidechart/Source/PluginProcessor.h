@@ -15,7 +15,8 @@
 // su salida estéreo siempre es silencio (FL espera al menos una salida en un generador).
 // Fase 1: el MIDI pasa por la etapa que garantiza que ninguna nota queda colgada (MidiStage), y se lee la posición del
 // host (HostClock) para mostrarla en la GUI. Fase 3: cada tecla dispara un acorde de la tonalidad elegida (en bypass,
-// el MIDI pasa tal cual), y la paleta de la GUI hace sonar los acordes con el ratón.
+// el MIDI pasa tal cual), y la paleta de la GUI hace sonar los acordes con el ratón. Fase 4: la progresión (guardada en
+// el proyecto), sincronizada con el host, con voicing y ritmo.
 // El MIDI está en tidechart::midi (sin JUCE); aquí solo se conectan los buffers de JUCE, los parámetros y la GUI.
 class TidechartAudioProcessor final : public juce::AudioProcessor
 {
@@ -68,9 +69,20 @@ public:
 
     // Cualquier hilo: la paleta hace sonar el acorde del grado 0..6 (−1 = soltarlo), desde el bloque siguiente.
     void previewChord (int degree) noexcept { stage.requestPreview (degree); }
+    // Lo mismo con cualquier grado escrito (un prestado, un paso de la progresión).
+    void previewNumeral (const deepwater::theory::RomanNumeral& numeral) noexcept { stage.requestPreviewChord (numeral); }
 
     // Los ajustes de acordes que dicen los parámetros ahora mismo (la tonalidad escrita según el modo).
     tidechart::midi::ChordSettings currentChordSettings (bool bypassed) const noexcept;
+
+    // La progresión (Fase 4): datos del proyecto, no parámetros. La GUI la cambia desde el hilo de mensajes y el audio
+    // lee una copia publicada (TripleBuffer), así nunca espera. changeCount sube con cada cambio (también al cargar un
+    // proyecto), para que la GUI sepa cuándo redibujarla.
+    deepwater::theory::Progression getProgression() const;
+    void setProgression (const deepwater::theory::Progression&);
+    std::uint32_t progressionChangeCount() const noexcept { return progressionChanges.load (std::memory_order_acquire); }
+    // La de fábrica: i–♭VI–♭III–♭VII, un compás cada uno (el esqueleto del reggaetón).
+    static deepwater::theory::Progression defaultProgression();
 
     // Contadores de notas (note-on) que entraron y salieron, para comprobar el ruteo en FL.
     std::uint32_t notesIn() const noexcept { return notesInCount.load (std::memory_order_relaxed); }
@@ -90,7 +102,18 @@ private:
     std::atomic<float>* chordSizeParam = nullptr;
     std::atomic<float>* keyMappingParam = nullptr;
     std::atomic<float>* chordBassParam = nullptr;
+    std::atomic<float>* playModeParam = nullptr;
+    std::atomic<float>* voicingParam = nullptr;
+    std::atomic<float>* rhythmParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
+
+    // La progresión: la copia del hilo de mensajes (con su lock, que el audio nunca toma: solo serializa a la GUI con
+    // setStateInformation, que algunos hosts llaman desde otro hilo), el buzón y la copia del audio.
+    juce::CriticalSection progressionLock;
+    deepwater::theory::Progression progression;
+    deepwater::dsp::TripleBuffer<deepwater::theory::Progression> progressionBox;
+    deepwater::theory::Progression audioProgression;
+    std::atomic<std::uint32_t> progressionChanges { 0 };
 
     tidechart::midi::MidiStage stage;
     deepwater::dsp::HostClock clock;

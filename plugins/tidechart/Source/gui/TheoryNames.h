@@ -61,6 +61,50 @@ inline juce::String functionName (th::HarmonicFunction function)
     return {};
 }
 
+// Fase 4: voicings, ritmos y modo de tocar, en el orden de sus parámetros.
+inline juce::String voicingName (int index)
+{
+    static constexpr std::array<const char*, 3> names { "Estado fundamental", "Conducci\xc3\xb3n de voces", "Abierto (drop 2)" };
+    return utf8 (names[static_cast<std::size_t> (index)]);
+}
+
+inline juce::String rhythmName (int index)
+{
+    static constexpr std::array<const char*, 9> names {
+        "Sostenido", "Negras", "Corcheas", "Contratiempo", "Dembow (3+3+2)", "Dembow largo", "Dembow a contratiempo",
+        "Dembow desplazado", "Dembow con huecos",
+    };
+    return utf8 (names[static_cast<std::size_t> (index)]);
+}
+
+// Qué hace cada ritmo y para qué sirve, en una frase.
+inline juce::String rhythmDescription (int index)
+{
+    static constexpr std::array<const char*, 9> text {
+        "el acorde dura todo su paso: pads, colchones, la base para escuchar la armon\xc3\xad" "a",
+        "un golpe por tiempo: el piano de balada, el pulso m\xc3\xa1s simple",
+        "dos golpes por tiempo, el primero acentuado: empuje constante (pop, synthwave)",
+        "el \"y\" de cada tiempo: el skank del reggae y del house, los acordes entre los bombos",
+        "3+3+2 en cada medio comp\xc3\xa1s (0 3 6 | 8 11 14): el boom-ch-boom-chick del reggaet\xc3\xb3n",
+        "el mismo 3+3+2 en corcheas, una vez por comp\xc3\xa1s: acordes que respiran (el tresillo de la habanera)",
+        "solo el \"ch\" del dembow: los acordes contestan al bombo en vez de pisarlo",
+        "el dembow movido una corchea: mismo dibujo, otro apoyo; suena a que tropieza",
+        "el 3+3 de la primera mitad y una anticipaci\xc3\xb3n al final: deja aire para la voz",
+    };
+    return utf8 (text[static_cast<std::size_t> (index)]);
+}
+
+inline juce::String playModeName (int index)
+{
+    return index == 0 ? utf8 ("Teclas: un acorde cada una") : utf8 ("Progresi\xc3\xb3n (sigue a FL)");
+}
+
+// "de dórico", "de menor (eólico)": el modo del que se tomó prestado un acorde.
+inline juce::String borrowedFrom (th::Mode mode)
+{
+    return "de " + names::modeName (mode); // calificado: libs/theory también tiene un modeName (en inglés)
+}
+
 // Reposo, alejarse, tensión: frío → templado → caliente.
 inline juce::Colour functionColour (th::HarmonicFunction function)
 {

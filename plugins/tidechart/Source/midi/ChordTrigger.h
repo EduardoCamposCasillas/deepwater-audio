@@ -5,6 +5,8 @@
 #include <optional>
 
 #include "deepwater/theory/Harmony.h"
+#include "deepwater/theory/Progression.h"
+#include "deepwater/theory/Voicing.h"
 #include "midi/NoteTracker.h"
 
 namespace tidechart::midi
@@ -21,6 +23,16 @@ enum class KeyMapping
     scaleNotes,
 };
 
+// Qué hacen las teclas (Fase 4).
+//   keys:        cada tecla dispara su acorde (Fase 3), con el ritmo y el voicing elegidos.
+//   progression: cualquier tecla abajo hace sonar la PROGRESIÓN, sincronizada con el host: en cada compás suena el paso
+//                que cae ahí. La octava de la tecla elige el registro (C5 = el de la paleta) y su velocidad, la fuerza.
+enum class PlayMode
+{
+    keys,
+    progression,
+};
+
 // Lo que la etapa MIDI necesita saber para convertir teclas en acordes. Lo arma el procesador en cada bloque con los
 // parámetros; enabled = false es el passthrough de la Fase 1 (el bypass).
 struct ChordSettings
@@ -30,16 +42,24 @@ struct ChordSettings
     deepwater::theory::ChordSize size = deepwater::theory::ChordSize::triad;
     KeyMapping mapping = KeyMapping::whiteKeys;
     bool bass = false; // además, la fundamental una octava abajo
+    // Fase 4.
+    PlayMode playMode = PlayMode::keys;
+    deepwater::theory::VoicingStyle voicing = deepwater::theory::VoicingStyle::rootPosition;
+    int rhythm = 0; // índice de deepwater::theory::rhythmPatterns (0 = sostenido)
 
     bool operator== (const ChordSettings&) const = default;
 };
 
-// Un acorde listo para sonar: su grado (0..6), el acorde y las teclas MIDI.
+// Un acorde listo para sonar: su grado (0..6, o −1 si no es un acorde de la escala: un prestado), el acorde, las teclas
+// MIDI y de dónde salieron (para poder darle otro voicing).
 struct TriggeredChord
 {
     int degree = 0;
     deepwater::theory::Chord chord;
     deepwater::theory::StaticVector<int, 9> notes;
+    int rootNote = 0;     // la fundamental en estado fundamental
+    int tonicNote = 0;    // la tónica del registro (el centro de la conducción de voces)
+    bool hasBass = false; // notes[0] es el bajo (la fundamental una octava abajo)
 };
 
 // El grado de una tecla blanca (C = 0 ... B = 6), o −1 si es negra.
@@ -57,9 +77,13 @@ struct TriggeredChord
     if (! chord)
         return std::nullopt;
 
-    TriggeredChord result { degree, *chord, {} };
+    TriggeredChord result { degree, *chord, {}, rootNote,
+                            rootNote - deepwater::theory::modeInfo (settings.key.mode).semitones[static_cast<std::size_t> (degree)], false };
     if (settings.bass && rootNote - 12 >= 0)
+    {
         result.notes.push_back (rootNote - 12);
+        result.hasBass = true;
+    }
     for (const int note : chord->midiNotes (rootNote))
         result.notes.push_back (note);
     if (result.notes.empty())
@@ -72,9 +96,78 @@ struct TriggeredChord
 // pulsada. Es la octava que usan las teclas blancas y la previsualización de la paleta.
 [[nodiscard]] constexpr std::optional<TriggeredChord> chordForDegree (int degree, int octaveC, const ChordSettings& settings) noexcept
 {
-    const int tonicPc = settings.key.tonic.pitchClass();
-    const int tonicNote = octaveC + tonicPc - (tonicPc >= 6 ? 12 : 0);
+    const int tonicNote = deepwater::theory::tonicNoteNear (settings.key, octaveC);
     return chordAtRoot (degree, tonicNote + deepwater::theory::modeInfo (settings.key.mode).semitones[static_cast<std::size_t> (degree)], settings);
+}
+
+// El grado de la escala (0..6) de un acorde si es un acorde de la tonalidad, o −1 (un prestado). Sirve para encender
+// los pads de la paleta.
+[[nodiscard]] constexpr int paletteDegree (const deepwater::theory::Chord& chord, const deepwater::theory::Key& key) noexcept
+{
+    return deepwater::theory::isDiatonic (chord, key) ? key.degreeOf (chord.root.pitchClass()) : -1;
+}
+
+// Cualquier acorde escrito como grado (también los prestados y las variantes: ♭VI, iv9, ♭IIsus2), en posición
+// fundamental con la tónica cerca del Do de 'octaveC', como chordForDegree.
+[[nodiscard]] constexpr std::optional<TriggeredChord> chordForNumeral (const deepwater::theory::RomanNumeral& numeral, int octaveC,
+                                                                     const ChordSettings& settings) noexcept
+{
+    namespace th = deepwater::theory;
+    const int tonicNote = th::tonicNoteNear (settings.key, octaveC);
+    const int rootNote = th::rootNoteFor (numeral, tonicNote);
+    const auto chord = th::chordFor (numeral, settings.key);
+    const auto voiced = th::voiceStep (chord, rootNote, th::VoicingStyle::rootPosition, 0, nullptr, settings.bass && rootNote - 12 >= 0);
+    TriggeredChord result { paletteDegree (chord, settings.key), chord, voiced.notes(), rootNote, tonicNote, voiced.bassNote >= 0 };
+    if (result.notes.empty())
+        return std::nullopt;
+    return result;
+}
+
+// Las voces del acorde, sin el bajo.
+[[nodiscard]] constexpr deepwater::theory::Voicing upperVoices (const TriggeredChord& chord) noexcept
+{
+    deepwater::theory::Voicing voices;
+    for (std::size_t i = chord.hasBass ? 1 : 0; i < chord.notes.size(); ++i)
+        voices.push_back (chord.notes[i]);
+    return voices;
+}
+
+// El mismo acorde con el voicing de los ajustes, conduciendo las voces desde 'previous' (las voces del acorde
+// anterior; vacío = el primero). Estado fundamental lo deja como está (la Fase 3). El bajo no cambia.
+[[nodiscard]] constexpr TriggeredChord withVoicing (TriggeredChord chord, const ChordSettings& settings,
+                                                    const deepwater::theory::Voicing& previous) noexcept
+{
+    namespace th = deepwater::theory;
+    if (settings.voicing == th::VoicingStyle::rootPosition)
+        return chord;
+    const int bassNote = chord.hasBass ? chord.notes[0] : -1;
+    const auto voices = th::voiceChord (chord.chord, chord.rootNote, settings.voicing, th::tonicCentre2 (chord.tonicNote),
+                                        previous.empty() ? nullptr : &previous, bassNote);
+    chord.notes.clear();
+    if (bassNote >= 0)
+        chord.notes.push_back (bassNote);
+    for (const int note : voices)
+        if (note >= 0 && note <= 127)
+            chord.notes.push_back (note);
+    return chord;
+}
+
+// La paleta pide qué hacer sonar con un solo número (un atómico entre la GUI y el audio): 0 = nada; 1..7 = el grado
+// 0..6 de la escala con el tamaño de acorde de los ajustes; desde numeralCodeBase, cualquier grado escrito (un prestado,
+// un paso de la progresión).
+inline constexpr int numeralCodeBase = 1000;
+
+[[nodiscard]] constexpr int previewCode (const deepwater::theory::RomanNumeral& numeral) noexcept
+{
+    const int degree = ((numeral.degree - 1) % 7 + 7) % 7;
+    const int accidental = numeral.accidental < -2 ? 0 : (numeral.accidental > 2 ? 4 : numeral.accidental + 2);
+    return numeralCodeBase + degree + 7 * accidental + 35 * static_cast<int> (numeral.type);
+}
+
+[[nodiscard]] constexpr deepwater::theory::RomanNumeral numeralFromCode (int code) noexcept
+{
+    const int value = code - numeralCodeBase;
+    return { value % 7 + 1, (value / 7) % 5 - 2, static_cast<deepwater::theory::ChordTypeId> (value / 35) };
 }
 
 // El acorde que dispara una tecla con estos ajustes, o nada (negras con teclas blancas; notas fuera de la escala).
@@ -101,9 +194,10 @@ struct TriggeredChord
 class ChordTrigger
 {
 public:
-    // Un "slot" por tecla de entrada (canal × nota) y uno más para la paleta de la GUI.
+    // Un "slot" por tecla de entrada (canal × nota), uno para la paleta de la GUI y uno para la progresión (Fase 4).
     static constexpr int previewSlot = numChannels * numNotes;
-    static constexpr int slotCount = previewSlot + 1;
+    static constexpr int progressionSlot = previewSlot + 1;
+    static constexpr int slotCount = progressionSlot + 1;
 
     [[nodiscard]] static constexpr int keySlot (int channel, int note) noexcept { return (channel & 0x0f) * numNotes + (note & 0x7f); }
 
@@ -113,6 +207,7 @@ public:
     {
         release (slot, emit);
         auto& held = slots[static_cast<std::size_t> (slot)];
+        held.used = true;
         held.channel = static_cast<std::uint8_t> (channel & 0x0f);
         held.degree = static_cast<std::int8_t> (chord.degree);
         held.count = 0;
@@ -127,7 +222,8 @@ public:
                 ++ref;
             held.notes[held.count++] = static_cast<std::uint8_t> (note);
         }
-        ++degreeCounts[static_cast<std::size_t> (chord.degree)];
+        if (chord.degree >= 0 && chord.degree < 7)
+            ++degreeCounts[static_cast<std::size_t> (chord.degree)];
         ++active;
     }
 
@@ -136,7 +232,7 @@ public:
     void release (int slot, Emit&& emit)
     {
         auto& held = slots[static_cast<std::size_t> (slot)];
-        if (held.degree < 0)
+        if (! held.used)
             return;
         for (int i = 0; i < held.count; ++i)
         {
@@ -144,7 +240,8 @@ public:
             if (ref > 0 && --ref == 0)
                 emit (ShortMessage::noteOff (held.channel, held.notes[static_cast<std::size_t> (i)]));
         }
-        --degreeCounts[static_cast<std::size_t> (held.degree)];
+        if (held.degree >= 0 && held.degree < 7)
+            --degreeCounts[static_cast<std::size_t> (held.degree)];
         --active;
         held = {};
     }
@@ -165,7 +262,7 @@ public:
         active = 0;
     }
 
-    [[nodiscard]] bool isHeld (int slot) const noexcept { return slots[static_cast<std::size_t> (slot)].degree >= 0; }
+    [[nodiscard]] bool isHeld (int slot) const noexcept { return slots[static_cast<std::size_t> (slot)].used; }
     [[nodiscard]] int activeCount() const noexcept { return active; }
     // Qué grados suenan ahora (bit d = grado d), para encender la paleta.
     [[nodiscard]] std::uint8_t heldDegrees() const noexcept
@@ -185,7 +282,8 @@ private:
 
     struct Held
     {
-        std::int8_t degree = -1; // −1 = el slot no tiene acorde
+        bool used = false;       // el slot tiene un acorde sonando
+        std::int8_t degree = -1; // su grado en la escala (−1 = un prestado: no enciende la paleta)
         std::uint8_t channel = 0;
         std::uint8_t count = 0;
         std::array<std::uint8_t, 9> notes {};

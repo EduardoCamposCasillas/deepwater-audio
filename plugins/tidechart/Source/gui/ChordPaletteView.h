@@ -21,11 +21,20 @@ namespace tidechart::gui
 // en números romanos, su nombre, su función (tónica / subdominante / dominante, con su color) y la tecla que lo
 // dispara. Mantener pulsado un acorde lo hace sonar (sale por el mismo puerto MIDI que las teclas); arrastrar de uno a
 // otro los encadena. Se enciende el que suena, se haya disparado desde aquí o desde el Piano Roll.
+// Fase 4: debajo, los PRESTADOS: acordes de los modos paralelos (misma tónica) que no están en la escala, con el modo
+// del que vienen. Se escuchan igual, y con "Agregar con clic" (en la progresión) cada clic agrega el acorde a la
+// progresión.
 class ChordPaletteView final : public juce::Component, public juce::TooltipClient
 {
 public:
-    ChordPaletteView (juce::AudioProcessorValueTreeState& state, std::function<void (int)> previewFn)
-        : preview (std::move (previewFn))
+    struct Callbacks
+    {
+        std::function<void (int)> previewDegree;                                      // 0..6, −1 = soltar
+        std::function<void (const deepwater::theory::RomanNumeral&)> previewNumeral;  // un prestado
+        std::function<void (const deepwater::theory::RomanNumeral&)> picked;          // clic en cualquier pad
+    };
+
+    ChordPaletteView (juce::AudioProcessorValueTreeState& state, Callbacks callbacksToUse) : callbacks (std::move (callbacksToUse))
     {
         namespace id = tidechart::params;
         for (int i = 0; i < 12; ++i)
@@ -71,7 +80,7 @@ public:
     ~ChordPaletteView() override
     {
         if (pressedPad >= 0)
-            preview (-1);
+            callbacks.previewDegree (-1);
     }
 
     // Desde el temporizador del editor: los ajustes que usa el audio y los grados que suenan. Solo repinta si cambió algo.
@@ -90,9 +99,12 @@ public:
 
     juce::String getTooltip() override
     {
+        const int pad = padAt (getMouseXYRelative());
+        if (pad >= 7 && pad - 7 < borrowedCount)
+            return borrowed[static_cast<std::size_t> (pad - 7)].tooltip;
         return juce::String::fromUTF8 ("Mant\xc3\xa9n pulsado un acorde para escucharlo (sale por el puerto MIDI, como las teclas); "
                                        "arrastra para pasar de uno a otro. En el Piano Roll de Tidechart, la tecla de arriba de "
-                                       "cada acorde lo dispara.");
+                                       "cada acorde lo dispara. Con \xc2\xab" "Agregar con clic\xc2\xbb, cada clic lo suma a la progresi\xc3\xb3n.");
     }
 
     void resized() override
@@ -113,10 +125,20 @@ public:
         area.removeFromTop (8);
         scaleArea = area.removeFromBottom (16);
         area.removeFromBottom (6);
+        auto borrowedRow = area.removeFromBottom (40);
+        area.removeFromBottom (6);
+
         constexpr int gap = 8;
         const int padWidth = (area.getWidth() - 6 * gap) / 7;
         for (int d = 0; d < 7; ++d)
             padBounds[static_cast<std::size_t> (d)] = juce::Rectangle<int> (area.getX() + d * (padWidth + gap), area.getY(), padWidth, area.getHeight());
+
+        borrowedTitle = borrowedRow.removeFromLeft (84);
+        constexpr int smallGap = 6;
+        const int smallWidth = (borrowedRow.getWidth() - (maxBorrowed - 1) * smallGap) / maxBorrowed;
+        for (int i = 0; i < maxBorrowed; ++i)
+            padBounds[static_cast<std::size_t> (7 + i)] = juce::Rectangle<int> (borrowedRow.getX() + i * (smallWidth + smallGap), borrowedRow.getY(),
+                                                                                 smallWidth, borrowedRow.getHeight());
     }
 
     void paint (juce::Graphics& g) override
@@ -141,20 +163,45 @@ public:
             g.setColour (colour.withAlpha (active ? 0.9f : 0.35f));
             g.fillRoundedRectangle (bounds.withHeight (4.0f).reduced (6.0f, 0.0f).translated (0.0f, 4.0f), 2.0f);
 
-            auto inner = bounds.reduced (8.0f, 10.0f);
+            auto inner = bounds.reduced (8.0f, 8.0f);
             g.setColour (active ? theme::dimText : theme::dimText.withAlpha (0.5f));
             g.setFont (juce::FontOptions (10.5f));
             g.drawText (pad.trigger, inner.removeFromTop (14.0f), juce::Justification::centredLeft);
 
             g.setColour (active ? theme::text : theme::dimText);
-            g.setFont (juce::FontOptions (22.0f, juce::Font::bold));
-            g.drawText (pad.roman, inner.removeFromTop (28.0f), juce::Justification::centred);
+            g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+            g.drawText (pad.roman, inner.removeFromTop (24.0f), juce::Justification::centred);
             g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
             g.setColour (active ? colour : theme::dimText);
             g.drawText (pad.symbol, inner.removeFromTop (18.0f), juce::Justification::centred);
             g.setColour (theme::dimText);
             g.setFont (juce::FontOptions (10.5f));
             g.drawText (names::functionName (pad.function), inner.removeFromTop (14.0f), juce::Justification::centred);
+        }
+
+        // Los prestados: grado y acorde en una línea, el modo de origen debajo.
+        g.setColour (theme::dimText);
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawFittedText (names::utf8 ("PRESTADOS\nde otros modos"), borrowedTitle, juce::Justification::centredLeft, 2);
+        for (int i = 0; i < maxBorrowed; ++i)
+        {
+            const auto bounds = padBounds[static_cast<std::size_t> (7 + i)].toFloat();
+            if (i >= borrowedCount)
+                continue;
+            const auto& pad = borrowed[static_cast<std::size_t> (i)];
+            const bool pressed = pressedPad == 7 + i;
+            const auto colour = names::functionColour (pad.function);
+            g.setColour (pressed ? colour.withAlpha (0.28f) : theme::display);
+            g.fillRoundedRectangle (bounds, 4.0f);
+            g.setColour (pressed ? colour : colour.withAlpha (active ? 0.45f : 0.2f));
+            g.drawRoundedRectangle (bounds.reduced (0.5f), 4.0f, pressed ? 1.6f : 1.0f);
+            auto inner = bounds.reduced (4.0f, 3.0f);
+            g.setColour (active ? theme::text : theme::dimText);
+            g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+            g.drawText (pad.roman + "  " + pad.symbol, inner.removeFromTop (18.0f), juce::Justification::centred);
+            g.setColour (theme::dimText);
+            g.setFont (juce::FontOptions (10.0f));
+            g.drawText (pad.source, inner, juce::Justification::centred);
         }
 
         g.setFont (juce::FontOptions (11.5f));
@@ -169,34 +216,60 @@ public:
         g.drawText (scaleLine, scaleArea, juce::Justification::centredLeft);
     }
 
-    void mouseDown (const juce::MouseEvent& e) override { pressPad (padAt (e.getPosition())); }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const int pad = padAt (e.getPosition());
+        pressPad (pad);
+        if (callbacks.picked)
+        {
+            if (pad >= 0 && pad < 7 && pads[static_cast<std::size_t> (pad)].valid)
+                callbacks.picked (pads[static_cast<std::size_t> (pad)].numeral);
+            else if (pad >= 7 && pad - 7 < borrowedCount)
+                callbacks.picked (borrowed[static_cast<std::size_t> (pad - 7)].numeral);
+        }
+    }
     void mouseDrag (const juce::MouseEvent& e) override { pressPad (padAt (e.getPosition())); }
     void mouseUp (const juce::MouseEvent&) override { pressPad (-1); }
 
 private:
+    static constexpr int maxBorrowed = 8;
+
     struct Pad
     {
         juce::String roman, symbol, trigger;
         deepwater::theory::HarmonicFunction function = deepwater::theory::HarmonicFunction::tonic;
+        deepwater::theory::RomanNumeral numeral;
+        bool valid = false;
+    };
+
+    struct BorrowedPad
+    {
+        juce::String roman, symbol, source, tooltip;
+        deepwater::theory::HarmonicFunction function = deepwater::theory::HarmonicFunction::tonic;
+        deepwater::theory::RomanNumeral numeral;
     };
 
     [[nodiscard]] int padAt (juce::Point<int> point) const
     {
-        for (int d = 0; d < 7; ++d)
-            if (padBounds[static_cast<std::size_t> (d)].contains (point))
-                return d;
+        for (int i = 0; i < 7 + borrowedCount; ++i)
+            if (padBounds[static_cast<std::size_t> (i)].contains (point))
+                return i;
         return -1;
     }
 
-    void pressPad (int degree)
+    void pressPad (int index)
     {
-        if (degree == pressedPad)
+        if (index == pressedPad)
             return;
-        pressedPad = degree;
-        preview (degree);
+        pressedPad = index;
+        if (index >= 7)
+            callbacks.previewNumeral (borrowed[static_cast<std::size_t> (index - 7)].numeral);
+        else
+            callbacks.previewDegree (index);
+        repaint();
     }
 
-    // Recalcula los 7 acordes con libs/theory cuando cambia la tonalidad, el modo o el tamaño.
+    // Recalcula los 7 acordes y los prestados con libs/theory cuando cambia la tonalidad, el modo o el tamaño.
     void rebuild()
     {
         namespace th = deepwater::theory;
@@ -209,14 +282,32 @@ private:
             const auto chord = th::diatonicChord (settings.key, d, settings.size);
             if (! chord)
                 continue;
-            const auto numeral = th::romanNumeralFor (*chord, settings.key);
-            pad.roman = u (th::romanNumeralText (numeral, notation));
+            pad.numeral = th::romanNumeralFor (*chord, settings.key);
+            pad.valid = true;
+            pad.roman = u (th::romanNumeralText (pad.numeral, notation));
             pad.symbol = u (th::chordSymbol (*chord, notation));
-            pad.function = th::harmonicFunction (numeral);
+            pad.function = th::harmonicFunction (pad.numeral);
             if (settings.mapping == midi::KeyMapping::whiteKeys)
                 pad.trigger = juce::String ("tecla ") + juce::String::charToString (static_cast<juce::juce_wchar> ("CDEFGAB"[d]));
             else
                 pad.trigger = "tecla " + u (th::noteName (settings.key.degree (d), notation));
+        }
+
+        const auto list = th::borrowedChords (settings.key, settings.size);
+        borrowedCount = std::min (maxBorrowed, static_cast<int> (list.size()));
+        for (int i = 0; i < borrowedCount; ++i)
+        {
+            const auto& b = list[static_cast<std::size_t> (i)];
+            auto& pad = borrowed[static_cast<std::size_t> (i)];
+            pad.numeral = b.numeral;
+            pad.roman = u (th::romanNumeralText (b.numeral, notation));
+            pad.symbol = u (th::chordSymbol (b.chord, notation));
+            pad.source = names::borrowedFrom (b.source);
+            pad.function = th::harmonicFunction (b.numeral);
+            pad.tooltip = pad.roman + " = " + pad.symbol + names::utf8 (", prestado ") + pad.source + ": no est\xc3\xa1 en "
+                          + u (th::noteName (settings.key.tonic, notation)) + " " + names::modeName (settings.key.mode)
+                          + names::utf8 (" pero s\xc3\xad en ") + u (th::noteName (settings.key.tonic, notation)) + " "
+                          + names::modeName (b.source) + names::utf8 (", con la misma t\xc3\xb3nica. Trae notas de fuera de la escala: color.");
         }
 
         scaleLine = u (th::noteName (settings.key.tonic, notation)) + " " + names::modeName (settings.key.mode) + ":  ";
@@ -226,7 +317,7 @@ private:
         hasPads = true;
     }
 
-    std::function<void (int)> preview;
+    Callbacks callbacks;
     juce::ComboBox tonicBox, modeBox, sizeBox, mappingBox;
     juce::TextButton bassButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicAttachment, modeAttachment, sizeAttachment, mappingAttachment;
@@ -237,8 +328,10 @@ private:
     bool hasPads = false;
     int pressedPad = -1;
     std::array<Pad, 7> pads;
-    std::array<juce::Rectangle<int>, 7> padBounds;
-    juce::Rectangle<int> scaleArea;
+    std::array<BorrowedPad, maxBorrowed> borrowed;
+    int borrowedCount = 0;
+    std::array<juce::Rectangle<int>, 7 + maxBorrowed> padBounds;
+    juce::Rectangle<int> scaleArea, borrowedTitle;
     juce::String scaleLine;
 };
 

@@ -5,6 +5,7 @@
 // ninguna nota queda colgada y que processBlock no reserva memoria.
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -15,6 +16,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
 
+#include "deepwater/theory/Progression.h"
 #include "Parameters.h"
 #include "PluginProcessor.h"
 
@@ -511,6 +513,107 @@ void testTransport()
     check (rig.allocations == 0, "transporte: reservas de memoria: " + juce::String (rig.allocations));
 }
 
+// Fase 4: la progresión con un host que reproduce. Con una tecla abajo una vuelta entera, lo que sale tiene que ser
+// exactamente renderProgression (la misma progresión como notas en el tiempo), cada note-on en la primera muestra cuya
+// posición llega a su semicorchea, a 4 sample rates y con bloques de 1 a 4096 muestras, sin reservar memoria.
+void testProgression()
+{
+    std::printf ("Progresion sincronizada con el host: igual a renderProgression en su muestra, a 4 sample rates y bloques "
+                 "1-4096 (dembow, conduccion de voces, bajo); editarla mientras suena; sin reservas\n");
+
+    namespace th = deepwater::theory;
+    namespace id = tidechart::params;
+    const double sampleRates[] { 44100.0, 48000.0, 88200.0, 96000.0 };
+    const int blockSizes[] { 1, 7, 64, 512, 4096, 0 };
+    juce::Random random (2026);
+    for (const double sampleRate : sampleRates)
+        for (const int blockSize : blockSizes)
+        {
+            const int maxBlock = blockSize == 0 ? 4096 : blockSize;
+            auto processor = makeProcessor (sampleRate, maxBlock);
+            setParameter (*processor, id::playMode, 1.0f);
+            setParameter (*processor, id::rhythm, 4.0f);  // dembow
+            setParameter (*processor, id::voicing, 1.0f); // conducción de voces
+            setParameter (*processor, id::chordBass, 1.0f);
+            TestHead head;
+            head.bpm = 120.0;
+            processor->setPlayHead (&head);
+            Rig rig (*processor, 2, maxBlock);
+
+            const double beatsPerSample = head.bpm / (60.0 * sampleRate);
+            const auto progression = processor->getProgression();
+            const auto loopSamples = static_cast<juce::int64> (std::ceil (progression.totalBeats() / beatsPerSample));
+            const std::vector<Event> input { { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), 0 },
+                                             { juce::MidiMessage::noteOff (1, 60), loopSamples } };
+            std::vector<Event> output;
+            while (rig.position < loopSamples + 100)
+            {
+                head.ppq = static_cast<double> (rig.position) * beatsPerSample;
+                const int n = blockSize == 0 ? 1 + random.nextInt (4096) : blockSize;
+                for (auto& e : rig.run (input, n))
+                    output.push_back (std::move (e));
+            }
+
+            // La semicorchea de una muestra, como la calcula el plugin, y la primera muestra que llega a la semicorchea k.
+            const auto tickAt = [&] (juce::int64 s) { return static_cast<juce::int64> (std::floor (static_cast<double> (s) * beatsPerSample * 4.0 + 1.0e-6)); };
+            const auto sampleOfTick = [&] (juce::int64 k) {
+                auto s = static_cast<juce::int64> (static_cast<double> (k) / (4.0 * beatsPerSample));
+                while (tickAt (s) < k)
+                    ++s;
+                while (s > 0 && tickAt (s - 1) >= k)
+                    --s;
+                return s;
+            };
+            th::RenderOptions options;
+            options.style = th::VoicingStyle::voiceLed;
+            options.tonicNote = 57;
+            options.bass = true;
+            options.rhythm = 4;
+            std::vector<std::array<int, 3>> expected, got;
+            for (const auto& e : th::renderProgression (progression, processor->currentChordSettings (false).key, options))
+                expected.push_back ({ static_cast<int> (sampleOfTick (juce::roundToInt (e.start * 4.0))), e.note, e.velocity });
+            for (const auto& e : output)
+                if (e.message.isNoteOn() && e.sample < loopSamples)
+                    got.push_back ({ static_cast<int> (e.sample), e.message.getNoteNumber(), e.message.getVelocity() });
+            std::sort (expected.begin(), expected.end());
+            std::sort (got.begin(), got.end());
+
+            const auto tag = juce::String (sampleRate / 1000.0, 1) + " kHz, bloque " + (blockSize == 0 ? juce::String ("variable") : juce::String (blockSize));
+            check (! expected.empty() && got == expected, tag + ": la progresion no salio como renderProgression (" + juce::String (static_cast<int> (got.size()))
+                                                              + " de " + juce::String (static_cast<int> (expected.size())) + " note-on)");
+            check (snapshotOf (*processor).soundingCount == 0, tag + ": quedaron notas sonando");
+            check (rig.allocations == 0, tag + ": processBlock reservo memoria " + juce::String (rig.allocations) + " veces");
+            processor->setPlayHead (nullptr);
+        }
+
+    // Editar la progresión mientras suena (desde el hilo de la GUI): el bloque siguiente toca el paso nuevo. Y lo que
+    // publica el audio para la GUI: el paso, que suena y la semicorchea del patrón.
+    auto processor = makeProcessor (48000.0, 512);
+    setParameter (*processor, id::playMode, 1.0f);
+    TestHead head;
+    processor->setPlayHead (&head);
+    Rig rig (*processor, 2, 512);
+    head.ppq = 4.5; // compás 2: ♭VI = F
+    rig.run ({ { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), 0 } }, 512);
+    auto s = snapshotOf (*processor);
+    check (s.progressionStep == 1 && s.progressionSounding && s.rhythmStep == -1, "el paso 2 suena (sostenido: sin semicorchea de patron)");
+    check (s.soundingChannels[65] != 0 && s.soundingChannels[69] != 0 && s.soundingChannels[72] != 0, "F suena");
+    auto edited = processor->getProgression();
+    edited.steps[1].numeral = { 4, 0, th::chordType ("m") }; // iv = Dm
+    processor->setProgression (edited);
+    head.ppq += 512.0 * 2.0 / 48000.0;
+    rig.run ({}, 512);
+    s = snapshotOf (*processor);
+    check (s.soundingChannels[62] != 0 && s.soundingChannels[65] != 0 && s.soundingChannels[69] != 0 && s.soundingCount == 3, "editada: Dm");
+    setParameter (*processor, id::rhythm, 4.0f);
+    head.ppq += 512.0 * 2.0 / 48000.0;
+    rig.run ({ { juce::MidiMessage::noteOff (1, 60), rig.position + 10 } }, 512);
+    s = snapshotOf (*processor);
+    check (s.rhythmStep >= 0 && s.soundingCount == 0 && ! s.progressionSounding, "soltar la tecla apaga la progresion");
+    check (rig.allocations == 0, "editar: reservas de memoria: " + juce::String (rig.allocations));
+    processor->setPlayHead (nullptr);
+}
+
 void testLayoutsAndState()
 {
     std::printf ("Buses (sin entradas, salida mono o estereo), estado del proyecto y monitor de la GUI\n");
@@ -539,6 +642,36 @@ void testLayoutsAndState()
     restored.setStateInformation ("basura", 6); // un estado corrupto no rompe nada
     check (restored.getParameters().getRawParameterValue (tidechart::params::bypass)->load() > 0.5f, "estado corrupto ignorado");
 
+    // Fase 4: los parámetros nuevos y la progresión viajan con el proyecto; la progresión se guarda legible.
+    namespace th = deepwater::theory;
+    setParameter (processor, tidechart::params::playMode, 1.0f);
+    setParameter (processor, tidechart::params::voicing, 2.0f);
+    setParameter (processor, tidechart::params::rhythm, 7.0f);
+    th::Progression custom;
+    custom.steps.push_back ({ { 1, 0, th::chordType ("m7") }, 2 });
+    custom.steps.push_back ({ { 2, -1, th::chordType ("maj7") }, 6 });
+    custom.steps.push_back ({ { 5, 0, th::chordType ("7b9") }, 16 });
+    processor.setProgression (custom);
+    juce::MemoryBlock withProgression;
+    processor.getStateInformation (withProgression);
+    TidechartAudioProcessor reloaded;
+    check (reloaded.getProgression() == TidechartAudioProcessor::defaultProgression(), "por defecto: i bVI bIII bVII");
+    const auto before = reloaded.progressionChangeCount();
+    reloaded.setStateInformation (withProgression.getData(), static_cast<int> (withProgression.getSize()));
+    check (reloaded.getProgression() == custom, "la progresion viaja con el proyecto");
+    check (reloaded.progressionChangeCount() != before, "la GUI se entera de la progresion cargada");
+    check (reloaded.currentChordSettings (false) == processor.currentChordSettings (false), "modo, voicing y ritmo viajan con el proyecto");
+    const auto xml = juce::AudioProcessor::getXmlFromBinary (withProgression.getData(), static_cast<int> (withProgression.getSize()));
+    check (xml != nullptr && xml->toString().contains ("chord=\"bIImaj7\"") && xml->toString().contains ("beats=\"16\""), "progresion legible en el XML");
+    // Guardar otra vez no la duplica (no queda dentro del árbol de parámetros).
+    juce::MemoryBlock again;
+    reloaded.getStateInformation (again);
+    const auto xmlAgain = juce::AudioProcessor::getXmlFromBinary (again.getData(), static_cast<int> (again.getSize()));
+    check (xmlAgain != nullptr && xmlAgain->getNumChildElements() == xml->getNumChildElements(), "la progresion no se duplica al guardar dos veces");
+    // Un proyecto de la Fase 3 (sin progresión) carga la de fábrica.
+    reloaded.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    check (reloaded.getProgression() == TidechartAudioProcessor::defaultProgression(), "proyecto sin progresion: la de fabrica");
+
     // El monitor recibe cada evento de entrada y de salida, y los contadores de notas.
     auto p = makeProcessor (44100.0, 128);
     Rig rig (*p, 2, 128);
@@ -556,15 +689,47 @@ void testLayoutsAndState()
 }
 } // namespace
 
-int main()
+// Pinta el editor fuera de pantalla en un PNG, con FL "reproduciendo" la progresión con dembow en el compás 2 (para
+// revisar la GUI sin capturar la pantalla):  TidechartProcessorTests --snapshot gui.png
+int saveSnapshot (const juce::File& file)
+{
+    auto processor = makeProcessor (48000.0, 512);
+    setParameter (*processor, tidechart::params::playMode, 1.0f);
+    setParameter (*processor, tidechart::params::rhythm, 4.0f);
+    setParameter (*processor, tidechart::params::voicing, 1.0f);
+    TestHead head;
+    head.ppq = 4.0;
+    processor->setPlayHead (&head);
+    Rig rig (*processor, 2, 512);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor->createEditor());
+    for (int block = 0; block < 6; ++block)
+    {
+        rig.run (block == 0 ? std::vector<Event> { { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), 0 } } : std::vector<Event> {}, 512);
+        head.ppq += 512.0 * 2.0 / 48000.0;
+    }
+    juce::Thread::sleep (100);
+    juce::Timer::callPendingTimersSynchronously();
+    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+    file.deleteFile();
+    juce::FileOutputStream stream (file);
+    const bool ok = stream.openedOk() && juce::PNGImageFormat().writeImageToStream (image, stream);
+    std::printf ("%s %s\n", ok ? "GUI guardada en" : "No se pudo guardar", file.getFullPathName().toRawUTF8());
+    processor->setPlayHead (nullptr);
+    return ok ? 0 : 1;
+}
+
+int main (int argc, char* argv[])
 {
     const juce::ScopedJuceInitialiser_GUI init;
+    if (argc == 3 && juce::String (argv[1]) == "--snapshot")
+        return saveSnapshot (juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (argv[2])));
 
     testPassThrough();
     testNoHungNotes();
     testBypass();
     testChords();
     testTransport();
+    testProgression();
     testLayoutsAndState();
 
     if (failures == 0)

@@ -8,6 +8,7 @@
 
 add_library(deepwater_theory STATIC
     src/ChordFinder.cpp
+    src/Progression.cpp
     src/Text.cpp
 )
 add_library(deepwater::theory ALIAS deepwater_theory)

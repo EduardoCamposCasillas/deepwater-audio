@@ -12,18 +12,38 @@ juce::String utf8 (const char* text)
 }
 
 constexpr int editorWidth = 900;
-constexpr int editorHeight = 740;
+constexpr int editorHeight = 840;
 } // namespace
 
 TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProcessor& p)
     : AudioProcessorEditor (&p),
       processor (p),
-      paletteView (p.getParameters(), [&p] (int degree) { p.previewChord (degree); }),
+      paletteView (p.getParameters(),
+                   { [&p] (int degree) { p.previewChord (degree); },
+                     [&p] (const deepwater::theory::RomanNumeral& numeral) { p.previewNumeral (numeral); },
+                     [this] (const deepwater::theory::RomanNumeral& numeral) {
+                         if (progressionView.addsOnClick())
+                             progressionView.append (numeral);
+                     } }),
+      progressionView (p.getParameters(),
+                       { [&p] (const deepwater::theory::Progression& progression) { p.setProgression (progression); },
+                         [&p] (const deepwater::theory::RomanNumeral& numeral) { p.previewNumeral (numeral); },
+                         [&p] { p.previewChord (-1); },
+                         [&p] (deepwater::theory::Mode mode) {
+                             // Una plantilla pone su modo, como si se eligiera en la paleta (con su gesto, para el host).
+                             auto* parameter = p.getParameters().getParameter (tidechart::params::keyMode);
+                             parameter->beginChangeGesture();
+                             parameter->setValueNotifyingHost (parameter->convertTo0to1 (static_cast<float> (mode)));
+                             parameter->endChangeGesture();
+                         } }),
       inputMonitor (utf8 ("ENTRADA  \xe2\x80\x94  lo que llega a Tidechart"), theme::input),
       outputMonitor (utf8 ("SALIDA  \xe2\x80\x94  lo que va al instrumento"), theme::accent)
 {
     addAndMakeVisible (transportView);
     addAndMakeVisible (paletteView);
+    addAndMakeVisible (progressionView);
+    seenProgressionChanges = processor.progressionChangeCount();
+    progressionView.setProgression (processor.getProgression());
     addAndMakeVisible (keyboardView);
     addAndMakeVisible (chordView);
     addAndMakeVisible (inputMonitor);
@@ -69,12 +89,14 @@ void TidechartAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("TIDECHART", header.removeFromLeft (150), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (utf8 ("acordes y melod\xc3\xad" "as por tonalidad  \xc2\xb7  Fase 3: un acorde por tecla"), header, juce::Justification::centredLeft);
+    g.drawText (utf8 ("acordes y melod\xc3\xad" "as por tonalidad  \xc2\xb7  Fase 4: progresiones, ritmo y conducci\xc3\xb3n de voces"), header,
+                juce::Justification::centredLeft);
 
     // Paneles detrás del reloj y del teclado.
     g.setColour (theme::panel);
     g.fillRoundedRectangle (transportView.getBounds().expanded (10, 4).toFloat(), 6.0f);
     g.fillRoundedRectangle (paletteView.getBounds().expanded (10, 6).toFloat(), 6.0f);
+    g.fillRoundedRectangle (progressionView.getBounds().expanded (10, 6).toFloat(), 6.0f);
     g.fillRoundedRectangle (keyboardView.getBounds().getUnion (chordView.getBounds()).withTop (keyboardTitleArea.getY()).expanded (10, 6).toFloat(), 6.0f);
 
     auto title = keyboardTitleArea;
@@ -116,7 +138,10 @@ void TidechartAudioProcessorEditor::resized()
     transportView.setBounds (area.removeFromTop (40).reduced (10, 0));
     area.removeFromTop (18);
 
-    paletteView.setBounds (area.removeFromTop (146).reduced (10, 0));
+    paletteView.setBounds (area.removeFromTop (192).reduced (10, 0));
+    area.removeFromTop (18);
+
+    progressionView.setBounds (area.removeFromTop (180).reduced (10, 0));
     area.removeFromTop (18);
 
     auto keyboard = area.removeFromTop (136).reduced (10, 0);
@@ -149,7 +174,16 @@ void TidechartAudioProcessorEditor::timerCallback()
     }
 
     // La tonalidad para nombrar el acorde que suena (aunque el audio no publique nada nuevo, p. ej. con FL parado).
-    chordView.setKey (processor.currentChordSettings (transport.bypassed).key);
+    const auto settings = processor.currentChordSettings (transport.bypassed);
+    chordView.setKey (settings.key);
+
+    // La progresión: si cambió (desde aquí o al cargar un proyecto), se vuelve a leer; y dónde está FL en ella.
+    if (const auto changes = processor.progressionChangeCount(); changes != seenProgressionChanges)
+    {
+        seenProgressionChanges = changes;
+        progressionView.setProgression (processor.getProgression());
+    }
+    progressionView.update (settings, transport);
 
     processor.drainMidiLog ([this] (const tidechart::midi::LoggedEvent& event) {
         (event.output ? outputMonitor : inputMonitor).add (event, transport);
