@@ -2224,6 +2224,90 @@ void testConvolverCrossfade()
     }
 }
 
+// Fase 16 de Fathom: el trabajo adelantado durante el bloque (bloques chicos al azar) da lo mismo, bit a bit, que todo en
+// el borde (bloques de P), también cambiando de kernel a mitad de un bloque, con y sin fundido, y soltándolos.
+void testConvolverWorkAhead()
+{
+    std::printf ("Convolucion particionada: repartir el trabajo en bloques chicos = todo en el borde, bit a bit (cambiando de kernel)\n");
+    constexpr int partition = 64, partitions = 6, blocks = 40;
+    unsigned seed = 777;
+    auto random = [&seed] {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<float> (seed >> 8) / 16777216.0f;
+    };
+    // Tres kernels de 2 entradas y 2 salidas: largos distintos, uno con un hueco al principio (empieza en el trozo 2).
+    std::array<dw::ConvolutionKernel, 3> kernels;
+    for (size_t k = 0; k < kernels.size(); ++k)
+    {
+        kernels[k].prepare (partition, partitions, 4);
+        for (int path = 0; path < 4; ++path)
+        {
+            std::vector<float> ir (static_cast<size_t> ((2 + 2 * k) * partition));
+            for (size_t i = (k == 2 && path == 1 ? 2 * partition : 0); i < ir.size(); ++i)
+                ir[i] = 2.0f * random() - 1.0f;
+            kernels[k].addPath (path % 2, path / 2, ir.data(), static_cast<int> (ir.size()));
+        }
+    }
+    std::array<std::vector<float>, 2> in;
+    for (auto& channel : in)
+    {
+        channel.resize (static_cast<size_t> (blocks * partition));
+        for (auto& x : channel)
+            x = 2.0f * random() - 1.0f;
+    }
+    // Qué pasa en cada bloque de P: 0 nada, 1 kernel nuevo sin fundido, 2 con fundido, 3 soltar los kernels.
+    std::array<int, blocks> events {};
+    std::array<size_t, blocks> which {};
+    for (int b = 1; b < blocks; ++b)
+    {
+        events[static_cast<size_t> (b)] = b % 3 == 0 ? 2 : b % 7 == 0 ? 1 : b == 31 ? 3 : 0;
+        which[static_cast<size_t> (b)] = static_cast<size_t> (b) % kernels.size();
+    }
+
+    const auto run = [&] (bool smallBlocks) {
+        dw::PartitionedConvolver convolver;
+        convolver.prepare (partition, partitions, 2, 2);
+        convolver.setKernel (&kernels[0], false);
+        std::array<std::vector<float>, 2> out { std::vector<float> (in[0].size()), std::vector<float> (in[0].size()) };
+        for (int b = 0; b < blocks; ++b)
+        {
+            const auto start = static_cast<size_t> (b * partition);
+            int done = 0;
+            // Con bloques chicos, el evento llega a mitad del bloque (después de un primer trozo al azar).
+            const int split = smallBlocks ? 1 + static_cast<int> (random() * (partition - 2)) : 0;
+            const auto feed = [&] (int count) {
+                while (count > 0)
+                {
+                    const int n = smallBlocks ? std::min (count, 1 + static_cast<int> (random() * 13.0f)) : count;
+                    const std::array<const float*, 2> input { in[0].data() + start + static_cast<size_t> (done),
+                                                              in[1].data() + start + static_cast<size_t> (done) };
+                    const std::array<float*, 2> output { out[0].data() + start + static_cast<size_t> (done),
+                                                         out[1].data() + start + static_cast<size_t> (done) };
+                    convolver.process (input.data(), output.data(), n);
+                    done += n;
+                    count -= n;
+                }
+            };
+            feed (split);
+            const auto event = events[static_cast<size_t> (b)];
+            if (event == 1 || event == 2)
+                convolver.setKernel (&kernels[which[static_cast<size_t> (b)]], event == 2);
+            else if (event == 3)
+                convolver.releaseKernels();
+            if (event == 3 || b == 33)
+                convolver.setKernel (&kernels[1], false); // vuelve a sonar (en el 31 justo después de soltar)
+            feed (partition - split);
+        }
+        return out;
+    };
+    const auto whole = run (false), pieces = run (true);
+    CHECK (whole[0] == pieces[0] && whole[1] == pieces[1]);
+    float peak = 0.0f;
+    for (const float x : whole[0])
+        peak = std::max (peak, std::abs (x));
+    CHECK (peak > 0.1f); // no es silencio
+}
+
 } // namespace
 
 int main()
@@ -2274,6 +2358,7 @@ int main()
     testRealFft();
     testPartitionedConvolution();
     testConvolverCrossfade();
+    testConvolverWorkAhead();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de deepwater::dsp pasaron.\n");

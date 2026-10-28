@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <limits>
 #include <vector>
 
 #include "deepwater/dsp/RealFft.h"
@@ -34,6 +35,13 @@ namespace deepwater::dsp
 // Cambiar de filtro sin clic: con setKernel(k, true) el bloque siguiente se calcula con el filtro viejo Y con el nuevo
 // (sobre la misma FDL: la entrada pasada es la misma) y se funde de uno al otro a lo largo de las P muestras del bloque.
 // Es como interpolar los dos filtros en el tiempo; un EQ que se mueve cambia de kernel en cada bloque.
+//
+// Repartir el trabajo (Fathom, Fase 16). Con bloques del host más chicos que P, un callback de cada P/bloque hacía todo
+// el cálculo: con 64 trozos y 4 caminos, varias veces el tiempo de un bloque de 32 muestras (el host corta aunque el
+// promedio sea bajo). Pero en Σ H_p · X_(n−p) los trozos con p ≥ 1 multiplican entradas PASADAS, que ya están en la
+// FDL mientras se junta el bloque actual: esa parte de la suma se va haciendo en cada llamada a process(), en
+// proporción a las muestras que llegaron. En el borde quedan la FFT de la entrada nueva, el trozo p = 0 y la inversa.
+// Misma latencia y el mismo resultado (salvo el orden de las sumas en float: el trozo 0 se suma al final).
 
 // Un filtro listo para convolucionar: sus trozos ya transformados. Se rellena FUERA del hilo de audio (o en un diseño
 // offline) y el convolucionador solo lo lee. No se puede tocar mientras un convolucionador lo esté usando.
@@ -180,6 +188,7 @@ public:
         head = 0;
         audible = nullptr;
         audibleFade = false;
+        restartAhead();
     }
 
     // Kernel nuevo. Con 'crossfade' (y si ya había uno), el bloque siguiente se funde del viejo al nuevo; si no, el
@@ -226,6 +235,8 @@ public:
                 computeBlock();
                 position = 0;
             }
+            else
+                workAhead();
         }
     }
 
@@ -243,9 +254,96 @@ private:
         bool used = false, otherUsed = false;
     };
 
+    // Lo adelantado de un kernel para el bloque siguiente: de cuál es y hasta qué trozo llegó (camino k, trozo p; solo
+    // los de edad ≥ 1).
+    struct Ahead
+    {
+        const ConvolutionKernel* kernel = nullptr;
+        int path = 0, part = 0, done = 0;
+        bool finished = false;
+    };
+
+    void restartAhead() noexcept
+    {
+        for (int o = 0; o < numOutputs; ++o)
+        {
+            auto& output = outputs[static_cast<size_t> (o)];
+            output.used = output.otherUsed = false;
+        }
+        ahead = { Ahead { current }, Ahead { pending } };
+    }
+
+    // Trozos de edad ≥ 1 de un kernel (lo que se puede adelantar).
+    [[nodiscard]] int aheadUnits (const ConvolutionKernel* kernel) const noexcept
+    {
+        int units = 0;
+        if (kernel != nullptr)
+            for (int k = 0; k < kernel->getNumPaths(); ++k)
+            {
+                const auto& path = kernel->getPath (k);
+                if (path.input < numInputs && path.output < numOutputs)
+                    units += std::max (0, std::min (path.first + path.count, maxPartitions) - std::max (path.first, 1));
+            }
+        return units;
+    }
+
+    // Avanza lo adelantado de 'which' (0 = el kernel que suena, 1 = el pendiente) hasta 'target' trozos (o todos).
+    void advanceAhead (int which, int target) noexcept
+    {
+        auto& state = ahead[static_cast<size_t> (which)];
+        const auto* kernel = which == 0 ? current : pending;
+        if (state.kernel != kernel)
+        {
+            // Cambió el kernel a mitad del bloque (setKernel sin fundido o un pendiente nuevo): lo de antes no sirve.
+            for (int o = 0; o < numOutputs; ++o)
+                (which == 0 ? outputs[static_cast<size_t> (o)].used : outputs[static_cast<size_t> (o)].otherUsed) = false;
+            state = Ahead { kernel };
+        }
+        if (kernel == nullptr)
+            return;
+        const int nextHead = (head + 1) % maxPartitions;
+        while (! state.finished && state.done < target)
+        {
+            if (state.path >= kernel->getNumPaths())
+            {
+                state.finished = true;
+                break;
+            }
+            const auto& path = kernel->getPath (state.path);
+            const int age = path.first + state.part;
+            if (path.input >= numInputs || path.output >= numOutputs || state.part >= path.count || age >= maxPartitions)
+            {
+                ++state.path;
+                state.part = 0;
+                continue;
+            }
+            if (age >= 1)
+            {
+                accumulatePart (*kernel, which == 1, state.path, state.part, nextHead);
+                ++state.done;
+            }
+            ++state.part;
+        }
+    }
+
+    // Durante el bloque: lo adelantado en proporción a las muestras que ya llegaron.
+    void workAhead() noexcept
+    {
+        for (int which = 0; which < 2; ++which)
+        {
+            const auto* kernel = which == 0 ? current : pending;
+            const int units = aheadUnits (kernel);
+            advanceAhead (which, (units * position + partitionSize - 1) / partitionSize);
+        }
+    }
+
     void computeBlock() noexcept
     {
-        // 1) La entrada nueva a frecuencia, a la FDL.
+        // 1) Lo que falte de los trozos de edad ≥ 1 (que solo leen entradas pasadas).
+        advanceAhead (0, std::numeric_limits<int>::max());
+        advanceAhead (1, std::numeric_limits<int>::max());
+
+        // 2) La entrada nueva a frecuencia, a la FDL.
         head = (head + 1) % maxPartitions;
         for (int i = 0; i < numInputs; ++i)
         {
@@ -255,18 +353,17 @@ private:
             std::copy_n (input.history.begin() + partitionSize, partitionSize, input.history.begin()); // el bloque nuevo pasa a ser el viejo
         }
 
-        // 2) Σ trozo × entrada de hace p bloques, por salida (con los dos kernels si hay fundido).
-        for (int o = 0; o < numOutputs; ++o)
-        {
-            auto& output = outputs[static_cast<size_t> (o)];
-            output.used = output.otherUsed = false;
-        }
-        if (current != nullptr)
-            accumulate (*current, false);
-        if (pending != nullptr)
-            accumulate (*pending, true);
+        // 3) Los trozos de edad 0 (la entrada recién llegada), por salida (con los dos kernels si hay fundido).
+        for (int which = 0; which < 2; ++which)
+            if (const auto* kernel = which == 0 ? current : pending)
+                for (int k = 0; k < kernel->getNumPaths(); ++k)
+                {
+                    const auto& path = kernel->getPath (k);
+                    if (path.count > 0 && path.first == 0 && path.input < numInputs && path.output < numOutputs)
+                        accumulatePart (*kernel, which == 1, k, 0, head);
+                }
 
-        // 3) De vuelta al tiempo: valen las últimas P muestras de cada bloque de 2P.
+        // 4) De vuelta al tiempo: valen las últimas P muestras de cada bloque de 2P.
         for (int o = 0; o < numOutputs; ++o)
         {
             auto& output = outputs[static_cast<size_t> (o)];
@@ -299,42 +396,35 @@ private:
             current = pending;
             pending = nullptr;
         }
+        restartAhead();
     }
 
-    void accumulate (const ConvolutionKernel& kernel, bool other) noexcept
+    // Un trozo p del camino k sobre la entrada de hace (first + p) bloques, contado desde 'blockHead' (la FDL del bloque
+    // que se está calculando), sumado al espectro de su salida.
+    void accumulatePart (const ConvolutionKernel& kernel, bool other, int k, int p, int blockHead) noexcept
     {
-        for (int k = 0; k < kernel.getNumPaths(); ++k)
+        const auto& path = kernel.getPath (k);
+        auto& output = outputs[static_cast<size_t> (path.output)];
+        float* accRe = other ? output.otherRe.data() : output.re.data();
+        float* accIm = other ? output.otherIm.data() : output.im.data();
+        bool& used = other ? output.otherUsed : output.used;
+        if (! used)
         {
-            const auto& path = kernel.getPath (k);
-            if (path.count == 0 || path.input >= numInputs || path.output >= numOutputs)
-                continue;
-            auto& output = outputs[static_cast<size_t> (path.output)];
-            float* accRe = other ? output.otherRe.data() : output.re.data();
-            float* accIm = other ? output.otherIm.data() : output.im.data();
-            bool& used = other ? output.otherUsed : output.used;
-            if (! used)
-            {
-                std::fill_n (accRe, bins, 0.0f);
-                std::fill_n (accIm, bins, 0.0f);
-                used = true;
-            }
-            const auto& input = inputs[static_cast<size_t> (path.input)];
-            for (int p = 0; p < path.count; ++p)
-            {
-                const int age = path.first + p; // este trozo multiplica a la entrada de hace 'age' bloques
-                if (age >= maxPartitions)
-                    break;
-                const int slot = (head - age + maxPartitions) % maxPartitions;
-                const float* xr = input.re.data() + slot * bins;
-                const float* xi = input.im.data() + slot * bins;
-                const float* hr = kernel.partitionRe (k, p);
-                const float* hi = kernel.partitionIm (k, p);
-                for (int b = 0; b < bins; ++b)
-                {
-                    accRe[b] += xr[b] * hr[b] - xi[b] * hi[b];
-                    accIm[b] += xr[b] * hi[b] + xi[b] * hr[b];
-                }
-            }
+            std::fill_n (accRe, bins, 0.0f);
+            std::fill_n (accIm, bins, 0.0f);
+            used = true;
+        }
+        const auto& input = inputs[static_cast<size_t> (path.input)];
+        const int age = path.first + p; // este trozo multiplica a la entrada de hace 'age' bloques
+        const int slot = (blockHead - age + maxPartitions) % maxPartitions;
+        const float* xr = input.re.data() + slot * bins;
+        const float* xi = input.im.data() + slot * bins;
+        const float* hr = kernel.partitionRe (k, p);
+        const float* hi = kernel.partitionIm (k, p);
+        for (int b = 0; b < bins; ++b)
+        {
+            accRe[b] += xr[b] * hr[b] - xi[b] * hi[b];
+            accIm[b] += xr[b] * hi[b] + xi[b] * hr[b];
         }
     }
 
@@ -348,6 +438,7 @@ private:
     const ConvolutionKernel* pending = nullptr;
     const ConvolutionKernel* audible = nullptr;
     bool audibleFade = false;
+    std::array<Ahead, 2> ahead {}; // lo adelantado del kernel que suena y del pendiente
 };
 
 } // namespace deepwater::dsp

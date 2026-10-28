@@ -3351,6 +3351,74 @@ double measureCpu (CpuCase which, double sampleRate, int numChannels, int blockS
     return 100.0 * seconds / 5.0;
 }
 
+// Los modos con bloques (fase lineal y natural, espectral) calculan un bloque entero de golpe cada tantas muestras: con
+// bloques del host chicos, un callback hace todo el trabajo. Lo que importa ahí es el PEOR callback: si se lleva más
+// que su tiempo (32 muestras = 0.73 ms a 44.1 kHz), el host corta. Se informa el promedio y el peor, en % del tiempo
+// de un bloque. En tiempo real (los FIR se diseñan en su hilo): el audio mide solo lo suyo.
+struct CpuPeak
+{
+    double average = 0.0, worst = 0.0;
+};
+
+CpuPeak measurePeak (PhaseMode mode, int quality, bool spectral, double sampleRate, int blockSize)
+{
+    Engine::BandArray bands {};
+    for (int b = 0; b < 6; ++b)
+    {
+        auto& band = bands[static_cast<size_t> (b)];
+        band = shapedBand (Shape::bell, 100.0f * std::pow (2.5f, static_cast<float> (b)), b % 2 == 0 ? 4.0f : -4.0f, 2.0f);
+        band.placement = b % 3 == 0 ? Placement::mid : b % 3 == 1 ? Placement::side : Placement::stereo; // 4 FIR en lineal
+        if (spectral)
+        {
+            band.dynamics.enabled = band.dynamics.spectral = true;
+            band.dynamics.thresholdDb = -40.0f;
+        }
+    }
+    Engine engine;
+    engine.setPhaseMode (mode, quality);
+    engine.prepare (sampleRate, false, 0.0f, bands);
+    engine.setRealtime (true);
+    const auto n = static_cast<size_t> (4.0 * sampleRate);
+    auto left = whiteNoise (n, 1), right = whiteNoise (n, 2);
+    const double blockSeconds = blockSize / sampleRate;
+    CpuPeak peak;
+    double total = 0.0;
+    int measured = 0;
+    for (size_t i = 0; i + static_cast<size_t> (blockSize) <= n; i += static_cast<size_t> (blockSize))
+    {
+        float* channels[] { left.data() + i, right.data() + i };
+        const auto start = std::chrono::steady_clock::now();
+        engine.process (channels, 2, blockSize);
+        const double seconds = std::chrono::duration<double> (std::chrono::steady_clock::now() - start).count();
+        if (i < static_cast<size_t> (sampleRate)) // el primer segundo: los diseños llegan y la caché se calienta
+            continue;
+        total += seconds;
+        ++measured;
+        peak.worst = std::max (peak.worst, 100.0 * seconds / blockSeconds);
+    }
+    peak.average = 100.0 * total / (measured * blockSeconds);
+    return peak;
+}
+
+void testCpuPeaks()
+{
+    std::printf ("CPU por callback: 6 bandas (mid, side y estereo), promedio / PEOR callback en %% del tiempo de un bloque\n");
+    const auto line = [] (const char* name, PhaseMode mode, int quality, bool spectral) {
+        const auto a = measurePeak (mode, quality, spectral, 44100.0, 32), b = measurePeak (mode, quality, spectral, 44100.0, 256),
+                   c = measurePeak (mode, quality, spectral, 96000.0, 32);
+        std::printf ("  %s  44.1k/32 %5.1f / %6.1f %%   44.1k/256 %5.1f / %6.1f %%   96k/32 %5.1f / %6.1f %%\n", name, a.average, a.worst,
+                     b.average, b.worst, c.average, c.worst);
+    };
+    line ("natural          ", PhaseMode::natural, 0, false);
+    for (int q = 0; q < numLinearQualities; ++q)
+    {
+        char name[32];
+        std::snprintf (name, sizeof (name), "lineal calidad %d ", q);
+        line (name, PhaseMode::linear, q, false);
+    }
+    line ("espectral (6)    ", PhaseMode::zeroLatency, 0, true);
+}
+
 void testCpu()
 {
     std::printf ("CPU: 24 bandas, cero latencia (solo informa; %% de un nucleo, 5 s de ruido)\n");
@@ -3363,6 +3431,7 @@ void testCpu()
         std::printf ("  %s  estereo 44.1k/256 %5.2f %%  96k/256 %5.2f %%  44.1k/32 %5.2f %%  mono 44.1k/256 %5.2f %%\n", name,
                      measureCpu (which, 44100.0, 2, 256), measureCpu (which, 96000.0, 2, 256), measureCpu (which, 44100.0, 2, 32),
                      measureCpu (which, 44100.0, 1, 256));
+    testCpuPeaks();
 }
 
 int main (int argc, char** argv)

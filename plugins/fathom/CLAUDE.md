@@ -192,8 +192,15 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 16 EN CURSO. Paso 1 (CPU de las bandas IIR) hecho; falta probarlo en FL. Pendiente: repartir el trabajo de la
-convolución y de la STFT con bloques chicos (picos), GUI escalable, automatización extrema.
+Fase 16 EN CURSO. Paso 1 (CPU de las bandas IIR) probado en FL: funciona. Paso 2 (picos de la convolución) hecho.
+Pendiente: picos de la STFT espectral, GUI escalable, automatización extrema.
+- Paso 2: `PartitionedConvolver` adelanta durante el bloque (en cada `process`, en proporción a las muestras llegadas)
+  la suma de los trozos de edad ≥ 1 (solo leen entradas pasadas); en el borde quedan la FFT nueva, el trozo 0 y la
+  inversa. Misma latencia; mismo resultado salvo el orden de las sumas (bit a bit igual con bloques chicos o de P:
+  test nuevo `testConvolverWorkAhead`, con kernels cambiados a mitad de bloque, con y sin fundido, y soltados).
+  `FathomTests --cpu` mide ahora también el PEOR callback (% del tiempo de un bloque; 6 bandas mid/side/estéreo, en
+  tiempo real). Fase lineal, peor callback antes → después: 44.1 kHz/32 calidad 4 55 → 10 %; 96 kHz/32 calidades 2-4
+  126-226 % (cortes) → 33-47 %; natural ~5 / 12-18 %. Espectral (6 bandas): 44 % a 44.1/32 y 200-350 % a 96/32 (pendiente).
 - Medición nueva `FathomTests.exe --cpu` (también al final de los tests, solo informa): 24 bandas en cero latencia en 5
   escenarios (campanas quietas, campanas automatizadas sin parar, cortes de 96 dB/oct, dinámicas, mid/side) a 44.1/256,
   96/256, 44.1/32 y mono.
