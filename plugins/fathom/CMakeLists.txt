@@ -17,11 +17,13 @@ juce_add_plugin(Fathom
     VST3_CATEGORIES          Fx EQ
 )
 
-target_sources(Fathom
-    PRIVATE
-        Source/PluginProcessor.cpp
-        Source/PluginEditor.cpp
+# Todo el código del plugin (también lo compila FathomInstanceTests).
+set(FATHOM_PLUGIN_SOURCES
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
 )
+
+target_sources(Fathom PRIVATE ${FATHOM_PLUGIN_SOURCES})
 
 target_include_directories(Fathom PRIVATE Source)
 
@@ -59,4 +61,23 @@ if(FATHOM_BUILD_TESTS)
     endif()
 
     add_test(NAME FathomTests COMMAND FathomTests)
+
+    # Fase 14: con JUCE, varios procesadores completos en el mismo proceso (las otras instancias).
+    juce_add_console_app(FathomInstanceTests PRODUCT_NAME "FathomInstanceTests")
+    target_sources(FathomInstanceTests PRIVATE tests/InstanceTests.cpp ${FATHOM_PLUGIN_SOURCES})
+    target_include_directories(FathomInstanceTests PRIVATE Source)
+    target_compile_definitions(FathomInstanceTests
+        PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            "JucePlugin_Name=\"Fathom\""
+    )
+    target_link_libraries(FathomInstanceTests
+        PRIVATE
+            juce::juce_audio_utils
+            deepwater::dsp
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
+    )
+    add_test(NAME FathomInstanceTests COMMAND FathomInstanceTests)
 endif()

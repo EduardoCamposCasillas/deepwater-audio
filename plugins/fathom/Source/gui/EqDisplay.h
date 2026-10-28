@@ -20,6 +20,7 @@
 #include "edit/NodeEditing.h"
 #include "gui/BandEdits.h"
 #include "gui/Format.h"
+#include "gui/InstanceLink.h"
 #include "gui/Keys.h"
 #include "gui/Theme.h"
 
@@ -52,6 +53,10 @@ namespace fathom::gui
 //    de la pista y muestra la curva que lleva la pista hacia la referencia (naranja); DIBUJAR deja trazar esa curva a
 //    mano (arrastrar = dibujar, clic derecho o Alt = borrar). En las dos, la línea verde es lo que harían las bandas que
 //    se crearían (edit/CurveFit.h); el panel de abajo (CurvePanel) las crea.
+//  - Otras instancias (Fase 14), con INSTANCIAS: el espectro de salida de otras pistas con Fathom (una línea con el color
+//    de cada una), sus choques con esta (columnas coral donde las dos tienen su energía importante en la misma banda
+//    crítica, con una barra del color de la otra abajo) y los nodos de una de ellas, que se arrastran desde aquí
+//    (gui/InstanceLink.h). La lectura de arriba nombra el choque bajo el mouse y quién tapa a quién.
 //
 // Edición (Fase 4), pensada para no tener que ir al panel:
 //  - Doble clic en el vacío = crear una banda ahí (campana; en los extremos, un corte). Doble clic en un nodo = apagarla
@@ -82,7 +87,7 @@ public:
     static constexpr double wheelGestureSeconds = 0.5; // la rueda quieta este tiempo = fin del paso de deshacer
     static constexpr float fineFactor = 0.1f;          // Shift: diez veces más lento
 
-    explicit EqDisplay (FathomAudioProcessor& p) : processor (p), edits (p)
+    explicit EqDisplay (FathomAudioProcessor& p) : processor (p), edits (p), link (p)
     {
         outputGain = processor.getParameters().getRawParameterValue (params::outputGain);
         gainScale = processor.getParameters().getRawParameterValue (params::gainScale);
@@ -105,8 +110,13 @@ public:
             "y crea las bandas que llevan tu pista hacia el color de la referencia. Abajo aparecen sus controles."));
         drawButton.setTooltip (juce::String::fromUTF8 (
             "Dibujar la curva a mano: arrastra sobre el visor la forma que quieres y Fathom la convierte en bandas "
-            "(editables despuÃ©s como cualquier otra)."));
-        for (auto* button : { &matchButton, &drawButton })
+            "(editables despu\xc3\xa9s como cualquier otra)."));
+        // Fase 14.
+        instancesButton.setTooltip (juce::String::fromUTF8 (
+            "Ver las dem\xc3\xa1s instancias de Fathom del proyecto: su espectro sobre el tuyo, d\xc3\xb3nde chocan con esta "
+            "pista (enmascaramiento) y editar sus bandas desde aqu\xc3\xad. Abajo aparece la lista."));
+        instancesButton.onClick = [this] { setTool (tool == Tool::instances ? Tool::none : Tool::instances); };
+        for (auto* button : { &matchButton, &drawButton, &instancesButton })
         {
             button->setClickingTogglesState (false);
             button->setColour (juce::TextButton::buttonOnColourId, theme::curveWanted.withAlpha (0.5f));
@@ -144,6 +154,14 @@ public:
         changed = refreshSpectral() || changed;
         changed = refreshPhaseCurve (sampleRate) || changed;
         changed = updateCurveTool (sampleRate) || changed; // Fase 12
+        if (! frozen && ! grabbing) // Fase 14: las otras instancias y sus choques
+            changed = link.update ({ minHz, maxHz, curveDb.size() }, view, elapsedSeconds) || changed;
+        if (otherWheelEditing && nowSeconds() - lastWheelSeconds > wheelGestureSeconds)
+        {
+            otherWheelEditing = false;
+            if (auto* otherEdits = link.editsForEditable(); otherEdits != nullptr && drag != Drag::otherNode)
+                otherEdits->end();
+        }
         const bool side = view.channels() == analysis::Channels::side;
         changed = updateTrace (input, side ? processor.getInputSideTap() : processor.getInputTap(), sampleRate, elapsedSeconds) || changed;
         changed = updateTrace (output, side ? processor.getOutputSideTap() : processor.getOutputTap(), sampleRate, elapsedSeconds) || changed;
@@ -210,6 +228,8 @@ public:
         drawButton.setBounds (title.removeFromRight (72.0f).reduced (0.0f, 2.0f).toNearestInt());
         title.removeFromRight (4.0f);
         matchButton.setBounds (title.removeFromRight (76.0f).reduced (0.0f, 2.0f).toNearestInt());
+        title.removeFromRight (4.0f);
+        instancesButton.setBounds (title.removeFromRight (90.0f).reduced (0.0f, 2.0f).toNearestInt());
         title.removeFromRight (12.0f);
         titleArea = title;
         area.removeFromTop (4.0f);
@@ -268,6 +288,7 @@ public:
         {
             juce::Graphics::ScopedSaveState clip (g);
             g.reduceClipRegion (plot.toNearestInt());
+            paintCollisions (g); // Fase 14: detrás de todo
             const bool holding = view.holdMode() != analysis::Hold::off;
             if (view.showSidechain)
             {
@@ -300,12 +321,15 @@ public:
                         paintHeld (g, outputSide, theme::spectrumSide);
                 }
             }
+            paintOtherSpectra (g); // Fase 14
             paintAnalyzerStatus (g);
+            paintEditableOther (g);
             paintCurve (g);
             paintCurveTool (g);
             paintPeakMarker (g);
             paintLasso (g);
             paintNodeLabel (g);
+            paintOtherNodeLabel (g);
         }
     }
 
@@ -333,6 +357,10 @@ public:
                                            "im\xc3\xa1n a los picos del espectro). Rueda = Q. Doble clic = apagar/encender. "
                                            "Ctrl+clic = elegir varias. Supr = borrar. Clic derecho = forma, pendiente y "
                                            "m\xc3\xa1s.");
+        if (otherNodeAt (position) >= 0)
+            return juce::String::fromUTF8 ("Un nodo de otra instancia (la que editas desde aqu\xc3\xad). Arrastrar = su "
+                                           "frecuencia y ganancia (Shift = fino, Alt = un solo eje), rueda = su Q, doble clic = "
+                                           "apagarla o encenderla. Se deshace desde SU ventana.");
         if (hoveredPeak >= 0)
             return juce::String::fromUTF8 ("Un pico del espectro: algo suena aqu\xc3\xad m\xc3\xa1s fuerte que alrededor. "
                                            "Clic y arrastrar = una campana justo en el pico (abajo = cortarlo, arriba = "
@@ -357,14 +385,16 @@ public:
             return;
         }
         const int node = nodeAt (mouse);
+        const int other = node >= 0 ? -1 : otherNodeAt (mouse); // Fase 14: los propios tienen prioridad
         const int peak = pickPeak();
-        if (node != hoveredNode || peak != hoveredPeak)
+        if (node != hoveredNode || peak != hoveredPeak || other != hoveredOther)
         {
             hoveredNode = node;
+            hoveredOther = other;
             hoveredPeak = peak;
             repaint (plot.toNearestInt());
         }
-        setMouseCursor (node >= 0 || pianoArea.contains (mouse) ? juce::MouseCursor::PointingHandCursor
+        setMouseCursor (node >= 0 || other >= 0 || pianoArea.contains (mouse) ? juce::MouseCursor::PointingHandCursor
                         : peak >= 0                             ? juce::MouseCursor::DraggingHandCursor
                                                                 : juce::MouseCursor::CrosshairCursor);
         repaintReadoutAndAxis();
@@ -373,9 +403,10 @@ public:
     void mouseExit (const juce::MouseEvent&) override
     {
         mouse = { -1.0f, -1.0f };
-        if (hoveredNode >= 0 || hoveredPeak >= 0)
+        if (hoveredNode >= 0 || hoveredPeak >= 0 || hoveredOther >= 0)
         {
             hoveredNode = -1;
+            hoveredOther = -1;
             hoveredPeak = -1;
             repaint (plot.toNearestInt());
         }
@@ -427,6 +458,14 @@ public:
             startNodeDrag (event.position);
             return;
         }
+        if (const int other = otherNodeAt (event.position); other >= 0) // Fase 14: un nodo de la otra instancia
+        {
+            if (event.mods.isPopupMenu())
+                showOtherNodeMenu (other);
+            else
+                startOtherDrag (other, event.position);
+            return;
+        }
 
         if (event.mods.isPopupMenu())
         {
@@ -459,6 +498,11 @@ public:
         {
             lassoMoved = lassoMoved || event.position.getDistanceFrom (dragOrigin) > 3.0f;
             repaint (plot.toNearestInt());
+            return;
+        }
+        if (drag == Drag::otherNode)
+        {
+            dragOther (event);
             return;
         }
         if (drag != Drag::nodes)
@@ -510,6 +554,9 @@ public:
             finishLasso (lassoRectangle (event.position));
         if (drag == Drag::nodes && dragMoved && ! wheelEditing)
             edits.end();
+        if (drag == Drag::otherNode && dragMoved && ! otherWheelEditing)
+            if (auto* otherEdits = link.editsForEditable())
+                otherEdits->end();
         if (drag == Drag::draw) // la vista previa se calcula al soltar (ajustar mientras se dibuja trabaría el trazo)
         {
             wantedDirty = previewDirty = true;
@@ -533,6 +580,11 @@ public:
             refreshNow();
             return;
         }
+        if (const int other = otherNodeAt (event.position); other >= 0) // Fase 14
+        {
+            toggleOther (other);
+            return;
+        }
         createBand (event.position, edit::shapeForNewBand (xToHz (event.position.x)));
     }
 
@@ -540,7 +592,11 @@ public:
     {
         const int node = tool == Tool::draw ? -1 : nodeAt (event.position);
         if (node < 0)
+        {
+            if (const int other = otherNodeAt (event.position); other >= 0) // Fase 14: el Q de la otra instancia
+                wheelOther (other, event, wheel);
             return;
+        }
         if (! selection.test (static_cast<size_t> (node)))
             selectOnly (node);
         // Rueda hacia arriba = Q más alto (más angosta). Cada "muesca" (~0.23 en Windows) multiplica el Q por ~1.18: de
@@ -617,6 +673,7 @@ public:
         none,  // edición normal
         match, // IGUALAR: la curva sale de los espectros aprendidos (los nodos se siguen editando)
         draw,  // DIBUJAR: arrastrar sobre el visor traza la curva (los nodos quedan quietos)
+        instances, // Fase 14: la lista de las otras instancias (los nodos se siguen editando)
     };
 
     Tool getTool() const noexcept { return tool; }
@@ -635,6 +692,8 @@ public:
             tools.learningReference = tools.learningCurrent = false;
         matchButton.setToggleState (tool == Tool::match, juce::dontSendNotification);
         drawButton.setToggleState (tool == Tool::draw, juce::dontSendNotification);
+        instancesButton.setToggleState (tool == Tool::instances, juce::dontSendNotification);
+        link.setPanelOpen (tool == Tool::instances);
         hoveredPeak = -1;
         wantedDirty = previewDirty = true;
         preview = {};
@@ -645,6 +704,22 @@ public:
     }
 
     std::function<void (Tool)> onToolChanged;
+
+    // Fase 14: el panel de INSTANCIAS lee de aquí la lista y los choques.
+    InstanceLink& getInstanceLink() noexcept { return link; }
+
+    // El panel cambió qué se ve o cuál se edita: se dibuja ya (y un arrastre a medias de otro nodo se suelta).
+    void instanceSettingsChanged()
+    {
+        if (drag == Drag::otherNode)
+        {
+            if (auto* otherEdits = link.editsForEditable())
+                otherEdits->end();
+            drag = Drag::none;
+        }
+        hoveredOther = -1;
+        repaint();
+    }
 
     // Lo que el panel de la herramienta muestra.
     struct CurveStatus
@@ -745,6 +820,7 @@ private:
         nodes, // moviendo los nodos elegidos
         lasso, // rectángulo de selección
         draw,  // Fase 12: trazando (o borrando) la curva a mano
+        otherNode, // Fase 14: moviendo un nodo de otra instancia
     };
 
     // Las zonas del mapa de frecuencias (aproximadas: cada instrumento las cruza, pero sirven para ubicarse).
@@ -1312,7 +1388,8 @@ private:
     int pickPeak() const noexcept
     {
         const auto* trace = grabTrace();
-        if (tool == Tool::draw || trace == nullptr || peaks.empty() || ! plot.contains (mouse) || nodeAt (mouse) >= 0 || trace->shown.size() < 2)
+        if (tool == Tool::draw || trace == nullptr || peaks.empty() || ! plot.contains (mouse) || nodeAt (mouse) >= 0 || otherNodeAt (mouse) >= 0
+            || trace->shown.size() < 2)
             return -1;
         const float step = plot.getWidth() / static_cast<float> (trace->shown.size() - 1);
         const int peak = analysis::nearestPeak (peaks, static_cast<double> ((mouse.x - plot.getX()) / step), static_cast<double> (peakGrabPixels / step));
@@ -1912,7 +1989,7 @@ private:
     // algo visible cambió.
     bool updateCurveTool (double sampleRate)
     {
-        if (tool == Tool::none)
+        if (tool != Tool::match && tool != Tool::draw)
             return false;
         auto& tools = processor.getCurveTools();
         bool changed = false;
@@ -2075,7 +2152,7 @@ private:
     // (verde: la curva total con las bandas que se crearían).
     void paintCurveTool (juce::Graphics& g) const
     {
-        if (tool == Tool::none || curveDb.size() < 2)
+        if ((tool != Tool::match && tool != Tool::draw) || curveDb.size() < 2)
             return;
         const auto& tools = processor.getCurveTools();
         const float dashes[] { 5.0f, 4.0f };
@@ -2155,6 +2232,11 @@ private:
         {
             note ("DIBUJAR: ARRASTRA PARA TRAZAR (CLIC DERECHO = BORRAR)", theme::curveWanted);
         }
+        // Fase 14: a qué instancia van las ediciones de los nodos de color.
+        if (const auto* editable = link.getEditable())
+            note ("EDITANDO: " + editable->name.toUpperCase(), editable->colour);
+        else if (tool == Tool::instances)
+            note ("INSTANCIAS", theme::accent);
         // Fase 10: con fase lineal o natural la curva es la del FIR (y con curvas por canal, la guía de las bandas).
         if (paintedMode != dsp::PhaseMode::zeroLatency)
             note (juce::String (paintedMode == dsp::PhaseMode::linear ? "FASE LINEAL" : "FASE NATURAL")
@@ -2310,10 +2392,266 @@ private:
                 if (channelShown[c])
                     curve << " " << letters[c] << format::db (channelDb (hz, c));
         }
+        // Fase 14: sobre un choque, con quién y quién tapa a quién (en vez de las dos escalas).
+        if (const auto clash = collisionText (hz); clash.isNotEmpty())
+        {
+            g.drawText (format::hz (hz) + dot + format::noteName (hz) + dot + curve + dot + clash, area, juce::Justification::centred);
+            return;
+        }
         g.drawText (format::hz (hz) + dot + format::noteName (hz) + dot + curve + dot
                         + "EQ " + format::db (yToEqDb (mouse.y)) + dot
                         + juce::String::fromUTF8 ("analizador ") + juce::String (juce::roundToInt (yToAnalyzerDb (mouse.y))) + " dB",
                     area, juce::Justification::centred);
+    }
+
+    // ---- Fase 14: otras instancias -------------------------------------------------------------------------------------
+
+    // Los choques: columnas coral (más opacas donde más chocan) y, en las zonas que cuentan, una barra del color de la
+    // otra instancia en el borde de abajo.
+    void paintCollisions (juce::Graphics& g) const
+    {
+        if (! processor.getLinkSettings().collisions)
+            return;
+        for (const auto& other : link.getShown())
+        {
+            const auto points = other.collision.size();
+            if (points < 2)
+                continue;
+            const float step = plot.getWidth() / static_cast<float> (points - 1);
+            for (size_t i = 0; i < points; ++i)
+                if (const float amount = other.collision[i]; amount > 0.2f)
+                {
+                    g.setColour (theme::collision.withAlpha (0.16f * amount * amount));
+                    g.fillRect (juce::Rectangle<float> (plot.getX() + step * (static_cast<float> (i) - 0.5f), plot.getY(), step, plot.getHeight()));
+                }
+            g.setColour (other.colour.withAlpha (0.9f));
+            for (const auto& zone : other.zones)
+            {
+                const float left = hzToX (static_cast<float> (zone.lowHz)) - step * 0.5f;
+                const float right = hzToX (static_cast<float> (zone.highHz)) + step * 0.5f;
+                g.fillRect (juce::Rectangle<float> (left, plot.getBottom() - 5.0f, right - left, 5.0f));
+            }
+        }
+    }
+
+    // El espectro de salida de cada otra instancia: una línea de su color (escala del analizador).
+    void paintOtherSpectra (juce::Graphics& g) const
+    {
+        for (const auto& other : link.getShown())
+            if (std::any_of (other.shown.begin(), other.shown.end(), [this] (float db) { return db > analyzerBottomDb(); }))
+            {
+                g.setColour (other.colour.withAlpha (0.85f));
+                g.strokePath (tracePath (other.shown, false), juce::PathStrokeType (1.3f));
+            }
+    }
+
+    // La instancia que se edita desde aquí: su curva (punteada, con su color) y sus nodos (anillos más chicos que los
+    // propios, con su número).
+    void paintEditableOther (juce::Graphics& g) const
+    {
+        const auto* other = link.getEditable();
+        if (other == nullptr || other->curveDb.size() != curveDb.size() || curveDb.size() < 2)
+            return;
+        juce::Path dashed;
+        const float dashes[] { 6.0f, 3.0f };
+        juce::PathStrokeType (1.6f).createDashedStroke (dashed, curvePath (other->curveDb, 0.0f), dashes, 2);
+        g.setColour (other->colour.withAlpha (0.9f));
+        g.fillPath (dashed);
+        g.setFont (juce::FontOptions (8.5f, juce::Font::bold));
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+        {
+            if (! InstanceLink::inUse (*other, b))
+                continue;
+            const bool active = b == hoveredOther || (drag == Drag::otherNode && b == draggedOther);
+            const float radius = otherNodeRadius + (active ? 1.5f : 0.0f);
+            const auto node = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (otherNodePosition (*other, b));
+            const bool enabled = other->bands[static_cast<size_t> (b)].enabled;
+            g.setColour (enabled ? other->colour.withAlpha (0.35f) : theme::display.withAlpha (0.8f));
+            g.fillEllipse (node);
+            g.setColour (other->colour);
+            g.drawEllipse (node, 1.6f);
+            g.drawText (juce::String (b + 1), node, juce::Justification::centred);
+        }
+    }
+
+    static constexpr float otherNodeRadius = 6.5f;
+
+    juce::Point<float> otherNodePosition (const InstanceLink::Other& other, int b) const noexcept
+    {
+        const auto& settings = other.bands[static_cast<size_t> (b)];
+        const float y = eqDbToY (other.outputDb + other.nodeDb[static_cast<size_t> (b)]);
+        return { hzToX (juce::jlimit (minHz, maxHz, settings.frequency)), juce::jlimit (plot.getY() + 7.0f, plot.getBottom() - 7.0f, y) };
+    }
+
+    // La banda de la instancia editable bajo 'position' (o −1). Dibujando no se agarran.
+    int otherNodeAt (juce::Point<float> position) const noexcept
+    {
+        const auto* other = link.getEditable();
+        if (other == nullptr || tool == Tool::draw || ! plot.expanded (otherNodeRadius).contains (position))
+            return -1;
+        int best = -1;
+        float bestDistance = otherNodeRadius + 3.0f;
+        for (int b = 0; b < dsp::Engine::numBands; ++b)
+            if (InstanceLink::inUse (*other, b))
+                if (const float distance = otherNodePosition (*other, b).getDistanceFrom (position); distance < bestDistance)
+                {
+                    best = b;
+                    bestDistance = distance;
+                }
+        return best;
+    }
+
+    // Arrastrar un nodo de la otra instancia: igual que uno propio (Shift fino, Alt un eje), con SU escala de ganancia.
+    void startOtherDrag (int band, juce::Point<float> position)
+    {
+        if (! link.readEditableBand (band, otherDragStart))
+            return;
+        drag = Drag::otherNode;
+        draggedOther = band;
+        dragLast = position;
+        dragTotal = {};
+        dragOctaves = dragDb = 0.0;
+        dragMoved = false;
+    }
+
+    void dragOther (const juce::MouseEvent& event)
+    {
+        const auto* other = link.getEditable();
+        auto* otherEdits = link.editsForEditable();
+        if (other == nullptr || otherEdits == nullptr) // se borró a mitad del arrastre
+        {
+            drag = Drag::none;
+            return;
+        }
+        const auto delta = event.position - dragLast;
+        dragLast = event.position;
+        dragTotal += delta;
+        if (! dragMoved && dragTotal.getDistanceFromOrigin() < 2.0f)
+            return;
+        if (! dragMoved)
+        {
+            dragMoved = true;
+            otherEdits->begin();
+        }
+        const float fine = event.mods.isShiftDown() ? fineFactor : 1.0f;
+        dragOctaves += static_cast<double> (delta.x * fine * octavesPerPixel());
+        dragDb -= static_cast<double> (delta.y * fine * eqDbPerPixel());
+        double octaves = dragOctaves, db = dragDb;
+        if (event.mods.isAltDown())
+        {
+            if (std::abs (dragTotal.x) >= std::abs (dragTotal.y))
+                db = 0.0;
+            else
+                octaves = 0.0;
+        }
+        const auto moved = edit::dragged (otherDragStart, octaves, db / std::max (other->scale, 0.25f), minHz, maxHz);
+        otherEdits->set (draggedOther, params::frequency, moved.frequency);
+        if (dsp::usesGain (otherDragStart.shape))
+            otherEdits->set (draggedOther, params::gain, moved.gainDb);
+        repaint (plot.toNearestInt());
+    }
+
+    void toggleOther (int band)
+    {
+        dsp::BandSettings settings;
+        auto* otherEdits = link.editsForEditable();
+        if (otherEdits == nullptr || ! link.readEditableBand (band, settings))
+            return;
+        otherEdits->begin();
+        otherEdits->set (band, params::enabled, settings.enabled ? 0.0f : 1.0f);
+        otherEdits->end();
+        repaint (plot.toNearestInt());
+    }
+
+    void wheelOther (int band, const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+    {
+        const float amount = (wheel.isReversed ? -wheel.deltaY : wheel.deltaY) * (event.mods.isShiftDown() ? fineFactor : 1.0f);
+        dsp::BandSettings settings;
+        auto* otherEdits = link.editsForEditable();
+        if (amount == 0.0f || otherEdits == nullptr || ! link.readEditableBand (band, settings) || ! dsp::usesQ (settings.shape, settings.slopeIndex))
+            return;
+        if (! otherEdits->isActive())
+            otherEdits->begin();
+        otherWheelEditing = true;
+        lastWheelSeconds = nowSeconds();
+        otherEdits->set (band, params::q, edit::scaledQ (settings.q, std::exp2 (static_cast<double> (amount))));
+        repaint (plot.toNearestInt());
+    }
+
+    void showOtherNodeMenu (int band)
+    {
+        const auto* other = link.getEditable();
+        if (other == nullptr)
+            return;
+        const bool enabled = other->bands[static_cast<size_t> (band)].enabled;
+        juce::PopupMenu menu;
+        menu.addSectionHeader (other->name + " - banda " + juce::String (band + 1));
+        menu.addItem (enabled ? "Apagar" : "Encender", guarded ([this, band] { toggleOther (band); }));
+        menu.addItem ("Dejar de editarla", guarded ([this] {
+            processor.getLinkSettings().setEditable (-1);
+            instanceSettingsChanged();
+        }));
+        showMenu (menu);
+    }
+
+    // Junto al nodo de la otra instancia bajo el mouse (o el que se arrastra): de quién es y sus valores.
+    void paintOtherNodeLabel (juce::Graphics& g) const
+    {
+        const auto* other = link.getEditable();
+        const int b = drag == Drag::otherNode && dragMoved ? draggedOther : (drag == Drag::none ? hoveredOther : -1);
+        if (other == nullptr || b < 0 || hoveredNode >= 0)
+            return;
+        const auto& s = other->bands[static_cast<size_t> (b)];
+        const auto dot = juce::String::fromUTF8 (" \xc2\xb7 ");
+        auto first = other->name + dot + juce::String (b + 1) + dot + juce::String::fromUTF8 (format::shapeNames[static_cast<size_t> (s.shape)]);
+        if (! s.enabled)
+            first << " (apagada)";
+        auto second = format::hz (s.frequency);
+        if (dsp::usesGain (s.shape) && s.shape != dsp::Shape::flatTilt)
+            second << dot << format::db (s.gainDb);
+        if (dsp::usesQ (s.shape, s.slopeIndex))
+            second << dot << "Q " << juce::String (s.q, s.q < 10.0f ? 2 : 1);
+        const juce::Font font { juce::FontOptions (11.0f) };
+        const float width = 12.0f + juce::jmax (juce::GlyphArrangement::getStringWidth (font, first), juce::GlyphArrangement::getStringWidth (font, second));
+        const auto centre = otherNodePosition (*other, b);
+        auto box = juce::Rectangle<float> (width, 32.0f).withPosition (centre.x + otherNodeRadius + 6.0f, centre.y - 38.0f);
+        if (box.getRight() > plot.getRight() - 2.0f)
+            box.setX (centre.x - otherNodeRadius - 6.0f - width);
+        if (box.getY() < plot.getY() + 2.0f)
+            box.setY (centre.y + otherNodeRadius + 6.0f);
+        g.setColour (theme::panel.withAlpha (0.92f));
+        g.fillRoundedRectangle (box, 4.0f);
+        g.setColour (other->colour.withAlpha (0.8f));
+        g.drawRoundedRectangle (box, 4.0f, 1.0f);
+        g.setFont (font);
+        auto lines = box.reduced (6.0f, 3.0f);
+        g.setColour (theme::text);
+        g.drawText (first, lines.removeFromTop (lines.getHeight() * 0.5f), juce::Justification::centredLeft);
+        g.setColour (theme::text.withAlpha (0.85f));
+        g.drawText (second, lines, juce::Justification::centredLeft);
+    }
+
+    // "choca con Voz (tú +4.0 dB)" si 'hz' cae en una zona de choque (la que más choca, si hay varias).
+    juce::String collisionText (float hz) const
+    {
+        if (! processor.getLinkSettings().collisions)
+            return {};
+        const InstanceLink::Other* best = nullptr;
+        const analysis::Collision* bestZone = nullptr;
+        for (const auto& other : link.getShown())
+            for (const auto& zone : other.zones)
+                if (hz >= zone.lowHz && hz <= zone.highHz && (bestZone == nullptr || zone.amount > bestZone->amount))
+                {
+                    best = &other;
+                    bestZone = &zone;
+                }
+        if (bestZone == nullptr)
+            return {};
+        const float louder = bestZone->louderDb;
+        const auto who = std::abs (louder) < 1.5f ? juce::String ("parejos")
+                         : louder > 0.0f          ? juce::String::fromUTF8 ("t\xc3\xba ") + format::db (louder)
+                                                  : best->name + " " + format::db (-louder);
+        return "choca con " + best->name + " (" + who + ")";
     }
 
     FathomAudioProcessor& processor;
@@ -2394,6 +2732,13 @@ private:
     double lastWantedSeconds = 0.0, lastFitSeconds = 0.0;
     juce::Point<float> drawLast;
     static constexpr double wantedRefreshSeconds = 0.25;
+
+    // Fase 14: las otras instancias, el botón y lo que se hace con los nodos de la editable.
+    InstanceLink link;
+    juce::TextButton instancesButton { "INSTANCIAS" };
+    int hoveredOther = -1, draggedOther = -1;
+    dsp::BandSettings otherDragStart;
+    bool otherWheelEditing = false;
 };
 
 } // namespace fathom::gui

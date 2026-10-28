@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 
 #include <juce_graphics/juce_graphics.h>
@@ -36,6 +37,16 @@ inline const juce::Colour curveSide { 0xffc6a6ff };
 // bandas, verde.
 inline const juce::Colour curveWanted { 0xffff9f43 };
 inline const juce::Colour curvePreview { 0xff6ee7a0 };
+
+// Fase 14: los choques con otra instancia (rojo coral: "aquí hay un problema") y el color de cada otra instancia si FL no
+// manda el de su pista (tonos que no se confunden con el azul de la salida ni con el gris de la entrada).
+inline const juce::Colour collision { 0xffff5f5f };
+inline juce::Colour instanceColour (int instanceId)
+{
+    static const std::array<juce::Colour, 6> colours { juce::Colour (0xffffc857), juce::Colour (0xff7ee081), juce::Colour (0xfff28fd8),
+                                                       juce::Colour (0xff5ee3e3), juce::Colour (0xffff9d5c), juce::Colour (0xffc3a6ff) };
+    return colours[static_cast<size_t> (std::max (instanceId - 1, 0)) % colours.size()];
+}
 
 // Cada banda tiene su color (el nodo, su relleno y las perillas cuando está elegida). Ocho tonos que se repiten: con
 // 24 bandas, la 1, la 9 y la 17 comparten color, pero rara vez se usan todas.

@@ -7,6 +7,7 @@
 #include "dsp/Engine.h"
 #include "edit/CurveTools.h"
 #include "edit/EditHistory.h"
+#include "link/InstanceRegistry.h"
 
 // Efecto mono/estéreo: 24 bandas de EQ con todas las formas y la ganancia de salida (Fase 3), editables sobre el visor
 // con deshacer/rehacer (Fase 4). El audio deja una copia de lo que entra, de lo que sale y del sidechain (Fase 5) en tres
@@ -14,7 +15,9 @@
 // gain, escala de ganancia, balance, polaridad y comparación A/B. Cada banda en estéreo, L, R, mid o side y el
 // analizador también del side (Fase 8). EQ dinámico por banda, con el detector en la banda o en el sidechain (Fase 9).
 // Modos de fase cero latencia / natural / lineal, con la latencia informada al host (Fase 10). Dinámica espectral por banda
-// (Fase 11). Igualar a una referencia y dibujar la curva, convertidas en bandas (Fase 12: todo en la GUI).
+// (Fase 11). Igualar a una referencia y dibujar la curva, convertidas en bandas (Fase 12: todo en la GUI). Color analógico
+// (Fase 13). Cada instancia se anota en una lista del proceso para que las demás vean su espectro, sus choques y sus
+// bandas, y puedan editarlas (Fase 14).
 // El audio está en fathom::dsp (sin JUCE); aquí solo se conectan los parámetros, el estado y la GUI.
 class FathomAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
@@ -133,6 +136,20 @@ public:
     bool switchCompareSide();
     void copyToOtherSide();     // el lado activo pasa a ser también el otro (A → B o B → A)
 
+    // Fase 14, hilo de mensajes: las demás instancias de Fathom del proceso (link/InstanceRegistry.h).
+    using Registry = fathom::link::InstanceRegistry<FathomAudioProcessor>;
+    int getInstanceId() const noexcept { return instanceId; }
+    // Cómo se llama esta instancia para las demás: el nombre puesto a mano, si no el de la pista del mixer de FL (si FL
+    // lo manda), si no "Fathom N". El puesto a mano se guarda con el proyecto (no es un parámetro).
+    juce::String getInstanceName() const;
+    juce::String getCustomName() const;
+    void setCustomName (const juce::String& name);
+    juce::String getTrackName() const { return trackName; }
+    std::optional<juce::Colour> getTrackColour() const { return trackColour; }
+    void updateTrackProperties (const TrackProperties& properties) override;
+    // Qué ve esta instancia de las demás (solo la GUI; no se guarda: los números cambian al abrir el proyecto).
+    fathom::link::LinkSettings& getLinkSettings() noexcept { return linkSettings; }
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
@@ -187,6 +204,14 @@ private:
     fathom::edit::EditHistory history; // después de 'parameters': se destruye antes (deja de escucharlos)
     fathom::edit::UndoStack otherSideHistory; // el historial del lado de la comparación que no está activo
     fathom::edit::CurveTools curveTools;
+
+    // Fase 14. La lista se guarda como referencia: el audio solo lee su atómico (sin pasar por la inicialización
+    // de la variable estática en cada bloque).
+    Registry& registry = Registry::shared();
+    int instanceId = 0;
+    juce::String trackName;
+    std::optional<juce::Colour> trackColour;
+    fathom::link::LinkSettings linkSettings;
 
     // Hilo de audio: el mid y el side de unos canales a sus tomas.
     static void pushTaps (AnalyzerTap& mid, AnalyzerTap& side, const float* const* channels, int numChannels, int numSamples) noexcept;

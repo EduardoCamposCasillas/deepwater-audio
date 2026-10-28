@@ -64,6 +64,7 @@ Desde la raíz del repositorio (ver también los comandos generales en el `CLAUD
 ```
 cmake --build build --config Release --target Fathom_VST3      # solo el plugin
 build/plugins/fathom/Release/FathomTests.exe                    # tests del motor (sin JUCE)
+build/plugins/fathom/FathomInstanceTests_artefacts/Release/FathomInstanceTests.exe   # Fase 14: varias instancias (JUCE)
 ```
 - VST3: `build/plugins/fathom/Fathom_artefacts/Release/VST3/Fathom.vst3`.
 - Standalone: `build/plugins/fathom/Fathom_artefacts/Release/Standalone/Fathom.exe`.
@@ -104,20 +105,27 @@ plugins/fathom/
     edit/NodeEditing.h       # cuentas de la edición sin JUCE: arrastrar nodos, rueda = Q, banda libre, notas
     edit/CurveFit.h          # Fase 12, sin JUCE: de una curva a bandas (grilla, codicioso + Levenberg-Marquardt)
     edit/CurveTools.h        # Fase 12, sin JUCE: estado de IGUALAR y DIBUJAR (en el procesador), trazos y metas
+    link/InstanceRegistry.h  # Fase 14, sin JUCE: la lista de instancias del proceso (números, avisos al borrar, quién
+                             # mira) y LinkSettings (qué ve una instancia de las demás)
     analysis/SpectrumView.h  # cuentas del analizador sin JUCE: inclinación, rango, resolución, balística, retención
                              # de picos, canales (mid/side), ajustes de la vista (ViewSettings) y búsqueda de picos
     analysis/SpectrumMatch.h # Fase 12, sin JUCE: espectro promedio (LTAS) y la curva para igualar a una referencia
+    analysis/Masking.h       # Fase 14, sin JUCE: choques (enmascaramiento): bandas críticas ERB, espectro lento,
+                             # cuánto chocan dos pistas por punto y sus zonas
     gui/                     # tema (con el color de cada banda), LookAndFeel, formato de valores, atajos (Keys),
                              # visor (EqDisplay: cuadrícula, analizador, curvas, nodos editables, teclado de piano,
                              # agarrar picos, curvas por canal), BandEdits (cambiar parámetros con gestos), panel de
                              # la banda elegida (BandPanel, con SOLO, CANAL y la fila de la dinámica), ajustes del
                              # analizador (AnalyzerPanel), columna de salida
                              # (OutputPanel: escala, auto gain, balance, polaridad, ganancia, fase, calidad y color),
-                             # panel de IGUALAR y DIBUJAR (CurvePanel, Fase 12; el visor tiene las herramientas)
+                             # panel de IGUALAR y DIBUJAR (CurvePanel, Fase 12; el visor tiene las herramientas),
+                             # las otras instancias (InstanceLink: sus espectros, choques, curva y gestos; Fase 14) y
+                             # su lista (InstancesPanel)
   tests/EngineTests.cpp    # tests del motor (con auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y
                            # dinámica espectral), de igualar y dibujar (ajuste de bandas, espectro promedio), del color
                            # analógico, de la
-                           # edición y del analizador (sin JUCE)
+                           # edición y del analizador, del registro de instancias y de los choques (sin JUCE)
+  tests/InstanceTests.cpp  # Fase 14, con JUCE: varios procesadores completos en el mismo proceso
 ```
 
 ## Aprendizaje de mezcla (igual de importante que el código)
@@ -170,14 +178,63 @@ fábrica incluyen notas de para qué sirven y por qué.
       mano y convertirla en bandas.
 - [x] Fase 13 — Color analógico: modos limpio / sutil / cálido (saturación suave con sobremuestreo, con lo aprendido
       en Riptide).
-- [ ] Fase 14 — Otras instancias: ver el espectro de las demás instancias de Fathom del proyecto y marcar dónde chocan
+- [x] Fase 14 — Otras instancias: ver el espectro de las demás instancias de Fathom del proyecto y marcar dónde chocan
       (enmascaramiento); editarlas desde aquí.
 - [ ] Fase 15 — Presets con notas educativas (voces, 808 y kick del dembow, percusión, buses, master).
 - [ ] Fase 16 — Pulido: CPU (24 bandas con SIMD, coeficientes), GUI escalable, pluginval estricto, pruebas de
       automatización extrema.
 
 ## Estado actual
-Fase 13 COMPLETADA (2026-10-27). Probada por el usuario en FL Studio: funciona.
+Fase 14 COMPLETADA (2026-10-27). Falta probarla en FL Studio.
+- Sin parámetros nuevos ni cambios en el sonido (un proyecto de las Fases 1-13 suena igual). Lo único que se guarda es
+  el nombre puesto a mano (propiedad `instanceName` del estado, fuera del A/B y del deshacer).
+- `link/InstanceRegistry.h` (sin JUCE): `InstanceRegistry<Member>::shared()` = la lista estática del proceso (FL carga la
+  DLL una vez y todas las instancias la comparten; una instancia "bridged" corre en otro proceso y no se ve). Números
+  que no se reutilizan, `find` por número (los punteros no se guardan de un cuadro al siguiente), avisos al borrar que
+  llegan ANTES de que el miembro desaparezca (el procesador llama a `remove` al principio de su destructor), mutex para
+  la lista y un atómico `isWatched` (cuántas GUIs miran), que es lo único que lee el audio. `LinkSettings` (en el
+  procesador, solo la GUI, no se guarda): las que se ven (hasta 8), la editable (editar implica ver), CHOQUES y
+  sensibilidad.
+- Procesador: se anota al final del constructor; nombre = el puesto a mano, si no el de la pista (`updateTrackProperties`,
+  si FL lo manda), si no "Fathom N"; color de la pista si lo manda (si no, `theme::instanceColour`). `processBlock` copia
+  a las tomas si hay editor abierto O si alguien mira (`registry.isWatched()`): con la ventana cerrada y nadie mirando no
+  gasta nada.
+- `analysis/Masking.h` (sin JUCE): ERB de Glasberg y Moore (24.7·(4.37·f/1000 + 1)); `erbSmooth` = lo MÁS FUERTE dentro
+  de ±ERB/2 (primero era el promedio de potencia: diluía un tono puro en su banda y cortar 20 dB no apagaba el choque en
+  el test; el componente más fuerte es el que tapa); `SlowSpectrum` = promedio exponencial de la potencia (1.5 s); choque
+  por punto = clamp(1 + min(nivel A − máx A, nivel B − máx B) / margen), con la inclinación fija de 4.5 dB/oct, máximos
+  entre 30 Hz y 16 kHz y piso −80 dB; margen = sensibilidad Baja / Media / Alta = 12 / 18 / 24 dB; zonas = tramos con
+  choque ≥ 0.5, centro en el medio de la meseta, `louderDb` = A − B ahí.
+- `gui/InstanceLink.h` (en EqDisplay, por cuadro salvo congelado): analiza la toma de salida de cada otra que se ve (FFT
+  de ~93 ms, con la velocidad y la inclinación de la vista) y la salida propia (solo si hay choques que calcular),
+  promedios lentos, choques y zonas; de la editable, sus bandas, su curva total en reposo (sin su FIR ni su dinámica, con
+  su escala y su salida) y sus nodos; `BandEdits` sobre SU procesador (el paso de deshacer queda en su historial, no en el
+  de la que mira). Oyente de la lista: si la editable se borra, cierra el gesto a medias y la olvida. Mira
+  (`startWatching`) mientras haya alguna que se vea o el panel esté abierto.
+- Visor: botón INSTANCIAS (`Tool::instances`, como IGUALAR/DIBUJAR; los nodos propios se siguen editando). Choques =
+  columnas coral (alfa ∝ choque²) detrás de todo y una barra de 5 px del color de la otra en las zonas; espectros de las
+  otras = líneas de su color; la editable = curva punteada de su color y nodos de 6.5 px con su número (arrastrar con
+  Shift/Alt, rueda = Q, doble clic = apagar, clic derecho = apagar / dejar de editarla); los propios tienen prioridad.
+  Nota "EDITANDO: NOMBRE"; sobre un choque, la lectura de arriba dice "choca con X (tú +4.0 dB)", "(X +3.0 dB)" o
+  "(parejos)".
+- `gui/InstancesPanel.h`: nombre de esta instancia (TextEditor; vacío = el de la pista o "Fathom N"), CHOQUES (MARCAR) y
+  SENSIBILIDAD, SALIR; la lista (Viewport) con color, nombre, "suena"/"sin audio", VER, EDITAR y las zonas de choque
+  ("73-132 Hz (tú +2.5 dB)"); sin otras, cómo agregarlas y lo del "bridged".
+- Arreglado de paso: el tooltip de DIBUJAR tenía "despuÃ©s" (UTF-8 mal escrito).
+- Tests nuevos `FathomTests`: la lista (números, avisos, quién mira), `LinkSettings`, ERB (valores de la fórmula),
+  `erbSmooth` (más ancho en graves, sin diluir), promedio lento (−21.99 dB a 1.5 s, exacto), choques sintéticos (kick +
+  808 en el sub, kick + hi-hat nada, la suave también choca y dice quién tapa, el piso, la sensibilidad ensancha, dos
+  zonas) y con el analizador y el motor (100 Hz: choque 1.00 → 0.35 al cortar 20 dB; la zona se va).
+- `FathomInstanceTests` (nuevo, con JUCE, en ctest): procesadores completos en el mismo proceso: la lista y los nombres
+  (pista, puesto a mano, guardado en el estado), la toma solo con alguien mirando, choques entre dos pistas de verdad
+  (73-132 Hz, +2.5 dB; se apagan al cortar en la que mira), editar otra (su deshacer; su curva +6.00 dB en su nodo),
+  borrarla a mitad de un gesto, y abrir/cerrar la ventana con una que se va.
+- GUI: sin captura (el Standalone es una sola instancia): revisar en FL con Fathom en dos o más pistas.
+- Release con 0 warnings; FathomTests y FathomInstanceTests: todos pasan; ctest 8/9: UndertowTests falló en su test de
+  CPU (el del resonador, como en la Fase 13; ni Undertow ni `libs/` cambiaron); pluginval strictness 10 ampliado: SUCCESS.
+
+### Lo que quedó de la Fase 13
+Probada por el usuario en FL Studio: funciona.
 - Color analógico (`dsp/AnalogColor.h`, `ColorStage`): parámetro nuevo `analogColor` (versionHint 13, lista Clean /
   Subtle / Warm, Clean por defecto: un proyecto de las Fases 1-12 suena igual, bit a bit y sin latencia). Entra al
   deshacer, al A/B y a la automatización. `Engine::setColor`, `getColorLatency`; el procesador lo pasa en
@@ -681,4 +738,4 @@ Probada por el usuario en FL Studio: funciona.
 - Sin cambios: salida ±24 dB, bypass con fundido, tomas del analizador, latencia 0, escalas del visor.
 - Release con 0 warnings; ctest 8/8; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 14 (otras instancias).
+Siguiente: Fase 15 (presets con notas educativas).

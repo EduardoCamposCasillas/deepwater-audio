@@ -1,4 +1,4 @@
-// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y dinámica espectral), igualar y dibujar (Fase 12), el color analógico (Fase 13), las cuentas de la edición (deshacer, arrastrar
+// Tests de Fathom sin JUCE: el motor de audio (salida, bypass, las bandas, auto gain, solo, estéreo por banda, EQ dinámico, modos de fase y dinámica espectral), igualar y dibujar (Fase 12), el color analógico (Fase 13), las otras instancias y sus choques (Fase 14), las cuentas de la edición (deshacer, arrastrar
 // nodos) y las del analizador (inclinación, balística, retención y picos). Se lanzan con ctest. Si algo falla, imprime el archivo, la línea y la
 // condición.
 
@@ -22,6 +22,8 @@
 #include "edit/CurveTools.h"
 #include "edit/NodeEditing.h"
 #include "edit/UndoStack.h"
+#include "analysis/Masking.h"
+#include "link/InstanceRegistry.h"
 
 namespace
 {
@@ -3070,6 +3072,223 @@ void testColorCpu()
         }
 }
 
+// ---- Fase 14: otras instancias ----------------------------------------------------------------------------------------
+
+struct FakeInstance
+{
+    int value = 0;
+};
+
+void testInstanceRegistry()
+{
+    std::printf ("Instancias: la lista del proceso, los avisos al borrar y quién mira\n");
+    using Registry = fathom::link::InstanceRegistry<FakeInstance>;
+    Registry registry; // una propia (shared() es la del proceso: aquí no hace falta)
+    FakeInstance a { 1 }, b { 2 }, c { 3 };
+    const int idA = registry.add (a), idB = registry.add (b);
+    CHECK (idA != idB);
+    CHECK (registry.find (idA) == &a && registry.find (idB) == &b);
+    CHECK ((registry.ids() == std::vector<int> { idA, idB }));
+
+    // Al borrar, los oyentes se enteran (una vez, con su número) y ya no se encuentra.
+    std::vector<int> removed;
+    bool foundDuringNotice = true;
+    const int token = registry.addListener ([&] (int id) {
+        removed.push_back (id);
+        foundDuringNotice = registry.find (id) != nullptr; // el oyente puede consultar la lista (sin trabarse)
+    });
+    registry.remove (idA);
+    CHECK ((removed == std::vector<int> { idA }));
+    CHECK (! foundDuringNotice);
+    CHECK (registry.find (idA) == nullptr && registry.find (idB) == &b);
+
+    // Los números no se reutilizan: uno viejo nunca apunta a otra instancia.
+    const int idC = registry.add (c);
+    CHECK (idC != idA && idC != idB);
+    CHECK ((registry.ids() == std::vector<int> { idB, idC }));
+
+    registry.removeListener (token);
+    registry.remove (idB);
+    CHECK (removed.size() == 1);
+    registry.remove (12345); // uno que no existe: no pasa nada
+
+    // Quién mira (lo lee el audio).
+    CHECK (! registry.isWatched());
+    registry.startWatching();
+    registry.startWatching();
+    registry.stopWatching();
+    CHECK (registry.isWatched());
+    registry.stopWatching();
+    CHECK (! registry.isWatched());
+
+    // Qué ve una instancia: editar implica ver; dejar de ver suelta la edición; una que se va se olvida.
+    fathom::link::LinkSettings settings;
+    settings.setEditable (7);
+    CHECK (settings.isShown (7) && settings.editable == 7);
+    settings.setShown (9, true);
+    settings.setShown (9, true);
+    CHECK (settings.shown.size() == 2);
+    settings.setShown (7, false);
+    CHECK (! settings.isShown (7) && settings.editable == -1);
+    settings.setEditable (9);
+    settings.forget (9);
+    CHECK (settings.shown.empty() && settings.editable == -1);
+}
+
+void testCriticalBands()
+{
+    std::printf ("Choques: bandas criticas (ERB), suavizado y promedio lento\n");
+    using namespace fathom::analysis;
+    // Glasberg y Moore: 24.7·(4.37·f/1000 + 1).
+    CHECK (std::abs (erbHz (1000.0) - 132.639) < 0.01);
+    CHECK (std::abs (erbHz (100.0) - 35.49) < 0.01);
+    CHECK (std::abs (erbHz (10000.0) - 1104.09) < 0.01);
+
+    const LogAxis axis { 20.0, 20000.0, 400 };
+    CHECK (std::abs (axis.hz (0) - 20.0) < 1.0e-9 && std::abs (axis.hz (399) - 20000.0) < 1.0e-6);
+    CHECK (std::abs (axis.position (axis.hz (123)) - 123.0) < 1.0e-9);
+
+    // Plano sigue plano.
+    const auto flat = erbSmooth (std::vector<float> (400, -30.0f), axis);
+    CHECK (std::all_of (flat.begin(), flat.end(), [] (float db) { return std::abs (db + 30.0f) < 1.0e-3f; }));
+
+    // Un punto suelto cubre el ancho de su banda crítica: en graves (ERB ancho en octavas) más puntos que en agudos.
+    const auto spread = [&] (double hz) {
+        std::vector<float> spike (400, -140.0f);
+        const auto at = static_cast<size_t> (std::round (axis.position (hz)));
+        spike[at] = 0.0f;
+        const auto smoothed = erbSmooth (spike, axis);
+        int wide = 0;
+        for (const float db : smoothed)
+            wide += db > -60.0f ? 1 : 0;
+        return std::pair<int, float> { wide, smoothed[at] };
+    };
+    const auto low = spread (80.0), high = spread (8000.0);
+    std::printf ("  un punto en 80 Hz cubre %d puntos (%.1f dB); en 8 kHz, %d (%.1f dB)\n", low.first, low.second, high.first, high.second);
+    CHECK (low.first > high.first);
+    CHECK (high.first >= 1 && low.second == 0.0f && high.second == 0.0f); // lo más fuerte de la banda: no se diluye
+
+    // El promedio lento: 1.5 s de constante; un salto de −60 a −20 dB llega al 63 % de la potencia en 1.5 s.
+    SlowSpectrum slow;
+    slow.feed (std::vector<float> (4, -60.0f), 0.0);
+    CHECK (slow.db.size() == 4 && slow.db[0] == -60.0f);
+    for (int frame = 0; frame < 45; ++frame) // 45 cuadros de 1/30 s = 1.5 s
+        slow.feed (std::vector<float> (4, -20.0f), 1.0 / 30.0);
+    const double expected = 10.0 * std::log10 (1.0e-6 + (1.0e-2 - 1.0e-6) * (1.0 - std::exp (-1.0)));
+    std::printf ("  promedio lento a los 1.5 s: %.2f dB (esperado %.2f)\n", static_cast<double> (slow.db[0]), expected);
+    CHECK (std::abs (static_cast<double> (slow.db[0]) - expected) < 0.05);
+}
+
+// Nivel por punto del visor de una señal (lo que hace InstanceLink): la última ventana, con la inclinación de 4.5 dB/oct.
+std::vector<float> pointLevels (const std::vector<float>& signal, double sampleRate, const fathom::analysis::LogAxis& axis)
+{
+    deepwater::dsp::SpectrumAnalyzer analyzer;
+    analyzer.prepare (fathom::analysis::fftOrder (1, sampleRate));
+    const auto size = static_cast<size_t> (analyzer.getSize());
+    analyzer.analyze (signal.data() + signal.size() - size);
+    std::vector<float> levels (axis.points);
+    const double halfStep = std::sqrt (axis.hz (1) / axis.hz (0));
+    for (size_t i = 0; i < axis.points; ++i)
+        levels[i] = analyzer.levelDb (axis.hz (i) / halfStep, axis.hz (i) * halfStep, sampleRate)
+                    + fathom::analysis::tiltDb (axis.hz (i), 4.5f);
+    return levels;
+}
+
+void testCollisions()
+{
+    std::printf ("Choques: donde las dos pistas tienen su energia importante en la misma banda critica\n");
+    using namespace fathom::analysis;
+    const LogAxis axis { 20.0, 20000.0, 400 };
+    const float span = maskingSensitivities[1].spanDb;
+    // Una "pista" sintética: una montaña (en dB) alrededor de una frecuencia, con su ancho en octavas.
+    const auto hill = [&] (double centreHz, float topDb, double octaves) {
+        std::vector<float> db (axis.points);
+        for (size_t i = 0; i < axis.points; ++i)
+        {
+            const double distance = std::log2 (axis.hz (i) / centreHz) / octaves;
+            db[i] = std::max (-140.0f, topDb - static_cast<float> (24.0 * distance * distance));
+        }
+        return db;
+    };
+    const auto clash = [&] (const std::vector<float>& a, const std::vector<float>& b) {
+        const auto sa = erbSmooth (a, axis), sb = erbSmooth (b, axis);
+        const auto amount = collisionAmount (sa, sb, axis, span);
+        return std::pair { amount, collisionZones (amount, sa, sb, axis) };
+    };
+
+    // Kick (60 Hz) y 808 (55 Hz): chocan en el sub, de lleno.
+    const auto kick = hill (60.0, -10.0f, 0.7), bass = hill (55.0, -12.0f, 0.8);
+    auto [amount, zones] = clash (kick, bass);
+    CHECK (zones.size() == 1);
+    if (! zones.empty())
+    {
+        std::printf ("  kick + 808: %.0f-%.0f Hz, el mayor en %.0f Hz (%.2f), el kick %+.1f dB\n", zones[0].lowHz, zones[0].highHz,
+                     zones[0].centreHz, static_cast<double> (zones[0].amount), static_cast<double> (zones[0].louderDb));
+        CHECK (zones[0].centreHz > 45.0 && zones[0].centreHz < 70.0);
+        CHECK (zones[0].amount > 0.9f);
+        CHECK (zones[0].louderDb > 0.0f); // el kick está más fuerte
+    }
+
+    // Kick y hi-hat (8 kHz): nada en común.
+    std::tie (amount, zones) = clash (kick, hill (8000.0, -15.0f, 0.5));
+    CHECK (zones.empty());
+    CHECK (*std::max_element (amount.begin(), amount.end()) < 0.05f);
+
+    // La misma forma 25 dB más suave también choca (la tapada es la suave: por eso importa), y dice quién tapa.
+    auto quiet = bass;
+    for (auto& db : quiet)
+        db -= 25.0f;
+    std::tie (amount, zones) = clash (kick, quiet);
+    CHECK (zones.size() == 1 && ! zones.empty() && zones[0].louderDb > 20.0f);
+
+    // Debajo del piso no hay choque.
+    std::tie (amount, zones) = clash (kick, std::vector<float> (axis.points, -140.0f));
+    CHECK (zones.empty() && *std::max_element (amount.begin(), amount.end()) == 0.0f);
+
+    // Más sensibilidad = zona más ancha (lo secundario también cuenta).
+    const auto width = [&] (float spanDb) {
+        const auto sa = erbSmooth (kick, axis), sb = erbSmooth (bass, axis);
+        const auto zs = collisionZones (collisionAmount (sa, sb, axis, spanDb), sa, sb, axis);
+        return zs.empty() ? 0.0 : std::log2 (zs[0].highHz / zs[0].lowHz);
+    };
+    const double narrow = width (maskingSensitivities[0].spanDb), wide = width (maskingSensitivities[2].spanDb);
+    std::printf ("  ancho de la zona: %.2f oct (baja) / %.2f oct (alta)\n", narrow, wide);
+    CHECK (narrow > 0.0 && wide > narrow);
+
+    // Dos zonas separadas salen como dos, de izquierda a derecha.
+    auto twoHills = hill (100.0, -10.0f, 0.4);
+    const auto upper = hill (3000.0, -10.0f, 0.4);
+    for (size_t i = 0; i < axis.points; ++i)
+        twoHills[i] = std::max (twoHills[i], upper[i]);
+    std::tie (amount, zones) = clash (twoHills, twoHills);
+    CHECK (zones.size() == 2 && zones.size() == 2 && zones[0].centreHz < zones[1].centreHz);
+
+    // Con señales de verdad y el analizador: una pista con 100 Hz fuerte y algo de 2 kHz; otra con 100 Hz. Chocan en
+    // 100 Hz. Al cortar 100 Hz de la primera con una campana de Fathom, su zona principal pasa a ser 2 kHz y el choque
+    // se apaga: lo que se ve al tallar espacio.
+    const double sampleRate = 48000.0;
+    const size_t length = 16384;
+    auto first = sine (100.0, 0.5, sampleRate, length);
+    const auto presence = sine (2000.0, 0.02, sampleRate, length);
+    for (size_t i = 0; i < length; ++i)
+        first[i] += presence[i];
+    const auto second = sine (100.0, 0.3, sampleRate, length);
+    const auto before = clash (pointLevels (first, sampleRate, axis), pointLevels (second, sampleRate, axis));
+    const auto at100 = static_cast<size_t> (std::round (axis.position (100.0)));
+    CHECK (before.second.size() == 1);
+    CHECK (before.first[at100] > 0.9f);
+
+    auto left = first, right = first;
+    Engine engine;
+    engine.prepare (sampleRate, false, 0.0f, only (shapedBand (Shape::bell, 100.0f, -20.0f, 1.0f)));
+    runStereo (engine, left, right);
+    const auto after = clash (pointLevels (left, sampleRate, axis), pointLevels (second, sampleRate, axis));
+    std::printf ("  100 Hz: choque %.2f antes, %.2f despues de cortar 20 dB; zonas %zu -> %zu\n", static_cast<double> (before.first[at100]),
+                 static_cast<double> (after.first[at100]), before.second.size(), after.second.size());
+    CHECK (after.first[at100] < collisionThreshold);
+    CHECK (after.second.empty());
+}
+
 int main()
 {
     testPassthroughIsBitExact();
@@ -3140,6 +3359,9 @@ int main()
     testColorSwitchingHasNoClicks();
     testColorInMono();
     testColorCpu();
+    testInstanceRegistry();
+    testCriticalBands();
+    testCollisions();
 
     if (failures > 0)
     {

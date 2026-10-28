@@ -16,7 +16,7 @@ constexpr int framesPerSecond = 30;
 } // namespace
 
 FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
-    : AudioProcessorEditor (p), processor (p), display (p), bandPanel (p), curvePanel (p, display), outputPanel (p)
+    : AudioProcessorEditor (p), processor (p), display (p), bandPanel (p), curvePanel (p, display), instancesPanel (p, display), outputPanel (p)
 {
     setLookAndFeel (&lookAndFeel);
 
@@ -27,6 +27,7 @@ FathomAudioProcessorEditor::FathomAudioProcessorEditor (FathomAudioProcessor& p)
     bandPanel.onBandChosen = [this] (int band) { selectBand (band); };
     // Fase 12: IGUALAR o DIBUJAR cambian el panel de abajo (el de la banda vuelve al salir).
     addChildComponent (curvePanel);
+    addChildComponent (instancesPanel); // Fase 14
     display.onToolChanged = [this] (fathom::gui::EqDisplay::Tool tool) { showTool (tool); };
 
     // El analizador: lo que se elige en el panel se guarda en el proyecto y lo usa el visor.
@@ -123,6 +124,7 @@ void FathomAudioProcessorEditor::timerCallback()
     display.update (elapsed);
     bandPanel.refresh();
     curvePanel.refresh();
+    instancesPanel.refresh();
     outputPanel.refresh();
     if ((processor.getCompareSide() == 1) != sideBButton.getToggleState()) // un proyecto cargado con la ventana abierta
         showCompareSide();
@@ -153,11 +155,15 @@ void FathomAudioProcessorEditor::selectBand (int band)
 
 void FathomAudioProcessorEditor::showTool (fathom::gui::EqDisplay::Tool tool)
 {
-    const bool editing = tool == fathom::gui::EqDisplay::Tool::none;
-    bandPanel.setVisible (editing);
-    curvePanel.setVisible (! editing);
-    if (! editing)
+    using Tool = fathom::gui::EqDisplay::Tool;
+    const bool curve = tool == Tool::match || tool == Tool::draw;
+    bandPanel.setVisible (tool == Tool::none);
+    curvePanel.setVisible (curve);
+    instancesPanel.setVisible (tool == Tool::instances);
+    if (curve)
         curvePanel.showTool (tool);
+    else if (tool == Tool::instances)
+        instancesPanel.showPanel();
 }
 
 void FathomAudioProcessorEditor::showCompareSide()
@@ -185,7 +191,7 @@ void FathomAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("FATHOM", header.removeFromLeft (100), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 13: color anal\xc3\xb3gico"), header, juce::Justification::centredLeft);
+    g.drawText (juce::String::fromUTF8 ("EQ param\xc3\xa9trico  -  Fase 14: otras instancias"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::dimText.withAlpha (0.6f));
     g.setFont (juce::FontOptions (11.0f));
@@ -219,6 +225,7 @@ void FathomAudioProcessorEditor::resized()
     content.removeFromRight (padding);
     bandPanel.setBounds (content.removeFromBottom (bandPanelHeight));
     curvePanel.setBounds (bandPanel.getBounds());
+    instancesPanel.setBounds (bandPanel.getBounds());
     content.removeFromBottom (padding);
     display.setBounds (content);
 

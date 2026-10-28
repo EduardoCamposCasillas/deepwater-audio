@@ -1517,3 +1517,109 @@ oído o el medidor de FL).
   en un sistema grande), una voz susurrada muy expuesta, o un master que ya satura en el limitador.
 - **Cuando la latencia importa**: grabando en vivo con Fathom en el canal de entrada, 1.7 ms suman. Graba en Limpio.
 - **Para corregir**: el color no arregla un balance tonal; primero las bandas, después el color.
+
+## Fase 14 — Otras instancias: ver dónde chocan las pistas
+
+Ecualizar una pista sola es la mitad del trabajo: en la mezcla, el problema casi siempre es que DOS pistas quieren la
+misma zona. Con Fathom en varias pistas del mixer, el botón **INSTANCIAS** (arriba del visor) muestra la salida de las
+otras sobre la tuya, marca en coral dónde chocan y deja mover las bandas de una de ellas desde esta ventana, sin
+cambiar de pista.
+
+### Conceptos aprendidos
+
+- **Enmascaramiento.** Un sonido fuerte tapa a uno más débil que está cerca en frecuencia: el débil no desaparece del
+  archivo, desaparece del oído. Por eso un 808 y un kick en la misma nota se "comen", o una voz se pierde detrás de los
+  acordes: no falta volumen, sobra la otra pista en esa zona.
+- **Bandas críticas (ERB).** La cóclea separa las frecuencias en filtros; dos sonidos dentro del mismo filtro compiten,
+  en filtros distintos se oyen los dos. El ancho de esos filtros se mide como ERB (Glasberg y Moore): unos 35 Hz en
+  100 Hz (casi media octava), 133 Hz en 1 kHz y 1.1 kHz en 10 kHz (1/6 de octava). Consecuencia práctica: **en graves
+  todo choca con todo** (un kick en 60 Hz y un 808 en 45 Hz están en la misma banda crítica); en agudos hay más lugar.
+- **Cómo mide Fathom un choque.** Para cada pista, primero el espectro promediado unos segundos (un choque es algo que
+  pasa en la canción, no en un golpe), llevado a bandas críticas (lo más fuerte de cada una: el componente que tapa).
+  Después, cuánto importa cada zona PARA ESA PISTA: su nivel comparado con su zona principal, con la inclinación de
+  4.5 dB/oct del analizador. Choque = las dos pistas importantes a la vez en la misma zona. Una pista mucho más suave
+  también choca si esa zona es lo principal de ella: es justamente la que queda tapada.
+- **Quién tapa a quién.** En la zona del choque, la diferencia de nivel entre las dos. Pasando el mouse por la zona
+  coral, la lectura de arriba dice "choca con 808 (tú +3.0 dB)": tu pista está 3 dB más fuerte ahí (tapa a la otra), o
+  "(808 +5.0 dB)": la otra te tapa.
+- **Tallar espacio.** Si las dos pistas necesitan la zona, una cede: un corte en una (el "hueco") y, si hace falta, una
+  subida suave en la otra. Al cortar en esta instancia, el choque se va apagando en unos segundos (el promedio lento):
+  medido con 100 Hz en las dos pistas, cortar 20 dB en una baja el choque de 1.00 a 0.35 y la zona deja de marcarse.
+- **Cómo se ven entre sí.** FL carga cada plugin una vez por proceso y todas sus instancias comparten una lista. Si un
+  Fathom corre "bridged" (otro proceso), no ve ni es visto. Con la ventana cerrada, una instancia solo manda su espectro
+  cuando alguna otra está mirando: si nadie mira, no gasta nada.
+
+### Qué hace cada control (y qué muestra la pantalla)
+
+- **INSTANCIAS** (arriba del visor): abre la lista en lugar del panel de la banda. Tus nodos se siguen editando.
+- **ESTA INSTANCIA**: el nombre con que te ven las demás ("Voz", "808", "Bus drums"). Vacío = el de la pista del mixer si
+  FL lo manda, o "Fathom N". Se guarda con el proyecto.
+- **CHOQUES · MARCAR / SENSIBILIDAD**: marcar o no los choques; Baja = solo donde las dos tienen su zona principal (lo
+  grave de verdad), Alta = también lo secundario.
+- **La lista**: color, nombre, si suena, **VER** (su salida como una línea de su color y sus choques con esta), **EDITAR**
+  (sus nodos en tu visor: anillos chicos con su número; una a la vez) y **dónde choca** ("73-132 Hz (tú +2.5 dB)").
+- **En el visor**: columnas coral = choque (más opacas, más choque); barra del color de la otra abajo = zona que cuenta;
+  línea de su color = su salida; línea punteada de su color = la curva de la que editas. Arriba, "EDITANDO: NOMBRE".
+- **Editar la otra**: arrastrar = su frecuencia y ganancia (Shift fino, Alt un eje), rueda = su Q, doble clic = apagar o
+  encender, clic derecho = apagar o dejar de editarla. Lo que cambies se deshace con Ctrl+Z **en su ventana**, no aquí.
+- Lo que eliges sigue al salir de INSTANCIAS (mientras el proyecto esté abierto; al abrirlo otra vez se elige de nuevo).
+
+### Ejercicio de escucha guiado en FL Studio
+
+1. **Ver el choque.** Fathom en el canal del kick (nómbralo "Kick") y en el del 808 ("808"), sin bandas. Reproduce el
+   loop. En el Fathom del 808: INSTANCIAS → VER en "Kick". Aparece la línea del kick sobre la tuya y, en coral, la zona
+   del sub donde chocan. Pasa el mouse: ¿quién está más fuerte?
+2. **Escucharlo.** Solo el kick, después kick + 808. Fíjate en el golpe del kick: con el 808 sonando, ¿se oye igual de
+   corto y definido? Lo que se pierde (el "punch" del primer ciclo) es el enmascaramiento.
+3. **Tallar.** En el Fathom del 808, una campana de −4 dB, Q 1.5, justo en el centro del choque (la frecuencia de la
+   lectura de arriba). Mira cómo la zona coral se achica en unos segundos. Escucha otra vez el golpe del kick.
+4. **Desde la otra pista.** EDITAR en "Kick": aparecen sus nodos. Crea en la ventana del kick una campana en su
+   fundamental (o mueve una que tenga) y ajústala desde la ventana del 808 mirando las dos líneas. Al terminar, cierra
+   y abre la ventana del kick: el cambio está ahí, con su propio deshacer.
+5. **Siempre con el volumen igualado.** AUTO GAIN encendido en las dos: cortar baja el volumen de la pista y "menos
+   fuerte" puede parecer peor aunque la mezcla esté más clara.
+
+### Receta: kick y 808 del dembow que no se pisan
+
+1. Fathom en los dos, con nombre. En el del 808, VER y EDITAR el kick; sensibilidad Media.
+2. Decide quién manda en el sub (normalmente el 808: es la nota; el kick aporta el golpe de 50-80 Hz y el "click" de
+   2-5 kHz).
+3. En el 808: campana −3 a −5 dB, Q 2, en la frecuencia del golpe del kick (el centro del choque).
+4. En el kick: corte de graves suave (12 dB/oct) por debajo de la fundamental del 808 y una campana de +2 dB en su click
+   (si hace falta, que no choque con la voz: VER también la voz). Las bandas se crean en la ventana del kick (desde
+   aquí solo se mueven las que ya tiene); después se afinan desde la del 808, mirando las dos líneas.
+5. Mira la zona coral: no tiene que desaparecer (los dos viven en graves), pero sí achicarse y dejar de ser una zona
+   principal de los dos a la vez.
+
+Por qué funciona: el oído no puede separar dos sonidos dentro de la misma banda crítica, así que se les da a cada uno
+una banda distinta (el 808 la nota, el kick el golpe). Cortar donde la otra pista es fuerte quita lo que de todos modos
+no se oía y deja libre lo que sí.
+
+### Reto sin receta
+
+Una voz con autotune y unos acordes de piano (o pad) que la tapan en el estribillo. Con Fathom en las dos y sin tocar el
+volumen de ninguna, consigue que la voz se entienda. Pistas (si no sale): ¿en qué zona chocan (mira el texto de la
+lista)? ¿Quién tiene que ceder ahí? ¿Basta con un corte en los acordes o hace falta una subida chica en la voz? ¿El
+choque está en el centro de la mezcla o a los lados (prueba la banda del piano en Side)?
+
+### Vocabulario
+
+- **Enmascaramiento**: un sonido fuerte vuelve inaudible a uno más débil cercano en frecuencia. **Ejemplo real**: en un
+  reggaetón con el 808 muy alto, el kick "desaparece" en un parlante grande aunque esté en la mezcla.
+- **Banda crítica / ERB**: el ancho del filtro del oído en cada frecuencia; dentro de él los sonidos compiten.
+- **Tallar (carving) / hacer espacio**: cortar en una pista lo que está tapando a otra en su zona principal.
+- **Pista que manda**: la que se queda con una zona cuando dos la necesitan (el 808 en el sub, la voz en la presencia).
+- **Instancia**: cada copia de un plugin en el proyecto (Fathom en el kick y Fathom en el 808 son dos instancias).
+
+### Errores comunes (y cuándo NO usarlo)
+
+- **Querer que no quede ningún choque.** Dos pistas en graves siempre comparten algo; el objetivo es que no tengan su
+  zona PRINCIPAL en el mismo sitio, no que no se toquen.
+- **Cortar las dos.** Si cortas la misma zona en las dos pistas, el choque baja pero la mezcla queda hueca ahí. Elige
+  quién manda.
+- **Mirar sin escuchar.** El coral es una pista para el oído, no un veredicto: una pista que "choca" en 8 kHz puede ser
+  justo el brillo que se busca. Decide escuchando, con el volumen igualado.
+- **Juzgar un choque en un golpe.** El promedio tarda unos segundos: después de un cambio, deja sonar el loop antes de
+  mirar.
+- **Esperar ver un Fathom "bridged".** Si una instancia corre en otro proceso no aparece; quita el "bridged" en FL.
+- **Olvidar dónde está el deshacer.** Lo que editas de otra instancia se deshace en SU ventana.

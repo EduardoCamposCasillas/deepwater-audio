@@ -131,10 +131,16 @@ FathomAudioProcessor::FathomAudioProcessor()
     // Fase 10: cambiar de modo de fase cambia la latencia; el host se entera desde el hilo de mensajes (no desde el
     // audio: avisarle es una llamada al sistema).
     startTimerHz (10);
+
+    // Fase 14: a la lista del proceso, al final (ya entera: otra instancia puede mirarla desde ya).
+    instanceId = registry.add (*this);
 }
 
 FathomAudioProcessor::~FathomAudioProcessor()
 {
+    // Fase 14: lo primero. Quien esté editando esta instancia desde otra ventana cierra su edición mientras todavía
+    // está entera.
+    registry.remove (instanceId);
     stopTimer();
 }
 
@@ -403,6 +409,40 @@ constexpr const char* compareTag = "Compare";  // hijo del estado: qué lado est
 constexpr const char* otherSideTag = "Other"; // hijo de Compare: un atributo por parámetro (ID = valor en sus unidades)
 } // namespace
 
+namespace
+{
+constexpr const char* instanceNameProperty = "instanceName"; // Fase 14: el nombre puesto a mano
+} // namespace
+
+juce::String FathomAudioProcessor::getCustomName() const
+{
+    return parameters.state.getProperty (instanceNameProperty).toString();
+}
+
+void FathomAudioProcessor::setCustomName (const juce::String& name)
+{
+    // Sin UndoManager: como la vista del analizador, no es una edición del sonido.
+    parameters.state.setProperty (instanceNameProperty, name.trim(), nullptr);
+}
+
+juce::String FathomAudioProcessor::getInstanceName() const
+{
+    if (const auto custom = getCustomName(); custom.isNotEmpty())
+        return custom;
+    if (trackName.isNotEmpty())
+        return trackName;
+    return "Fathom " + juce::String (instanceId);
+}
+
+void FathomAudioProcessor::updateTrackProperties (const TrackProperties& properties)
+{
+    // JUCE la llama en el hilo de mensajes (el wrapper VST3 la pasa ahí si el host la manda desde otro).
+    trackName = properties.name.value_or (juce::String()).trim();
+    trackColour.reset();
+    if (properties.colourARGB.has_value())
+        trackColour = juce::Colour (*properties.colourARGB);
+}
+
 int FathomAudioProcessor::getCompareSide() const
 {
     return parameters.state.getChildWithName (compareTag).getProperty ("side", 0);
@@ -508,8 +548,9 @@ void FathomAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const int sidechainChannels = juce::jmin (sidechain.getNumChannels(), 2);
 
     // Para la GUI: la entrada tal cual llega (el motor procesa en el sitio, así que antes de procesar). Sin editor
-    // abierto no hay quien la lea: no se copia.
-    const bool feedAnalyzer = analyzerActive.load (std::memory_order_relaxed);
+    // abierto (ni otra instancia mirando) no hay quien la lea: no se copia.
+    // Fase 14: también si otra instancia está mirando a las demás (para ver este espectro y sus choques).
+    const bool feedAnalyzer = analyzerActive.load (std::memory_order_relaxed) || registry.isWatched();
     if (feedAnalyzer)
     {
         pushTaps (inputTap, inputSideTap, buffer.getArrayOfReadPointers(), numChannels, numSamples);
