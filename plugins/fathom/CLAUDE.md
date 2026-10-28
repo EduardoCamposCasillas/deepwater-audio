@@ -187,7 +187,7 @@ fábrica incluyen notas de para qué sirven y por qué.
       automatización extrema.
 
 ## Estado actual
-Fase 14 COMPLETADA (2026-10-27). Falta probarla en FL Studio.
+Fase 14 COMPLETADA (2026-10-27). Probada por el usuario en FL Studio: funciona.
 - Sin parámetros nuevos ni cambios en el sonido (un proyecto de las Fases 1-13 suena igual). Lo único que se guarda es
   el nombre puesto a mano (propiedad `instanceName` del estado, fuera del A/B y del deshacer).
 - `link/InstanceRegistry.h` (sin JUCE): `InstanceRegistry<Member>::shared()` = la lista estática del proceso (FL carga la
