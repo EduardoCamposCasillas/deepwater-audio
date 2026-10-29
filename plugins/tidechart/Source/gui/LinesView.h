@@ -17,6 +17,9 @@
 #include "Lines.h"
 #include "midi/ChordTrigger.h"
 #include "midi/EventLog.h"
+#include "MidiExport.h"
+#include "MidiFileExport.h"
+#include "gui/MidiDragButton.h"
 #include "Parameters.h"
 #include "TransportSnapshot.h"
 
@@ -31,6 +34,8 @@ namespace tidechart::gui
 // nota del acorde (apoyo), de la escala (de paso, adorno o tensión) o cromática. Pasar el ratón por una nota la explica.
 // Vista simple: las capas, el estilo y "Otra" de cada línea, y el piano roll. Densidad, rango, capturar, fijar y variar
 // quedan en la vista completa (siguen como estén).
+// Abajo, en las dos vistas (Fase 7): AL PIANO ROLL, un botón por capa que se arrastra a FL y suelta ahí sus notas (las
+// mismas que suenan en vivo, una vuelta).
 class LinesView final : public juce::Component
 {
 public:
@@ -41,6 +46,8 @@ public:
         std::function<void (bool)> setCapturing;
         std::function<void (const deepwater::theory::Line&)> captured;
         std::function<void()> fix;
+        // Fase 7: las notas de una capa tal como suenan ahora (el procesador las arma con su progresión y sus líneas).
+        std::function<ExportClip (ExportLayer)> exportClip;
     };
 
     LinesView (juce::AudioProcessorValueTreeState& state, Callbacks callbacksToUse) : callbacks (std::move (callbacksToUse))
@@ -129,7 +136,7 @@ public:
         variationOther.onClick = [this] { applyVariation (true); };
         captureButton.onClick = [this] { toggleCapture(); };
         fixButton.onClick = [this] {
-            captureMessage = {};
+            statusMessage = {};
             if (callbacks.fix)
                 callbacks.fix();
         };
@@ -139,6 +146,20 @@ public:
             addAndMakeVisible (*button);
         }
         captureButton.setColour (juce::TextButton::buttonOnColourId, theme::warning.withAlpha (0.7f));
+
+        for (auto [button, layer] : { std::pair { &dragChords, ExportLayer::chords }, std::pair { &dragBass, ExportLayer::bass },
+                                      std::pair { &dragMelody, ExportLayer::melody } })
+        {
+            button->setText (layer == ExportLayer::melody ? names::utf8 ("Melod\xc3\xad" "a") : exportLayerName (layer));
+            button->setTooltip (dragTooltip (layer));
+            button->makeFile = [this, layer] { return writeDragFile (layer); };
+            button->onClick = [this] {
+                statusMessage = names::utf8 ("No se pulsa: se arrastra. Mant\xc3\xa9n el clic sobre el bot\xc3\xb3n, ll\xc3\xa9valo al Piano Roll "
+                                             "de FL (o a la Playlist) y su\xc3\xa9ltalo ah\xc3\xad.");
+                refreshInfo();
+            };
+            addAndMakeVisible (*button);
+        }
     }
 
     ~LinesView() override
@@ -197,6 +218,7 @@ public:
     // Desde el temporizador del editor: dónde está FL (la línea de reproducción en el piano roll).
     void update (const TransportSnapshot& transport)
     {
+        bpm = transport.bpm;
         const int length = std::max (lines.melody.length, lines.bass.length);
         float position = -1.0f;
         if (transport.source == deepwater::dsp::ClockSource::host && length > 0)
@@ -254,6 +276,7 @@ public:
                 style->setBounds (row);
             }
             area.removeFromTop (12);
+            layoutDragRow (area);
             infoArea = area.removeFromBottom (64);
             area.removeFromBottom (4);
             legendArea = area.removeFromBottom (16);
@@ -296,6 +319,7 @@ public:
         variation.setBounds (row);
 
         area.removeFromTop (12);
+        layoutDragRow (area);
         infoArea = area.removeFromBottom (64);
         area.removeFromBottom (4);
         legendArea = area.removeFromBottom (16);
@@ -348,6 +372,10 @@ public:
 
         drawRoll (g);
         drawLegend (g);
+
+        g.setColour (theme::dimText);
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawFittedText (names::utf8 ("Al Piano Roll:"), dragChords.getBounds().withX (0).withWidth (62), juce::Justification::centredLeft, 2);
 
         g.setFont (juce::FontOptions (11.5f));
         auto info = infoArea;
@@ -491,7 +519,7 @@ private:
         s.generator.high = static_cast<int> (bassRange.getMaxValue());
         if (newSeed)
             ++s.generator.seed;
-        captureMessage = {};
+        statusMessage = {};
         callbacks.setBass (s);
     }
 
@@ -508,7 +536,7 @@ private:
         if (newSeed)
             ++s.generator.seed;
         s.hasSource = false;
-        captureMessage = {};
+        statusMessage = {};
         callbacks.setMelody (s);
     }
 
@@ -525,7 +553,7 @@ private:
             if (s.variation <= 0.0)
                 s.variation = 0.3;
         }
-        captureMessage = {};
+        statusMessage = {};
         callbacks.setMelody (s);
     }
 
@@ -538,7 +566,7 @@ private:
         {
             capture.clear();
             warnStopped = false;
-            captureMessage = {};
+            statusMessage = {};
         }
         if (callbacks.setCapturing)
             callbacks.setCapturing (capturing);
@@ -546,10 +574,10 @@ private:
         {
             const auto line = capture.toLine (deepwater::theory::lineLength (progression));
             if (line.notes.empty())
-                captureMessage = names::utf8 ("No lleg\xc3\xb3 ninguna nota con FL reproduciendo: la melod\xc3\xad" "a no cambi\xc3\xb3.");
+                statusMessage = names::utf8 ("No lleg\xc3\xb3 ninguna nota con FL reproduciendo: la melod\xc3\xad" "a no cambi\xc3\xb3.");
             else
             {
-                captureMessage = names::utf8 ("Capturadas ") + juce::String (static_cast<int> (line.notes.size()))
+                statusMessage = names::utf8 ("Capturadas ") + juce::String (static_cast<int> (line.notes.size()))
                                  + names::utf8 (" notas: son la base de las variaciones.");
                 if (callbacks.captured)
                     callbacks.captured (line);
@@ -559,6 +587,60 @@ private:
     }
 
     // Recalcula las notas del piano roll (posición y papel) con la tonalidad y la progresión de ahora.
+    // La fila de arrastrar, abajo del todo, alineada con la de "Suenan" (una columna por capa).
+    void layoutDragRow (juce::Rectangle<int>& area)
+    {
+        auto row = area.removeFromBottom (28);
+        area.removeFromBottom (8);
+        row.removeFromLeft (64);
+        const int third = (row.getWidth() - 12) / 3;
+        dragChords.setBounds (row.removeFromLeft (third));
+        row.removeFromLeft (6);
+        dragBass.setBounds (row.removeFromLeft (third));
+        row.removeFromLeft (6);
+        dragMelody.setBounds (row);
+    }
+
+    static juce::String dragTooltip (ExportLayer layer)
+    {
+        const juce::String what = layer == ExportLayer::chords ? names::utf8 ("los acordes de la progresi\xc3\xb3n con su ritmo, voicing y bajo, en "
+                                                                             "la octava de C5")
+                                  : layer == ExportLayer::bass ? names::utf8 ("la l\xc3\xadnea de bajo")
+                                                               : names::utf8 ("la melod\xc3\xad" "a (con su variaci\xc3\xb3n)");
+        return names::utf8 ("Arr\xc3\xa1stralo al Piano Roll de FL: escribe ") + what
+               + names::utf8 (", una vuelta desde el comp\xc3\xa1s 1, tal como suena ahora. Su\xc3\xa9ltalo en el Piano Roll del instrumento que "
+                              "debe tocarlo (no en el de Tidechart), o en la Playlist para un patr\xc3\xb3n nuevo. Funciona aunque la capa "
+                              "est\xc3\xa9 apagada.");
+    }
+
+    // Escribe el .mid de una capa para arrastrarlo. Vacío si no hay notas (progresión vacía) o no se pudo escribir.
+    juce::File writeDragFile (ExportLayer layer)
+    {
+        if (! callbacks.exportClip)
+            return {};
+        const auto clip = callbacks.exportClip (layer);
+        if (clip.empty())
+        {
+            statusMessage = names::utf8 ("No hay notas que arrastrar: arma primero una progresi\xc3\xb3n.");
+            refreshInfo();
+            return {};
+        }
+        const auto key = juce::String (deepwater::theory::keyName (settings.key));
+        const auto name = "Tidechart " + exportLayerName (layer) + " (" + key + ")";
+        const auto file = exportFolder().getChildFile (juce::File::createLegalFileName (name) + ".mid");
+        if (! writeMidiFile (clip, name, bpm, file))
+        {
+            statusMessage = names::utf8 ("No se pudo escribir el archivo MIDI en ") + exportFolder().getFullPathName();
+            refreshInfo();
+            return {};
+        }
+        statusMessage = names::utf8 ("Arrastrando ") + juce::String (static_cast<int> (clip.notes.size())) + " notas ("
+                        + juce::String (juce::roundToInt (clip.lengthBeats / 4.0))
+                        + names::utf8 (" compases): su\xc3\xa9ltalas en el Piano Roll del instrumento.");
+        refreshInfo();
+        return file;
+    }
+
     void rebuildRoll()
     {
         namespace th = deepwater::theory;
@@ -625,8 +707,8 @@ private:
                   << (warnStopped ? names::utf8 ("\xc2\xa1" "Dale play en FL! Con FL parado no se sabe d\xc3\xb3nde va cada nota.")
                                   : names::utf8 ("Dale play en FL y toca (o deja sonar el Piano Roll de Tidechart)."));
         }
-        else if (captureMessage.isNotEmpty())
-            state = captureMessage;
+        else if (statusMessage.isNotEmpty())
+            state = statusMessage;
         else
         {
             state << names::utf8 ("Melod\xc3\xad" "a ") << (m.hasSource ? names::utf8 ("fija (capturada o fijada)")
@@ -808,6 +890,8 @@ private:
     juce::ComboBox bassStyle, melodyStyle;
     juce::Slider bassDensity, melodyDensity, bassRange, melodyRange, variation;
     juce::TextButton bassOther, melodyOther, variationOther, captureButton, fixButton;
+    MidiDragButton dragChords, dragBass, dragMelody;
+    double bpm = 120.0;
 
     Lines lines;
     deepwater::theory::Progression progression;
@@ -815,7 +899,7 @@ private:
     std::vector<RollNote> rollNotes;
     MelodyCapture capture;
     bool capturing = false, warnStopped = false, updating = false, simple = false;
-    juce::String captureMessage;
+    juce::String statusMessage;
     juce::StringArray infoLines;
     int hovered = -1;
     float playhead = -1.0f;

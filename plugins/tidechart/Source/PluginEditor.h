@@ -23,7 +23,8 @@ class TidechartAudioProcessor;
 //     TONALIDAD (tónica y modo; a la derecha, Escuchar para detectarla) y los acordes de la escala + los prestados
 //     PROGRESIÓN: qué tocan las teclas, ritmo, ideas ("Otra idea"), armar con clic, los pasos y el patrón
 //     una guía de qué hacer ahora (según el modo, si FL reproduce, si suena algo) y el ruteo de FL
-//   derecha, MELODÍA Y BAJO: capas, estilo y "Otra" de cada línea, piano roll que explica cada nota
+//   derecha, MELODÍA Y BAJO: capas, estilo y "Otra" de cada línea, piano roll que explica cada nota y, abajo, arrastrar
+//     cada capa al Piano Roll de FL (Fase 7)
 //
 // COMPLETA: todo lo construido en las Fases 1–6.
 //   cabecera:  TIDECHART | vista simple | pánico | bypass

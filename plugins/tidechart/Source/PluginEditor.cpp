@@ -66,7 +66,8 @@ TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProc
                    [&p] (const tidechart::MelodySettings& settings) { p.setMelodySettings (settings); },
                    [&p] (bool capture) { p.setCapturing (capture); },
                    [&p] (const deepwater::theory::Line& line) { p.captureMelody (line); },
-                   [&p] { p.fixMelody(); } }),
+                   [&p] { p.fixMelody(); },
+                   [&p] (tidechart::ExportLayer layer) { return p.exportClip (layer); } }),
       inputMonitor (utf8 ("ENTRADA  \xe2\x80\x94  lo que llega a Tidechart"), theme::input),
       outputMonitor (utf8 ("SALIDA  \xe2\x80\x94  lo que va al instrumento"), theme::accent)
 {

@@ -828,3 +828,109 @@ suenen a perreo oscuro. Después abre la vista completa y mira qué ajustes camb
 - Bajo «Pedal de tónica» o «Dembow»; melodía «Gancho».
 - Si la melodía se siente llena, en la vista completa baja la densidad: el espacio es parte del gancho.
 </details>
+
+## Fase 7 — Arrastrar al Piano Roll
+
+Hasta aquí Tidechart tocaba **en vivo**: las notas salían por un puerto MIDI hacia otro instrumento mientras FL
+reproducía. Ahora también las **escribe**: abajo del panel MELODÍA Y BAJO, la fila **Al Piano Roll** tiene un botón por
+capa (Acordes, Bajo, Melodía). Lo arrastras al Piano Roll de un instrumento y sueltas: las notas quedan escritas en la
+canción, como si las hubieras dibujado tú. A partir de ahí ya no dependen de Tidechart: las puedes editar, cortar,
+copiar, o quitar el plugin.
+
+### Conceptos aprendidos
+
+- **El archivo MIDI (.mid).** No es audio: es una **partitura para máquinas**. Una lista de eventos, cada uno con su
+  momento: "en el tick 0 empieza la nota A4 con velocidad 100", "en el tick 3840 termina la A4". Por eso pesa unos
+  pocos KB y cualquier programa lo puede leer (FL, Ableton, un editor de partituras).
+- **Ticks por negra (PPQ).** El tiempo de un .mid se cuenta en ticks, no en segundos: el archivo dice cuántos ticks
+  dura una negra y el programa que lo lee pone el tempo. Tidechart usa 960: una semicorchea = 240 ticks exactos, así
+  que el dembow (3+3+2 en semicorcheas) cae justo en la rejilla, sin redondeos. Como el tiempo va en negras y no en
+  segundos, el clip encaja en tu canción a cualquier tempo.
+- **Note-on y note-off.** Una nota del Piano Roll son dos eventos: empieza (con su velocidad) y termina. Si una nota
+  termina en el mismo tick en que vuelve a empezar (dos semicorcheas seguidas de la misma tecla), el archivo pone
+  primero el final: si no, el programa que lo lea podría cortar la nota nueva.
+- **En vivo contra escrito.** En vivo, Tidechart decide cada nota mientras FL reproduce (cambias el ritmo o la
+  progresión y se oye al instante). Escrito, la decisión queda congelada en la canción: ya no cambia sola, pero la
+  puedes editar a mano. Lo normal es buscar en vivo y escribir cuando algo te gusta.
+
+### Qué hace cada control
+
+- **Acordes**: la progresión con el ritmo, el voicing y el "+ Bajo" que tengas puestos, con la tónica cerca de C5 (la
+  octava de la paleta) y velocidad 100 con los acentos del ritmo (en el dembow, el "boom" más fuerte que el "ch").
+- **Bajo / Melodía**: la línea tal como la ves en el piano roll del panel, con sus velocidades y en su rango.
+- Las tres capas duran lo mismo: **una vuelta de las líneas** (la progresión repetida hasta tener al menos 4 compases).
+  Con una progresión de 2 compases, los acordes salen 2 veces; así, en la Playlist, los tres clips se repiten juntos.
+- Se arrastra aunque la capa esté **apagada** en "Suenan": puedes escuchar solo los acordes y escribir igual el bajo.
+- **Un clic sin arrastrar** solo te explica cómo se usa (en la línea de información, encima de la fila).
+
+### Ejercicio guiado: de la idea a la canción
+
+1. Arma en Tidechart lo de la Fase 6: La menor, i–♭VI–♭III–♭VII, ritmo Dembow, voicing Conducción de voces, Bajo en
+   Dembow y Melodía en Gancho. Escúchalo en vivo hasta que te guste.
+2. En el Channel Rack, carga tres instrumentos (o tres instancias de Undertow): un pad, un 808 o bajo y un pluck. No
+   hace falta rutearlos a Tidechart: ahora las notas van escritas.
+3. Abre el Piano Roll del **pad** (con un patrón vacío) y arrastra **Acordes** desde Tidechart hasta él. Haz lo mismo con
+   **Bajo** en el Piano Roll del 808 y **Melodía** en el del pluck.
+4. Apaga las capas de Tidechart en "Suenan" y dale play: tiene que sonar igual que en vivo. Mira el Piano Roll del pad:
+   ¿ves que los acordes casi no saltan? Eso es la conducción de voces, ahora a la vista. Pon "Estado fundamental",
+   arrastra otra vez a otro patrón y compara los dos dibujos.
+5. Mira el Piano Roll del bajo con las ghost notes del pad (las notas de otros canales, en gris): cada cambio de acorde
+   empieza en la fundamental, debajo del acorde.
+
+### Receta: el loop de 4 compases listo para arreglar
+
+Para empezar un beat de perreo: Mi frigio, i–♭II, ritmo **Dembow con huecos**, voicing abierto (drop 2); Bajo en
+**Pedal de tónica**; Melodía en **Gancho** con densidad baja. Arrastra las tres capas a tres patrones distintos y ponlos
+en la Playlist en el mismo compás. Por qué así: con cada capa en su patrón puedes **arreglar** la canción (la intro
+solo con el pad, el bajo entra en el compás 9, la melodía solo en el coro), que en vivo no se puede. Y como los tres
+clips duran lo mismo, se copian en bloque sin que se desfasen.
+
+### Reto (sin receta)
+
+Arrastra la melodía al Piano Roll y **edítala a mano** para que sea tuya: cambia como mucho 4 notas y el ritmo de un
+compás. Después escúchala contra la original. ¿Sigue "encajando"? Usa lo de la Fase 6 para comprobarlo.
+
+<details><summary>Pistas</summary>
+
+- Los apoyos (tiempo 1 y 3, cambio de acorde) en notas del acorde: si mueves la nota de un apoyo, llévala a otra nota
+  del acorde que suena (las del pad, en gris con las ghost notes).
+- Alargar la última nota de cada frase la hace sonar más "cerrada"; acortarla, más "abierta".
+- Si cambias el ritmo, prueba a adelantar una nota una semicorchea (anticipación): es el "empuje" del reggaetón.
+</details>
+
+### Teoría aplicada: leer la armonía en el Piano Roll
+
+Con las notas escritas, la teoría se ve. En el Piano Roll del pad: tres notas apiladas de a terceras son una tríada; si
+la de abajo es la fundamental está en **estado fundamental**, si no, es una **inversión** (abajo va la 3.ª o la 5.ª).
+En una buena conducción de voces cada nota se mueve **poco** al acorde siguiente (uno o dos semitonos) y las notas
+comunes **no se mueven** (A y C de Am a F). En el bajo, un dembow se reconoce por los golpes en las semicorcheas 1, 4 y
+7 de cada medio compás. Y en la melodía, el motivo es lo que se repite: el compás 1 y el 3 tienen el mismo ritmo.
+
+### Análisis de canciones
+
+Transcribe a oído en el Piano Roll los acordes de un tema de reggaetón que te guste (o busca su MIDI) y ponlos debajo de
+lo que exporta Tidechart con la misma progresión: ¿usa el mismo voicing o abre más los acordes? ¿El ritmo de acordes es
+el dembow o va a contratiempo? Muchos productores escriben los acordes como un bloque largo y dejan que el ritmo lo
+ponga el sidechain (Ebb): compáralo con escribir el ritmo en las notas.
+
+### Vocabulario
+
+- **Archivo MIDI (.mid)**: una lista de eventos musicales en el tiempo (notas, velocidades, tempo), sin sonido.
+- **Tick / PPQ**: la unidad de tiempo del MIDI / cuántos ticks dura una negra (Tidechart: 960).
+- **Note-on / note-off**: el principio y el final de una nota.
+- **Pista (track)**: cada parte de un .mid; Tidechart escribe una por archivo (una capa = un instrumento).
+- **Clip / patrón**: un trozo de canción que se repite en la Playlist (en FL, un *pattern*).
+- **Arreglo**: decidir qué suena en cada parte de la canción (intro, verso, coro): qué capas entran y cuándo.
+- **Ghost notes**: en el Piano Roll de FL, las notas de otros canales en gris, para escribir una capa mirando las otras.
+
+### Errores comunes
+
+- **Soltar en el Piano Roll de Tidechart.** En el modo Progresión, cada nota volvería a disparar la progresión entera y
+  sonaría todo encima. Las notas van en el Piano Roll del instrumento que las toca.
+- **Dejar Tidechart sonando en vivo y además escrito.** Se duplica. Después de arrastrar, apaga la capa en "Suenan" (o
+  quita la nota que la dispara).
+- **Soltar en un patrón con notas.** Lo nuevo se mezcla con lo que había. Usa un patrón vacío para cada capa.
+- **Esperar que lo escrito cambie con Tidechart.** Lo arrastrado es una foto de ese momento: si cambias la progresión,
+  vuelve a arrastrar.
+- **La octava de los acordes.** Se escriben cerca de C5, como la paleta; en vivo los subía o bajaba la tecla que
+  tocabas. Si los querías en otra octava, selecciónalos en el Piano Roll y muévelos una octava (Ctrl + flechas).

@@ -88,6 +88,8 @@ plugins/tidechart/
     TransportSnapshot.h      # lo que el audio publica para la GUI en cada bloque (TripleBuffer): reloj y notas que suenan
     Lines.h                  # Fase 6: las líneas como datos del proyecto (ajustes + notas), computeBass/computeMelody y
                              # MelodyCapture (cuantizar y doblar sobre la vuelta lo que se tocó); sin JUCE
+    MidiExport.h             # Fase 7: el clip de cada capa (acordes, bajo, melodía) = lo que suena en vivo; sin JUCE
+    MidiFileExport.h         # Fase 7: el clip como .mid (juce::MidiFile, 960 ticks por negra) y la carpeta temporal
     midi/NoteTracker.h       # mensajes cortos y la cuenta de lo que suena por canal y nota (releaseAll = los note-off que faltan)
     midi/MidiStage.h         # la etapa MIDI sin JUCE: todo lo que sale pasa por emit (contado); apagar y pánico pedidos
                              # desde cualquier hilo y atendidos en la muestra 0 del bloque siguiente; bypass ↔ acordes;
@@ -103,10 +105,12 @@ plugins/tidechart/
                              # (ProgressionView, ProgressionTemplates), teclado de lo que suena, acorde que suena
                              # (ChordView, con libs/theory), teoría en español (TheoryNames), monitor MIDI, detección
                              # de tonalidad (KeyDetectView: escuchar, resultado con su porqué, alternativas, histograma),
-                             # melodía y bajo (LinesView: capas, estilo, densidad, rango, capturar, variar, piano roll)
+                             # melodía y bajo (LinesView: capas, estilo, densidad, rango, capturar, variar, piano roll;
+                             # Fase 7: la fila "Al Piano Roll" con un MidiDragButton por capa)
   tests/MidiTests.cpp        # etapa MIDI sin JUCE (contra un receptor modelo independiente)
   tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte,
-                             # progresión, reservas); --snapshot <png> [full] pinta la GUI (vista simple o completa)
+                             # progresión, reservas; Fase 7: lo exportado = lo que suena y el .mid leído de vuelta);
+                             # --snapshot <png> [full] pinta la GUI (vista simple o completa)
                              # fuera de pantalla para revisarla
 ```
 
@@ -267,6 +271,24 @@ plugins/tidechart/
     ahora trae `playing`) los note-on/off con su posición; al terminar, `MelodyCapture` cuantiza a semicorcheas, dobla
     sobre la vuelta (la última pasada gana) y descarta lo tocado con FL parado; `captureMelody` la deja como base.
 
+- Decisiones de la Fase 7:
+  - Un `.mid` por capa (no uno con todo): en FL cada capa va al Piano Roll de SU instrumento (pad, 808, lead). Formato 1,
+    una pista, canal 1, 960 ticks por negra (una semicorchea = 240 exactos), nombre de pista, tempo de FL y 4/4 al
+    principio, note-off de verdad (el note-off antes que el note-on si coinciden en un tick) y el fin de pista al final de
+    la vuelta (el clip dura sus compases aunque termine en silencio).
+  - Qué notas (`exportClip`, sin JUCE): las de `renderProgression` y `renderLine`, que son el oráculo de lo que suena en
+    vivo. Acordes con el voicing, ritmo y bajo de los parámetros, la tónica cerca de C5 (como la paleta: en vivo la
+    octava la elige la tecla) y velocidad 100 (en vivo, la de la tecla); las líneas con sus notas y velocidades. Las tres
+    capas duran la vuelta de las líneas (`lineLength`): con i–♭II de un compás cada uno, los acordes van 2 veces y en la
+    Playlist los tres clips se repiten juntos. Se exporta aunque la capa esté apagada. `exportClip` del procesador llama
+    antes a `refreshLines` (el temporizador puede ir 100 ms atrás).
+  - Arrastre: `MidiDragButton` (se arrastra, no se pulsa; un clic explica qué hacer). Al pasar 5 px de arrastre escribe el
+    archivo con lo de ese momento y llama a `DragAndDropContainer::performExternalDragDropOfFiles` (copia, no mover):
+    para FL es lo mismo que arrastrar un `.mid` desde el Explorador. Archivos en `%TEMP%/Tidechart/`, uno por capa con
+    nombre fijo ("Tidechart Acordes (A minor).mid"), reemplazado entero en cada arrastre: no se acumulan.
+  - Descartado: arrastrar la capa al Piano Roll del propio Tidechart (en el modo progresión cada nota volvería a disparar
+    la progresión); el tooltip dice que va en el del instrumento.
+
 ## GUI: vista simple primero (regla para todas las fases que faltan)
 Pedido del usuario (2026-10-28): la GUI debe ser minimalista, con lo necesario para que alguien que empieza pueda usarla
 y encontrar acordes, progresiones y melodías nuevas. Hay dos vistas de los MISMOS paneles (`setSimple` en cada vista):
@@ -324,6 +346,22 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 7 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (arrastrar cada capa al Piano Roll de un
+instrumento y a la Playlist; que lo escrito suene igual que en vivo).
+- Plugin: `MidiExport.h` (`exportClip`), `MidiFileExport.h` (`toMidiFile`, `writeMidiFile`, `exportFolder`),
+  `gui/MidiDragButton.h`; `exportClip` en el procesador; en `LinesView`, en las dos vistas, la fila "Al Piano Roll:"
+  con Acordes / Bajo / Melodía alineada con la de "Suenan" (la línea de información dice cuántas notas y compases se
+  arrastran, o que se arrastra y no se pulsa). Revisadas las dos vistas con `--snapshot`.
+- Tests: `TidechartProcessorTests` +1: cada capa sola, con un host a 120 BPM y una tecla en C5 durante una vuelta, suena
+  exactamente como su clip (inicio, duración, nota y velocidad) en 4 ajustes (por defecto; conducción + dembow + bajo;
+  Mi frigio drop 2 + dembow con huecos; Fa♯ dórico en corcheas + bajo) × 2 progresiones (i–♭VI–♭III–♭VII e i–♭II, que
+  se repite 2 veces); el `.mid` leído de vuelta: formato 1, una pista, 960 ticks, nombre, tempo, 4/4, cada note-on con
+  su note-off en el canal 1, las mismas notas y el fin de pista al final de la vuelta. Nota repetida pegada (note-off
+  antes del note-on), progresión vacía (nada que arrastrar) y un archivo más corto que reemplaza a uno largo sin restos.
+- Release con 0 warnings; ctest 14/14; pluginval strictness 10 ampliado con `--randomise`: SUCCESS.
+- Pendiente para más adelante: arrastrar las tres capas juntas (un `.mid` de 3 pistas para la Playlist), exportar
+  varias vueltas o en la octava de la tecla, guardar el `.mid` con un diálogo (si un host no acepta arrastres).
+
 GUI minimalista (entre las Fases 6 y 7, 2026-10-28): vista simple por defecto y vista completa. Probada por el usuario
 en FL Studio: funciona.
 - Vista simple 1180 × 560: TONALIDAD (tónica, modo y, en la misma fila, Escuchar → resultado → Usar) con los 7 acordes y
@@ -481,4 +519,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 7 (arrastrar el MIDI generado al Piano Roll de FL Studio).
+Siguiente: que el usuario pruebe la Fase 7 en FL; después, Fase 8 (GUI: teclado con la escala, círculo de quintas, progresión editable).

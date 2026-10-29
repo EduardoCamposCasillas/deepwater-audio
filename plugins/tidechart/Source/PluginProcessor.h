@@ -8,6 +8,7 @@
 #include "deepwater/dsp/HostClock.h"
 #include "deepwater/dsp/TripleBuffer.h"
 #include "Lines.h"
+#include "MidiExport.h"
 #include "midi/EventLog.h"
 #include "midi/KeyListener.h"
 #include "midi/MidiStage.h"
@@ -107,6 +108,10 @@ public:
     // Si cambiaron la progresión o la tonalidad desde la última vez, regenera las líneas (las fijas sin variación no se
     // tocan). Lo llama un temporizador del procesador (10 veces por segundo, en el hilo de mensajes) y los tests.
     void refreshLines();
+
+    // Arrastrar al Piano Roll (Fase 7): las notas de una capa como suenan ahora, una vuelta desde el compás 1 (antes,
+    // las líneas se ponen al día si cambiaron la progresión o la tonalidad). Hilo de mensajes.
+    tidechart::ExportClip exportClip (tidechart::ExportLayer layer);
 
     // Capturar una melodía (Fase 6). Como escuchar: mientras captura, el MIDI pasa tal cual (se oye lo que se toca) y la
     // GUI recoge las notas del monitor. Cualquier hilo; no se guarda.

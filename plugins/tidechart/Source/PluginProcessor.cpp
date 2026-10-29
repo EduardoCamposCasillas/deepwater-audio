@@ -192,6 +192,14 @@ void TidechartAudioProcessor::refreshLines()
     publishLines();
 }
 
+tidechart::ExportClip TidechartAudioProcessor::exportClip (tidechart::ExportLayer layer)
+{
+    refreshLines();
+    const auto settings = currentChordSettings (false);
+    const juce::ScopedLock lock (dataLock);
+    return tidechart::exportClip (layer, progression, settings, lines);
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout TidechartAudioProcessor::createParameterLayout()
 {
     namespace id = tidechart::params;

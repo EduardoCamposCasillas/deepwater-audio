@@ -1,6 +1,7 @@
 // Tests del procesador completo de Tidechart (con JUCE): exactamente lo que hace el plugin dentro de FL. MIDI al azar a
 // 4 sample rates y con bloques de 1 a 4096 muestras; bypass, reinicios del audio, pánico y cargar el estado a mitad de
-// una nota; un host que reproduce, para, salta y hace loop; acordes de una tecla con sus parámetros y la paleta.
+// una nota; un host que reproduce, para, salta y hace loop; acordes de una tecla con sus parámetros y la paleta;
+// lo que se arrastra al Piano Roll (Fase 7) contra lo que suena.
 // Comprueba que el MIDI sale como debe (en bypass, idéntico) y en su muestra, que la salida de audio es silencio, que
 // ninguna nota queda colgada y que processBlock no reserva memoria.
 
@@ -19,6 +20,7 @@
 #include "deepwater/theory/KeyDetection.h"
 #include "deepwater/theory/Progression.h"
 #include "deepwater/theory/Text.h"
+#include "MidiFileExport.h"
 #include "Parameters.h"
 #include "PluginProcessor.h"
 
@@ -1050,6 +1052,195 @@ int saveSnapshot (const juce::File& file, bool full)
     return ok ? 0 : 1;
 }
 
+// Fase 7: lo que se arrastra al Piano Roll es lo que suena. Para cada capa sola (acordes, bajo, melodía), el procesador
+// con un host a 120 BPM y una tecla en C5 durante una vuelta: las notas que salen (inicio, duración, nota, velocidad),
+// pasadas a negras, tienen que ser exactamente las del clip. Y el clip como archivo .mid: leído de vuelta, las mismas
+// notas en ticks exactos, cada note-on con su note-off, el note-off primero si coinciden, el fin de pista al final de la
+// vuelta, el nombre, el tempo y el compás.
+void testExport()
+{
+    std::printf ("Arrastrar al Piano Roll (Fase 7): cada capa exportada = lo que suena en vivo (4 ajustes x 2 progresiones); "
+                 "el .mid leido de vuelta tiene las mismas notas, exactas al tick\n");
+
+    namespace th = deepwater::theory;
+    namespace id = tidechart::params;
+    using tidechart::ExportLayer;
+
+    struct Setup
+    {
+        const char* name;
+        int tonic, mode, size, voicing, rhythm, bass;
+    };
+    const Setup setups[] { { "La menor, por defecto", 9, static_cast<int> (th::Mode::aeolian), 0, 0, 0, 0 },
+                           { "La menor, conduccion + dembow + bajo", 9, static_cast<int> (th::Mode::aeolian), 0, 1, 4, 1 },
+                           { "Mi frigio, septimas drop 2 + dembow gaps", 4, static_cast<int> (th::Mode::phrygian), 1, 2, 8, 0 },
+                           { "Fa# dorico, corcheas + bajo", 6, static_cast<int> (th::Mode::dorian), 0, 1, 2, 1 } };
+    const char* progressions[] { "i bVI bIII bVII", "i bII" }; // la segunda dura 2 compases: los acordes se repiten 2 veces
+
+    for (const auto* text : progressions)
+        for (const auto& setup : setups)
+        {
+            const double sampleRate = 48000.0; // a 120 BPM, una negra = 24000 muestras exactas
+            const double samplesPerBeat = 24000.0;
+            auto processor = makeProcessor (sampleRate, 512);
+            th::Progression progression;
+            const auto numerals = th::parseProgression (text); // con nombre: el temporal no vive lo que dura el for
+            for (const auto& numeral : *numerals)
+                progression.steps.push_back ({ numeral, 4 });
+            processor->setProgression (progression);
+            setParameter (*processor, id::keyTonic, static_cast<float> (setup.tonic));
+            setParameter (*processor, id::keyMode, static_cast<float> (setup.mode));
+            setParameter (*processor, id::chordSize, static_cast<float> (setup.size));
+            setParameter (*processor, id::voicing, static_cast<float> (setup.voicing));
+            setParameter (*processor, id::rhythm, static_cast<float> (setup.rhythm));
+            setParameter (*processor, id::chordBass, static_cast<float> (setup.bass));
+            setParameter (*processor, id::playMode, 1.0f);
+
+            const auto chords = processor->exportClip (ExportLayer::chords);
+            const auto bass = processor->exportClip (ExportLayer::bass);
+            const auto melody = processor->exportClip (ExportLayer::melody);
+            const auto tag = juce::String (text) + ", " + setup.name;
+            const double expectedLength = th::lineLength (progression) / 4.0;
+            check (expectedLength > 0.0 && processor->getProgression() == progression, tag + ": la progresion de la prueba no llego al procesador");
+            check (chords.lengthBeats == expectedLength && bass.lengthBeats == expectedLength && melody.lengthBeats == expectedLength,
+                   tag + ": las tres capas no duran una vuelta de las lineas (" + juce::String (chords.lengthBeats) + ", "
+                       + juce::String (bass.lengthBeats) + ", " + juce::String (melody.lengthBeats) + ")");
+
+            for (const auto& [layer, clip] : { std::pair { ExportLayer::chords, &chords }, std::pair { ExportLayer::bass, &bass },
+                                               std::pair { ExportLayer::melody, &melody } })
+            {
+                setParameter (*processor, id::playChords, layer == ExportLayer::chords ? 1.0f : 0.0f);
+                setParameter (*processor, id::playBass, layer == ExportLayer::bass ? 1.0f : 0.0f);
+                setParameter (*processor, id::playMelody, layer == ExportLayer::melody ? 1.0f : 0.0f);
+                processor->reset();
+                TestHead head;
+                processor->setPlayHead (&head);
+                Rig rig (*processor, 2, 512);
+                const auto loopSamples = static_cast<juce::int64> (clip->lengthBeats * samplesPerBeat);
+                const std::vector<Event> input { { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), 0 },
+                                                 { juce::MidiMessage::noteOff (1, 60), loopSamples } };
+                std::vector<Event> output;
+                while (rig.position < loopSamples + 512)
+                {
+                    head.ppq = static_cast<double> (rig.position) / samplesPerBeat;
+                    for (auto& e : rig.run (input, 512))
+                        output.push_back (std::move (e));
+                }
+                processor->setPlayHead (nullptr);
+
+                // Cada note-on con su note-off (la misma nota: el primero que sigue abierto).
+                std::vector<th::NoteEvent> live;
+                std::array<std::vector<std::size_t>, 128> open;
+                for (const auto& e : output)
+                {
+                    const auto& m = e.message;
+                    if (m.isNoteOn())
+                    {
+                        open[static_cast<std::size_t> (m.getNoteNumber())].push_back (live.size());
+                        live.push_back ({ m.getNoteNumber(), static_cast<double> (e.sample) / samplesPerBeat, 0.0, m.getVelocity() });
+                    }
+                    else if (m.isNoteOff() && ! open[static_cast<std::size_t> (m.getNoteNumber())].empty())
+                    {
+                        auto& stack = open[static_cast<std::size_t> (m.getNoteNumber())];
+                        auto& n = live[stack.front()];
+                        stack.erase (stack.begin());
+                        n.length = static_cast<double> (e.sample) / samplesPerBeat - n.start;
+                    }
+                }
+                const auto byStart = [] (const th::NoteEvent& a, const th::NoteEvent& b) {
+                    return a.start != b.start ? a.start < b.start : a.note < b.note;
+                };
+                // La vuelta siguiente empieza en la misma muestra en que se suelta la tecla: su primer ataque no cuenta.
+                std::erase_if (live, [&] (const th::NoteEvent& n) { return n.start >= clip->lengthBeats; });
+                std::sort (live.begin(), live.end(), byStart);
+                const auto layerName = tidechart::exportLayerName (layer);
+                check (! clip->empty() && live == clip->notes, tag + ", " + layerName + ": lo exportado no es lo que suena ("
+                                                                    + juce::String (static_cast<int> (clip->notes.size())) + " notas contra "
+                                                                    + juce::String (static_cast<int> (live.size())) + ")");
+
+                // El archivo MIDI, leído de vuelta.
+                juce::MemoryOutputStream written;
+                check (tidechart::toMidiFile (*clip, "Tidechart " + layerName, 93.0).writeTo (written, 1), tag + ": no se pudo escribir el .mid");
+                juce::MemoryInputStream readBack (written.getData(), written.getDataSize(), false);
+                juce::MidiFile file;
+                int format = 0;
+                check (file.readFrom (readBack, true, &format), tag + ": el .mid no se puede leer");
+                check (format == 1 && file.getNumTracks() == 1 && file.getTimeFormat() == tidechart::midiFileTicksPerQuarter,
+                       tag + ": formato, pistas o resolucion");
+                if (file.getNumTracks() != 1)
+                    continue;
+                auto track = *file.getTrack (0);
+                track.updateMatchedPairs();
+                std::vector<th::NoteEvent> fromFile;
+                bool name = false, tempo = false, meter = false, matched = true, channelOne = true;
+                double end = -1.0;
+                for (int i = 0; i < track.getNumEvents(); ++i)
+                {
+                    const auto* event = track.getEventPointer (i);
+                    const auto& m = event->message;
+                    name = name || (m.isTrackNameEvent() && m.getTextFromTextMetaEvent() == "Tidechart " + layerName);
+                    tempo = tempo || (m.isTempoMetaEvent() && std::abs (m.getTempoSecondsPerQuarterNote() - 60.0 / 93.0) < 1.0e-6);
+                    if (m.isTimeSignatureMetaEvent())
+                    {
+                        int numerator = 0, denominator = 0;
+                        m.getTimeSignatureInfo (numerator, denominator);
+                        meter = numerator == 4 && denominator == 4;
+                    }
+                    if (m.isEndOfTrackMetaEvent())
+                        end = m.getTimeStamp();
+                    if (m.isNoteOn())
+                    {
+                        channelOne = channelOne && m.getChannel() == 1;
+                        if (event->noteOffObject == nullptr)
+                        {
+                            matched = false;
+                            continue;
+                        }
+                        fromFile.push_back ({ m.getNoteNumber(), m.getTimeStamp() / tidechart::midiFileTicksPerQuarter,
+                                              (event->noteOffObject->message.getTimeStamp() - m.getTimeStamp()) / tidechart::midiFileTicksPerQuarter,
+                                              m.getVelocity() });
+                    }
+                }
+                std::sort (fromFile.begin(), fromFile.end(), byStart);
+                check (name && tempo && meter, tag + ", " + layerName + ": faltan el nombre, el tempo o el compas");
+                check (matched && channelOne, tag + ", " + layerName + ": un note-on sin note-off o fuera del canal 1");
+                check (fromFile == clip->notes, tag + ", " + layerName + ": las notas del .mid no son las del clip");
+                check (end == clip->lengthBeats * tidechart::midiFileTicksPerQuarter, tag + ", " + layerName + ": el fin de pista no esta al final de la vuelta");
+            }
+        }
+
+    // Una nota repetida pegada a sí misma (termina en el tick en que empieza la siguiente): en el archivo, el note-off
+    // va antes que el note-on, o un programa que lea en orden la cortaría al empezar.
+    tidechart::ExportClip repeated;
+    repeated.notes = { { 60, 0.0, 0.25, 100 }, { 60, 0.25, 0.25, 90 } };
+    repeated.lengthBeats = 4.0;
+    const auto midi = tidechart::toMidiFile (repeated, "repetida", 120.0);
+    std::vector<juce::String> order;
+    for (const auto* event : *midi.getTrack (0))
+        if (event->message.isNoteOnOrOff())
+            order.push_back ((event->message.isNoteOn() ? "on " : "off ") + juce::String (event->message.getTimeStamp()));
+    check (order == std::vector<juce::String> { "on 0", "off 240", "on 240", "off 480" }, "nota repetida: el note-off no va antes del note-on");
+
+    // Progresión vacía: nada que arrastrar.
+    auto processor = makeProcessor (48000.0, 512);
+    processor->setProgression ({});
+    check (processor->exportClip (ExportLayer::chords).empty(), "progresion vacia: el clip de acordes deberia estar vacio");
+
+    // El archivo en disco: se reemplaza entero (uno más corto no deja restos del anterior).
+    const auto file = juce::File::createTempFile (".mid");
+    tidechart::ExportClip longClip;
+    for (int i = 0; i < 64; ++i)
+        longClip.notes.push_back ({ 48 + i % 24, i * 0.25, 0.25, 100 });
+    longClip.lengthBeats = 16.0;
+    check (tidechart::writeMidiFile (longClip, "larga", 120.0, file), "no se pudo escribir el .mid largo");
+    check (tidechart::writeMidiFile (repeated, "corta", 120.0, file), "no se pudo escribir el .mid corto");
+    juce::FileInputStream in (file);
+    juce::MidiFile reread;
+    check (in.openedOk() && reread.readFrom (in) && reread.getNumTracks() == 1 && reread.getTrack (0)->getNumEvents() == 8,
+           "el .mid sobrescrito no tiene solo lo nuevo (3 metas + 4 notas + fin)");
+    file.deleteFile();
+}
+
 int main (int argc, char* argv[])
 {
     const juce::ScopedJuceInitialiser_GUI init;
@@ -1067,6 +1258,7 @@ int main (int argc, char* argv[])
     testLayoutsAndState();
     testLines();
     testLinesState();
+    testExport();
 
     if (failures == 0)
         std::printf ("\nTodos los tests del procesador de Tidechart pasaron.\n");
