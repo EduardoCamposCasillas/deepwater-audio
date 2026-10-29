@@ -2,6 +2,8 @@
 #include "PluginProcessor.h"
 #include "Parameters.h"
 
+#include <initializer_list>
+
 namespace theme = tidechart::gui::theme;
 
 namespace
@@ -11,9 +13,17 @@ juce::String utf8 (const char* text)
     return juce::String::fromUTF8 (text);
 }
 
-constexpr int editorWidth = 1360;
-constexpr int leftWidth = 900; // la columna de la Fase 5; a la derecha, MELODÍA Y BAJO
-constexpr int editorHeight = 960;
+// Vista completa: la columna de la Fase 5 a la izquierda; a la derecha, MELODÍA Y BAJO.
+constexpr int fullWidth = 1360;
+constexpr int fullLeftWidth = 900;
+constexpr int fullHeight = 960;
+
+// Vista simple.
+constexpr int simpleWidth = 1180;
+constexpr int simpleLeftWidth = 780;
+constexpr int simpleHeight = 560;
+
+const juce::Identifier viewProperty { "view" }; // "simple" (o nada: por defecto) / "full"
 } // namespace
 
 TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProcessor& p)
@@ -75,6 +85,17 @@ TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProc
     addAndMakeVisible (inputMonitor);
     addAndMakeVisible (outputMonitor);
 
+    viewButton.setTooltip (utf8 ("Vista simple: lo necesario para encontrar acordes, progresiones y melod\xc3\xad" "as. Vista completa: "
+                                 "todos los controles (s\xc3\xa9ptimas, voicing, densidad, rango, capturar, variar), el reloj de FL, "
+                                 "lo que suena y el monitor MIDI. Lo que cambies en una se ve en la otra."));
+    viewButton.setColour (juce::TextButton::buttonColourId, theme::control);
+    viewButton.setColour (juce::TextButton::textColourOffId, theme::text);
+    viewButton.onClick = [this] {
+        setSimple (! simple);
+        processor.getParameters().state.setProperty (viewProperty, simple ? "simple" : "full", nullptr);
+    };
+    addAndMakeVisible (viewButton);
+
     panicButton.setButtonText (utf8 ("P\xc3\xa1nico"));
     panicButton.setTooltip (utf8 ("Apaga todo lo que suena: un note-off por cada nota que sali\xc3\xb3 de aqu\xc3\xad y no se apag\xc3\xb3, "
                                   "y All Notes Off (CC 123) en los 16 canales por si el instrumento tiene notas colgadas "
@@ -95,13 +116,31 @@ TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProc
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.getParameters(),
                                                                                                 tidechart::params::bypass, bypassButton);
 
-    setSize (editorWidth, editorHeight);
+    setSimple (processor.getParameters().state.getProperty (viewProperty, "simple").toString() != "full");
     startTimerHz (30);
 }
 
 TidechartAudioProcessorEditor::~TidechartAudioProcessorEditor()
 {
     stopTimer();
+}
+
+void TidechartAudioProcessorEditor::setSimple (bool shouldBeSimple)
+{
+    simple = shouldBeSimple;
+    viewButton.setButtonText (simple ? "Vista completa" : "Vista simple");
+    for (auto* c : std::initializer_list<juce::Component*> { &transportView, &keyboardView, &chordView, &inputMonitor, &outputMonitor })
+        c->setVisible (! simple);
+    paletteView.setSimple (simple);
+    progressionView.setSimple (simple);
+    keyDetectView.setSimple (simple);
+    linesView.setSimple (simple);
+    if (simple)
+        setSize (simpleWidth, simpleHeight);
+    else
+        setSize (fullWidth, fullHeight);
+    resized(); // por si el tamaño no cambió (al abrir)
+    repaint();
 }
 
 void TidechartAudioProcessorEditor::paint (juce::Graphics& g)
@@ -115,16 +154,77 @@ void TidechartAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText ("TIDECHART", header.removeFromLeft (150), juce::Justification::centredLeft);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (utf8 ("acordes y melod\xc3\xad" "as por tonalidad  \xc2\xb7  Fase 6: melod\xc3\xad" "as y bajos"), header,
-                juce::Justification::centredLeft);
+    g.drawText (utf8 ("acordes y melod\xc3\xad" "as por tonalidad"), header, juce::Justification::centredLeft);
 
-    // Paneles detrás del reloj y del teclado.
+    g.setColour (theme::panel);
+    for (auto* c : std::initializer_list<juce::Component*> { &paletteView, &progressionView, &linesView })
+        g.fillRoundedRectangle (c->getBounds().expanded (10, 6).toFloat(), 6.0f);
+
+    if (! simple)
+    {
+        paintFull (g);
+        return;
+    }
+
+    // La guía: qué hacer ahora; debajo, el ruteo.
+    auto guideBox = guideArea;
+    g.setColour (theme::accent);
+    g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+    g.drawFittedText (guide, guideBox.removeFromTop (36), juce::Justification::topLeft, 2, 1.0f);
+    guideBox.removeFromTop (6);
+    g.setColour (theme::dimText);
+    g.setFont (juce::FontOptions (11.0f));
+    g.drawFittedText (utf8 ("Para o\xc3\xadrlo en FL: engranaje de Tidechart \xe2\x86\x92 MIDI \xe2\x86\x92 Output port = 1; en el instrumento "
+                            "(Undertow, FLEX\xe2\x80\xa6): MIDI \xe2\x86\x92 Input port = 1."),
+                      guideBox.removeFromTop (16), juce::Justification::centredLeft, 1, 0.9f);
+}
+
+// Qué hacer ahora, según lo que pasa: el siguiente paso para que suene algo, o qué probar con lo que ya suena.
+juce::String TidechartAudioProcessorEditor::guideText() const
+{
+    namespace th = deepwater::theory;
+    const auto settings = processor.currentChordSettings (transport.bypassed);
+    if (transport.bypassed)
+        return utf8 ("Bypass: el MIDI pasa tal cual y no hay acordes. Qu\xc3\xadtalo (arriba a la derecha) para que Tidechart toque.");
+    if (transport.listening)
+        return utf8 ("Escuchando: toca en tu teclado o dale play a tu canci\xc3\xb3n en FL. Cuando diga \xc2\xab" "clara\xc2\xbb o \xc2\xab"
+                     "probable\xc2\xbb, pulsa Usar y la paleta queda en esa tonalidad.");
+    if (settings.playMode == tidechart::midi::PlayMode::keys)
+        return utf8 ("Mant\xc3\xa9n pulsado un acorde de arriba para o\xc3\xadrlo. En el Piano Roll de Tidechart, las teclas blancas tocan los "
+                     "acordes (C = el 1.\xc2\xba). Para o\xc3\xadr la progresi\xc3\xb3n con FL: \xc2\xab" "Progresi\xc3\xb3n (sigue a FL)\xc2\xbb.");
+    const auto progression = processor.getProgression();
+    if (progression.steps.empty())
+        return utf8 ("La progresi\xc3\xb3n est\xc3\xa1 vac\xc3\xad" "a: pulsa \xc2\xab" "Otra idea\xc2\xbb, o enciende \xc2\xab" "Agregar con clic\xc2\xbb "
+                     "y elige acordes arriba.");
+    if (transport.source != deepwater::dsp::ClockSource::host)
+        return utf8 ("Dale play en FL con una nota larga en el Piano Roll de Tidechart (cualquier tecla): suena la progresi\xc3\xb3n, "
+                     "siguiendo a FL.");
+    if (! transport.progressionSounding)
+        return utf8 ("FL reproduce, pero no hay ninguna nota abajo en el Piano Roll de Tidechart: pon una nota larga (cualquier "
+                     "tecla) que dure todo el patr\xc3\xb3n.");
+
+    juce::String text = utf8 ("Suena ");
+    if (const int step = transport.progressionStep; step >= 0 && step < static_cast<int> (progression.steps.size()))
+    {
+        const th::Notation notation { true, 5 };
+        const auto& numeral = progression.steps[static_cast<std::size_t> (step)].numeral;
+        text << "el " << juce::String::fromUTF8 (th::romanNumeralText (numeral, notation).c_str()) << " ("
+             << juce::String::fromUTF8 (th::chordSymbol (th::chordFor (numeral, settings.key), notation).c_str()) << "). ";
+    }
+    else
+        text << utf8 ("la progresi\xc3\xb3n. ");
+    if (! settings.playBass && ! settings.playMelody)
+        return text + utf8 ("Prueba otro ritmo u \xc2\xab" "Otra idea\xc2\xbb; luego enciende Bajo y Melod\xc3\xad" "a a la derecha.");
+    return text + utf8 ("Pulsa \xc2\xab" "Otra\xc2\xbb hasta encontrar un bajo y una melod\xc3\xad" "a que te gusten; pasa el rat\xc3\xb3n por una "
+                        "nota para ver por qu\xc3\xa9 funciona.");
+}
+
+void TidechartAudioProcessorEditor::paintFull (juce::Graphics& g)
+{
+    // Paneles detrás del reloj, de la tonalidad y del teclado.
     g.setColour (theme::panel);
     g.fillRoundedRectangle (transportView.getBounds().expanded (10, 4).toFloat(), 6.0f);
-    g.fillRoundedRectangle (paletteView.getBounds().expanded (10, 6).toFloat(), 6.0f);
-    g.fillRoundedRectangle (progressionView.getBounds().expanded (10, 6).toFloat(), 6.0f);
     g.fillRoundedRectangle (keyDetectView.getBounds().expanded (10, 6).toFloat(), 6.0f);
-    g.fillRoundedRectangle (linesView.getBounds().expanded (10, 6).toFloat(), 6.0f);
     g.fillRoundedRectangle (keyboardView.getBounds().getUnion (chordView.getBounds()).withTop (keyboardTitleArea.getY()).expanded (10, 6).toFloat(), 6.0f);
 
     auto title = keyboardTitleArea;
@@ -153,7 +253,7 @@ void TidechartAudioProcessorEditor::paint (juce::Graphics& g)
         g.drawText ("BYPASS", keyboardTitleArea, juce::Justification::centredRight);
     }
 
-    auto footer = getLocalBounds().withWidth (leftWidth).reduced (16, 0).removeFromBottom (34);
+    auto footer = getLocalBounds().withWidth (fullLeftWidth).reduced (16, 0).removeFromBottom (34);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (11.5f));
     g.drawFittedText (utf8 ("Ruteo en FL: engranaje de Tidechart \xe2\x86\x92 MIDI \xe2\x86\x92 Output port = 1. En el instrumento que debe sonar "
@@ -168,13 +268,41 @@ void TidechartAudioProcessorEditor::resized()
     bypassButton.setBounds (header.removeFromRight (90).reduced (0, 12));
     header.removeFromRight (8);
     panicButton.setBounds (header.removeFromRight (90).reduced (0, 12));
+    header.removeFromRight (8);
+    viewButton.setBounds (header.removeFromRight (130).reduced (0, 12));
 
-    // A la derecha, de arriba abajo: MELODÍA Y BAJO.
-    auto right = getLocalBounds().withTrimmedLeft (leftWidth).withTrimmedTop (56).reduced (0, 6);
+    if (simple)
+        layoutSimple();
+    else
+        layoutFull();
+}
+
+void TidechartAudioProcessorEditor::layoutSimple()
+{
+    // A la derecha: MELODÍA Y BAJO, todo el alto.
+    auto right = getLocalBounds().withTrimmedLeft (simpleLeftWidth).withTrimmedTop (56).reduced (0, 6);
     right.removeFromRight (16);
     linesView.setBounds (right.reduced (10, 0).withTrimmedBottom (4));
 
-    auto area = getLocalBounds().withWidth (leftWidth).reduced (16, 0);
+    auto area = getLocalBounds().withWidth (simpleLeftWidth).reduced (16, 0);
+    area.removeFromTop (56);
+    paletteView.setBounds (area.removeFromTop (200).reduced (10, 0));
+    // La detección, en la fila de la tonalidad: es la otra forma de elegirla.
+    keyDetectView.setBounds (paletteView.freeTopArea() + paletteView.getPosition());
+    area.removeFromTop (18);
+    progressionView.setBounds (area.removeFromTop (196).reduced (10, 0));
+    area.removeFromTop (16);
+    guideArea = area.withTrimmedBottom (10).reduced (10, 0);
+}
+
+void TidechartAudioProcessorEditor::layoutFull()
+{
+    // A la derecha, de arriba abajo: MELODÍA Y BAJO.
+    auto right = getLocalBounds().withTrimmedLeft (fullLeftWidth).withTrimmedTop (56).reduced (0, 6);
+    right.removeFromRight (16);
+    linesView.setBounds (right.reduced (10, 0).withTrimmedBottom (4));
+
+    auto area = getLocalBounds().withWidth (fullLeftWidth).reduced (16, 0);
     area.removeFromTop (52);
 
     area.removeFromTop (4);
@@ -184,7 +312,7 @@ void TidechartAudioProcessorEditor::resized()
     paletteView.setBounds (area.removeFromTop (192).reduced (10, 0));
     area.removeFromTop (18);
 
-    progressionView.setBounds (area.removeFromTop (180).reduced (10, 0));
+    progressionView.setBounds (area.removeFromTop (192).reduced (10, 0));
     area.removeFromTop (18);
 
     keyDetectView.setBounds (area.removeFromTop (108).reduced (10, 0));
@@ -241,6 +369,13 @@ void TidechartAudioProcessorEditor::timerCallback()
         seenLinesChanges = changes;
         linesView.setLines (processor.getLines());
     }
+
+    if (simple)
+        if (auto text = guideText(); text != guide)
+        {
+            guide = text;
+            repaint (guideArea);
+        }
 
     processor.drainMidiLog ([this] (const tidechart::midi::LoggedEvent& event) {
         (event.output ? outputMonitor : inputMonitor).add (event, transport);

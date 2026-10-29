@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -24,6 +25,8 @@ namespace tidechart::gui
 // Fase 4: debajo, los PRESTADOS: acordes de los modos paralelos (misma tónica) que no están en la escala, con el modo
 // del que vienen. Se escuchan igual, y con "Agregar con clic" (en la progresión) cada clic agrega el acorde a la
 // progresión.
+// Vista simple: arriba solo la tónica y el modo (con el título TONALIDAD; a la derecha queda sitio para la detección);
+// tríadas/séptimas, qué teclas disparan y "+ Bajo" quedan en la vista completa (siguen sonando como estén).
 class ChordPaletteView final : public juce::Component, public juce::TooltipClient
 {
 public:
@@ -97,6 +100,22 @@ public:
         repaint();
     }
 
+    // Vista simple o completa.
+    void setSimple (bool shouldBeSimple)
+    {
+        simple = shouldBeSimple;
+        for (auto* c : std::initializer_list<juce::Component*> { &sizeBox, &mappingBox, &bassButton })
+            c->setVisible (! simple);
+        resized();
+        repaint();
+    }
+
+    // Vista simple: lo que queda libre en la fila de arriba, a la derecha del modo.
+    [[nodiscard]] juce::Rectangle<int> freeTopArea() const
+    {
+        return getLocalBounds().removeFromTop (26).withLeft (modeBox.getRight() + 24);
+    }
+
     juce::String getTooltip() override
     {
         const int pad = padAt (getMouseXYRelative());
@@ -111,7 +130,7 @@ public:
     {
         auto area = getLocalBounds();
         auto top = area.removeFromTop (26);
-        top.removeFromLeft (74); // el título
+        top.removeFromLeft (simple ? 96 : 74); // el título
         tonicBox.setBounds (top.removeFromLeft (96));
         top.removeFromLeft (8);
         modeBox.setBounds (top.removeFromLeft (170));
@@ -145,7 +164,8 @@ public:
     {
         g.setColour (theme::accent);
         g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-        g.drawText ("PALETA", getLocalBounds().removeFromTop (26).removeFromLeft (74), juce::Justification::centredLeft);
+        g.drawText (simple ? "TONALIDAD" : "PALETA", getLocalBounds().removeFromTop (26).removeFromLeft (simple ? 96 : 74),
+                    juce::Justification::centredLeft);
 
         const bool active = settings.enabled;
         for (int d = 0; d < 7; ++d)
@@ -326,6 +346,7 @@ private:
     midi::ChordSettings settings;
     std::uint8_t held = 0;
     bool hasPads = false;
+    bool simple = false;
     int pressedPad = -1;
     std::array<Pad, 7> pads;
     std::array<BorrowedPad, maxBorrowed> borrowed;

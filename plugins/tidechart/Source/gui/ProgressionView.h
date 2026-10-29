@@ -28,6 +28,8 @@ namespace tidechart::gui
 // prestado. Mantener pulsado un paso lo hace sonar; clic derecho = duración, tipo de acorde, mover o quitar; la rueda
 // cambia la duración. El paso que corresponde a la posición de FL se enciende, y la tira de abajo dibuja el patrón
 // rítmico con la semicorchea actual.
+// "Otra idea" pasa a la plantilla siguiente: la forma rápida de probar progresiones distintas sin saber teoría.
+// Vista simple: sin el voicing ni el texto romano (siguen como estén; se cambian en la vista completa).
 class ProgressionView final : public juce::Component, public juce::TooltipClient
 {
 public:
@@ -61,6 +63,10 @@ public:
         voicingBox.setTooltip (names::utf8 ("C\xc3\xb3mo se reparten las notas. Estado fundamental: la fundamental abajo, cada acorde salta. "
                                             "Conducci\xc3\xb3n de voces: la inversi\xc3\xb3n que menos mueve las voces (las notas comunes quietas). "
                                             "Abierto: lo mismo, con la 2.\xc2\xaa voz una octava abajo (m\xc3\xa1s ancho, de pad)."));
+        ideaButton.setButtonText (names::utf8 ("Otra idea"));
+        ideaButton.setTooltip (names::utf8 ("Pone la progresi\xc3\xb3n siguiente de las plantillas (con su modo): esc\xc3\xba" "chala con play en FL, "
+                                            "y si te gusta, c\xc3\xa1mbiale el ritmo o encima ponle bajo y melod\xc3\xad" "a."));
+        ideaButton.onClick = [this] { applyTemplate ((lastTemplate + 1) % static_cast<int> (progressionTemplates.size())); };
         textEditor.setTooltip (names::utf8 ("La progresi\xc3\xb3n en n\xc3\xbameros romanos. Escribe y pulsa Enter: i bVI bIII bVII, i bII, "
                                             "Imaj7 IV7 iv9... (min\xc3\xbascula = menor, b = bemol, o = disminuido, + = aumentado)."));
         addButton.setTooltip (names::utf8 ("Encendido: cada clic en la paleta (tambi\xc3\xa9n en los prestados) agrega ese acorde al final de la progresi\xc3\xb3n."));
@@ -91,7 +97,7 @@ public:
             info = names::utf8 ("Progresi\xc3\xb3n vac\xc3\xad" "a: enciende \xc2\xab" "Agregar con clic\xc2\xbb y elige acordes en la paleta.");
             repaint();
         };
-        for (auto* button : { &addButton, &clearButton })
+        for (auto* button : { &addButton, &clearButton, &ideaButton })
         {
             button->setColour (juce::TextButton::buttonColourId, theme::control);
             button->setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.55f));
@@ -109,6 +115,15 @@ public:
     {
         if (pressedStep >= 0)
             callbacks.stopPreview();
+    }
+
+    // Vista simple o completa.
+    void setSimple (bool shouldBeSimple)
+    {
+        simple = shouldBeSimple;
+        voicingBox.setVisible (! simple);
+        textEditor.setVisible (! simple);
+        resized();
     }
 
     // ¿Los clics en la paleta agregan acordes?
@@ -175,7 +190,9 @@ public:
 
         area.removeFromTop (6);
         row = area.removeFromTop (26);
-        templateBox.setBounds (row.removeFromLeft (260));
+        templateBox.setBounds (row.removeFromLeft (simple ? 240 : 200));
+        row.removeFromLeft (8);
+        ideaButton.setBounds (row.removeFromLeft (100));
         row.removeFromLeft (8);
         clearButton.setBounds (row.removeFromRight (70));
         row.removeFromRight (8);
@@ -184,7 +201,7 @@ public:
         textEditor.setBounds (row);
 
         area.removeFromTop (8);
-        infoArea = area.removeFromBottom (16);
+        infoArea = area.removeFromBottom (28); // dos líneas: el nombre de la idea y por qué funciona
         area.removeFromBottom (4);
         rhythmArea = area.removeFromBottom (20);
         area.removeFromBottom (8);
@@ -245,7 +262,7 @@ public:
 
         g.setFont (juce::FontOptions (11.5f));
         g.setColour (error ? theme::warning : theme::dimText);
-        g.drawText (info, infoArea, juce::Justification::centredLeft);
+        g.drawFittedText (info, infoArea, juce::Justification::centredLeft, 2, 1.0f);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -375,6 +392,7 @@ private:
     {
         if (index < 0 || index >= static_cast<int> (progressionTemplates.size()))
             return;
+        lastTemplate = index;
         const auto& t = progressionTemplates[static_cast<std::size_t> (index)];
         deepwater::theory::Progression updated;
         if (const auto parsed = deepwater::theory::parseProgression (t.numerals))
@@ -382,7 +400,7 @@ private:
                 updated.steps.push_back ({ numeral, 4 });
         callbacks.setMode (t.mode);
         commit (updated);
-        info = names::utf8 (t.description);
+        info = names::utf8 (t.name) + names::utf8 (": ") + names::utf8 (t.description);
         templateBox.setSelectedId (0, juce::dontSendNotification);
         repaint();
     }
@@ -510,7 +528,7 @@ private:
     Callbacks callbacks;
     juce::ComboBox playModeBox, rhythmBox, voicingBox, templateBox;
     juce::TextEditor textEditor;
-    juce::TextButton addButton, clearButton;
+    juce::TextButton addButton, clearButton, ideaButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> playModeAttachment, rhythmAttachment, voicingAttachment;
 
     deepwater::theory::Progression progression;
@@ -519,7 +537,8 @@ private:
     std::array<juce::Rectangle<int>, deepwater::theory::maxProgressionSteps> tileBounds;
     juce::Rectangle<int> stepsArea, rhythmArea, infoArea;
     juce::String info;
-    bool error = false;
+    bool error = false, simple = false;
+    int lastTemplate = -1;
     int step = -1, rhythmStep = -1, pressedStep = -1;
     bool sounding = false;
 };

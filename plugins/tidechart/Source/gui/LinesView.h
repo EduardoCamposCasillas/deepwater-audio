@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <vector>
 
@@ -28,6 +29,8 @@ namespace tidechart::gui
 // (cuánto y otra variación) y FIJAR (la melodía de ahora pasa a ser la base de las variaciones).
 // Debajo, un piano roll de una vuelta con los acordes arriba y cada nota coloreada por su papel sobre el acorde que suena:
 // nota del acorde (apoyo), de la escala (de paso, adorno o tensión) o cromática. Pasar el ratón por una nota la explica.
+// Vista simple: las capas, el estilo y "Otra" de cada línea, y el piano roll. Densidad, rango, capturar, fijar y variar
+// quedan en la vista completa (siguen como estén).
 class LinesView final : public juce::Component
 {
 public:
@@ -144,6 +147,19 @@ public:
             callbacks.setCapturing (false);
     }
 
+    // Vista simple o completa. Si estaba capturando, la captura termina (su botón no se ve en la simple).
+    void setSimple (bool shouldBeSimple)
+    {
+        if (shouldBeSimple && capturing)
+            toggleCapture();
+        simple = shouldBeSimple;
+        for (auto* c : std::initializer_list<juce::Component*> { &bassDensity, &melodyDensity, &bassRange, &melodyRange, &variation,
+                                                                 &variationOther, &captureButton, &fixButton })
+            c->setVisible (! simple);
+        resized();
+        repaint();
+    }
+
     // Desde el editor: las líneas del procesador (al abrir, al cargar un proyecto, tras cada cambio).
     void setLines (const Lines& newLines)
     {
@@ -226,6 +242,26 @@ public:
         row.removeFromLeft (6);
         melodyButton.setBounds (row);
 
+        if (simple)
+        {
+            for (auto [style, other] : { std::pair { &bassStyle, &bassOther }, std::pair { &melodyStyle, &melodyOther } })
+            {
+                area.removeFromTop (8);
+                row = area.removeFromTop (26);
+                row.removeFromLeft (64);
+                other->setBounds (row.removeFromRight (70));
+                row.removeFromRight (6);
+                style->setBounds (row);
+            }
+            area.removeFromTop (12);
+            infoArea = area.removeFromBottom (64);
+            area.removeFromBottom (4);
+            legendArea = area.removeFromBottom (16);
+            area.removeFromBottom (4);
+            rollArea = area;
+            return;
+        }
+
         const auto layoutLine = [&area] (juce::Rectangle<int>& header, juce::ComboBox& style, juce::Button& other, juce::Slider& density,
                                          juce::Slider& range, juce::Rectangle<int>& rangeText) {
             area.removeFromTop (12);
@@ -279,26 +315,36 @@ public:
         const auto label = [&g] (juce::Rectangle<int> row, const char* text) {
             g.drawText (names::utf8 (text), row.withX (0).withWidth (70), juce::Justification::centredLeft);
         };
-        for (const auto& [header, text] : { std::pair { bassHeader, "BAJO" }, std::pair { melodyHeader, "MELOD\xc3\x8d" "A" } })
+        if (simple)
         {
             g.setColour (theme::text);
-            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-            g.drawText (names::utf8 (text), header, juce::Justification::centredLeft);
-            g.setColour (theme::panelOutline);
-            g.fillRect (header.withTrimmedLeft (70).withHeight (1).withY (header.getCentreY()));
+            g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+            label (bassStyle.getBounds(), "Bajo");
+            label (melodyStyle.getBounds(), "Melod\xc3\xad" "a");
         }
-        g.setColour (theme::dimText);
-        g.setFont (juce::FontOptions (11.0f));
-        label (bassDensity.getBounds(), "Densidad");
-        label (melodyDensity.getBounds(), "Densidad");
-        label (bassRange.getBounds(), "Rango");
-        label (melodyRange.getBounds(), "Rango");
-        label (variation.getBounds(), "Variaci\xc3\xb3n");
-        g.setColour (theme::text);
-        g.drawText (rangeText (lines.bassSettings.generator.low, lines.bassSettings.generator.high, true), bassRangeText,
-                    juce::Justification::centredRight);
-        g.drawText (rangeText (lines.melodySettings.generator.low, lines.melodySettings.generator.high, false), melodyRangeText,
-                    juce::Justification::centredRight);
+        else
+        {
+            for (const auto& [header, text] : { std::pair { bassHeader, "BAJO" }, std::pair { melodyHeader, "MELOD\xc3\x8d" "A" } })
+            {
+                g.setColour (theme::text);
+                g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+                g.drawText (names::utf8 (text), header, juce::Justification::centredLeft);
+                g.setColour (theme::panelOutline);
+                g.fillRect (header.withTrimmedLeft (70).withHeight (1).withY (header.getCentreY()));
+            }
+            g.setColour (theme::dimText);
+            g.setFont (juce::FontOptions (11.0f));
+            label (bassDensity.getBounds(), "Densidad");
+            label (melodyDensity.getBounds(), "Densidad");
+            label (bassRange.getBounds(), "Rango");
+            label (melodyRange.getBounds(), "Rango");
+            label (variation.getBounds(), "Variaci\xc3\xb3n");
+            g.setColour (theme::text);
+            g.drawText (rangeText (lines.bassSettings.generator.low, lines.bassSettings.generator.high, true), bassRangeText,
+                        juce::Justification::centredRight);
+            g.drawText (rangeText (lines.melodySettings.generator.low, lines.melodySettings.generator.high, false), melodyRangeText,
+                        juce::Justification::centredRight);
+        }
 
         drawRoll (g);
         drawLegend (g);
@@ -741,8 +787,9 @@ private:
         auto area = legendArea;
         const juce::Font font (juce::FontOptions (10.5f));
         g.setFont (font);
-        for (const auto& [role, text] : { std::pair { deepwater::theory::NoteRole::chordTone, "nota del acorde (apoyo)" },
-                                          std::pair { deepwater::theory::NoteRole::scaleTone, "de la escala (paso, adorno, tensi\xc3\xb3n)" },
+        for (const auto& [role, text] : { std::pair { deepwater::theory::NoteRole::chordTone, simple ? "del acorde" : "nota del acorde (apoyo)" },
+                                          std::pair { deepwater::theory::NoteRole::scaleTone,
+                                                      simple ? "de la escala" : "de la escala (paso, adorno, tensi\xc3\xb3n)" },
                                           std::pair { deepwater::theory::NoteRole::chromatic, "crom\xc3\xa1tica" } })
         {
             g.setColour (roleColour (role));
@@ -767,7 +814,7 @@ private:
     midi::ChordSettings settings;
     std::vector<RollNote> rollNotes;
     MelodyCapture capture;
-    bool capturing = false, warnStopped = false, updating = false;
+    bool capturing = false, warnStopped = false, updating = false, simple = false;
     juce::String captureMessage;
     juce::StringArray infoLines;
     int hovered = -1;

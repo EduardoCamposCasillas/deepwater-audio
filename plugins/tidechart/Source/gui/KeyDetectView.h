@@ -23,7 +23,9 @@ namespace tidechart::gui
 // altura es cuánto sonó cada una; en color las de la escala detectada (la tónica en turquesa) y un punto naranja en
 // las que se llevaron votos de "casa" (el bajo al empezar cada frase).
 // Todo corre en la GUI con lo que publica el audio; el audio solo suma.
-class KeyDetectView final : public juce::Component
+// Vista simple: una sola fila (Escuchar, el resultado con su confianza, Usar), sin título, histograma ni alternativas;
+// el porqué queda en el tooltip del resultado.
+class KeyDetectView final : public juce::Component, public juce::TooltipClient
 {
 public:
     struct Callbacks
@@ -86,8 +88,29 @@ public:
         refresh();
     }
 
+    // Vista simple (una fila) o completa.
+    void setSimple (bool shouldBeSimple)
+    {
+        simple = shouldBeSimple;
+        refresh();
+        resized();
+    }
+
+    juce::String getTooltip() override { return simple ? explanation : juce::String(); }
+
     void resized() override
     {
+        if (simple)
+        {
+            auto row = getLocalBounds();
+            listenButton.setBounds (row.removeFromLeft (90));
+            row.removeFromLeft (10);
+            useButton.setBounds (row.removeFromRight (64));
+            row.removeFromRight (8);
+            resultArea = row;
+            return;
+        }
+
         // Arriba: título, Escuchar, el resultado y Usar. Abajo: el histograma a la izquierda; a la derecha el porqué y
         // las alternativas.
         auto area = getLocalBounds();
@@ -118,6 +141,12 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        if (simple)
+        {
+            paintSimple (g);
+            return;
+        }
+
         g.setColour (theme::accent);
         g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
         g.drawText ("TONALIDAD", getLocalBounds().removeFromTop (26).removeFromLeft (94), juce::Justification::centredLeft);
@@ -206,7 +235,7 @@ private:
         useButton.setEnabled (ready);
         for (std::size_t i = 0; i < alternatives.size(); ++i)
         {
-            alternatives[i].setVisible (ready);
+            alternatives[i].setVisible (ready && ! simple);
             if (ready)
                 alternatives[i].setButtonText (keyText (ranking[i + 1].key));
         }
@@ -275,6 +304,30 @@ private:
         return text;
     }
 
+    // Una fila: el resultado y su confianza, o qué hacer para tenerlo.
+    void paintSimple (juce::Graphics& g) const
+    {
+        auto result = resultArea;
+        if (ready)
+        {
+            g.setColour (theme::text);
+            g.setFont (juce::FontOptions (13.5f, juce::Font::bold));
+            const auto name = keyText (ranking[0].key);
+            const int nameWidth = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), name) + 10;
+            g.drawText (name, result.removeFromLeft (nameWidth), juce::Justification::centredLeft);
+            const auto [label, colour] = confidenceLabel (confidence);
+            g.setColour (colour);
+            g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+            g.drawText (label, result, juce::Justification::centredLeft);
+            return;
+        }
+        g.setColour (listening ? theme::input : theme::dimText);
+        g.setFont (juce::FontOptions (11.5f, listening ? juce::Font::bold : juce::Font::plain));
+        g.drawFittedText (listening ? names::utf8 ("Escuchando\xe2\x80\xa6 toca o dale play a tu canci\xc3\xb3n")
+                                    : names::utf8 ("\xc2\xbfNo sabes la tonalidad? Pulsa Escuchar y toca algo"),
+                          result, juce::Justification::centredLeft, 1, 0.9f);
+    }
+
     void paintHistogram (juce::Graphics& g) const
     {
         const auto area = histogramArea.toFloat();
@@ -326,6 +379,7 @@ private:
     deepwater::theory::KeyConfidence confidence = deepwater::theory::KeyConfidence::none;
     bool ready = false;
     bool listening = false;
+    bool simple = false;
     double heardSeconds = 0.0;
     juce::String explanation;
 

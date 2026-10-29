@@ -106,7 +106,8 @@ plugins/tidechart/
                              # melodía y bajo (LinesView: capas, estilo, densidad, rango, capturar, variar, piano roll)
   tests/MidiTests.cpp        # etapa MIDI sin JUCE (contra un receptor modelo independiente)
   tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte,
-                             # progresión, reservas); --snapshot <png> pinta la GUI fuera de pantalla para revisarla
+                             # progresión, reservas); --snapshot <png> [full] pinta la GUI (vista simple o completa)
+                             # fuera de pantalla para revisarla
 ```
 
 ## Librería de teoría musical (`libs/theory`, namespace `deepwater::theory`)
@@ -266,6 +267,21 @@ plugins/tidechart/
     ahora trae `playing`) los note-on/off con su posición; al terminar, `MelodyCapture` cuantiza a semicorcheas, dobla
     sobre la vuelta (la última pasada gana) y descarta lo tocado con FL parado; `captureMelody` la deja como base.
 
+## GUI: vista simple primero (regla para todas las fases que faltan)
+Pedido del usuario (2026-10-28): la GUI debe ser minimalista, con lo necesario para que alguien que empieza pueda usarla
+y encontrar acordes, progresiones y melodías nuevas. Hay dos vistas de los MISMOS paneles (`setSimple` en cada vista):
+- **Simple (por defecto):** solo lo que hace falta para crear, en el orden en que se usa (tonalidad → acordes →
+  progresión → melodía y bajo), botones de descubrir ("Otra idea", "Otra"), y una guía de qué hacer ahora. Sin datos de
+  depuración (reloj, monitor MIDI, teclado de lo que suena). Los textos dicen qué hacer, no cómo funciona por dentro;
+  el porqué va en tooltips, en la línea de información y en el piano roll.
+- **Completa:** todo lo construido (lo que se probó en FL en cada fase), detrás de "Vista completa". Nada se pierde.
+- La vista se guarda en el proyecto: propiedad `view` del árbol del APVTS ("simple" o nada / "full"), no es parámetro.
+- Cada fase nueva decide qué va en la simple con esta pregunta: ¿lo necesita alguien que empieza para crear algo? Si
+  sí, entra en la simple (como mucho un control por idea, con un buen valor por defecto); si es ajuste fino, en la
+  completa. Fase 7: arrastrar al Piano Roll es esencial → en la simple, un botón visible por capa. Fase 8: lo que
+  reemplace a un control de la simple lo reemplaza ahí (no se suma). Fase 9: presets = la puerta de entrada de la
+  simple (barra de presets arriba). Fase 10: revisar las dos vistas con `--snapshot` y `--snapshot <png> full`.
+
 ## Requisitos propios (además de los del raíz)
 - Ninguna nota colgada, en ningún caso (ver arriba).
 - Un acorde por tecla: la tecla que dispara un acorde no suena además sola, salvo que se pida (modo "con la nota").
@@ -308,6 +324,22 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+GUI minimalista (entre las Fases 6 y 7, 2026-10-28): vista simple por defecto y vista completa. Pendiente de probar en FL.
+- Vista simple 1180 × 560: TONALIDAD (tónica, modo y, en la misma fila, Escuchar → resultado → Usar) con los 7 acordes y
+  los prestados; PROGRESIÓN (qué tocan las teclas, ritmo, plantillas, "Otra idea", agregar con clic, vaciar, pasos y
+  patrón); la guía (qué hacer ahora según bypass, escuchar, modo, progresión vacía, FL parado, sin nota abajo, o qué
+  suena y qué probar) y el ruteo; a la derecha MELODÍA Y BAJO (capas, estilo y "Otra" por línea, piano roll con
+  leyenda corta y la explicación de cada nota al pasar el ratón).
+- Fuera de la simple (en la completa, siguen sonando como estén): tríadas/séptimas, teclas blancas/notas de la escala,
+  + Bajo, voicing, texto romano, densidad, rango, capturar, fijar, variación; reloj, SUENA AHORA, ACORDE, monitor MIDI,
+  histograma y alternativas de la detección.
+- Nuevo en las dos vistas: "Otra idea" (la plantilla siguiente, con su modo) y el nombre de la idea en la línea de
+  información de la progresión (ahora de dos líneas). Vista completa 1360 × 960 igual que antes (+ el botón).
+- Cada vista: `setSimple` en `ChordPaletteView` (+ `freeTopArea` para la detección), `ProgressionView`,
+  `KeyDetectView` (una fila; el porqué en el tooltip) y `LinesView` (si capturaba, la captura termina).
+- Release con 0 warnings; `TidechartTests` y `TidechartProcessorTests` pasan; pluginval strictness 10 ampliado con
+  `--randomise`: SUCCESS. Revisadas las dos vistas con `--snapshot`.
+
 Fase 6 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (capas, estilos, densidad, rango, Otra, capturar,
 variar y fijar): funciona.
 - `libs/theory`: `Melody.h` (`LineNote`, `Line`, `lineLength`, `linePosition`, `chordAt`, `chordChangesAt`, `scaleMask`,

@@ -793,3 +793,38 @@ distintas: la identidad está en el ritmo y en la repetición, no en la variedad
   Variación, y Fijar cuando una te guste.
 - **Clonar y editar en el original.** Cada clon guarda su copia de la progresión y las líneas: si cambias la progresión
   en uno, cámbiala también en el otro (o vuelve a clonar).
+
+## Vista simple — el camino corto para empezar
+
+Desde aquí Tidechart abre en la **vista simple**: solo lo necesario para encontrar acordes, progresiones, bajos y
+melodías, en el orden en que se usa (de arriba abajo y de izquierda a derecha). Todo lo demás (séptimas, voicing,
+texto romano, densidad, rango, capturar, variar, el reloj de FL, el teclado de lo que suena y el monitor MIDI) sigue en
+**Vista completa**, arriba a la derecha. Las dos vistas son el mismo plugin: lo que cambias en una se ve en la otra, y
+lo que solo está en la completa sigue sonando como lo dejaste.
+
+### El recorrido en 5 minutos
+
+1. **TONALIDAD.** Elige tónica y modo (empieza por La menor). Si ya tienes una canción, pulsa **Escuchar**, reprodúcela
+   o tócala, y cuando diga *clara* o *probable* pulsa **Usar**.
+2. **ACORDES.** Mantén pulsado cada acorde para oírlo. La franja de color es su función: verde = casa (tónica),
+   lila = se aleja (subdominante), naranja = pide volver (dominante). Los **prestados** son colores de otros modos:
+   el ♭II de frigio es el perreo oscuro.
+3. **PROGRESIÓN.** Pon «Progresión (sigue a FL)», un ritmo (Dembow) y pulsa **Otra idea** hasta que una te guste; o
+   enciende **Agregar con clic** y ármala tú con clics en los acordes. Debajo aparece por qué funciona cada idea.
+4. **Que suene.** En el Piano Roll de Tidechart, una nota larga (cualquier tecla) y play en FL. La línea azul de abajo
+   a la izquierda te dice siempre qué falta o qué probar.
+5. **MELODÍA Y BAJO.** Enciende Bajo y Melodía, elige un estilo y pulsa **Otra** hasta encontrar una que te guste.
+   Pasa el ratón por las notas del piano roll: lila = nota del acorde (estable), turquesa = de la escala (movimiento),
+   naranja = cromática (aproximación).
+
+### Reto (sin receta)
+
+Sin abrir la vista completa: encuentra una progresión de 2 acordes con un prestado, un bajo y una melodía que juntos
+suenen a perreo oscuro. Después abre la vista completa y mira qué ajustes cambiarías (densidad, rango, variación).
+
+<details><summary>Pistas</summary>
+
+- La menor + el ♭II (B♭) prestado de frigio, o directamente la idea «Perreo oscuro».
+- Bajo «Pedal de tónica» o «Dembow»; melodía «Gancho».
+- Si la melodía se siente llena, en la vista completa baja la densidad: el espacio es parte del gancho.
+</details>
