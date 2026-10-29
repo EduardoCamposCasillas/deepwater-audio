@@ -18,6 +18,7 @@
 #include "deepwater/theory/Text.h"
 #include "deepwater/theory/Melody.h"
 #include "Lines.h"
+#include "ProgressionEdit.h"
 #include "midi/ChordTrigger.h"
 #include "midi/EventLog.h"
 #include "midi/KeyListener.h"
@@ -814,49 +815,54 @@ NoteLists split (const std::vector<Event>& events, int before)
 void testProgressionMatchesRender()
 {
     std::printf ("Progresion en vivo = renderProgression: cada ataque y cada note-off en su muestra exacta, con bloques "
-                 "al azar, en los 9 ritmos y los 3 voicings, con y sin bajo\n");
+                 "al azar, en los 9 ritmos y los 3 voicings, con y sin bajo; tambien con 16 pasos\n");
 
     constexpr int sixteenth = 6000; // muestras a 120 BPM y 48 kHz
-    const auto progression = progressionOf ("i bVI bIII bVII7", { 4, 2, 2, 8 });
     const th::Key aMinor { th::notes::A, th::Mode::aeolian };
     Random random { 777 };
-    for (int rhythm = 0; rhythm < th::rhythmPatternCount; ++rhythm)
-        for (int style = 0; style < th::voicingStyleCount; ++style)
-            for (const bool bass : { false, true })
-            {
-                const auto settings = progressionSettings (static_cast<th::VoicingStyle> (style), rhythm, bass);
-                TimedRig rig;
-                rig.stage.setProgression (progression);
-                const long long length = 2LL * progression.totalBeats() * 4 * sixteenth; // dos vueltas
-                rig.runUntil (length + 100, settings, random, { on (60, 0, 110), off (60, static_cast<int> (length)) });
-
-                th::RenderOptions options;
-                options.style = settings.voicing;
-                options.tonicNote = 57;
-                options.bass = bass;
-                options.rhythm = rhythm;
-                options.velocity = 110;
-                options.loops = 2;
-                std::vector<Event> expected;
-                for (const auto& e : th::renderProgression (progression, aMinor, options))
+    // La segunda, con el máximo de pasos (16 desde la Fase 8) y duraciones de 1 a 6 tiempos.
+    const std::array progressions { progressionOf ("i bVI bIII bVII7", { 4, 2, 2, 8 }),
+                                    progressionOf ("i bVI bIII bVII iv v i bII bVI bVII i iv bIII bVII bII i",
+                                                   { 2, 1, 1, 2, 3, 1, 2, 2, 1, 1, 4, 2, 1, 1, 2, 6 }) };
+    CHECK (progressions[1].steps.size() == static_cast<std::size_t> (th::maxProgressionSteps));
+    for (const auto& progression : progressions)
+        for (int rhythm = 0; rhythm < th::rhythmPatternCount; ++rhythm)
+            for (int style = 0; style < th::voicingStyleCount; ++style)
+                for (const bool bass : { false, true })
                 {
-                    const int start = static_cast<int> (e.start * 4 * sixteenth + 0.5);
-                    const int end = static_cast<int> ((e.start + e.length) * 4 * sixteenth + 0.5);
-                    expected.push_back (on (e.note, start, e.velocity));
-                    if (end < length)
-                        expected.push_back (off (e.note, end));
+                    const auto settings = progressionSettings (static_cast<th::VoicingStyle> (style), rhythm, bass);
+                    TimedRig rig;
+                    rig.stage.setProgression (progression);
+                    const long long length = 2LL * progression.totalBeats() * 4 * sixteenth; // dos vueltas
+                    rig.runUntil (length + 100, settings, random, { on (60, 0, 110), off (60, static_cast<int> (length)) });
+
+                    th::RenderOptions options;
+                    options.style = settings.voicing;
+                    options.tonicNote = 57;
+                    options.bass = bass;
+                    options.rhythm = rhythm;
+                    options.velocity = 110;
+                    options.loops = 2;
+                    std::vector<Event> expected;
+                    for (const auto& e : th::renderProgression (progression, aMinor, options))
+                    {
+                        const int start = static_cast<int> (e.start * 4 * sixteenth + 0.5);
+                        const int end = static_cast<int> ((e.start + e.length) * 4 * sixteenth + 0.5);
+                        expected.push_back (on (e.note, start, e.velocity));
+                        if (end < length)
+                            expected.push_back (off (e.note, end));
+                    }
+                    // Lo que suena al soltar la tecla (en 'length') se apaga ahí: se compara antes.
+                    const auto got = split (rig.out, static_cast<int> (length));
+                    const auto want = split (expected, static_cast<int> (length));
+                    const bool same = got.ons == want.ons && got.offs == want.offs && got.ons.size() >= 2 * 4 * 3 && ! got.offs.empty();
+                    if (! same)
+                        std::printf ("    ritmo %d, voicing %d, bajo %d: %d/%d note-on, %d/%d note-off\n", rhythm, style, bass ? 1 : 0,
+                                     static_cast<int> (got.ons.size()), static_cast<int> (want.ons.size()), static_cast<int> (got.offs.size()),
+                                     static_cast<int> (want.offs.size()));
+                    CHECK (same);
+                    CHECK (rig.receiver.sounding() == 0 && rig.maxPerNote <= 1);
                 }
-                // Lo que suena al soltar la tecla (en 'length') se apaga ahí: se compara antes.
-                const auto got = split (rig.out, static_cast<int> (length));
-                const auto want = split (expected, static_cast<int> (length));
-                const bool same = got.ons == want.ons && got.offs == want.offs && got.ons.size() >= 2 * 4 * 3 && ! got.offs.empty();
-                if (! same)
-                    std::printf ("    ritmo %d, voicing %d, bajo %d: %d/%d note-on, %d/%d note-off\n", rhythm, style, bass ? 1 : 0,
-                                 static_cast<int> (got.ons.size()), static_cast<int> (want.ons.size()), static_cast<int> (got.offs.size()),
-                                 static_cast<int> (want.offs.size()));
-                CHECK (same);
-                CHECK (rig.receiver.sounding() == 0 && rig.maxPerNote <= 1);
-            }
 }
 
 void testProgressionFollowsHost()
@@ -1442,6 +1448,78 @@ void testEventLog()
     CHECK (received + static_cast<int> (shared.droppedCount()) == total);
 }
 
+void testProgressionEdit()
+{
+    std::printf ("Linea de progresion (Fase 8): mover, cambiar la duracion, insertar y quitar; que hay bajo el raton, "
+                 "donde cae un paso arrastrado y la posicion de FL en la vuelta\n");
+
+    const auto text = [] (const th::Progression& p) {
+        std::string result;
+        for (const auto& s : p.steps)
+            result += (result.empty() ? "" : " ") + th::romanNumeralText (s.numeral, { false, 5 });
+        return result;
+    };
+    using namespace tidechart;
+    const auto reggaeton = progressionOf ("i bVI bIII bVII", { 4, 2, 2, 8 });
+
+    // Mover: 'to' es la posición final; fuera de rango se ajusta; mover a sí mismo no cambia nada.
+    CHECK (text (moveStep (reggaeton, 0, 3)) == "bVI bIII bVII i");
+    CHECK (text (moveStep (reggaeton, 3, 0)) == "bVII i bVI bIII");
+    CHECK (text (moveStep (reggaeton, 1, 2)) == "i bIII bVI bVII");
+    CHECK (moveStep (reggaeton, 2, 2) == reggaeton && moveStep (reggaeton, 9, 0) == reggaeton);
+    CHECK (text (moveStep (reggaeton, 0, 99)) == "bVI bIII bVII i");
+    CHECK (moveStep (reggaeton, 3, 0).steps[0].beats == 8); // la duración viaja con el paso
+    for (int from = 0; from < 4; ++from)
+        for (int to = 0; to < 4; ++to)
+            CHECK (moveStep (moveStep (reggaeton, from, to), to, from) == reggaeton);
+
+    // Duración: se corren los de después; se limita a 1..16.
+    CHECK (resizeStep (reggaeton, 1, 6).totalBeats() == 20 && Timeline::startBeat (resizeStep (reggaeton, 1, 6), 2) == 10.0);
+    CHECK (resizeStep (reggaeton, 0, 0).steps[0].beats == 1 && resizeStep (reggaeton, 0, 40).steps[0].beats == th::maxStepBeats);
+    CHECK (resizeStep (reggaeton, 7, 2) == reggaeton);
+
+    // Insertar y quitar; nunca más de 16 pasos.
+    const th::ProgressionStep flatTwo { *th::parseRomanNumeral ("bII"), 4 };
+    CHECK (text (insertStep (reggaeton, 1, flatTwo)) == "i bII bVI bIII bVII");
+    CHECK (text (insertStep (reggaeton, 99, flatTwo)) == "i bVI bIII bVII bII");
+    CHECK (text (insertStep ({}, 0, flatTwo)) == "bII");
+    th::Progression full;
+    for (int i = 0; i < th::maxProgressionSteps; ++i)
+        full = insertStep (full, i, flatTwo);
+    CHECK (full.steps.size() == static_cast<std::size_t> (th::maxProgressionSteps) && insertStep (full, 0, { {}, 4 }) == full);
+    CHECK (text (removeStep (reggaeton, 0)) == "bVI bIII bVII" && removeStep (reggaeton, 9) == reggaeton);
+
+    // Geometría: 16 tiempos en 800 px = 50 px por tiempo, desde x = 100. Los pasos van de 100–300, 300–400, 400–500, 500–900.
+    const auto line = Timeline::fit (reggaeton, 100.0, 800.0);
+    CHECK (std::abs (line.pixelsPerBeat - 50.0) < 1.0e-9 && std::abs (line.x (4.0) - 300.0) < 1.0e-9 && std::abs (line.beatAt (300.0) - 4.0) < 1.0e-9);
+    CHECK (Timeline::fit (progressionOf ("i bII"), 0.0, 800.0).pixelsPerBeat == 50.0); // 2 compases: se ven 4
+    CHECK (Timeline::fit (progressionOf ("i bVI bIII bVII i bVI"), 0.0, 960.0).pixelsPerBeat == 40.0); // 24 tiempos
+    CHECK (line.hit (reggaeton, 150.0).step == 0 && ! line.hit (reggaeton, 150.0).edge);
+    CHECK (line.hit (reggaeton, 298.0).step == 0 && line.hit (reggaeton, 298.0).edge);
+    CHECK (line.hit (reggaeton, 303.0).step == 0 && line.hit (reggaeton, 303.0).edge);  // a la izquierda del siguiente
+    CHECK (line.hit (reggaeton, 310.0).step == 1 && ! line.hit (reggaeton, 310.0).edge);
+    CHECK (line.hit (reggaeton, 897.0).step == 3 && line.hit (reggaeton, 897.0).edge);  // el borde del último, para alargarlo
+    CHECK (line.hit (reggaeton, 99.0).step == -1 && line.hit (reggaeton, 910.0).step == -1);
+    // Un paso de 1 tiempo a 10 px por tiempo es más angosto que 3 zonas de borde: se agarra entero, no por el borde.
+    const auto tight = Timeline { 0.0, 10.0 };
+    CHECK (tight.hit (progressionOf ("i bII", { 1, 4 }), 9.0).step == 0 && ! tight.hit (progressionOf ("i bII", { 1, 4 }), 9.0).edge);
+
+    // Arrastrar el i (centro en 200) hacia la derecha: pasa al ♭VI (centro en 350), al ♭III (450) y al ♭VII (700).
+    CHECK (line.dropIndex (reggaeton, 0, 200.0) == 0 && line.dropIndex (reggaeton, 0, 360.0) == 1);
+    CHECK (line.dropIndex (reggaeton, 0, 460.0) == 2 && line.dropIndex (reggaeton, 0, 720.0) == 3);
+    CHECK (line.dropIndex (reggaeton, 3, 120.0) == 0 && line.dropIndex (reggaeton, 3, 900.0) == 3);
+
+    // Arrastrar un borde: redondea al tiempo más cercano y se limita.
+    CHECK (line.resizedBeats (reggaeton, 0, 300.0, 324.0) == 4 && line.resizedBeats (reggaeton, 0, 300.0, 326.0) == 5);
+    CHECK (line.resizedBeats (reggaeton, 0, 300.0, 140.0) == 1 && line.resizedBeats (reggaeton, 0, 300.0, 1000.0) == th::maxStepBeats);
+    CHECK (line.resizedBeats (reggaeton, 3, 900.0, 2000.0) == th::maxStepBeats);
+
+    // FL dentro de la vuelta (16 tiempos): el resto, también antes del principio.
+    CHECK (loopBeat (reggaeton, 0.0) == 0.0 && loopBeat (reggaeton, 17.5) == 1.5 && loopBeat (reggaeton, -1.0) == 15.0);
+    CHECK (loopBeat ({}, 3.0) == -1.0);
+    CHECK (reggaeton.stepAt (static_cast<long long> (loopBeat (reggaeton, 36.0) * 4)) == 1); // 36 → tiempo 4 de la vuelta: el ♭VI
+}
+
 void testNoteNames()
 {
     std::printf ("Nombres como FL (C5 = 60, A5 = 69) y descripciones del monitor\n");
@@ -1480,6 +1558,7 @@ int main()
     testLinesFollowHost();
     testMelodyCapture();
     testKeyListener();
+    testProgressionEdit();
     testEventLog();
     testNoteNames();
 

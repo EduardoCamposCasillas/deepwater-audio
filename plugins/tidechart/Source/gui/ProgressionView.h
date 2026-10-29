@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <string>
@@ -16,6 +18,7 @@
 #include "gui/TheoryNames.h"
 #include "midi/ChordTrigger.h"
 #include "Parameters.h"
+#include "ProgressionEdit.h"
 #include "TransportSnapshot.h"
 
 namespace tidechart::gui
@@ -24,10 +27,13 @@ namespace tidechart::gui
 // El constructor de progresiones (Fase 4). Arriba, cómo suena: qué hacen las teclas (cada una su acorde, o cualquiera la
 // progresión), el ritmo de los acordes y el voicing. Debajo, la progresión: plantillas, el texto en números romanos
 // (se puede escribir: "i bVI bIII bVII"), "Agregar con clic" (los clics en la paleta la van armando) y vaciar.
-// Cada paso muestra su grado, su acorde, su función y cuántos tiempos dura; si no es de la escala, de qué modo se tomó
-// prestado. Mantener pulsado un paso lo hace sonar; clic derecho = duración, tipo de acorde, mover o quitar; la rueda
-// cambia la duración. El paso que corresponde a la posición de FL se enciende, y la tira de abajo dibuja el patrón
-// rítmico con la semicorchea actual.
+// Fase 8: la progresión es una línea de tiempo, como una pista de la Playlist de FL: cada paso mide lo que dura (al
+// menos se ven 4 compases), con los compases numerados arriba y la posición de FL como una línea. Cada paso muestra su
+// grado, su acorde y cuántos tiempos dura; si no es de la escala, de qué modo se tomó prestado. Mantener pulsado un
+// paso lo hace sonar; arrastrarlo lo mueve; arrastrar su borde derecho lo alarga o acorta (de a un tiempo); la rueda
+// también cambia la duración; clic derecho = cambiar el acorde, tipo, duración, duplicar o quitar. El "+" del final
+// agrega un acorde de la escala o prestado. Lo arrastrado se aplica al soltar (un solo cambio para el audio y las
+// líneas). La tira de abajo dibuja el patrón rítmico con la semicorchea actual.
 // "Otra idea" pasa a la plantilla siguiente: la forma rápida de probar progresiones distintas sin saber teoría.
 // Vista simple: sin el voicing ni el texto romano (siguen como estén; se cambian en la vista completa).
 class ProgressionView final : public juce::Component, public juce::TooltipClient
@@ -113,7 +119,7 @@ public:
 
     ~ProgressionView() override
     {
-        if (pressedStep >= 0)
+        if (previewing)
             callbacks.stopPreview();
     }
 
@@ -135,7 +141,8 @@ public:
         auto updated = progression;
         if (static_cast<int> (updated.steps.size()) >= deepwater::theory::maxProgressionSteps)
         {
-            info = names::utf8 ("La progresi\xc3\xb3n tiene 8 pasos como m\xc3\xa1ximo: quita alguno (clic derecho) para agregar m\xc3\xa1s.");
+            info = names::utf8 ("La progresi\xc3\xb3n tiene ") + juce::String (deepwater::theory::maxProgressionSteps)
+                   + names::utf8 (" pasos como m\xc3\xa1ximo: quita alguno (clic derecho) para agregar m\xc3\xa1s.");
             repaint();
             return;
         }
@@ -161,18 +168,31 @@ public:
         step = transport.progressionStep;
         sounding = transport.progressionSounding;
         rhythmStep = transport.rhythmStep;
+
+        // La línea de FL: solo con un host (sin él, el reloj libre del Standalone no es la canción).
+        const double beat = transport.source == deepwater::dsp::ClockSource::host ? loopBeat (progression, transport.ppq) : -1.0;
+        const bool playheadMoved = (beat < 0.0) != (playheadBeat < 0.0) || std::abs (beat - playheadBeat) * timeline.pixelsPerBeat > 0.5;
+        playheadBeat = beat;
+
         if (keyChanged)
             rebuild();
         else if (changed)
             repaint();
+        else if (playheadMoved)
+            repaint (lineArea.expanded (2));
     }
 
     juce::String getTooltip() override
     {
-        if (tileAt (getMouseXYRelative()) >= 0)
-            return names::utf8 ("Mant\xc3\xa9n pulsado para escucharlo. Clic derecho: duraci\xc3\xb3n, tipo de acorde, mover o quitar. "
-                                "Rueda: m\xc3\xa1s o menos tiempos.");
-        if (rhythmArea.contains (getMouseXYRelative()))
+        const auto mouse = getMouseXYRelative();
+        if (addArea.contains (mouse))
+            return names::utf8 ("Agrega un acorde al final: de la escala o prestado de otro modo. Tambi\xc3\xa9n puedes encender "
+                                "\xc2\xab" "Agregar con clic\xc2\xbb y elegirlos en la paleta.");
+        if (const auto h = hitAt (mouse); h.step >= 0)
+            return h.edge ? names::utf8 ("Arrastra el borde para alargar o acortar el acorde (de a un tiempo); los de despu\xc3\xa9s se corren.")
+                          : names::utf8 ("Mant\xc3\xa9n pulsado para escucharlo; arr\xc3\xa1stralo para moverlo. Clic derecho: cambiar el acorde, "
+                                         "tipo, duraci\xc3\xb3n, duplicar o quitar. Rueda: m\xc3\xa1s o menos tiempos.");
+        if (rhythmArea.contains (mouse))
             return names::rhythmDescription (settings.rhythm);
         return {};
     }
@@ -205,11 +225,13 @@ public:
         area.removeFromBottom (4);
         rhythmArea = area.removeFromBottom (20);
         area.removeFromBottom (8);
+        // La línea: la regla de compases arriba, los pasos debajo y, a la derecha, el "+".
+        addArea = area.removeFromRight (addWidth).withTrimmedTop (rulerHeight);
+        area.removeFromRight (6);
+        lineArea = area;
+        rulerArea = area.removeFromTop (rulerHeight);
         stepsArea = area;
-        constexpr int gap = 6;
-        const int width = (stepsArea.getWidth() - (deepwater::theory::maxProgressionSteps - 1) * gap) / deepwater::theory::maxProgressionSteps;
-        for (int i = 0; i < deepwater::theory::maxProgressionSteps; ++i)
-            tileBounds[static_cast<std::size_t> (i)] = { stepsArea.getX() + i * (width + gap), stepsArea.getY(), width, stepsArea.getHeight() };
+        layoutTimeline();
     }
 
     void paint (juce::Graphics& g) override
@@ -218,46 +240,7 @@ public:
         g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
         g.drawText (names::utf8 ("PROGRESI\xc3\x93N"), getLocalBounds().removeFromTop (26).removeFromLeft (100), juce::Justification::centredLeft);
 
-        const bool active = settings.enabled;
-        const bool progressionMode = settings.playMode == midi::PlayMode::progression;
-        for (int i = 0; i < deepwater::theory::maxProgressionSteps; ++i)
-        {
-            const auto bounds = tileBounds[static_cast<std::size_t> (i)].toFloat();
-            if (i >= static_cast<int> (tiles.size()))
-            {
-                g.setColour (theme::panelOutline.withAlpha (0.6f));
-                g.drawRoundedRectangle (bounds.reduced (0.5f), 5.0f, 1.0f);
-                if (i == static_cast<int> (tiles.size()))
-                {
-                    g.setColour (theme::dimText.withAlpha (0.7f));
-                    g.setFont (juce::FontOptions (10.5f));
-                    g.drawFittedText (names::utf8 ("+ un acorde\n(clic en la paleta)"), bounds.reduced (4.0f).toNearestInt(), juce::Justification::centred, 2);
-                }
-                continue;
-            }
-            const auto& tile = tiles[static_cast<std::size_t> (i)];
-            const auto colour = names::functionColour (tile.function);
-            const bool here = i == step;
-            const bool lit = here && sounding;
-            g.setColour (lit ? colour.withAlpha (0.28f) : (pressedStep == i ? theme::control : theme::display));
-            g.fillRoundedRectangle (bounds, 5.0f);
-            g.setColour (here ? (progressionMode ? colour : theme::dimText) : theme::panelOutline);
-            g.drawRoundedRectangle (bounds.reduced (0.5f), 5.0f, here ? 1.8f : 1.0f);
-            g.setColour (colour.withAlpha (active ? 0.9f : 0.35f));
-            g.fillRoundedRectangle (bounds.withHeight (4.0f).reduced (6.0f, 0.0f).translated (0.0f, 4.0f), 2.0f);
-
-            auto inner = bounds.reduced (6.0f, 9.0f);
-            g.setColour (active ? theme::text : theme::dimText);
-            g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
-            g.drawText (tile.roman, inner.removeFromTop (20.0f), juce::Justification::centred);
-            g.setColour (active ? colour : theme::dimText);
-            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-            g.drawText (tile.symbol, inner.removeFromTop (16.0f), juce::Justification::centred);
-            g.setColour (tile.borrowed ? theme::freeRunning : theme::dimText);
-            g.setFont (juce::FontOptions (10.0f));
-            g.drawText (tile.detail, inner.removeFromTop (13.0f), juce::Justification::centred);
-        }
-
+        drawTimeline (g);
         drawRhythm (g);
 
         g.setFont (juce::FontOptions (11.5f));
@@ -265,34 +248,82 @@ public:
         g.drawFittedText (info, infoArea, juce::Justification::centredLeft, 2, 1.0f);
     }
 
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const auto h = hitAt (e.getPosition());
+        setMouseCursor (h.edge ? juce::MouseCursor::LeftRightResizeCursor
+                               : (h.step >= 0 || (canAdd() && addArea.contains (e.getPosition())) ? juce::MouseCursor::PointingHandCursor
+                                                                                                 : juce::MouseCursor::NormalCursor));
+    }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
-        const int index = tileAt (e.getPosition());
-        if (index < 0)
+        if (addArea.contains (e.getPosition()))
+        {
+            if (canAdd())
+                showAddMenu();
+            return;
+        }
+        const auto h = hitAt (e.getPosition());
+        if (h.step < 0)
             return;
         if (e.mods.isPopupMenu())
         {
-            showMenu (index);
+            showMenu (h.step);
             return;
         }
-        pressedStep = index;
-        callbacks.preview (progression.steps[static_cast<std::size_t> (index)].numeral);
+        drag = h.edge ? Drag::resize : Drag::pending;
+        dragStep = h.step;
+        pressX = dragX = e.position.x;
+        grabOffset = pressX - static_cast<float> (timeline.x (Timeline::startBeat (progression, h.step)));
+        if (! h.edge)
+        {
+            callbacks.preview (progression.steps[static_cast<std::size_t> (h.step)].numeral);
+            previewing = true;
+        }
+        repaint();
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (drag == Drag::none)
+            return;
+        dragX = e.position.x;
+        if (drag == Drag::pending && std::abs (dragX - pressX) > 4.0f)
+        {
+            drag = Drag::move; // ya no es escuchar: es mover
+            stopPreview();
+        }
+        if (drag == Drag::resize)
+        {
+            const int beats = timeline.resizedBeats (progression, dragStep, pressX, dragX);
+            info = tiles[static_cast<std::size_t> (dragStep)].roman + ": " + beatsText (beats)
+                   + names::utf8 (" \xc2\xb7 suelta para aplicarlo");
+        }
         repaint();
     }
 
     void mouseUp (const juce::MouseEvent&) override
     {
-        if (pressedStep < 0)
-            return;
-        pressedStep = -1;
-        callbacks.stopPreview();
+        const auto finished = drag;
+        const auto edited = draggedProgression();
+        drag = Drag::none;
+        stopPreview();
+        if ((finished == Drag::move || finished == Drag::resize) && ! (edited == progression))
+        {
+            commit (edited);
+            info = {};
+        }
+        else if (finished == Drag::resize)
+            info = {};
+        layoutTimeline();
         repaint();
     }
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
-        const int index = tileAt (e.getPosition());
-        if (index < 0 || wheel.deltaY == 0.0f)
+        const int index = hitAt (e.getPosition()).step;
+        if (index < 0 || wheel.deltaY == 0.0f || drag != Drag::none)
             return;
         auto updated = progression;
         auto& beats = updated.steps[static_cast<std::size_t> (index)].beats;
@@ -303,17 +334,77 @@ public:
 private:
     struct Tile
     {
-        juce::String roman, symbol, detail;
+        juce::String roman, symbol, origin; // origin: " · de frigio" si es prestado
         deepwater::theory::HarmonicFunction function = deepwater::theory::HarmonicFunction::tonic;
         bool borrowed = false;
     };
 
-    [[nodiscard]] int tileAt (juce::Point<int> point) const
+    // Lo que se arrastra: nada, un clic que todavía puede ser escuchar o mover, mover un paso, o su borde derecho.
+    enum class Drag
     {
-        for (int i = 0; i < static_cast<int> (tiles.size()); ++i)
-            if (tileBounds[static_cast<std::size_t> (i)].contains (point))
-                return i;
-        return -1;
+        none,
+        pending,
+        move,
+        resize
+    };
+
+    static constexpr int rulerHeight = 13;
+    static constexpr int addWidth = 58;
+
+    [[nodiscard]] bool canAdd() const { return static_cast<int> (progression.steps.size()) < deepwater::theory::maxProgressionSteps; }
+
+    [[nodiscard]] static juce::String beatsText (int beats) { return juce::String (beats) + (beats == 1 ? " tiempo" : " tiempos"); }
+
+    // La escala de la línea: se ajusta al soltar y al cambiar la progresión, nunca mientras se arrastra (si no, el borde
+    // se escaparía del ratón al cambiar el largo total).
+    void layoutTimeline()
+    {
+        if (drag == Drag::none)
+            timeline = Timeline::fit (progression, stepsArea.getX(), stepsArea.getWidth());
+    }
+
+    [[nodiscard]] Timeline::Hit hitAt (juce::Point<int> point) const
+    {
+        if (! lineArea.contains (point))
+            return {};
+        return timeline.hit (progression, point.x);
+    }
+
+    // Arrastrando un paso: dónde caería.
+    [[nodiscard]] int dropTarget() const
+    {
+        const double width = timeline.x (Timeline::endBeat (progression, dragStep)) - timeline.x (Timeline::startBeat (progression, dragStep));
+        return timeline.dropIndex (progression, dragStep, dragX - grabOffset + width * 0.5);
+    }
+
+    // La progresión como quedaría al soltar lo que se arrastra (la que se dibuja mientras tanto).
+    [[nodiscard]] deepwater::theory::Progression draggedProgression() const
+    {
+        if (drag == Drag::move)
+            return moveStep (progression, dragStep, dropTarget());
+        if (drag == Drag::resize)
+            return resizeStep (progression, dragStep, timeline.resizedBeats (progression, dragStep, pressX, dragX));
+        return progression;
+    }
+
+    // Qué paso original se dibuja en cada posición (al mover, el arrastrado ocupa su sitio nuevo).
+    [[nodiscard]] std::vector<int> drawOrder() const
+    {
+        std::vector<int> order;
+        for (int i = 0; i < static_cast<int> (progression.steps.size()); ++i)
+            if (drag != Drag::move || i != dragStep)
+                order.push_back (i);
+        if (drag == Drag::move)
+            order.insert (order.begin() + std::min (dropTarget(), static_cast<int> (order.size())), dragStep);
+        return order;
+    }
+
+    void stopPreview()
+    {
+        if (! previewing)
+            return;
+        previewing = false;
+        callbacks.stopPreview();
     }
 
     void commit (const deepwater::theory::Progression& updated)
@@ -338,15 +429,15 @@ private:
             tile.roman = u (th::romanNumeralText (s.numeral, notation));
             tile.symbol = u (th::chordSymbol (chord, notation));
             tile.function = th::harmonicFunction (s.numeral);
-            tile.detail = juce::String (s.beats) + (s.beats == 1 ? " tiempo" : " tiempos");
             if (! th::isDiatonic (chord, settings.key))
             {
                 tile.borrowed = true;
                 const auto modes = th::modesContaining (chord, settings.key.tonic);
-                tile.detail << names::utf8 (" \xc2\xb7 ") << (modes.empty() ? names::utf8 ("crom\xc3\xa1tico") : names::borrowedFrom (modes[0]));
+                tile.origin << names::utf8 (" \xc2\xb7 ") << (modes.empty() ? names::utf8 ("crom\xc3\xa1tico") : names::borrowedFrom (modes[0]));
             }
             tiles.push_back (tile);
         }
+        layoutTimeline();
         refreshText();
         repaint();
     }
@@ -384,7 +475,9 @@ private:
             return;
         }
         commit (updated);
-        info = truncated ? names::utf8 ("Solo caben 8 pasos: se qued\xc3\xb3 con los primeros.") : juce::String();
+        info = truncated ? names::utf8 ("Solo caben ") + juce::String (deepwater::theory::maxProgressionSteps)
+                               + names::utf8 (" pasos: se qued\xc3\xb3 con los primeros.")
+                         : juce::String();
         refreshText();
     }
 
@@ -429,33 +522,193 @@ private:
                               true, numeral.type == current.numeral.type, [this, index, numeral] { setNumeral (index, numeral); });
         }
 
+        juce::PopupMenu chordMenu, insertMenu;
+        addChordChoices (chordMenu, [this, index] (const th::RomanNumeral& numeral) { setNumeral (index, numeral); });
+        addChordChoices (insertMenu, [this, index] (const th::RomanNumeral& numeral) { commit (insertStep (progression, index, { numeral, 4 })); });
+
         menu.addSectionHeader (tiles[static_cast<std::size_t> (index)].roman + "  " + tiles[static_cast<std::size_t> (index)].symbol);
-        menu.addSubMenu (names::utf8 ("Duraci\xc3\xb3n"), beatsMenu);
+        menu.addSubMenu ("Cambiar el acorde", chordMenu);
         menu.addSubMenu ("Tipo de acorde", typeMenu);
+        menu.addSubMenu (names::utf8 ("Duraci\xc3\xb3n"), beatsMenu);
         menu.addSeparator();
-        menu.addItem (names::utf8 ("Mover a la izquierda"), index > 0, false, [this, index] { swapSteps (index, index - 1); });
+        menu.addSubMenu ("Insertar antes", insertMenu, canAdd());
+        menu.addItem ("Duplicar", canAdd(), false, [this, index, current] { commit (insertStep (progression, index + 1, current)); });
+        menu.addItem (names::utf8 ("Mover a la izquierda"), index > 0, false, [this, index] { commit (moveStep (progression, index, index - 1)); });
         menu.addItem (names::utf8 ("Mover a la derecha"), index + 1 < static_cast<int> (progression.steps.size()), false,
-                      [this, index] { swapSteps (index, index + 1); });
-        menu.addItem ("Duplicar", static_cast<int> (progression.steps.size()) < th::maxProgressionSteps, false, [this, index] {
-            auto updated = progression;
-            th::Progression result;
-            for (int i = 0; i < static_cast<int> (updated.steps.size()); ++i)
+                      [this, index] { commit (moveStep (progression, index, index + 1)); });
+        menu.addItem ("Quitar", [this, index] { commit (removeStep (progression, index)); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (stepBounds (index).toNearestInt())));
+    }
+
+    // El "+": un acorde de la escala o prestado, al final.
+    void showAddMenu()
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("Agregar al final");
+        addChordChoices (menu, [this] (const deepwater::theory::RomanNumeral& numeral) { append (numeral); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (addArea)));
+    }
+
+    // Los 7 acordes de la escala (como la paleta: tríadas o séptimas) y, en un submenú por modo, los prestados.
+    void addChordChoices (juce::PopupMenu& menu, std::function<void (const deepwater::theory::RomanNumeral&)> pick) const
+    {
+        namespace th = deepwater::theory;
+        const th::Notation notation { true, 5 };
+        const auto label = [&] (const th::RomanNumeral& numeral, const th::Chord& chord) {
+            return juce::String::fromUTF8 ((th::romanNumeralText (numeral, notation) + "   " + th::chordSymbol (chord, notation)).c_str());
+        };
+        for (int d = 0; d < 7; ++d)
+            if (const auto chord = th::diatonicChord (settings.key, d, settings.size))
             {
-                result.steps.push_back (updated.steps[static_cast<std::size_t> (i)]);
-                if (i == index)
-                    result.steps.push_back (updated.steps[static_cast<std::size_t> (i)]);
+                const auto numeral = th::romanNumeralFor (*chord, settings.key);
+                menu.addItem (label (numeral, *chord) + "   (" + names::functionName (th::harmonicFunction (numeral)) + ")",
+                              [pick, numeral] { pick (numeral); });
             }
-            commit (result);
-        });
-        menu.addItem ("Quitar", [this, index] {
-            th::Progression result;
-            for (int i = 0; i < static_cast<int> (progression.steps.size()); ++i)
-                if (i != index)
-                    result.steps.push_back (progression.steps[static_cast<std::size_t> (i)]);
-            commit (result);
-        });
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (
-            localAreaToGlobal (tileBounds[static_cast<std::size_t> (index)])));
+
+        const auto borrowedList = th::borrowedChords (settings.key, settings.size);
+        if (borrowedList.empty())
+            return;
+        menu.addSeparator();
+        juce::PopupMenu borrowedMenu;
+        for (const auto source : th::parallelModeOrder (settings.key))
+        {
+            juce::PopupMenu modeMenu;
+            for (const auto& b : borrowedList)
+                if (b.source == source)
+                    modeMenu.addItem (label (b.numeral, b.chord), [pick, numeral = b.numeral] { pick (numeral); });
+            if (modeMenu.getNumItems() > 0)
+                borrowedMenu.addSubMenu (names::borrowedFrom (source), modeMenu);
+        }
+        menu.addSubMenu ("Prestados de otros modos", borrowedMenu);
+    }
+
+    // Dónde se dibuja el paso en la posición 'position' de 'shown' (la progresión tal como se ve).
+    [[nodiscard]] juce::Rectangle<float> stepBounds (int position, const deepwater::theory::Progression& shown) const
+    {
+        const auto x0 = static_cast<float> (timeline.x (Timeline::startBeat (shown, position)));
+        const auto x1 = static_cast<float> (timeline.x (Timeline::endBeat (shown, position)));
+        return { x0 + 1.0f, static_cast<float> (stepsArea.getY()), std::max (1.0f, x1 - x0 - 2.0f), static_cast<float> (stepsArea.getHeight()) };
+    }
+    [[nodiscard]] juce::Rectangle<float> stepBounds (int index) const { return stepBounds (index, progression); }
+
+    // Un paso: fondo (encendido si suena), la franja de su función y, según el ancho, grado, acorde y duración.
+    void drawStep (juce::Graphics& g, juce::Rectangle<float> bounds, int index, int beats, bool here, bool held, float alpha)
+    {
+        const auto& tile = tiles[static_cast<std::size_t> (index)];
+        const bool active = settings.enabled;
+        const auto colour = names::functionColour (tile.function);
+        const bool lit = here && sounding;
+        g.setColour ((lit ? colour.withAlpha (0.28f) : (held ? theme::control : theme::display)).withMultipliedAlpha (alpha));
+        g.fillRoundedRectangle (bounds, 4.0f);
+        g.setColour ((here ? (settings.playMode == midi::PlayMode::progression ? colour : theme::dimText) : theme::panelOutline).withMultipliedAlpha (alpha));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 4.0f, here ? 1.8f : 1.0f);
+        g.setColour (colour.withAlpha (active ? 0.9f : 0.35f));
+        g.fillRoundedRectangle (bounds.withHeight (3.0f).reduced (std::min (5.0f, bounds.getWidth() * 0.2f), 0.0f).translated (0.0f, 3.0f), 1.5f);
+
+        const float width = bounds.getWidth();
+        if (width < 12.0f)
+            return;
+        auto inner = bounds.reduced (3.0f, 0.0f).withTrimmedTop (8.0f);
+        g.setColour (active ? theme::text : theme::dimText);
+        g.setFont (juce::FontOptions (width >= 40.0f ? 16.0f : 12.0f, juce::Font::bold));
+        g.drawFittedText (tile.roman, inner.removeFromTop (19.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
+        if (width < 26.0f)
+            return;
+        g.setColour (active ? colour : theme::dimText);
+        g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+        g.drawFittedText (tile.symbol, inner.removeFromTop (15.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
+        g.setColour (tile.borrowed ? theme::freeRunning : theme::dimText);
+        g.setFont (juce::FontOptions (10.0f));
+        const auto detail = width >= 150.0f ? beatsText (beats) + tile.origin : (width >= 62.0f ? beatsText (beats) : juce::String (beats));
+        g.drawFittedText (detail, inner.removeFromTop (12.0f).toNearestInt(), juce::Justification::centred, 1, 0.8f);
+    }
+
+    // La regla (compases numerados, los tiempos como marcas), los pasos, lo que se arrastra, el "+" y la línea de FL.
+    void drawTimeline (juce::Graphics& g)
+    {
+        namespace th = deepwater::theory;
+        const auto shown = draggedProgression();
+        const int visibleBeats = static_cast<int> (std::floor (timeline.beatAt (stepsArea.getRight()) + 1.0e-6));
+        const double barWidth = 4.0 * timeline.pixelsPerBeat;
+        const int barLabelEvery = barWidth >= 18.0 ? 1 : (barWidth >= 9.0 ? 2 : 4);
+        g.setFont (juce::FontOptions (9.5f));
+        for (int beat = 0; beat <= visibleBeats; ++beat)
+        {
+            const auto x = static_cast<float> (timeline.x (beat));
+            const bool bar = beat % 4 == 0;
+            g.setColour (theme::dimText.withAlpha (bar ? 0.55f : 0.25f));
+            g.fillRect (x, static_cast<float> (rulerArea.getBottom() - (bar ? 6 : 3)), 1.0f, bar ? 6.0f : 3.0f);
+            if (bar && (beat / 4) % barLabelEvery == 0 && beat < visibleBeats)
+                g.drawText (juce::String (beat / 4 + 1), juce::Rectangle<float> (x + 3.0f, static_cast<float> (rulerArea.getY()), 24.0f, 9.0f),
+                            juce::Justification::centredLeft);
+        }
+        // Lo que está más allá de la vuelta: la progresión vuelve a empezar.
+        const auto loopEnd = static_cast<float> (timeline.x (shown.totalBeats()));
+        if (loopEnd < static_cast<float> (stepsArea.getRight()))
+        {
+            g.setColour (theme::panelOutline.withAlpha (0.35f));
+            g.fillRoundedRectangle (juce::Rectangle<float> (loopEnd + 2.0f, static_cast<float> (stepsArea.getY()),
+                                                            static_cast<float> (stepsArea.getRight()) - loopEnd - 2.0f, static_cast<float> (stepsArea.getHeight())),
+                                    4.0f);
+            if (static_cast<float> (stepsArea.getRight()) - loopEnd > 90.0f)
+            {
+                g.setColour (theme::dimText.withAlpha (0.6f));
+                g.setFont (juce::FontOptions (10.5f));
+                g.drawText (tiles.empty() ? names::utf8 ("Vac\xc3\xad" "a: pulsa + o elige una plantilla") : names::utf8 ("y vuelve a empezar"),
+                            juce::Rectangle<float> (loopEnd + 8.0f, static_cast<float> (stepsArea.getY()), static_cast<float> (stepsArea.getRight()) - loopEnd - 12.0f,
+                                                    static_cast<float> (stepsArea.getHeight())),
+                            juce::Justification::centred);
+            }
+        }
+
+        const auto order = drawOrder();
+        for (int position = 0; position < static_cast<int> (order.size()); ++position)
+        {
+            const int index = order[static_cast<std::size_t> (position)];
+            const auto bounds = stepBounds (position, shown);
+            if (drag == Drag::move && index == dragStep)
+            {
+                // El hueco donde caería.
+                g.setColour (theme::accent.withAlpha (0.7f));
+                g.drawRoundedRectangle (bounds.reduced (1.0f), 4.0f, 1.5f);
+                continue;
+            }
+            drawStep (g, bounds, index, shown.steps[static_cast<std::size_t> (position)].beats, index == step,
+                      previewing && index == dragStep, 1.0f);
+        }
+        if (drag == Drag::move)
+        {
+            const auto width = stepBounds (dragStep).getWidth();
+            const auto floating = juce::Rectangle<float> (dragX - grabOffset + 1.0f, static_cast<float> (stepsArea.getY()) - 3.0f, width,
+                                                          static_cast<float> (stepsArea.getHeight()));
+            drawStep (g, floating, dragStep, progression.steps[static_cast<std::size_t> (dragStep)].beats, false, true, 0.9f);
+        }
+        if (drag == Drag::resize)
+        {
+            g.setColour (theme::accent);
+            const auto edge = static_cast<float> (timeline.x (Timeline::endBeat (shown, dragStep)));
+            g.fillRect (edge - 1.0f, static_cast<float> (stepsArea.getY()), 2.0f, static_cast<float> (stepsArea.getHeight()));
+        }
+
+        // El "+".
+        const auto add = addArea.toFloat();
+        const bool canAddMore = canAdd();
+        g.setColour (theme::panelOutline.withAlpha (canAddMore ? 1.0f : 0.4f));
+        g.drawRoundedRectangle (add.reduced (0.5f), 4.0f, 1.0f);
+        g.setColour (canAddMore ? theme::dimText : theme::dimText.withAlpha (0.35f));
+        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.drawText ("+", add.withTrimmedBottom (18.0f), juce::Justification::centred);
+        g.setFont (juce::FontOptions (10.0f));
+        g.drawText (canAddMore ? "acorde" : juce::String (th::maxProgressionSteps) + names::utf8 (" m\xc3\xa1x."), add.withTrimmedTop (30.0f),
+                    juce::Justification::centredTop);
+
+        // FL: una línea en la posición de la canción dentro de la vuelta.
+        if (playheadBeat >= 0.0 && drag == Drag::none)
+        {
+            const auto x = static_cast<float> (timeline.x (playheadBeat));
+            g.setColour (theme::text.withAlpha (0.85f));
+            g.fillRect (x - 0.5f, static_cast<float> (rulerArea.getY()), 1.5f, static_cast<float> (stepsArea.getBottom() - rulerArea.getY()));
+        }
     }
 
     void setBeats (int index, int beats)
@@ -473,16 +726,6 @@ private:
             return;
         auto updated = progression;
         updated.steps[static_cast<std::size_t> (index)].numeral = numeral;
-        commit (updated);
-    }
-
-    void swapSteps (int a, int b)
-    {
-        const int count = static_cast<int> (progression.steps.size());
-        if (a < 0 || b < 0 || a >= count || b >= count)
-            return;
-        auto updated = progression;
-        std::swap (updated.steps[static_cast<std::size_t> (a)], updated.steps[static_cast<std::size_t> (b)]);
         commit (updated);
     }
 
@@ -534,12 +777,17 @@ private:
     deepwater::theory::Progression progression;
     midi::ChordSettings settings;
     std::vector<Tile> tiles;
-    std::array<juce::Rectangle<int>, deepwater::theory::maxProgressionSteps> tileBounds;
-    juce::Rectangle<int> stepsArea, rhythmArea, infoArea;
+    juce::Rectangle<int> lineArea, rulerArea, stepsArea, addArea, rhythmArea, infoArea;
+    Timeline timeline;
+    double playheadBeat = -1.0; // FL dentro de la vuelta, en tiempos (−1 = sin host o vacía)
+    Drag drag = Drag::none;
+    int dragStep = -1;
+    float pressX = 0.0f, dragX = 0.0f, grabOffset = 0.0f;
+    bool previewing = false;
     juce::String info;
     bool error = false, simple = false;
     int lastTemplate = -1;
-    int step = -1, rhythmStep = -1, pressedStep = -1;
+    int step = -1, rhythmStep = -1;
     bool sounding = false;
 };
 

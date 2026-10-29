@@ -90,6 +90,9 @@ plugins/tidechart/
                              # MelodyCapture (cuantizar y doblar sobre la vuelta lo que se tocó); sin JUCE
     MidiExport.h             # Fase 7: el clip de cada capa (acordes, bajo, melodía) = lo que suena en vivo; sin JUCE
     MidiFileExport.h         # Fase 7: el clip como .mid (juce::MidiFile, 960 ticks por negra) y la carpeta temporal
+    ProgressionEdit.h        # Fase 8: editar la progresión como línea de tiempo (moveStep, resizeStep, insertStep,
+                             # removeStep; Timeline: x de cada paso, qué hay bajo el ratón, dónde cae lo arrastrado;
+                             # loopBeat = FL dentro de la vuelta); sin JUCE, con tests en TidechartTests
     midi/NoteTracker.h       # mensajes cortos y la cuenta de lo que suena por canal y nota (releaseAll = los note-off que faltan)
     midi/MidiStage.h         # la etapa MIDI sin JUCE: todo lo que sale pasa por emit (contado); apagar y pánico pedidos
                              # desde cualquier hilo y atendidos en la muestra 0 del bloque siguiente; bypass ↔ acordes;
@@ -172,7 +175,7 @@ plugins/tidechart/
   - `libs/theory`: `Voicing.h` (`voiceChord`: todas las inversiones en 5 octavas; gana la que menos mueve las voces —
     emparejadas de grave a agudo— ×4 más la distancia al centro; el centro = la tríada de tónica y no se aleja más de
     ±7 semitonos; empate → estado fundamental), `Rhythm.h` (9 patrones en semicorcheas; el orden es formato),
-    `Progression.h` (pasos = `RomanNumeral` + tiempos 1..16, máximo 8 pasos; `stepAt` desde el principio de la
+    `Progression.h` (pasos = `RomanNumeral` + tiempos 1..16, máximo 16 pasos desde la Fase 8 (antes 8; las líneas, hasta 1024 notas); `stepAt` desde el principio de la
     canción; `voiceProgression` en dos pasadas para que la vuelta del loop también se mueva poco; `renderProgression`,
     las notas en el tiempo, es el oráculo de los tests y será lo que se arrastre al Piano Roll en la Fase 7) y
     `borrowedChords` en `Harmony.h` (por orden de uso: de una mayor, el eólico primero; de una menor, dórico, frigio,
@@ -335,7 +338,14 @@ pestañas de los MISMOS paneles (cada vista tiene `setSimple`), todas de 1180 ×
       estilo; variaciones a partir de una melodía existente.
 - [x] Fase 7 — Arrastrar y soltar el MIDI generado al Piano Roll de FL Studio (archivo `.mid` temporal escrito con
       `juce::MidiFile` y `DragAndDropContainer::performExternalDragDropOfFiles`).
-- [ ] Fase 8 — GUI: teclado con la escala resaltada, círculo de quintas, línea de progresión editable.
+- [ ] Fase 8 — GUI: teclado con la escala resaltada, círculo de quintas, línea de progresión editable. En tres partes
+      (acordado con el usuario al empezarla), cada una probada en FL:
+  - [ ] 8.1 — Línea de progresión editable (ancho = duración, arrastrar para mover y por el borde para la duración,
+        regla de compases, la posición de FL, "+" con los acordes de la escala y prestados); hasta 16 pasos.
+  - [ ] 8.2 — Teclado de 2 octavas con la escala en lugar de la línea de texto de la escala (tónica, notas del
+        acorde que suena o bajo el ratón; las que trae un prestado de fuera, en otro color).
+  - [ ] 8.3 — Círculo de quintas en una ventana al hacer clic en la tónica (reemplaza al menú): elegir la tonalidad,
+        la zona de los acordes de la escala, la relativa y dónde caen los prestados.
 - [ ] Fase 9 — Presets por género y estado de ánimo (reggaetón, oscuro/experimental, R&B, trap) con notas que
       expliquen por qué funciona cada progresión (formato de `libs/presets`; la progresión como "estado extra").
 - [ ] Fase 10 — Pulido y pluginval.
@@ -354,6 +364,28 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 8.1 IMPLEMENTADA (2026-10-28), pendiente de probar en FL Studio: la progresión como línea de tiempo.
+- `libs/theory`: `maxProgressionSteps` 8 → 16 y `maxLineNotes` 512 → 1024 (la vuelta más larga, 16 pasos de 16
+  tiempos = 64 compases, con 16 notas por compás). `DeepwaterTheoryTests`: la progresión más larga mide
+  `maxLineSixteenths` y la melodía más densa de cada estilo cabe entera (la última nota en el último compás).
+- Plugin: `ProgressionEdit.h`; `ProgressionView` con la línea en el mismo sitio que los 8 cuadros (no se agrandó nada):
+  regla de compases (numerados cada 1, 2 o 4 según el ancho, marcas de tiempo), al menos 4 compases visibles, lo que
+  sigue a la vuelta en gris ("y vuelve a empezar"), la línea de FL (solo con host), un paso arrastrado flota y un
+  recuadro marca dónde caerá; el borde se agarra a ±5 px (si el paso mide ≥ 15 px) y la escala de la línea se congela
+  mientras se arrastra; lo arrastrado se aplica al soltar (un solo `setProgression`). Según el ancho, cada paso muestra
+  grado + acorde + "4 tiempos · de frigio", o menos. Clic derecho: Cambiar el acorde, Tipo, Duración, Insertar antes,
+  Duplicar, mover, Quitar. "+" (58 px a la derecha): los 7 de la escala con su función y los prestados por modo.
+- Tests: `TidechartTests` +1 (mover, duración, insertar, quitar, hit-test con bordes, dónde cae un paso arrastrado,
+  `loopBeat`) y la progresión en vivo = `renderProgression` también con 16 pasos de 1 a 6 tiempos.
+  `TidechartProcessorTests`: 16 pasos viajan con el proyecto. Los procesadores locales de `testLayoutsAndState` y
+  `testLinesState` pasaron al heap (con las líneas de 1024 notas el procesador pesa ~250 KB y sus marcos llegaban a
+  1,2 MB: desbordaban la pila de 1 MB). Medido con `dumpbin /disasm` de los .obj: en el plugin el marco más grande es
+  `setStateInformation` (82 KB) y el `timerCallback` del editor 50 KB. `--snapshot` llama al temporizador 4 veces (con
+  una, a veces salía la paleta vacía).
+- Release con 0 warnings; `DeepwaterTheoryTests`, `TidechartTests` y `TidechartProcessorTests` pasan; pluginval
+  strictness 10 ampliado con `--randomise`: SUCCESS. Revisadas Crear y Ajustes con `--snapshot` (y con 16 pasos de 1 a
+  6 tiempos, con un cambio temporal en el arnés).
+
 GUI en pestañas (después de la Fase 7, 2026-10-28). Probada por el usuario en FL Studio: funciona. Problema reportado: en la laptop
 de 13" del usuario la vista completa (1360 × 960) solo cabía achicada al ~70 % y no se leía. Arreglo: en vez de
 "Vista simple / Vista completa", tres pestañas del mismo tamaño que la simple (1180 × 560, caben al 100 %):
@@ -545,4 +577,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 8 (GUI: teclado con la escala, círculo de quintas, progresión editable).
+Siguiente: probar la Fase 8.1 en FL Studio; después, 8.2 (teclado con la escala) y 8.3 (círculo de quintas).

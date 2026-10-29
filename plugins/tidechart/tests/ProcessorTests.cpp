@@ -721,7 +721,8 @@ void testLayoutsAndState()
 {
     std::printf ("Buses (sin entradas, salida mono o estereo), estado del proyecto y monitor de la GUI\n");
 
-    TidechartAudioProcessor processor;
+    auto processorOwner = std::make_unique<TidechartAudioProcessor>(); // en el heap: el procesador pesa ~250 KB (sus líneas)
+    auto& processor = *processorOwner;
     auto layout = processor.getBusesLayout();
     check (layout.inputBuses.isEmpty(), "sin entradas de audio");
     check (processor.acceptsMidi() && processor.producesMidi(), "MIDI de entrada y salida");
@@ -737,7 +738,8 @@ void testLayoutsAndState()
     setParameter (processor, tidechart::params::chordBass, 1.0f);
     juce::MemoryBlock state;
     processor.getStateInformation (state);
-    TidechartAudioProcessor restored;
+    auto restoredOwner = std::make_unique<TidechartAudioProcessor>(); // en el heap: el procesador pesa ~250 KB (sus líneas)
+    auto& restored = *restoredOwner;
     check (restored.currentChordSettings (false) == tidechart::midi::ChordSettings { true }, "por defecto: La menor, triadas, teclas blancas");
     restored.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
     check (restored.getParameters().getRawParameterValue (tidechart::params::bypass)->load() > 0.5f, "el bypass viaja con el proyecto");
@@ -757,7 +759,8 @@ void testLayoutsAndState()
     processor.setProgression (custom);
     juce::MemoryBlock withProgression;
     processor.getStateInformation (withProgression);
-    TidechartAudioProcessor reloaded;
+    auto reloadedOwner = std::make_unique<TidechartAudioProcessor>(); // en el heap: el procesador pesa ~250 KB (sus líneas)
+    auto& reloaded = *reloadedOwner;
     check (reloaded.getProgression() == TidechartAudioProcessor::defaultProgression(), "por defecto: i bVI bIII bVII");
     const auto before = reloaded.progressionChangeCount();
     reloaded.setStateInformation (withProgression.getData(), static_cast<int> (withProgression.getSize()));
@@ -771,6 +774,15 @@ void testLayoutsAndState()
     reloaded.getStateInformation (again);
     const auto xmlAgain = juce::AudioProcessor::getXmlFromBinary (again.getData(), static_cast<int> (again.getSize()));
     check (xmlAgain != nullptr && xmlAgain->getNumChildElements() == xml->getNumChildElements(), "la progresion no se duplica al guardar dos veces");
+    // Fase 8: hasta 16 pasos viajan enteros.
+    th::Progression longest;
+    for (int i = 0; i < th::maxProgressionSteps; ++i)
+        longest.steps.push_back ({ { 1 + i % 7, i % 3 == 0 ? -1 : 0, th::chordType (i % 2 == 0 ? "" : "m7") }, 1 + i });
+    processor.setProgression (longest);
+    juce::MemoryBlock withLongest;
+    processor.getStateInformation (withLongest);
+    reloaded.setStateInformation (withLongest.getData(), static_cast<int> (withLongest.getSize()));
+    check (reloaded.getProgression() == longest && longest.steps.size() == 16, "una progresion de 16 pasos viaja con el proyecto");
     // Un proyecto de la Fase 3 (sin progresión) carga la de fábrica.
     reloaded.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
     check (reloaded.getProgression() == TidechartAudioProcessor::defaultProgression(), "proyecto sin progresion: la de fabrica");
@@ -868,7 +880,8 @@ void testLines()
     melody.generator.style = th::MelodyStyle::sung;
     melody.generator.seed = 9;
     processor->setMelodySettings (melody);
-    check (processor->getLines().melody == th::generateMelody (processor->getProgression(), processor->currentChordSettings (false).key, melody.generator),
+    auto now = processor->getLines();
+    check (now.melody == th::generateMelody (processor->getProgression(), processor->currentChordSettings (false).key, melody.generator),
            "setMelodySettings genera con la progresion y la tonalidad de ahora");
     for (int block = 0; block < 40; ++block)
     {
@@ -886,7 +899,8 @@ void testLines()
     progression.steps[1].numeral = { 2, -1, th::chordType ("") }; // ♭II
     processor->setProgression (progression);
     processor->refreshLines();
-    check (! (processor->getLines().bass == before.bass) && processor->getLines().bass == th::generateBass (progression, th::Key { th::notes::A, th::Mode::aeolian }, before.bassSettings.generator),
+    now = processor->getLines();
+    check (! (now.bass == before.bass) && now.bass == th::generateBass (progression, th::Key { th::notes::A, th::Mode::aeolian }, before.bassSettings.generator),
            "la progresion cambio: el bajo se regenera");
     th::Line written;
     written.length = 64;
@@ -894,7 +908,8 @@ void testLines()
     processor->captureMelody (written);
     setParameter (*processor, id::keyTonic, 4.0f);
     processor->refreshLines();
-    check (processor->getLines().melody == written && processor->getLines().melodySettings.hasSource, "una melodia capturada no se regenera");
+    now = processor->getLines();
+    check (now.melody == written && now.melodySettings.hasSource, "una melodia capturada no se regenera");
 
     // Capturando, el MIDI pasa tal cual (como escuchando) y el monitor sabe si FL reproducía.
     processor->setCapturing (true);
@@ -919,7 +934,8 @@ void testLinesState()
 
     namespace th = deepwater::theory;
     namespace id = tidechart::params;
-    TidechartAudioProcessor processor;
+    auto processorOwner = std::make_unique<TidechartAudioProcessor>(); // en el heap: el procesador pesa ~250 KB (sus líneas)
+    auto& processor = *processorOwner;
     tidechart::BassSettings bass;
     bass.generator.style = th::BassStyle::walking;
     bass.generator.density = 0.8;
@@ -937,7 +953,8 @@ void testLinesState()
     juce::MemoryBlock state;
     processor.getStateInformation (state);
 
-    TidechartAudioProcessor reloaded;
+    auto reloadedOwner = std::make_unique<TidechartAudioProcessor>(); // en el heap: el procesador pesa ~250 KB (sus líneas)
+    auto& reloaded = *reloadedOwner;
     const auto changes = reloaded.linesChangeCount();
     reloaded.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
     const auto a = processor.getLines(), b = reloaded.getLines();
@@ -985,7 +1002,8 @@ void testLinesState()
             param->setAttribute ("value", param->getStringAttribute ("id") == "playChords" ? 1.0 : 0.0);
     juce::MemoryBlock oldState;
     juce::AudioProcessor::copyXmlToBinary (old, oldState);
-    TidechartAudioProcessor fresh;
+    auto freshOwner = std::make_unique<TidechartAudioProcessor>(); // en el heap: el procesador pesa ~250 KB (sus líneas)
+    auto& fresh = *freshOwner;
     fresh.setStateInformation (oldState.getData(), static_cast<int> (oldState.getSize()));
     const auto key = fresh.currentChordSettings (false).key;
     check (fresh.getLines().melody == th::generateMelody (fresh.getProgression(), key, th::MelodyOptions {})
@@ -1042,8 +1060,13 @@ int saveSnapshot (const juce::File& file, const juce::String& page)
         rig.run (block == 0 ? std::vector<Event> { { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), 0 } } : std::vector<Event> {}, 512);
         head.ppq += 512.0 * 2.0 / 48000.0;
     }
-    juce::Thread::sleep (100);
-    juce::Timer::callPendingTimersSynchronously();
+    // Varias vueltas del temporizador del editor: con una sola, a veces todavía no había leído el reloj publicado y la
+    // captura salía con la paleta vacía.
+    for (int tick = 0; tick < 4; ++tick)
+    {
+        juce::Thread::sleep (40);
+        juce::Timer::callPendingTimersSynchronously();
+    }
     // A tamaño original aunque el editor se haya achicado para caber en la pantalla.
     const auto* scaled = dynamic_cast<TidechartAudioProcessorEditor*> (editor.get());
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, scaled != nullptr ? 1.0f / scaled->currentScale() : 1.0f);

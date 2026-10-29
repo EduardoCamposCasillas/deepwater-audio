@@ -28,7 +28,7 @@ struct ProgressionStep
     constexpr bool operator== (const ProgressionStep&) const = default;
 };
 
-inline constexpr int maxProgressionSteps = 8;
+inline constexpr int maxProgressionSteps = 16; // 8 hasta la Fase 8 de Tidechart
 inline constexpr int maxStepBeats = 16;
 
 struct Progression

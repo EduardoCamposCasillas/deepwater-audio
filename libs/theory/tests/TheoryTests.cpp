@@ -1047,7 +1047,15 @@ void testChordScales()
     CHECK (lineLength (progressionOf ("i bVI bIII bVII")) == 64);
     CHECK (lineLength (progressionOf ("i bII")) == 64);                 // 2 compases → 2 vueltas
     CHECK (lineLength (progressionOf ("i bII i", { 2, 2, 2 })) == 72); // 6 tiempos → 3 vueltas
-    CHECK (lineLength (progressionOf ("i bVI bIII bVII i bVI bIII bVII", { 16, 16, 16, 16, 16, 16, 16, 16 })) == maxLineSixteenths);
+    // La progresión más larga (16 pasos de 16 tiempos = 64 compases) y la melodía más densa sobre ella caben enteras: la
+    // última nota cae en el último compás.
+    const auto longest = progressionOf ("i bVI bIII bVII i bVI bIII bVII i bVI bIII bVII i bVI bIII bVII", std::vector<int> (16, 16));
+    CHECK (longest.steps.size() == static_cast<std::size_t> (maxProgressionSteps) && lineLength (longest) == maxLineSixteenths);
+    for (int s = 0; s < melodyStyleCount; ++s)
+    {
+        const auto dense = generateMelody (longest, aMinor, { static_cast<MelodyStyle> (s), 1.0, 64, 81, 7 });
+        CHECK (dense.notes.size() < static_cast<std::size_t> (maxLineNotes) && ! dense.notes.empty() && dense.notes[dense.notes.size() - 1].start >= maxLineSixteenths - 16);
+    }
     CHECK (lineLength (Progression {}) == 0 && generateMelody (Progression {}, aMinor, {}).length == 0);
     CHECK (chordChangesAt (progressionOf ("i bII", { 4, 2 }), 16) && ! chordChangesAt (progressionOf ("i bII", { 4, 2 }), 8));
     CHECK (chordChangesAt (progressionOf ("i bII", { 4, 2 }), 24)); // la vuelta siguiente

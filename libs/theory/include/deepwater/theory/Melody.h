@@ -28,7 +28,7 @@ struct LineNote
     constexpr bool operator== (const LineNote&) const = default;
 };
 
-inline constexpr int maxLineNotes = 512;
+inline constexpr int maxLineNotes = 1024; // 16 por compás en la vuelta más larga (64 compases)
 inline constexpr int minLineSixteenths = 64; // una frase: 4 compases
 inline constexpr int maxLineSixteenths = maxProgressionSteps * maxStepBeats * sixteenthsPerQuarter;
 

@@ -934,3 +934,95 @@ ponga el sidechain (Ebb): compáralo con escribir el ritmo en las notas.
   vuelve a arrastrar.
 - **La octava de los acordes.** Se escriben cerca de C5, como la paleta; en vivo los subía o bajaba la tecla que
   tocabas. Si los querías en otra octava, selecciónalos en el Piano Roll y muévelos una octava (Ctrl + flechas).
+
+## Fase 8.1 — La progresión como línea de tiempo
+
+La progresión ya no son 8 cuadros iguales: es una **línea de tiempo**, como una pista de la Playlist de FL. Cada
+acorde mide lo que dura (uno de 2 tiempos es la mitad de ancho que uno de un compás), arriba están los compases
+numerados y una línea blanca marca dónde va FL. Se edita con el ratón: arrastrar un acorde lo mueve, arrastrar su
+borde derecho lo alarga o acorta, y el **+** del final agrega un acorde de la escala o prestado. Ahora caben **16
+pasos** (antes 8).
+
+### Conceptos aprendidos
+
+- **Ritmo armónico.** Cada cuánto cambia el acorde. No es el ritmo de los acordes (el dembow que los golpea): es cuánto
+  dura cada uno antes de pasar al siguiente. En la línea se **ve**: acordes anchos = armonía lenta, que deja respirar a
+  la voz; acordes angostos = armonía que empuja. Un acorde más largo que los demás pesa más (se siente como "llegar").
+- **Dónde cae el cambio.** Cambiar de acorde en el tiempo 1 del compás se siente estable; cambiar antes (en el tiempo 4
+  del compás anterior, o a mitad de compás) se siente como un empujón hacia adelante. Con la regla de compases arriba se
+  ve si un cambio cae en el 1 o fuera.
+- **La vuelta.** La progresión se repite desde el compás 1 de la canción. Lo gris a la derecha de la línea es "después
+  de la vuelta": ahí vuelve a empezar. Una vuelta de 4 u 8 compases encaja con las frases de una canción; una de 5 o 7
+  compases se siente rara (a veces a propósito).
+
+### Qué hace cada control
+
+- **Mantener pulsado un acorde**: suena (como antes).
+- **Arrastrarlo**: cambia de lugar; los demás se apartan y un recuadro marca dónde va a caer. Se aplica al soltar.
+- **Arrastrar el borde derecho** (el cursor cambia a ↔): lo alarga o acorta de a un tiempo (1 a 16). Los de después se
+  corren. La línea de información dice cuántos tiempos va a durar; se aplica al soltar.
+- **Rueda del ratón** sobre un acorde: un tiempo más o menos.
+- **Clic derecho**: **Cambiar el acorde** (por otro de la escala o prestado, conservando la duración), **Tipo de acorde**
+  (sus, séptimas, novenas...), **Duración**, **Insertar antes**, **Duplicar**, mover y **Quitar**.
+- **+**: agrega al final un acorde de la escala (con su función) o, en el submenú, uno prestado de cada modo.
+
+### Ejercicio guiado: el mismo i–♭VI–♭III–♭VII con tres ritmos armónicos
+
+1. La menor, plantilla i–♭VI–♭III–♭VII, ritmo Sostenido, Bajo en Fundamental, Melodía apagada. Play en FL: un acorde
+   por compás, armonía tranquila.
+2. Arrastra el borde del **i** hasta 8 tiempos (2 compases) y el de los otros tres hasta 2 tiempos cada uno. Misma
+   cantidad de compases (4), otra sensación: el i se queda, y los otros tres "corren" hacia la vuelta.
+3. Ahora al revés: i y ♭VI de 2 tiempos, ♭III de 4 y ♭VII de 8. Escucha cómo la vuelta "llega" al ♭VII y se queda
+   esperando, con tensión, antes de volver al i.
+4. Mira el piano roll de MELODÍA Y BAJO con cada versión: el bajo cambia de nota justo donde cambia el ancho.
+
+### Receta: el ♭II que llega antes
+
+Mi frigio, i–♭II, ritmo Dembow. Pon el **i de 6 tiempos** y el **♭II de 2**: el ♭II entra a mitad del segundo compás,
+como un empujón, y vuelve al i en el 1. Por qué funciona: el ♭II está a un semitono de la tónica (F contra E): es
+pura tensión, y si dura poco se oye como un adorno oscuro que "cae" a casa, el sonido del perreo oscuro. Si dura
+igual que el i, la tensión se vuelve parte del paisaje y pierde fuerza.
+
+### Reto (sin receta)
+
+Arma una progresión de **8 compases y al menos 6 acordes** en la que la mitad de los cambios no caigan en el tiempo 1 del
+compás, y que aun así se sienta estable al volver al principio.
+
+<details><summary>Pistas</summary>
+
+- Lo que da estabilidad es dónde está el i: si el i empieza en el compás 1 y dura más que los demás, todo lo de en medio
+  puede moverse.
+- Cambios a mitad de compás (acordes de 2 tiempos) en los compases 2, 4 y 6; los compases 1, 3, 5 y 7 empiezan con
+  un acorde nuevo en el tiempo 1.
+- Prueba a terminar la vuelta con un acorde corto (♭VII o V de 2 tiempos): empuja hacia el i del principio.
+</details>
+
+### Teoría aplicada: armonía rápida contra armonía lenta
+
+En el reggaetón el ritmo armónico suele ser **lento y parejo** (un acorde por compás, o dos compases cada uno): el
+movimiento lo pone el dembow y la voz, y la armonía es el piso. En el R&B y el neo-soul, en cambio, la armonía se mueve
+más (dos acordes por compás, cambios antes del 1) y es parte de la melodía. Cuando una progresión de reggaetón se
+siente "plana", alargar el i y acortar el último acorde (que empuje hacia el principio) suele bastar, sin cambiar los
+acordes.
+
+### Análisis de canciones
+
+Toma un tema de reggaetón y uno de R&B que te gusten. Con un metrónomo o la Playlist de FL, cuenta cada cuántos tiempos
+cambia el bajo (casi siempre el bajo marca el cambio de acorde). Arma la misma estructura en la línea de Tidechart
+(aunque no sean los mismos acordes) y compara: ¿cuál tiene un ritmo armónico más rápido? ¿Algún cambio cae antes del 1?
+
+### Vocabulario
+
+- **Ritmo armónico**: cada cuánto cambia el acorde (en un tema de reggaetón, casi siempre 1 por compás).
+- **Anticipación (armónica)**: el acorde siguiente llega antes del tiempo 1 (en el 4 del compás anterior o a mitad).
+- **Vuelta / loop**: la progresión entera, que se repite.
+- **Frase**: un grupo de compases que se siente completo (casi siempre 4 u 8).
+
+### Errores comunes
+
+- **Cambiar todo a la vez.** Si mueves los acordes y además cambias todas las duraciones, no sabes qué cambió la
+  sensación. Una cosa por vez, con play en FL.
+- **Vueltas de largo raro sin querer.** Si la vuelta dura 4 compases y medio, cada vuelta empieza en otro tiempo del
+  compás y la canción "se desarma". Mira la regla: el final de la vuelta debería caer en una línea de compás.
+- **Acordes de 1 tiempo en todos lados.** Con muchos cambios rápidos la armonía tapa la melodía y el dembow; usa los
+  cortos como empujón, no como regla.
