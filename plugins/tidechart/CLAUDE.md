@@ -324,7 +324,8 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-GUI minimalista (entre las Fases 6 y 7, 2026-10-28): vista simple por defecto y vista completa. Pendiente de probar en FL.
+GUI minimalista (entre las Fases 6 y 7, 2026-10-28): vista simple por defecto y vista completa. Probada por el usuario
+en FL Studio: funciona.
 - Vista simple 1180 × 560: TONALIDAD (tónica, modo y, en la misma fila, Escuchar → resultado → Usar) con los 7 acordes y
   los prestados; PROGRESIÓN (qué tocan las teclas, ritmo, plantillas, "Otra idea", agregar con clic, vaciar, pasos y
   patrón); la guía (qué hacer ahora según bypass, escuchar, modo, progresión vacía, FL parado, sin nota abajo, o qué
