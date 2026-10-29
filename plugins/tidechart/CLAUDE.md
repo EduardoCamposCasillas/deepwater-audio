@@ -359,7 +359,7 @@ pestañas de los MISMOS paneles (cada vista tiene `setSimple`), todas de 1180 ×
 - [ ] Fase 9 — Presets por género y estado de ánimo (reggaetón, oscuro/experimental, R&B, trap) con notas que
       expliquen por qué funciona cada progresión (formato de `libs/presets`; la progresión como "estado extra"). En dos
       partes (acordado con el usuario al empezarla; también: un preset NO cambia la tónica, sí el modo):
-  - [ ] 9.1 — El sistema: formato, barra de presets en la cabecera, la progresión y los ajustes de las líneas como
+  - [x] 9.1 — El sistema: formato, barra de presets en la cabecera, la progresión y los ajustes de las líneas como
         estado extra, tests; Init y uno por categoría.
   - [ ] 9.2 — La biblioteca de fábrica completa, con sus notas.
 - [ ] Fase 10 — Pulido y pluginval.
@@ -378,7 +378,7 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 9.1 IMPLEMENTADA (2026-10-29), pendiente de probar en FL Studio: el sistema de presets.
+Fase 9.1 COMPLETADA (2026-10-29). Probada por el usuario en FL Studio: funciona. El sistema de presets.
 - `presets/TidechartPresets.h/.cpp`: `<TidechartPreset>`, `.tcpreset`, `Documentos\Tidechart\Presets`; categorías Init,
   Reggaetón, Oscuro, R&B, Trap, Otros ("Oscuro / Experimental" no cabía en el botón del navegador). Excluidos: `bypass`,
   `keyTonic` (un preset no cambia la tónica de tu canción) y `keyMapping` (cómo tocas). Estado extra `<Composition>` con
@@ -649,4 +649,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 9.1 en FL Studio; después, 9.2 (la biblioteca de fábrica completa).
+Siguiente: Fase 9.2 (la biblioteca de fábrica completa).
