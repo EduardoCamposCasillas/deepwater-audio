@@ -341,13 +341,13 @@ pestañas de los MISMOS paneles (cada vista tiene `setSimple`), todas de 1180 ×
       estilo; variaciones a partir de una melodía existente.
 - [x] Fase 7 — Arrastrar y soltar el MIDI generado al Piano Roll de FL Studio (archivo `.mid` temporal escrito con
       `juce::MidiFile` y `DragAndDropContainer::performExternalDragDropOfFiles`).
-- [ ] Fase 8 — GUI: teclado con la escala resaltada, círculo de quintas, línea de progresión editable. En tres partes
+- [x] Fase 8 — GUI: teclado con la escala resaltada, círculo de quintas, línea de progresión editable. En tres partes
       (acordado con el usuario al empezarla), cada una probada en FL:
   - [x] 8.1 — Línea de progresión editable (ancho = duración, arrastrar para mover y por el borde para la duración,
         regla de compases, la posición de FL, "+" con los acordes de la escala y prestados); hasta 16 pasos.
   - [x] 8.2 — Teclado de 2 octavas con la escala en lugar de la línea de texto de la escala (tónica, notas del
         acorde que suena o bajo el ratón; las que trae un prestado de fuera, en otro color).
-  - [ ] 8.3 — Círculo de quintas en una ventana al hacer clic en la tónica (reemplaza al menú): elegir la tonalidad,
+  - [x] 8.3 — Círculo de quintas en una ventana al hacer clic en la tónica (reemplaza al menú): elegir la tonalidad,
         la zona de los acordes de la escala, la relativa y dónde caen los prestados.
 - [ ] Fase 9 — Presets por género y estado de ánimo (reggaetón, oscuro/experimental, R&B, trap) con notas que
       expliquen por qué funciona cada progresión (formato de `libs/presets`; la progresión como "estado extra").
@@ -367,7 +367,7 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 8.3 IMPLEMENTADA (2026-10-28), pendiente de probar en FL Studio: el círculo de quintas.
+Fase 8 COMPLETADA (2026-10-29). Fase 8.3 probada por el usuario en FL Studio (abrir el círculo, elegir, cerrar): funciona. El círculo de quintas.
 - `gui/CircleOfFifthsView.h` (340 × 392): C arriba, una quinta por casilla en el sentido del reloj; afuera las
   mayores, adentro las relativas menores (F♯/G♭ y E♭m abajo). Cada casilla = un acorde mayor o menor escrito en la
   tonalidad (`spellInKey`): de la escala → color de su función y su grado; prestado de los 8 que ofrece la paleta →
@@ -382,8 +382,7 @@ Fase 8.3 IMPLEMENTADA (2026-10-28), pendiente de probar en FL Studio: el círcul
   E♭, el borde entre C y G; el centro y las esquinas nada; el aro en La menor, Do mayor, Mi frigio, Sol mixolidio y Mi♭
   mayor). `--snapshot <png> circle`.
 - Release con 0 warnings; ctest de Tidechart y teoría pasan; pluginval strictness 10 ampliado con `--randomise`:
-  SUCCESS. Revisados el círculo (La menor y Mi frigio) y Crear con `--snapshot`. No probado con el ratón (abrir, elegir,
-  cerrar): lo prueba el usuario en FL.
+  SUCCESS. Revisados el círculo (La menor y Mi frigio) y Crear con `--snapshot`.
 
 Fase 8.2 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio: funciona. El teclado con la escala.
 - `gui/ScaleKeyboard.h`: 2 octavas (C a B), teclas grises (claras = de la escala, oscuras = fuera; el color queda para
@@ -611,4 +610,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 8.3 en FL Studio (con ella termina la Fase 8); después, Fase 9 (presets).
+Siguiente: Fase 9 (presets por género y estado de ánimo).
