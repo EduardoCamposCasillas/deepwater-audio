@@ -343,7 +343,7 @@ pestañas de los MISMOS paneles (cada vista tiene `setSimple`), todas de 1180 ×
       (acordado con el usuario al empezarla), cada una probada en FL:
   - [x] 8.1 — Línea de progresión editable (ancho = duración, arrastrar para mover y por el borde para la duración,
         regla de compases, la posición de FL, "+" con los acordes de la escala y prestados); hasta 16 pasos.
-  - [ ] 8.2 — Teclado de 2 octavas con la escala en lugar de la línea de texto de la escala (tónica, notas del
+  - [x] 8.2 — Teclado de 2 octavas con la escala en lugar de la línea de texto de la escala (tónica, notas del
         acorde que suena o bajo el ratón; las que trae un prestado de fuera, en otro color).
   - [ ] 8.3 — Círculo de quintas en una ventana al hacer clic en la tónica (reemplaza al menú): elegir la tonalidad,
         la zona de los acordes de la escala, la relativa y dónde caen los prestados.
@@ -365,7 +365,7 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 8.2 IMPLEMENTADA (2026-10-28), pendiente de probar en FL Studio: el teclado con la escala.
+Fase 8.2 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio: funciona. El teclado con la escala.
 - `gui/ScaleKeyboard.h`: 2 octavas (C a B), teclas grises (claras = de la escala, oscuras = fuera; el color queda para
   la tónica, en el verde de la función tónica con su letra, y para los puntos); el acorde mostrado como puntos del color
   de su función, en estado fundamental desde la fundamental en la 1.ª octava (lo que pasa de 2 octavas baja una), con
@@ -591,4 +591,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 8.2 en FL Studio; después, 8.3 (círculo de quintas).
+Siguiente: Fase 8.3 (círculo de quintas).
