@@ -340,7 +340,7 @@ pestañas de los MISMOS paneles (cada vista tiene `setSimple`), todas de 1180 ×
       `juce::MidiFile` y `DragAndDropContainer::performExternalDragDropOfFiles`).
 - [ ] Fase 8 — GUI: teclado con la escala resaltada, círculo de quintas, línea de progresión editable. En tres partes
       (acordado con el usuario al empezarla), cada una probada en FL:
-  - [ ] 8.1 — Línea de progresión editable (ancho = duración, arrastrar para mover y por el borde para la duración,
+  - [x] 8.1 — Línea de progresión editable (ancho = duración, arrastrar para mover y por el borde para la duración,
         regla de compases, la posición de FL, "+" con los acordes de la escala y prestados); hasta 16 pasos.
   - [ ] 8.2 — Teclado de 2 octavas con la escala en lugar de la línea de texto de la escala (tónica, notas del
         acorde que suena o bajo el ratón; las que trae un prestado de fuera, en otro color).
@@ -364,7 +364,7 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 8.1 IMPLEMENTADA (2026-10-28), pendiente de probar en FL Studio: la progresión como línea de tiempo.
+Fase 8.1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio: funciona. La progresión como línea de tiempo.
 - `libs/theory`: `maxProgressionSteps` 8 → 16 y `maxLineNotes` 512 → 1024 (la vuelta más larga, 16 pasos de 16
   tiempos = 64 compases, con 16 notas por compás). `DeepwaterTheoryTests`: la progresión más larga mide
   `maxLineSixteenths` y la melodía más densa de cada estilo cabe entera (la última nota en el último compás).
@@ -577,4 +577,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 8.1 en FL Studio; después, 8.2 (teclado con la escala) y 8.3 (círculo de quintas).
+Siguiente: Fase 8.2 (teclado con la escala), después 8.3 (círculo de quintas).
