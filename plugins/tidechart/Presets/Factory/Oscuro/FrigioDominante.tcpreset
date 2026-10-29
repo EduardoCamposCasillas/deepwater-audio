@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- I–♭II–♭vii–♭II en frigio dominante: el reggaetón árabe, en dembow. -->
+<TidechartPreset formatVersion="1" name="Frigio Dominante" category="Oscuro" author="Tidechart">
+  <Notes>
+    I–♭II–♭vii–♭II en frigio dominante, con el ♭II corto la primera vez. En Mi: E–F–Dm–F. El sonido "árabe" o
+    flamenco que tantas canciones de reggaetón usan en el gancho.
+
+    Por qué funciona:
+    - El frigio dominante es el frigio con la 3.ª MAYOR (en Mi: E F G♯ A B C D). La tónica es un acorde mayor, pero el 2.º
+      grado sigue a un semitono: casa luminosa con una sombra pegada.
+    - Entre el ♭II (F) y la 3.ª de la tónica (G♯) hay una segunda aumentada (3 semitonos): ese salto es lo que el oído
+      reconoce como "árabe".
+    - Es el 5.º modo de la menor armónica: el I aquí es el V de La menor armónica. Por eso suena a dominante que no termina
+      de resolver.
+
+    Cómo se construyó:
+    - Modo frigio dominante, progresión I (6) – ♭II (2) – ♭vii (4) – ♭II (4), ritmo Dembow, conducción de voces.
+    - Bajo Dembow, melodía Gancho: la melodía va a usar el G♯ y el F, el salto característico.
+
+    Pruébalo: cambia la melodía a Arpegio para oír la escala entera; o el ritmo a Dembow con huecos para un perreo más seco.
+    Cuándo NO usarlo: si el tema no tiene nada "exótico": el color es tan marcado que se come todo lo demás.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="keyMode" value="Phrygian dominant"/>
+    <PARAM id="rhythm" value="Dembow"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="I" beats="6"/>
+      <Step chord="bII" beats="2"/>
+      <Step chord="bvii" beats="4"/>
+      <Step chord="bII" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="dembow" density="0.5"/>
+      <Melody style="hook" density="0.5"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

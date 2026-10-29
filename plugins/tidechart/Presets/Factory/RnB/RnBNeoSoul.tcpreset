@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ii9–V13–Imaj9–vi9 en mayor: el ii–V–I del jazz con extensiones, a contratiempo. -->
+<TidechartPreset formatVersion="1" name="R&amp;B Neo Soul" category="R&amp;B" author="Tidechart">
+  <Notes>
+    ii9–V13–Imaj9–vi9 en mayor, a contratiempo y con conducción de voces. En Do: Dm9–G13–Cmaj9–Am9. El ii–V–I del
+    jazz, que el neo-soul y el R&amp;B usan en todos lados.
+
+    Por qué funciona:
+    - ii–V–I es la cadencia más fuerte que hay: el ii prepara (subdominante), el V tensa (dominante, con el tritono B–F) y el
+      I resuelve. El vi al final es el relativo menor: no cierra, deja la vuelta abierta para empezar de nuevo.
+    - Las extensiones (9.ª, 13.ª) llenan los acordes de notas comunes: de Dm9 a G13 casi no se mueve nada, y la conducción de
+      voces lo hace "derretirse". El 13 del V (E) es la nota que va a ser la 3.ª del I: la tensión ya anticipa la llegada.
+    - A contratiempo, los acordes caen entre los tiempos: el groove de pies y cabeza del neo-soul.
+
+    Cómo se construyó:
+    - Modo mayor, séptimas en la paleta, la progresión con sus tipos escritos, ritmo Contratiempo, conducción de voces.
+    - Bajo Caminante al 50 %: llega a cada fundamental desde un semitono o un tono.
+    - Melodía R&amp;B al 50 %.
+
+    Pruébalo: cambia el V13 por un ♭II7 (sustituto tritonal: clic derecho → Cambiar el acorde, y el tipo 7): el bajo baja
+    por semitonos (D–D♭–C).
+    Cuándo NO usarlo: debajo de un dembow marcado; tanta riqueza armónica se embarra con un ritmo tan denso.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="keyMode" value="Major (ionian)"/>
+    <PARAM id="chordSize" value="Sevenths"/>
+    <PARAM id="rhythm" value="Offbeat"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="ii9" beats="4"/>
+      <Step chord="V13" beats="4"/>
+      <Step chord="Imaj9" beats="4"/>
+      <Step chord="vi9" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="walking" density="0.5"/>
+      <Melody style="rnb" density="0.5"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- i–♭VI–♭VII–♭VI de medio compás cada uno, dembow desplazado, bajo y gancho densos. -->
+<TidechartPreset formatVersion="1" name="Dembow Dominicano" category="Reggaetón" author="Tidechart">
+  <Notes>
+    Armonía rápida para un dembow rápido: i–♭VI–♭VII–♭VI, medio compás cada uno (la vuelta dura 2 compases), con el
+    dembow desplazado y el bajo y el gancho muy densos. En La menor: Am–F–G–F.
+
+    Por qué funciona:
+    - El dembow dominicano va más rápido (120–130 BPM) y es más percusivo que el reggaetón: los acordes cambian a mitad de
+      compás y hacen de golpe más que de colchón.
+    - Tres acordes que se balancean: el ♭VI hace de eje (aparece dos veces) y el ♭VII sube un tono y vuelve. Nunca llega una
+      dominante: el loop gira sin parar, como el baile.
+    - El ritmo desplazado mueve los ataques fuera de donde los espera el oído: más empuje.
+
+    Cómo se construyó:
+    - Menor (eólico), progresión de 4 pasos de 2 tiempos, ritmo Dembow desplazado, conducción de voces (con cambios tan
+      seguidos, que las voces no salten).
+    - Bajo Dembow al 70 % y Gancho al 65 %: mucho movimiento, frases cortas.
+
+    Pruébalo: sube el tempo de FL a 128 y ponle un kick a negras: es otra canción que con el reggaetón a 95.
+    Cuándo NO usarlo: en un tema lento o romántico; tantos cambios cansan si no hay energía detrás.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="rhythm" value="Dembow shifted"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="2"/>
+      <Step chord="bVI" beats="2"/>
+      <Step chord="bVII" beats="2"/>
+      <Step chord="bVI" beats="2"/>
+    </Progression>
+    <Lines>
+      <Bass style="dembow" density="0.7"/>
+      <Melody style="hook" density="0.65"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

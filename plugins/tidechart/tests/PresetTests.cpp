@@ -193,6 +193,15 @@ void testFactoryPresets()
                    && lines.melody == tidechart::computeMelody (lines.melodySettings, composition.progression, key),
                tag + ": las lineas no se generaron con la tonalidad de ahora");
 
+        // Fase 9.2: cada acorde es de la escala o de un modo paralelo (las notas lo explican como "prestado"): nada que no
+        // se pueda encontrar en la paleta o entender con el teclado de la escala.
+        for (const auto& step : composition.progression.steps)
+        {
+            const auto chord = th::chordFor (step.numeral, key);
+            check (th::isDiatonic (chord, key) || ! th::modesContaining (chord, key.tonic).empty(),
+                   tag + ": el " + juce::String (th::romanNumeralText (step.numeral)) + " no es de ningun modo con esta tonica");
+        }
+
         // Suena: en el modo progresión, al menos un acorde por compás; con bajo, algo por debajo de C4 (48).
         const bool progressionMode = choiceIndex (*processor, id::playMode) == 1;
         const auto played = play (*processor);

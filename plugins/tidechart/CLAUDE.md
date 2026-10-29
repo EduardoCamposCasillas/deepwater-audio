@@ -378,6 +378,18 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 9.2 IMPLEMENTADA (2026-10-29), pendiente de probar en FL Studio: la biblioteca de fábrica completa.
+- 21 presets (16 nuevos), generados una vez con un script y revisados a mano: Reggaetón 5 (Clásico, Romántico IV–I–V–vi,
+  Dembow Dominicano de ½ compás, Perreo Andaluz con el V prestado, Mixolidio I–♭VII–IV–I), Oscuro 5 (Perreo Frigio,
+  Sombra Cromática ♭II→V, Locrio Inestable, Frigio Dominante, Mediante Cromática i–iii–♭VI), R&B 4 (Dórico, Neo Soul
+  ii9–V13–Imaj9–vi9, Menor Lento con extensiones, Lidio Flotante), Trap 4 (Menor Armónica, Melódico, Disminuido
+  i–vii°7, Latino), Pop 2 (I–V–vi–IV, Balada con el iv prestado). Categoría nueva "Pop" (antes de "Otros", que por
+  convención de la suite recoge las desconocidas). Todos en el modo progresión con bajo y melodía.
+- `TidechartPresetTests` +1 comprobación: cada acorde de cada preset es de la escala o de un modo paralelo (se encuentra
+  en la paleta o en los prestados; nada cromático sin explicación).
+- Release con 0 warnings; ctest de Tidechart (4) y teoría pasan; pluginval strictness 10 ampliado con `--randomise`:
+  SUCCESS. Revisado el navegador con `--snapshot <png> presets`.
+
 Fase 9.1 COMPLETADA (2026-10-29). Probada por el usuario en FL Studio: funciona. El sistema de presets.
 - `presets/TidechartPresets.h/.cpp`: `<TidechartPreset>`, `.tcpreset`, `Documentos\Tidechart\Presets`; categorías Init,
   Reggaetón, Oscuro, R&B, Trap, Otros ("Oscuro / Experimental" no cabía en el botón del navegador). Excluidos: `bypass`,
@@ -392,7 +404,7 @@ Fase 9.1 COMPLETADA (2026-10-29). Probada por el usuario en FL Studio: funciona.
   guardar tapan la página; los mensajes reemplazan la guía 4 s (Crear y Ajustes); cambiar de pestaña cierra los
   paneles; `%APPDATA%\Deepwater\Tidechart.settings` (el último autor). `--snapshot <png> presets` (Crear con el
   navegador abierto).
-- Presets de fábrica: Init, Reggaetón Clásico (i–♭VI–♭III–♭VII, dembow, bajo dembow, gancho), Perreo Frigio (i 6 +
+- Presets de fábrica (los de la 9.1; la 9.2 completó la biblioteca): Init, Reggaetón Clásico (i–♭VI–♭III–♭VII, dembow, bajo dembow, gancho), Perreo Frigio (i 6 +
   ♭II 2 ×2, dembow con huecos, drop 2, pedal), R&B Dórico (i9–IV9–♭IIImaj7–♭VIImaj7, séptimas, caminante, R&B), Trap
   Menor Armónica (i–♭VI–iv–V, sostenido, drop 2, 808 grave poco denso, arpegio); notas: por qué funciona, cómo se
   construyó, pruébalo, cuándo no.
@@ -649,4 +661,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 9.2 (la biblioteca de fábrica completa).
+Siguiente: probar la Fase 9.2 en FL Studio (con ella termina la Fase 9); después, Fase 10 (pulido y pluginval).

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- i–iv–♭VI–♭VII en menor, sostenido y abierto, 808 grave y una melodía cantada. -->
+<TidechartPreset formatVersion="1" name="Trap Melódico" category="Trap" author="Tidechart">
+  <Notes>
+    i–iv–♭VI–♭VII en menor, un compás cada uno, sostenido y abierto, con el bajo grave y poco denso para un 808 y una
+    melodía cantada. En La menor: Am–Dm–F–G. El trap melódico triste.
+
+    Por qué funciona:
+    - Todo diatónico, sin dominante: i (tónica), iv (subdominante menor, la más triste), ♭VI y ♭VII que suben de a un tono
+      hacia la vuelta. El ♭VII → i es un regreso suave, sin la tensión de la sensible: tristeza sin drama.
+    - Acordes largos y abiertos dejan todo el ritmo a los hi-hats y al 808; la armonía es una nube.
+    - El bajo en E2–G3 (41–98 Hz) y con pocas notas: el 808 necesita espacio para su cola y su glide.
+
+    Cómo se construyó:
+    - Menor (eólico), ritmo Sostenido, voicing abierto (drop 2).
+    - Bajo Fundamental al 30 % en el registro grave; melodía Cantada al 50 %.
+
+    Pruébalo: arrastra el bajo al Piano Roll de un 808 y alarga cada nota hasta la siguiente con glide; la melodía, a un
+    pluck o una voz con mucha reverb.
+    Cuándo NO usarlo: si el tema necesita tensión o un drop que explote; no hay ninguna dominante que lo empuje.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="rhythm" value="Sustain"/>
+    <PARAM id="voicing" value="Open (drop 2)"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="4"/>
+      <Step chord="iv" beats="4"/>
+      <Step chord="bVI" beats="4"/>
+      <Step chord="bVII" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="root" density="0.3" low="28" high="43"/>
+      <Melody style="sung" density="0.5"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

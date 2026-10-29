@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- La progresión del reggaetón con novenas y séptimas: i9–♭VImaj7–♭IIImaj7–♭VII9sus4. -->
+<TidechartPreset formatVersion="1" name="R&amp;B Menor Lento" category="R&amp;B" author="Tidechart">
+  <Notes>
+    i9–♭VImaj7–♭IIImaj7–♭VII9sus4: la misma progresión que "Reggaetón Clásico", pero con extensiones y sostenida. En
+    La menor: Am9–Fmaj7–Cmaj7–G9sus4. El puente entre el reggaetón y el R&amp;B.
+
+    Por qué funciona:
+    - Los grados son los mismos (i–♭VI–♭III–♭VII): la emoción de la progresión no cambia. Lo que cambia es el color: cada
+      acorde suma una o dos notas de la escala encima, y la tristeza se vuelve melancolía suave.
+    - El sus4 del final no tiene 3.ª (la reemplaza la 4.ª): suena suspendido, en el aire, y el i del principio lo "aterriza".
+    - Sostenidos y con conducción de voces, los acordes se funden: es el sonido de la intro lenta de muchos temas de
+      reggaetón antes de que entre el dembow.
+
+    Cómo se construyó:
+    - Menor (eólico), séptimas en la paleta, la progresión con sus tipos escritos, ritmo Sostenido, conducción de voces.
+    - Bajo Fundamental al 40 %, melodía R&amp;B al 40 %.
+
+    Pruébalo: carga "Reggaetón Clásico" y este, uno detrás del otro, y escucha la misma progresión vestida de dos maneras.
+    Para la canción: este en la intro, el otro cuando entra el dembow.
+    Cuándo NO usarlo: si los acordes tienen que cortar con fuerza; tantas notas suavizan los ataques.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="chordSize" value="Sevenths"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i9" beats="4"/>
+      <Step chord="bVImaj7" beats="4"/>
+      <Step chord="bIIImaj7" beats="4"/>
+      <Step chord="bVII9sus4" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="root" density="0.4"/>
+      <Melody style="rnb" density="0.4"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

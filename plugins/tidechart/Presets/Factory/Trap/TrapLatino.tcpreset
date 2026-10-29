@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- i–♭III–♭VII–iv en menor, sostenido, 808 y un gancho: el trap latino del 2017 en adelante. -->
+<TidechartPreset formatVersion="1" name="Trap Latino" category="Trap" author="Tidechart">
+  <Notes>
+    i–♭III–♭VII–iv en menor, sostenido y con conducción de voces, 808 grave y un gancho encima. En La menor:
+    Am–C–G–Dm. El trap latino: oscuro, pero con un acorde mayor que levanta.
+
+    Por qué funciona:
+    - Después del i, el ♭III (el relativo mayor) abre la luz: mismo color de escala, otra casa por un compás. El ♭VII baja un
+      poco y el iv cierra la vuelta en la subdominante menor, que tira hacia el i de nuevo.
+    - El iv al final (Dm → Am) es una cadencia plagal menor: resuelve sin la tensión de una dominante, "amén" en menor.
+    - Sostenido y con poca densidad de bajo, el ritmo queda para la batería y el flow de la voz.
+
+    Cómo se construyó:
+    - Menor (eólico), ritmo Sostenido, conducción de voces.
+    - Bajo Fundamental al 35 % en E2–A3; melodía Gancho al 45 %.
+
+    Pruébalo: pon el ritmo en Dembow para oír cómo la misma progresión se vuelve reggaetón: la frontera entre los dos
+    géneros es casi solo el ritmo.
+    Cuándo NO usarlo: si necesitas un final contundente; el iv no cierra tan fuerte como un V.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="rhythm" value="Sustain"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="4"/>
+      <Step chord="bIII" beats="4"/>
+      <Step chord="bVII" beats="4"/>
+      <Step chord="iv" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="root" density="0.35" low="28" high="45"/>
+      <Melody style="hook" density="0.45"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- i–iii–♭VI en menor: un salto a un acorde menor que no es de la escala, con una nota común. -->
+<TidechartPreset formatVersion="1" name="Mediante Cromática" category="Oscuro" author="Tidechart">
+  <Notes>
+    i–iii–♭VI en menor: de La menor a Do♯ menor y a Fa. En La menor: Am–C♯m–F. Un salto "de película": dos acordes
+    menores a una tercera mayor de distancia que comparten una sola nota.
+
+    Por qué funciona:
+    - Una mediante cromática es un acorde a una tercera de distancia que NO es de la escala. Am (A C E) y C♯m (C♯ E G♯)
+      comparten solo el E: esa nota común sostiene el salto, y las otras dos se mueven un semitono (C sube a C♯, A baja a
+      G♯). Por eso suena extraño pero no "equivocado".
+    - El iii (C♯m) es prestado de La mayor: trae dos notas naranjas (C♯ y G♯). Del iii al ♭VI (F) vuelven las notas de la
+      escala de golpe: oscuro → raro → oscuro.
+    - Es el truco de las bandas sonoras para lo sobrenatural o lo épico.
+
+    Cómo se construyó:
+    - Menor (eólico), progresión i (2 compases) – iii (1) – ♭VI (1), ritmo Dembow con huecos, conducción de voces.
+    - Bajo Fundamental al 40 %, melodía Cantada al 35 %.
+
+    Pruébalo: mira en el teclado de la escala el paso de Am a C♯m: el E se queda y las otras dos notas suben un semitono.
+    Cuándo NO usarlo: en algo que tenga que sonar simple y directo; llama mucho la atención.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="rhythm" value="Dembow gaps"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="8"/>
+      <Step chord="iii" beats="4"/>
+      <Step chord="bVI" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="root" density="0.4"/>
+      <Melody style="sung" density="0.35"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

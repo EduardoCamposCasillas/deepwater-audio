@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- IV–I–V–vi en mayor, dembow largo, conducción de voces, bajo dembow y una melodía cantada. -->
+<TidechartPreset formatVersion="1" name="Reggaetón Romántico" category="Reggaetón" author="Tidechart">
+  <Notes>
+    IV–I–V–vi en mayor, un compás cada uno, con el dembow largo (golpes que se sostienen más) y una melodía
+    cantada. En Do: F–C–G–Am.
+
+    Por qué funciona:
+    - Son los cuatro acordes del pop (I, IV, V, vi), pero empezando en el IV: la vuelta arranca "lejos de casa" y llega al
+      I en el compás 2, así cada vuelta se siente como un suspiro que se resuelve. Es el orden de mucho pop latino.
+    - Termina en el vi (el relativo menor): el final de la vuelta tiene un toque triste antes de volver al IV, el "agridulce"
+      de las canciones de amor.
+    - En mayor la casa es luminosa: el mismo dembow que en menor suena a perreo, aquí suena a canción para cantar.
+
+    Cómo se construyó:
+    - Modo mayor, progresión IV–I–V–vi, ritmo Dembow largo, conducción de voces.
+    - Bajo Dembow (40 %): menos notas de paso, más espacio para la voz.
+    - Melodía Cantada (45 %): notas más largas y saltos chicos, como una línea vocal.
+
+    Pruébalo: pon el vi de 2 tiempos y agrega un V de 2 tiempos al final: un empujón más hacia el IV.
+    Cuándo NO usarlo: si buscas oscuridad; en mayor y sin préstamos, esto es brillo puro.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="keyMode" value="Major (ionian)"/>
+    <PARAM id="rhythm" value="Dembow long"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="IV" beats="4"/>
+      <Step chord="I" beats="4"/>
+      <Step chord="V" beats="4"/>
+      <Step chord="vi" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="dembow" density="0.4"/>
+      <Melody style="sung" density="0.45"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- La cadencia andaluza i–♭VII–♭VI–V en menor (el V prestado de la armónica), en dembow. -->
+<TidechartPreset formatVersion="1" name="Perreo Andaluz" category="Reggaetón" author="Tidechart">
+  <Notes>
+    La cadencia andaluza en dembow: i–♭VII–♭VI–V, un compás cada uno. En La menor: Am–G–F–E. El bajo baja por grados
+    (A–G–F–E) y el último acorde, mayor, empuja de vuelta al principio.
+
+    Por qué funciona:
+    - El bajo desciende nota a nota por la escala: es una de las líneas más viejas de la música (el flamenco, el barroco,
+      "Hit the Road Jack") y el oído la reconoce al instante.
+    - El V (E mayor) NO es de la escala menor: es prestado de la menor armónica. Trae el G♯, la sensible, a medio tono de la
+      tónica A: el final de la vuelta tira hacia el i con fuerza. En la paleta, el V aparece en PRESTADOS ("de menor armónica").
+    - Entre el ♭VI (F) y el V (E) el bajo baja un semitono: la misma tensión del frigio (F sobre E), que le da el aire
+      español.
+
+    Cómo se construyó:
+    - Menor (eólico), la progresión con el V prestado, ritmo Dembow, conducción de voces.
+    - Bajo Dembow, melodía Gancho; sobre el V, la melodía usa la escala del modo prestado (con G♯).
+
+    Pruébalo: cambia el modo a frigio dominante: el V pasa a ser el I y la cadencia se escucha "desde el otro lado".
+    Cuándo NO usarlo: si la melodía ya está escrita con G natural todo el tiempo: sobre el V choca.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="rhythm" value="Dembow"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="4"/>
+      <Step chord="bVII" beats="4"/>
+      <Step chord="bVI" beats="4"/>
+      <Step chord="V" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="dembow" density="0.5"/>
+      <Melody style="hook" density="0.5"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

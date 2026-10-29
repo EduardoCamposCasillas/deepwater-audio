@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- I–V–vi–IV en mayor, a negras, bajo en octavas y melodía cantada: el eje del pop. -->
+<TidechartPreset formatVersion="1" name="Pop I–V–vi–IV" category="Pop" author="Tidechart">
+  <Notes>
+    I–V–vi–IV en mayor, a negras, con el bajo en octavas y una melodía cantada. En Do: C–G–Am–F. La progresión más
+    usada del pop (cientos de éxitos la usan tal cual).
+
+    Por qué funciona:
+    - Recorre las tres funciones: el I es la casa, el V la tensión (pero sin resolver de inmediato: va al vi, la cadencia
+      "rota" o engañosa), el vi el relativo menor y el IV la subdominante que lleva de vuelta al I. Cada vuelta tiene un
+      momento triste (vi) y uno de esperanza (IV → I).
+    - Es la misma progresión que el reggaetón (i–♭VI–♭III–♭VII) empezando en otro acorde: en Do mayor y La menor son los
+      mismos cuatro acordes (C, G, Am, F). Cambia solo dónde está la casa.
+    - A negras y con el bajo en octavas, el pulso queda marcado: es la base del pop-rock.
+
+    Cómo se construyó:
+    - Modo mayor, ritmo Negras, conducción de voces; bajo Octavas al 50 %, melodía Cantada al 50 %.
+
+    Pruébalo: arrastra los dos primeros pasos al final (vi–IV–I–V) y escucha cómo pasa de alegre a melancólico sin cambiar
+    ni un acorde.
+    Cuándo NO usarlo: si buscas algo que no suene a "ya lo escuché"; justamente por lo usada, suena familiar.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="keyMode" value="Major (ionian)"/>
+    <PARAM id="rhythm" value="Quarters"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="I" beats="4"/>
+      <Step chord="V" beats="4"/>
+      <Step chord="vi" beats="4"/>
+      <Step chord="IV" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="octaves" density="0.5"/>
+      <Melody style="sung" density="0.5"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

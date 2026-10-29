@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- i–♭VI–♭II–V en menor: dos préstamos y un tritono entre ellos, dembow largo. -->
+<TidechartPreset formatVersion="1" name="Sombra Cromática" category="Oscuro" author="Tidechart">
+  <Notes>
+    i–♭VI–♭II–V en menor, con el ♭VI y el ♭II de medio compás: tres compases de vuelta. En La menor: Am–F–B♭–E. Dos
+    acordes prestados seguidos y entre ellos un tritono.
+
+    Por qué funciona:
+    - El ♭II (B♭) viene del frigio y el V (E mayor) de la menor armónica: dos colores de fuera de la escala, cada uno con su
+      nota naranja (B♭ y G♯). Juntos son lo más oscuro y lo más tenso que tiene el menor.
+    - Del ♭II al V las fundamentales están a un tritono (B♭–E), el intervalo más inestable: el paso suena a precipicio. Y el
+      V resuelve al i por la sensible: después del abismo, casa.
+    - La vuelta de 3 compases (no 4) descoloca un poco: es experimental a propósito.
+
+    Cómo se construyó:
+    - Menor (eólico), progresión i (4) – ♭VI (2) – ♭II (2) – V (4), ritmo Dembow largo, voicing abierto.
+    - Bajo Fundamental al 40 %, melodía Gancho al 30 %: pocas notas, que no tapen los choques.
+
+    Pruébalo: pon el V de 8 tiempos para una vuelta de 4 compases y escucha cómo el tritono pierde sorpresa y gana peso.
+    Cuándo NO usarlo: debajo de una melodía que use mucho el B natural: choca con el ♭II.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="rhythm" value="Dembow long"/>
+    <PARAM id="voicing" value="Open (drop 2)"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="4"/>
+      <Step chord="bVI" beats="2"/>
+      <Step chord="bII" beats="2"/>
+      <Step chord="V" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="root" density="0.4"/>
+      <Melody style="hook" density="0.3"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

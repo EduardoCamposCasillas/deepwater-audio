@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- i°–♭II–♭V–♭II en locrio: una casa disminuida que nunca descansa. -->
+<TidechartPreset formatVersion="1" name="Locrio Inestable" category="Oscuro" author="Tidechart">
+  <Notes>
+    i°–♭II–♭V–♭II en locrio: la casa es un acorde disminuido. En Si: Bdim–C–F–C. Para cuando quieres que nada se
+    resuelva nunca.
+
+    Por qué funciona (y por qué casi nadie lo usa):
+    - El locrio es el único modo con la 5.ª disminuida sobre la tónica (en Si, F en vez de F♯). La tónica no tiene una
+      quinta justa que la sostenga: su acorde es disminuido, inestable por naturaleza. La "casa" se tambalea.
+    - El ♭II (C) está a un semitono, como en el frigio, y el ♭V (F) a un tritono de la tónica: los dos intervalos más tensos
+      alrededor de la casa.
+    - El pedal en el bajo (la tónica todo el tiempo) es lo único firme: todo lo de arriba se mueve sobre un suelo que suena
+      a alarma.
+
+    Cómo se construyó:
+    - Modo locrio, progresión i° (2 compases) – ♭II (1) – ♭V (½) – ♭II (½), ritmo Contratiempo, voicing abierto.
+    - Bajo Pedal de tónica, melodía Cantada al 30 %: largas y pocas.
+
+    Pruébalo: úsalo en una intro o un puente de 4 compases y vuelve después a un frigio o un menor: el alivio es enorme.
+    Cuándo NO usarlo: como base de toda una canción; cansa rápido. Es un color, no un piso.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="keyMode" value="Locrian"/>
+    <PARAM id="rhythm" value="Offbeat"/>
+    <PARAM id="voicing" value="Open (drop 2)"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="io" beats="8"/>
+      <Step chord="bII" beats="4"/>
+      <Step chord="bV" beats="2"/>
+      <Step chord="bII" beats="2"/>
+    </Progression>
+    <Lines>
+      <Bass style="pedal" density="0.5"/>
+      <Melody style="sung" density="0.3"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

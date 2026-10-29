@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- I–iii–IV–iv en mayor: el iv prestado del menor, la tristeza que entra en un acorde. -->
+<TidechartPreset formatVersion="1" name="Balada con Préstamo Modal" category="Pop" author="Tidechart">
+  <Notes>
+    I–iii–IV–iv en mayor, en corcheas y con conducción de voces. En Do: C–Em–F–Fm. Una balada que se nubla en el
+    último acorde.
+
+    Por qué funciona:
+    - El IV (F) y el iv (Fm) son el mismo acorde con la 3.ª bajada medio tono (A → A♭). El iv es prestado del menor paralelo
+      (Do menor): trae una sola nota de fuera, el A♭, y con ella una tristeza repentina. Es el préstamo modal más famoso de la
+      música popular.
+    - El A♭ baja a G (la 5.ª del I) al volver: una voz desciende por semitonos (A → A♭ → G) y el regreso a casa suena a
+      suspiro.
+    - El iii (Em) entre I y IV comparte dos notas con cada uno: un paso suave hacia arriba antes de la caída.
+
+    Cómo se construyó:
+    - Modo mayor, ritmo Corcheas, conducción de voces; bajo Fundamental al 40 %, melodía Arpegio al 45 %.
+
+    Pruébalo: en la paleta, el iv aparece en PRESTADOS ("de menor"); pasa el ratón y mira el A♭ en naranja en el teclado.
+    Prueba también el ♭VI (A♭ mayor) en su lugar: el mismo A♭, otro color.
+    Cuándo NO usarlo: si el tema tiene que ser alegre hasta el final; el iv siempre trae nostalgia.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="keyMode" value="Major (ionian)"/>
+    <PARAM id="rhythm" value="Eighths"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="I" beats="4"/>
+      <Step chord="iii" beats="4"/>
+      <Step chord="IV" beats="4"/>
+      <Step chord="iv" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="root" density="0.4"/>
+      <Melody style="arpeggio" density="0.45"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

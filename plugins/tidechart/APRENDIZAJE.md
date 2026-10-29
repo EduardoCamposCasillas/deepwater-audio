@@ -1246,3 +1246,69 @@ encaja (en dórico, con séptimas). Después cárgalo y compara: ¿qué acordes 
   guarda una copia tuya).
 - **Pensar que el preset cambió de tonalidad.** No la cambia nunca; si suena "más agudo" que en el ejemplo de las notas,
   es porque tu tónica es otra.
+
+## Fase 9.2 — La biblioteca: un mapa de la armonía
+
+Ahora hay 21 presets en 6 categorías. Cada uno muestra **una idea** de armonía o de ritmo, y juntos forman un mapa de lo
+que se puede hacer con una tonalidad: lee sus notas en el navegador como si fueran lecciones cortas.
+
+### El mapa
+
+| Idea | Presets |
+|------|---------|
+| La progresión de 4 acordes del pop y del reggaetón (los mismos acordes, otra casa) | Reggaetón Clásico, Pop I–V–vi–IV, Reggaetón Romántico, R&B Menor Lento |
+| Modos: cambiar UNA nota de la escala cambia el carácter | Perreo Frigio (♭2), R&B Dórico (6.ª mayor), Reggaetón Mixolidio (♭7), Lidio Flotante (♯4), Locrio Inestable (♭5), Frigio Dominante (3.ª mayor + ♭2) |
+| Préstamo modal: un acorde de otro modo con la misma tónica | Perreo Andaluz (V), Balada con Préstamo Modal (iv), Sombra Cromática (♭II y V), Mediante Cromática (iii) |
+| Tensión y resolución: la sensible y la dominante | Trap Menor Armónica, Trap Disminuido, R&B Neo Soul (ii–V–I), Perreo Andaluz |
+| Ritmo armónico (cuánto dura cada acorde) | Dembow Dominicano (½ compás), Perreo Frigio (6 + 2), Locrio Inestable (2 compases + ½) |
+| Sin dominante: loops que giran sin fin | Reggaetón Clásico, Trap Melódico, Trap Latino, Dembow Dominicano |
+
+### Ejercicio guiado: tres presets, una tónica
+
+1. Pon la tónica en La. Carga, en orden, **Reggaetón Clásico**, **Perreo Andaluz** y **Sombra Cromática**, con play en FL.
+2. Los tres empiezan en Am. Escucha qué cambia en el resto: el primero no tiene ningún préstamo; el segundo, uno (el V,
+   con G♯); el tercero, dos (♭II con B♭, y el V). Cada préstamo suma "drama".
+3. Pasa el ratón por cada paso de la progresión y mira el teclado de la escala: cuenta las notas naranjas.
+
+### Receta: elegir por la emoción
+
+- ¿Triste pero bailable? Reggaetón Clásico o Trap Latino.
+- ¿Amenazante? Perreo Frigio, Locrio Inestable (para una intro), Trap Disminuido.
+- ¿Romántico? Reggaetón Romántico o Balada con Préstamo Modal.
+- ¿Elegante, nocturno? R&B Neo Soul, R&B Menor Lento.
+- ¿"Árabe" / flamenco? Frigio Dominante, Perreo Andaluz.
+Carga uno, cámbiale una cosa (el ritmo, una duración) y guárdalo como tuyo.
+
+### Reto (sin receta)
+
+Toma la progresión de **Pop I–V–vi–IV** y conviértela en algo de la categoría Oscuro **cambiando solo dos cosas** (el
+modo, un acorde, una duración o el ritmo). Después compara con los de Oscuro: ¿a cuál se parece?
+
+<details><summary>Pistas</summary>
+
+- Cambiar el modo a menor ya cambia la casa (prueba también frigio).
+- Un acorde prestado con una nota a un semitono de la tónica (♭II) oscurece más que cualquier otro.
+- Un dembow con huecos y acordes largos suena más oscuro que negras parejas.
+</details>
+
+### Análisis de canciones
+
+Elige tres canciones que te gusten (una de reggaetón, una de R&B, una de trap). Con "Escuchar" o a oído, encuentra la
+tonalidad y los acordes de su coro y búscalos en el mapa de arriba: ¿qué idea usan? ¿Usan préstamos? ¿Cuánto dura cada
+acorde?
+
+### Vocabulario
+
+- **Sustituto tritonal**: cambiar un V7 por el 7 a un tritono de distancia (G7 → D♭7); comparten el tritono (R&B Neo Soul).
+- **Mediante cromática**: un acorde a una tercera de distancia que no es de la escala, con una nota común (Am → C♯m).
+- **Cadencia plagal**: iv → i o IV → I, el "amén" (Trap Latino).
+- **Cadencia engañosa**: V → vi en vez de V → I (Pop I–V–vi–IV).
+- **Acorde simétrico**: el disminuido de 7.ª, cuatro terceras menores iguales (Trap Disminuido).
+
+### Errores comunes
+
+- **Juzgar un preset sin play en FL.** Las progresiones viven del ritmo y de la repetición: escucha al menos dos
+  vueltas.
+- **Usar los modos raros como base de toda la canción.** Locrio, lidio o la mediante cromática son colores para una
+  sección; la canción necesita también un lugar donde descansar.
+- **Quedarse con el preset tal cual.** Son puntos de partida; lo que suena a ti es lo que les cambias.

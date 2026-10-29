@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- I–♭VII–IV–I en mixolidio: mayor pero sin sensible, dembow a contratiempo. -->
+<TidechartPreset formatVersion="1" name="Reggaetón Mixolidio" category="Reggaetón" author="Tidechart">
+  <Notes>
+    I–♭VII–IV–I en mixolidio, un compás cada uno, con el dembow a contratiempo. En Do: C–B♭–F–C.
+
+    Por qué funciona:
+    - El mixolidio es el mayor con la 7.ª bajada (en Do, B♭ en vez de B). Sin sensible, la casa es mayor pero relajada,
+      sin la "obligación" de resolver: el sonido de mucho rock, del funk y del reggaetón más fiestero.
+    - El ♭VII (B♭) es MAYOR y de la escala: el acorde que en Do mayor sería un préstamo aquí es natural. ♭VII–IV–I es la
+      cadencia "de rock": baja de a cuartas hasta casa.
+    - El I dos veces (al principio y al final): la vuelta termina en casa y la siguiente empieza ahí, dos compases seguidos
+      de I que se sienten como un "sí".
+
+    Cómo se construyó:
+    - Modo mixolidio, progresión I–♭VII–IV–I, ritmo Dembow a contratiempo, conducción de voces.
+    - Bajo Dembow y melodía Gancho al 50 %.
+
+    Pruébalo: cambia el modo a mayor: el ♭VII se vuelve prestado (naranja) y el carácter casi no cambia; ahora mira el
+    teclado: el B♭ es la única diferencia.
+    Cuándo NO usarlo: en un tema triste u oscuro: es el modo más "de fiesta" de los mayores.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="keyMode" value="Mixolydian"/>
+    <PARAM id="rhythm" value="Dembow offbeat"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="I" beats="4"/>
+      <Step chord="bVII" beats="4"/>
+      <Step chord="IV" beats="4"/>
+      <Step chord="I" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="dembow" density="0.5"/>
+      <Melody style="hook" density="0.5"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

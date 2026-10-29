@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Imaj7–II–iii7–II en lidio: el II mayor que hace flotar todo, abierto y sostenido. -->
+<TidechartPreset formatVersion="1" name="Lidio Flotante" category="R&amp;B" author="Tidechart">
+  <Notes>
+    Imaj7–II–iii7–II en lidio, sostenido y abierto. En Do: Cmaj7–D–Em7–D. Un sonido de sueño, sin gravedad.
+
+    Por qué funciona:
+    - El lidio es el mayor con la 4.ª aumentada (en Do, F♯ en vez de F). Esa nota convierte el II en un acorde MAYOR (D, con
+      F♯): el vaivén I–II es la firma del lidio, el sonido de las bandas sonoras de vuelo y de mucho R&amp;B atmosférico.
+    - Sin la 4.ª justa no hay subdominante "normal" (no hay IV de la escala mayor): la música no tiene hacia dónde caer y
+      flota.
+    - El iii7 (Em7) comparte tres notas con el Imaj7: es casi el mismo acorde con el bajo en otro lado.
+
+    Cómo se construyó:
+    - Modo lidio, séptimas en la paleta, ritmo Sostenido, voicing abierto (drop 2): ancho, de pad.
+    - Bajo Fundamental al 30 % (casi solo los cambios), melodía Cantada al 40 %.
+
+    Pruébalo: mira el F♯ en el teclado de la escala; cambia el modo a mayor y el II pasa a ser prestado (naranja): sigue
+    sonando lidio porque lo que importa es esa nota.
+    Cuándo NO usarlo: en algo con fuerza o con drama; el lidio no tensa, flota.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="keyMode" value="Lydian"/>
+    <PARAM id="chordSize" value="Sevenths"/>
+    <PARAM id="voicing" value="Open (drop 2)"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="Imaj7" beats="4"/>
+      <Step chord="II" beats="4"/>
+      <Step chord="iii7" beats="4"/>
+      <Step chord="II" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="root" density="0.3"/>
+      <Melody style="sung" density="0.4"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

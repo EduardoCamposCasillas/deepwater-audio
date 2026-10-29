@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- i–vii°7 en menor armónica: el acorde disminuido de las películas de terror sobre un 808. -->
+<TidechartPreset formatVersion="1" name="Trap Disminuido" category="Trap" author="Tidechart">
+  <Notes>
+    Dos acordes de dos compases: i–vii°7 en menor armónica. En La: Am–G♯°7. Lo más tenso que hay en dos acordes.
+
+    Por qué funciona:
+    - El vii°7 (G♯ B D F) está hecho solo de terceras menores: divide la octava en cuatro partes iguales. Es simétrico, no
+      tiene una fundamental clara y por eso suena a misterio, a peligro: el acorde de las películas de terror.
+    - Tiene la sensible (G♯) y dos tritonos dentro (G♯–D y B–F): toda la tensión de una dominante, sin su firmeza. Vuelve
+      al i porque cada voz está a un semitono o un tono de una nota de Am.
+    - Dos compases por acorde: el trap oscuro vive de la repetición; la tensión se sostiene en vez de resolverse rápido.
+
+    Cómo se construyó:
+    - Modo menor armónica (el vii°7 es de la escala), ritmo Sostenido, voicing abierto.
+    - Bajo Fundamental al 25 % en el registro grave (el 808 va a A y a G♯: un semitono que retumba).
+    - Melodía Arpegio al 50 %: recorre las notas de cada acorde y deja oír el disminuido.
+
+    Pruébalo: cambia el vii°7 por un V (E): menos misterio, más resolución.
+    Cuándo NO usarlo: en algo romántico o luminoso; también con mucha melodía encima, porque el disminuido se come todo.
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="keyMode" value="Harmonic minor"/>
+    <PARAM id="rhythm" value="Sustain"/>
+    <PARAM id="voicing" value="Open (drop 2)"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="8"/>
+      <Step chord="viio7" beats="8"/>
+    </Progression>
+    <Lines>
+      <Bass style="root" density="0.25" low="28" high="43"/>
+      <Melody style="arpeggio" density="0.5"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

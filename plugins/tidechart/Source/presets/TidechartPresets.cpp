@@ -191,7 +191,9 @@ juce::StringArray categoryNames()
 {
     // "Init" primero y "Otros" al final (convención de libs/presets). Las de la hoja de ruta: por género, más "Oscuro"
     // (oscuro / experimental: lo que se sale, frigio, cromático, pedales raros; el nombre corto cabe en el navegador).
-    return { "Init", juce::String::fromUTF8 ("Reggaet\xc3\xb3n"), "Oscuro", "R&B", "Trap", "Otros" };
+    // Fase 9.2: "Pop" para las progresiones de referencia que no son de ningún género urbano (el eje I–V–vi–IV, el iv
+    // prestado de las baladas): "Otros" queda para las categorías desconocidas, como en toda la suite.
+    return { "Init", juce::String::fromUTF8 ("Reggaet\xc3\xb3n"), "Oscuro", "R&B", "Trap", "Pop", "Otros" };
 }
 
 deepwater::presets::PresetFormat format (std::function<juce::ValueTree()> capture, std::function<void (const Composition&)> apply,
