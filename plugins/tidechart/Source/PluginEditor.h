@@ -6,6 +6,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "deepwater/presets/PresetPanel.h"
 #include "gui/ChordPaletteView.h"
 #include "gui/ChordView.h"
 #include "gui/KeyDetectView.h"
@@ -65,6 +66,7 @@ private:
     void layoutAnalysis();
     void paintAnalysis (juce::Graphics&);
     [[nodiscard]] juce::String guideText() const;
+    void showMessage (const juce::String& text);
 
     TidechartAudioProcessor& processor;
 
@@ -88,6 +90,13 @@ private:
     std::uint32_t seenLinesChanges = 0;
     juce::Rectangle<int> keyboardTitleArea, guideArea;
     juce::String guide;
+
+    // Presets (Fase 9): la barra en la cabecera; el navegador y el panel de guardar tapan la página. Los mensajes
+    // ("Preset: …", avisos al cargar) reemplazan la guía unos segundos (hasta messageExpiry, ms del sistema).
+    std::unique_ptr<juce::PropertiesFile> preferences; // %APPDATA%\Deepwater\Tidechart.settings: el último autor al guardar
+    deepwater::presets::PresetPanel presets;
+    juce::String message;
+    juce::uint32 messageExpiry = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TidechartMainView)
 };

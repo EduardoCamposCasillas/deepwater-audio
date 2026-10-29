@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -12,6 +13,7 @@
 #include "midi/EventLog.h"
 #include "midi/KeyListener.h"
 #include "midi/MidiStage.h"
+#include "presets/TidechartPresets.h"
 #include "TransportSnapshot.h"
 
 // Herramienta MIDI: recibe notas (del Piano Roll o de un teclado) y emite MIDI hacia otro instrumento. No genera audio:
@@ -113,6 +115,13 @@ public:
     // las líneas se ponen al día si cambiaron la progresión o la tonalidad). Hilo de mensajes.
     tidechart::ExportClip exportClip (tidechart::ExportLayer layer);
 
+    // Presets (Fase 9): biblioteca, preset actual y guardar/cargar (solo desde el hilo de mensajes). Un preset trae los
+    // parámetros (menos la tónica, el bypass y las teclas) y la composición: la progresión y los ajustes de las líneas.
+    deepwater::presets::PresetManager& getPresetManager() noexcept { return *presetManager; }
+    // Lo que hace un preset al cargarse: la progresión y los ajustes de las líneas, que se regeneran con la tonalidad
+    // de ahora. Hilo de mensajes.
+    void applyComposition (const tidechart::presets::Composition&);
+
     // Capturar una melodía (Fase 6). Como escuchar: mientras captura, el MIDI pasa tal cual (se oye lo que se toca) y la
     // GUI recoge las notas del monitor. Cualquier hilo; no se guarda.
     void setCapturing (bool shouldCapture) noexcept { captureRequested.store (shouldCapture, std::memory_order_release); }
@@ -188,6 +197,9 @@ private:
     tidechart::midi::EventLog<1024> midiLog;
     std::atomic<std::uint32_t> notesInCount { 0 };
     std::atomic<std::uint32_t> notesOutCount { 0 };
+
+    // Se crea al final del constructor, con la progresión y las líneas de fábrica ya puestas ("Init" sin "*").
+    std::unique_ptr<deepwater::presets::PresetManager> presetManager;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TidechartAudioProcessor)
 };

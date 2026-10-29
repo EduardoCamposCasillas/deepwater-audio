@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- La base del reggaetón: i–♭VI–♭III–♭VII en dembow, con bajo y gancho. -->
+<TidechartPreset formatVersion="1" name="Reggaetón Clásico" category="Reggaetón" author="Tidechart">
+  <Notes>
+    La progresión más usada del reggaetón: i–♭VI–♭III–♭VII en menor, un compás cada uno, con el ritmo dembow en los
+    acordes, el bajo en dembow y un gancho corto encima. En La menor: Am–F–C–G.
+
+    Por qué funciona:
+    - Son los mismos 4 acordes del pop (I–V–vi–IV) empezando en el vi: al empezar en el menor, la casa es triste y
+      oscura, pero los acordes son tan conocidos que suenan "bien" al instante.
+    - Am → F → C → G: cada acorde comparte notas con el siguiente (Am y F comparten A y C), y la conducción de voces
+      casi no las mueve: los acordes se deslizan en vez de saltar.
+    - No hay dominante (no hay V con sensible): nada "resuelve" con fuerza al final, y por eso el loop puede girar sin
+      fin bajo la voz. El ♭VII (G) vuelve al i por un tono entero: un regreso suave, sin tensión.
+    - El dembow (3+3+2 en cada medio compás) pone el movimiento; la armonía es el piso.
+
+    Cómo se construyó:
+    - Modo Progresión (sigue a FL), ritmo Dembow, conducción de voces.
+    - Bajo en Dembow: la fundamental en el "boom" y una nota de paso en el "chick".
+    - Melodía Gancho (densidad 50 %): notas cortas y repetidas sobre el 3+3+2, como un coro.
+
+    Pruébalo: cambia el ritmo a "Dembow a contratiempo" para un perreo más suelto, o pon el ♭VII de 2 tiempos y agrega
+    un iv (Dm) de 2 tiempos antes del i: un empujón al final de la vuelta.
+    Cuándo NO usarlo tal cual: si la canción necesita un coro que "explote", esta progresión no crece sola: la energía
+    tiene que venir del arreglo (entrar el bajo, subir la melodía una octava).
+  </Notes>
+  <Parameters>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="rhythm" value="Dembow"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="4"/>
+      <Step chord="bVI" beats="4"/>
+      <Step chord="bIII" beats="4"/>
+      <Step chord="bVII" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="dembow" density="0.5"/>
+      <Melody style="hook" density="0.5"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

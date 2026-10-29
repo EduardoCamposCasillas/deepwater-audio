@@ -72,6 +72,7 @@ cmake --build build --config Release --target Tidechart_VST3       # solo el plu
 build/plugins/tidechart/Release/TidechartTests.exe                 # etapa MIDI sin JUCE
 build/plugins/tidechart/TidechartProcessorTests_artefacts/Release/TidechartProcessorTests.exe   # procesador completo
 build/libs/theory/Release/DeepwaterTheoryTests.exe                 # libs/theory
+build/plugins/tidechart/TidechartPresetTests_artefacts/Release/TidechartPresetTests.exe   # presets (--notes: las notas)
 ```
 - VST3: `build/plugins/tidechart/Tidechart_artefacts/Release/VST3/Tidechart.vst3`.
 - Standalone: `build/plugins/tidechart/Tidechart_artefacts/Release/Standalone/Tidechart.exe` (sin host: reloj libre a
@@ -80,7 +81,8 @@ build/libs/theory/Release/DeepwaterTheoryTests.exe                 # libs/theory
 ## Estructura
 ```
 plugins/tidechart/
-  CMakeLists.txt             # plugin (IS_SYNTH, MIDI de entrada y salida) y tests; enlaza deepwater::dsp y ::theory
+  CMakeLists.txt             # plugin (IS_SYNTH, MIDI de entrada y salida), presets de fábrica (BinaryData) y tests;
+                             # enlaza deepwater::dsp, ::theory y ::presets
   Source/
     PluginProcessor.h/.cpp   # parámetros, estado, processBlock (MidiBuffer ↔ MidiStage), PlayHead, publicación a la GUI
     PluginEditor.h/.cpp      # GUI
@@ -93,6 +95,8 @@ plugins/tidechart/
     ProgressionEdit.h        # Fase 8: editar la progresión como línea de tiempo (moveStep, resizeStep, insertStep,
                              # removeStep; Timeline: x de cada paso, qué hay bajo el ratón, dónde cae lo arrastrado;
                              # loopBeat = FL dentro de la vuelta); sin JUCE, con tests en TidechartTests
+    presets/TidechartPresets.h/.cpp  # Fase 9: formato (.tcpreset, categorías, excluidos: bypass, tónica y teclas) y el
+                             # XML de <Progression> y <Lines> que comparten el proyecto y los presets (<Composition>)
     midi/NoteTracker.h       # mensajes cortos y la cuenta de lo que suena por canal y nota (releaseAll = los note-off que faltan)
     midi/MidiStage.h         # la etapa MIDI sin JUCE: todo lo que sale pasa por emit (contado); apagar y pánico pedidos
                              # desde cualquier hilo y atendidos en la muestra 0 del bloque siguiente; bypass ↔ acordes;
@@ -112,6 +116,9 @@ plugins/tidechart/
                              # de tonalidad (KeyDetectView: escuchar, resultado con su porqué, alternativas, histograma),
                              # melodía y bajo (LinesView: capas, estilo, densidad, rango, capturar, variar, piano roll;
                              # Fase 7: la fila "Al Piano Roll" con un MidiDragButton por capa)
+  Presets/Factory/          # .tcpreset de fábrica por categoría (compilados dentro del plugin)
+  tests/PresetTests.cpp      # presets (con JUCE): los de fábrica se leen y suenan, la tónica se queda, el "*", Init,
+                             # guardar y cargar uno del usuario, el estado del proyecto
   tests/MidiTests.cpp        # etapa MIDI sin JUCE (contra un receptor modelo independiente)
   tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte,
                              # progresión, reservas; Fase 7: lo exportado = lo que suena y el .mid leído de vuelta);
@@ -315,7 +322,7 @@ pestañas de los MISMOS paneles (cada vista tiene `setSimple`), todas de 1180 ×
   entra en Crear (como mucho un control por idea, con un buen valor por defecto); si es ajuste fino, en Ajustes; si es
   ver qué pasa por dentro, en Análisis. Ninguna pestaña puede pasar de 1180 × 560: si algo no cabe, se quita o se
   reemplaza, no se agranda la ventana. Fase 8: lo que reemplace a un control de Crear lo reemplaza ahí (no se suma).
-  Fase 9: presets = la puerta de entrada de Crear (barra de presets arriba). Fase 10: revisar las tres pestañas con
+  Fase 9: presets = la puerta de entrada de Crear (la barra de presets en la cabecera, visible en las tres pestañas). Fase 10: revisar las tres pestañas con
   `--snapshot <png> [settings|analysis]`.
 
 ## Requisitos propios (además de los del raíz)
@@ -350,7 +357,11 @@ pestañas de los MISMOS paneles (cada vista tiene `setSimple`), todas de 1180 ×
   - [x] 8.3 — Círculo de quintas en una ventana al hacer clic en la tónica (reemplaza al menú): elegir la tonalidad,
         la zona de los acordes de la escala, la relativa y dónde caen los prestados.
 - [ ] Fase 9 — Presets por género y estado de ánimo (reggaetón, oscuro/experimental, R&B, trap) con notas que
-      expliquen por qué funciona cada progresión (formato de `libs/presets`; la progresión como "estado extra").
+      expliquen por qué funciona cada progresión (formato de `libs/presets`; la progresión como "estado extra"). En dos
+      partes (acordado con el usuario al empezarla; también: un preset NO cambia la tónica, sí el modo):
+  - [ ] 9.1 — El sistema: formato, barra de presets en la cabecera, la progresión y los ajustes de las líneas como
+        estado extra, tests; Init y uno por categoría.
+  - [ ] 9.2 — La biblioteca de fábrica completa, con sus notas.
 - [ ] Fase 10 — Pulido y pluginval.
 
 ## Aprendizaje de teoría musical y composición (igual de importante que el código)
@@ -367,6 +378,34 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 9.1 IMPLEMENTADA (2026-10-29), pendiente de probar en FL Studio: el sistema de presets.
+- `presets/TidechartPresets.h/.cpp`: `<TidechartPreset>`, `.tcpreset`, `Documentos\Tidechart\Presets`; categorías Init,
+  Reggaetón, Oscuro, R&B, Trap, Otros ("Oscuro / Experimental" no cabía en el botón del navegador). Excluidos: `bypass`,
+  `keyTonic` (un preset no cambia la tónica de tu canción) y `keyMapping` (cómo tocas). Estado extra `<Composition>` con
+  `<Progression>` y `<Lines>` (solo los AJUSTES de las líneas y, si la hay, la melodía fija `<Source>`; las notas se
+  generan al cargar con la tónica de ahora). `writeProgression`/`readProgression`/`writeLines`/`readLines` salieron del
+  procesador: el XML del proyecto es el mismo de antes (con las notas de las líneas).
+- Procesador: `PresetManager` (unique_ptr creado al final del constructor, con la progresión y las líneas de fábrica:
+  una instancia nueva es "Init" sin "*"); `applyComposition` (progresión + ajustes, regenera las líneas con la tonalidad
+  que ya puso el preset, apaga lo que sonaba); nombre del preset y "*" en el estado del proyecto.
+- GUI: barra de presets (420 px) en el hueco de la cabecera entre las pestañas y Pánico; el navegador y el panel de
+  guardar tapan la página; los mensajes reemplazan la guía 4 s (Crear y Ajustes); cambiar de pestaña cierra los
+  paneles; `%APPDATA%\Deepwater\Tidechart.settings` (el último autor). `--snapshot <png> presets` (Crear con el
+  navegador abierto).
+- Presets de fábrica: Init, Reggaetón Clásico (i–♭VI–♭III–♭VII, dembow, bajo dembow, gancho), Perreo Frigio (i 6 +
+  ♭II 2 ×2, dembow con huecos, drop 2, pedal), R&B Dórico (i9–IV9–♭IIImaj7–♭VIImaj7, séptimas, caminante, R&B), Trap
+  Menor Armónica (i–♭VI–iv–V, sostenido, drop 2, 808 grave poco denso, arpegio); notas: por qué funciona, cómo se
+  construyó, pruébalo, cuándo no.
+- `TidechartPresetTests` (4 grupos): cada preset de fábrica sin avisos, con notas y categoría, una por categoría; al
+  cargarlo la tónica (Mi) se queda, la progresión y los ajustes son los del archivo y las líneas salen con la tonalidad
+  de ahora; con un host y una tecla suena (y el bajo por debajo de C4) y nada queda colgado. El "*" con la duración de un
+  paso, otra semilla de melodía y otra densidad del bajo; Init = una instancia nueva salvo la tónica. Un preset del
+  usuario con 16 pasos, bajo en octavas y una melodía capturada vuelve igual; XML legible sin tónica, bypass ni teclas;
+  un grado roto da un aviso. Proyecto: el preset y su "*" viajan; el XML del proyecto conserva `<Progression>` y
+  `<Lines>` con notas.
+- Release con 0 warnings; ctest de Tidechart (4) y teoría pasan; pluginval strictness 10 ampliado con `--randomise`:
+  SUCCESS. Revisadas Crear y Análisis con la barra, y el navegador abierto, con `--snapshot`.
+
 Fase 8 COMPLETADA (2026-10-29). Fase 8.3 probada por el usuario en FL Studio (abrir el círculo, elegir, cerrar): funciona. El círculo de quintas.
 - `gui/CircleOfFifthsView.h` (340 × 392): C arriba, una quinta por casilla en el sentido del reloj; afuera las
   mayores, adentro las relativas menores (F♯/G♭ y E♭m abajo). Cada casilla = un acorde mayor o menor escrito en la
@@ -610,4 +649,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 9 (presets por género y estado de ánimo).
+Siguiente: probar la Fase 9.1 en FL Studio; después, 9.2 (la biblioteca de fábrica completa).

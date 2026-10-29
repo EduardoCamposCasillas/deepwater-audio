@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- R&B nocturno: novenas y séptimas mayores en dórico, conducción de voces, bajo que camina. -->
+<TidechartPreset formatVersion="1" name="R&amp;B Dórico" category="R&amp;B" author="Tidechart">
+  <Notes>
+    i9–IV9–♭IIImaj7–♭VIImaj7 en dórico, un compás cada uno, sostenidos y con conducción de voces; el bajo camina hacia
+    cada acorde y la melodía es de R&amp;B. En Re: Dm9–G9–Fmaj7–Cmaj7.
+
+    Por qué funciona:
+    - El dórico es el menor con la 6.ª mayor (en Re, el B natural). Esa nota hace que el IV sea MAYOR (G en vez de Gm):
+      el i–IV dórico es menor pero luminoso, el sonido de mucho neo-soul y R&amp;B.
+    - Las novenas y séptimas mayores apilan terceras de más: cada acorde tiene 4 o 5 notas y comparte varias con el
+      siguiente. Con la conducción de voces casi todas se quedan quietas y una o dos se mueven un semitono: los acordes
+      "se derriten" uno en otro en vez de cambiar.
+    - Ningún acorde es una dominante que resuelva: la progresión flota, sin principio ni final marcados.
+
+    Cómo se construyó:
+    - Modo dórico, séptimas en la paleta (para seguir armando con el mismo color), progresión con sus tipos escritos.
+    - Ritmo Sostenido, conducción de voces.
+    - Bajo Caminante (densidad 40 %): la fundamental en cada cambio y notas que llevan al acorde siguiente.
+    - Melodía R&amp;B: notas largas, adornos, apoyos que a veces caen en la 9.ª o la 7.ª (las tensiones también cantan).
+
+    Pruébalo: cambia el voicing a Abierto (drop 2) para un pad más ancho; o el ritmo a Contratiempo para un groove de
+    R&amp;B más movido. Pasa el ratón por los acordes de la paleta y mira el B en el teclado: es la nota dórica.
+    Cuándo NO usarlo: debajo de un dembow muy marcado los acordes de 5 notas se embarran; en reggaetón, usa tríadas o
+    quita el bajo.
+  </Notes>
+  <Parameters>
+    <PARAM id="keyMode" value="Dorian"/>
+    <PARAM id="chordSize" value="Sevenths"/>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="voicing" value="Voice leading"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i9" beats="4"/>
+      <Step chord="IV9" beats="4"/>
+      <Step chord="bIIImaj7" beats="4"/>
+      <Step chord="bVIImaj7" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="walking" density="0.4"/>
+      <Melody style="rnb" density="0.5"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

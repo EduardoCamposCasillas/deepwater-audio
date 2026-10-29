@@ -82,12 +82,14 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 ## Librería de presets (`libs/presets`, namespace `deepwater::presets`)
 - Nació en Undertow (Fase 10) y pasó a la librería con Riptide (Fase 9). Usa JUCE: es una librería INTERFACE con
   fuentes (cada plugin compila `src/` con su configuración de JUCE) y no tiene tests propios: la prueban
-  `UndertowPresetTests`, `RiptidePresetTests`, `EbbPresetTests` y `FathomPresetTests` (cambiarla = correr los cuatro).
+  `UndertowPresetTests`, `RiptidePresetTests`, `EbbPresetTests`, `FathomPresetTests` y `TidechartPresetTests` (cambiarla =
+  correr los cinco).
 - `PresetManager.h`: formato XML legible en unidades reales (lo que falta = valor por defecto; en listas, un número es el
   índice de la opción), fábrica (BinaryData del plugin) + carpeta del usuario, preset actual y "*" en el proyecto.
   Cada plugin describe lo suyo en un `PresetFormat` (etiqueta raíz, extensión, categorías con "Init" primero y
   "Otros" al final, carpeta, parámetros excluidos como el bypass, archivos de fábrica) y, opcional, un "estado extra"
-  que no es un parámetro (la curva de Ebb: un `ValueTree` guardado como elemento hijo del preset que cuenta para el "*")
+  que no es un parámetro (la curva de Ebb, la progresión y las líneas de Tidechart: un `ValueTree` guardado como elemento
+  hijo del preset que cuenta para el "*")
   y, opcional, `beforeLoad`/`afterLoad` alrededor de cargar (Fathom: cargar un preset = un paso de su deshacer).
 - GUI: `PresetPanel.h` (barra + navegador + panel de guardar y todo su comportamiento; el editor solo llama a `addTo`,
   `setBounds`, `update` y `onMessage`), con los colores del plugin en una `Palette`.

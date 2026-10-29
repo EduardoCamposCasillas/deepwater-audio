@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Perreo oscuro: i–♭II en frigio, el ♭II corto, dembow con huecos y pedal en el bajo. -->
+<TidechartPreset formatVersion="1" name="Perreo Frigio" category="Oscuro" author="Tidechart">
+  <Notes>
+    Dos acordes y un semitono: i–♭II en frigio, con el ♭II de solo 2 tiempos que "empuja" de vuelta al i. Debajo, el
+    bajo se queda en la tónica (pedal) y el dembow tiene huecos. En Mi: Em–F.
+
+    Por qué funciona:
+    - El frigio es el menor con el 2.º grado bajado: entre la tónica y el ♭II hay un solo semitono (E–F). Es el
+      intervalo más tenso que hay junto a la casa, y por eso suena oscuro, casi amenazante.
+    - El ♭II corto (2 de 8 tiempos) es un adorno: llega tarde, en la segunda mitad del compás, y cae al i en el 1. Si
+      durara lo mismo que el i, la tensión se volvería paisaje.
+    - El pedal en el bajo (la tónica todo el tiempo, también debajo del ♭II) hace que el F suene como una sombra sobre
+      el E en vez de un cambio de acorde: el choque es el color.
+    - Los huecos del dembow dejan aire: en el perreo oscuro el silencio pesa tanto como los golpes.
+
+    Cómo se construyó:
+    - Modo frigio. Progresión i (6 tiempos) – ♭II (2 tiempos), dos veces: 4 compases.
+    - Ritmo Dembow con huecos, voicing abierto (drop 2): ancho, de pad.
+    - Bajo Pedal de tónica; melodía Gancho con poca densidad (35 %): pocas notas, que no tapen el semitono.
+
+    Pruébalo: con el teclado de la escala mira el ♭II: todas sus notas son de la escala frigia. Cambia el modo a menor
+    (eólico): el ♭II pasa a ser prestado (naranja) y el carácter es el mismo, porque lo que importa es ese semitono.
+    Cuándo NO usarlo: en algo alegre o romántico; y no le pongas una melodía con F♯ (la 2.ª natural): choca con el ♭II.
+  </Notes>
+  <Parameters>
+    <PARAM id="keyMode" value="Phrygian"/>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="rhythm" value="Dembow gaps"/>
+    <PARAM id="voicing" value="Open (drop 2)"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="6"/>
+      <Step chord="bII" beats="2"/>
+      <Step chord="i" beats="6"/>
+      <Step chord="bII" beats="2"/>
+    </Progression>
+    <Lines>
+      <Bass style="pedal" density="0.5"/>
+      <Melody style="hook" density="0.35"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

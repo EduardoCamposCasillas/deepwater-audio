@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trap oscuro: i–♭VI–iv–V en menor armónica, acordes sostenidos, 808 largo y un arpegio arriba. -->
+<TidechartPreset formatVersion="1" name="Trap Menor Armónica" category="Trap" author="Tidechart">
+  <Notes>
+    i–♭VI–iv–V en menor armónica, un compás cada uno, sostenidos y abiertos; el bajo con notas largas (para un 808) y un
+    arpegio encima, como un pluck. En La: Am–F–Dm–E.
+
+    Por qué funciona:
+    - La menor armónica es la menor con la 7.ª subida (en La, G♯). Esa nota convierte el v en V (E mayor): ahora hay
+      una dominante de verdad, con la sensible G♯ a medio tono de la tónica A. El final de la vuelta (E) tira hacia el
+      principio (Am): tensión y resolución en cada loop.
+    - El intervalo entre F y G♯ (♭6 y 7, una segunda aumentada) da el color "de película de terror" / árabe que el trap
+      oscuro usa tanto en sus melodías.
+    - Acordes sostenidos y abiertos (drop 2): el ritmo lo ponen los hi-hats y el 808, no los acordes.
+
+    Cómo se construyó:
+    - Modo menor armónica, progresión i–♭VI–iv–V, ritmo Sostenido, voicing Abierto (drop 2).
+    - Bajo Fundamental con poca densidad (25 %) y en el registro grave (E2–G3, 41–98 Hz): notas largas, para que el 808 tenga
+      tiempo de sonar con su glide.
+    - Melodía Arpegio (densidad 60 %): las notas de cada acorde en orden; sobre el V se oye el G♯.
+
+    Pruébalo: arrastra el Bajo al Piano Roll de un 808 y alarga las notas hasta la siguiente; activa el glide (portamento)
+    del instrumento. Cambia el V por un ♭VII (clic derecho → Cambiar el acorde) y escucha cómo desaparece la tensión.
+    Cuándo NO usarlo: en un reggaetón romántico; la sensible y la segunda aumentada suenan dramáticas, no dulces.
+  </Notes>
+  <Parameters>
+    <PARAM id="keyMode" value="Harmonic minor"/>
+    <PARAM id="playMode" value="Progression (synced)"/>
+    <PARAM id="voicing" value="Open (drop 2)"/>
+    <PARAM id="playBass" value="On"/>
+    <PARAM id="playMelody" value="On"/>
+  </Parameters>
+  <Composition>
+    <Progression>
+      <Step chord="i" beats="4"/>
+      <Step chord="bVI" beats="4"/>
+      <Step chord="iv" beats="4"/>
+      <Step chord="V" beats="4"/>
+    </Progression>
+    <Lines>
+      <Bass style="root" density="0.25" low="28" high="43"/>
+      <Melody style="arpeggio" density="0.6"/>
+    </Lines>
+  </Composition>
+</TidechartPreset>

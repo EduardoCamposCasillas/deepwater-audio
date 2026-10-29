@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Punto de partida: todo como al cargar Tidechart por primera vez. Un preset de fábrica solo escribe lo que cambia
+     respecto a este. -->
+<TidechartPreset formatVersion="1" name="Init" category="Init" author="Tidechart">
+  <Notes>
+    Todo como al cargar Tidechart por primera vez: modo menor (eólico), tríadas, cada tecla dispara su acorde (modo
+    Teclas), estado fundamental, ritmo Sostenido, solo la capa de acordes, y la progresión de fábrica i–♭VI–♭III–♭VII
+    (un compás cada uno: el esqueleto del reggaetón). La tónica NO cambia: ningún preset la cambia, es la de tu canción.
+
+    Cómo empezar desde aquí:
+    1. Elige la tónica (clic en ella: el círculo de quintas) y el modo.
+    2. Toca los acordes de la paleta para oírlos; arma la progresión con "Otra idea", las plantillas o el "+".
+    3. Pon "Progresión (sigue a FL)", un ritmo (el dembow) y dale play en FL.
+    4. Enciende Bajo y Melodía y pulsa "Otra" hasta que te gusten; arrástralos al Piano Roll.
+  </Notes>
+  <Parameters>
+  </Parameters>
+</TidechartPreset>

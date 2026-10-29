@@ -25,9 +25,20 @@ juce_add_plugin(Tidechart
 set(TIDECHART_PLUGIN_SOURCES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
+    Source/presets/TidechartPresets.cpp
 )
 
 target_sources(Tidechart PRIVATE ${TIDECHART_PLUGIN_SOURCES})
+
+# --- Presets de fábrica (Fase 9) ---------------------------------------------------
+# Los .tcpreset de Presets/Factory se compilan DENTRO del plugin (BinaryData.h), como en el resto de la suite.
+# CONFIGURE_DEPENDS: un preset nuevo se detecta al compilar, sin reconfigurar a mano.
+file(GLOB_RECURSE TIDECHART_FACTORY_PRESETS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Presets/Factory/*.tcpreset")
+juce_add_binary_data(TidechartPresetData
+    HEADER_NAME BinaryData.h
+    NAMESPACE   BinaryData
+    SOURCES     ${TIDECHART_FACTORY_PRESETS}
+)
 target_include_directories(Tidechart PRIVATE Source)
 
 target_compile_definitions(Tidechart
@@ -40,8 +51,10 @@ target_compile_definitions(Tidechart
 target_link_libraries(Tidechart
     PRIVATE
         juce::juce_audio_utils         # incluye audio_processors, audio_devices, gui, etc.
+        TidechartPresetData
         deepwater::dsp                 # librería compartida de la suite (libs/dsp): el reloj del host, el buzón a la GUI
         deepwater::theory              # teoría musical (libs/theory): nombres de nota, acordes, escalas, grados
+        deepwater::presets             # presets de la suite (libs/presets)
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
@@ -80,10 +93,35 @@ if(TIDECHART_BUILD_TESTS)
     target_link_libraries(TidechartProcessorTests
         PRIVATE
             juce::juce_audio_utils
+            TidechartPresetData
             deepwater::dsp
             deepwater::theory
+            deepwater::presets
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
     )
     add_test(NAME TidechartProcessorTests COMMAND TidechartProcessorTests)
+
+    # Tests de presets (Fase 9): cada preset de fábrica se lee sin avisos y suena; guardar y cargar, el "*", el estado del
+    # proyecto. Con JUCE (parámetros, XML): compila el procesador, como los de los otros plugins.
+    juce_add_console_app(TidechartPresetTests PRODUCT_NAME "TidechartPresetTests")
+    target_sources(TidechartPresetTests PRIVATE tests/PresetTests.cpp ${TIDECHART_PLUGIN_SOURCES})
+    target_include_directories(TidechartPresetTests PRIVATE Source)
+    target_compile_definitions(TidechartPresetTests
+        PRIVATE
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            "JucePlugin_Name=\"Tidechart\""
+    )
+    target_link_libraries(TidechartPresetTests
+        PRIVATE
+            juce::juce_audio_utils
+            TidechartPresetData
+            deepwater::dsp
+            deepwater::theory
+            deepwater::presets
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
+    )
+    add_test(NAME TidechartPresetTests COMMAND TidechartPresetTests)
 endif()

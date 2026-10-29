@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <functional>
 #include <cstdio>
 #include <cstdlib>
 #include <new>
@@ -1019,6 +1020,7 @@ void testLinesState()
 //   TidechartProcessorTests --snapshot gui.png            (la pestaña Crear, la de por defecto)
 //   TidechartProcessorTests --snapshot gui.png settings   (Ajustes; "analysis": Análisis)
 //   TidechartProcessorTests --snapshot gui.png circle     (Fase 8.3: el círculo de quintas, en La menor y en Mi frigio)
+//   TidechartProcessorTests --snapshot gui.png presets    (Fase 9: Crear con el navegador de presets abierto)
 int saveSnapshot (const juce::File& file, const juce::String& page)
 {
     namespace th = deepwater::theory;
@@ -1074,9 +1076,26 @@ int saveSnapshot (const juce::File& file, const juce::String& page)
         processor->setPlayHead (nullptr);
         return ok ? 0 : 1;
     }
-    if (page.isNotEmpty())
+    if (page.isNotEmpty() && page != "presets")
         processor->getParameters().state.setProperty ("page", page, nullptr);
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor->createEditor());
+    // Fase 9: "presets" = Crear con el navegador de presets abierto (se busca entre los componentes de la vista).
+    if (page == "presets")
+    {
+        std::function<void (juce::Component&)> openBrowser = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (auto* browser = dynamic_cast<deepwater::presets::PresetBrowser*> (child))
+                {
+                    browser->refresh();
+                    browser->setVisible (true);
+                    browser->toFront (false);
+                }
+                openBrowser (*child);
+            }
+        };
+        openBrowser (*editor);
+    }
     for (int block = 0; block < 6; ++block)
     {
         rig.run (block == 0 ? std::vector<Event> { { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), 0 } } : std::vector<Event> {}, 512);

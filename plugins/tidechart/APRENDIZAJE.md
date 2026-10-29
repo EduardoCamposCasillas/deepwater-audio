@@ -1181,3 +1181,68 @@ menor a mayor en el puente). Encuentra las dos tonalidades a oído (o con "Escuc
   posible, solo que más fuerte.
 - **Modular a lo lejos sin preparar.** Saltar 4 o 5 casillas de golpe suena a error si no hay un acorde puente (uno que
   esté en las dos tonalidades) o una pausa.
+
+## Fase 9.1 — Presets: recetas para empezar
+
+Arriba, en la cabecera, está la **barra de presets**: ◀ ▶ para pasar de uno a otro, el nombre (clic: el navegador con
+las notas de cada uno), **Guardar** y ···. Un preset de Tidechart es una **receta de composición**: el modo, la
+progresión con sus duraciones, el ritmo, el voicing, qué capas suenan y cómo se generan el bajo y la melodía. Lo que
+**no** trae es la tónica: la de tu canción se queda (si estás en Mi, "Perreo Frigio" suena en Mi frigio).
+
+### Conceptos aprendidos
+
+- **Receta, no grabación.** El preset guarda los grados (i–♭II), no las notas (E–F): por eso sirve en cualquier
+  tonalidad. Las líneas igual: se guarda cómo generarlas (estilo, densidad, rango, semilla) y salen en tu tónica. La
+  excepción es una melodía que capturaste o fijaste: esa es tuya y viaja nota a nota.
+- **El "*".** Si cambias algo (una duración, otra melodía con "Otra", el ritmo), el nombre del preset muestra un "*":
+  ya no es el original. Guárdalo con otro nombre si te gusta; el original de fábrica no se pierde.
+- **Las notas del preset.** Cada uno explica por qué funciona su progresión, cómo se construyó, qué probar y cuándo no
+  usarlo. Léelas en el navegador: son una lección corta de armonía cada una.
+
+### Qué hace cada control
+
+- **◀ ▶**: el preset anterior / siguiente (dan la vuelta).
+- **Nombre**: abre el navegador: categorías a la izquierda, la lista, y a la derecha las notas. Buscar encuentra por
+  nombre, categoría o notas ("frigio", "dembow").
+- **Guardar**: tu preset en `Documentos\Tidechart\Presets`, con nombre, categoría, autor y tus notas (si partiste de
+  uno de fábrica, las notas empiezan diciendo de cuál).
+- **···**: Init (empezar de cero), Guardar como…, abrir la carpeta de tus presets y volver a leerla.
+
+### Ejercicio guiado: el mismo preset en tres tonalidades
+
+1. Carga "Reggaetón Clásico" con la tónica en La: Am–F–C–G. Dale play.
+2. Cambia la tónica a Re con el círculo de quintas: el preset sigue igual (sin "*", porque la tónica no es parte de él)
+   y ahora es Dm–B♭–F–C. Escucha que la sensación es la misma, más arriba.
+3. Ahora carga "Perreo Frigio" sin cambiar la tónica: suena en Re frigio. Mira el teclado: el ♭II es E♭.
+
+### Receta: tu propio punto de partida
+
+Carga el preset que más se parezca a lo que buscas, cámbiale UNA cosa (el ritmo, una duración, la melodía con "Otra")
+y guárdalo con un nombre que diga para qué es ("Intro perreo lento"). En la próxima canción empiezas desde ahí. Por qué
+así: los productores no empiezan de cero cada vez; tienen sus recetas y las van afinando.
+
+### Reto (sin receta)
+
+Antes de cargar "R&B Dórico", lee solo su nombre y escribe en el Piano Roll una progresión de 4 acordes que creas que
+encaja (en dórico, con séptimas). Después cárgalo y compara: ¿qué acordes coinciden? ¿Qué tiene el suyo que el tuyo no?
+
+<details><summary>Pistas</summary>
+
+- El acorde que define el dórico es el IV MAYOR (en Re dórico, G).
+- En R&B casi todo lleva 7.ª o 9.ª: mira los tipos en el clic derecho de cada paso.
+- Fíjate en qué notas comparten acordes seguidos (el teclado de la escala ayuda).
+</details>
+
+### Vocabulario
+
+- **Preset**: un ajuste guardado con nombre; en Tidechart, una receta de composición.
+- **Init**: el punto de partida "vacío" (todo por defecto).
+- **Plantilla / receta**: una estructura que se reutiliza y se adapta (la tonalidad, el ritmo, la melodía).
+
+### Errores comunes
+
+- **Cargar un preset y esperar la canción terminada.** Es un punto de partida: la canción sale de lo que cambies.
+- **Guardar encima sin querer.** Guarda con otro nombre cuando partas de uno de fábrica (los de fábrica no se pisan, se
+  guarda una copia tuya).
+- **Pensar que el preset cambió de tonalidad.** No la cambia nunca; si suena "más agudo" que en el ejemplo de las notas,
+  es porque tu tónica es otra.

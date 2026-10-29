@@ -27,6 +27,24 @@ const juce::Identifier scaleProperty { "scale" }; // la escala elegida con la es
 constexpr double minScale = 0.5, maxScale = 1.5;
 
 constexpr const char* pageIds[] { "create", "settings", "analysis" };
+constexpr int presetBarWidth = 420;
+constexpr int messageSeconds = 4;
+
+std::unique_ptr<juce::PropertiesFile> openSettings()
+{
+    // %APPDATA%\Deepwater\Tidechart.settings (en Windows). Solo guarda preferencias de la interfaz.
+    juce::PropertiesFile::Options options;
+    options.applicationName = "Tidechart";
+    options.filenameSuffix = ".settings";
+    options.folderName = "Deepwater";
+    options.osxLibrarySubFolder = "Application Support";
+    return std::make_unique<juce::PropertiesFile> (options);
+}
+
+deepwater::presets::Palette presetPalette()
+{
+    return { theme::background, theme::panel, theme::panelOutline, theme::display, theme::text, theme::dimText, theme::accent, theme::freeRunning };
+}
 } // namespace
 
 TidechartMainView::TidechartMainView (TidechartAudioProcessor& p)
@@ -71,7 +89,9 @@ TidechartMainView::TidechartMainView (TidechartAudioProcessor& p)
                    [&p] { p.fixMelody(); },
                    [&p] (tidechart::ExportLayer layer) { return p.exportClip (layer); } }),
       inputMonitor (utf8 ("ENTRADA  \xe2\x80\x94  lo que llega a Tidechart"), theme::input),
-      outputMonitor (utf8 ("SALIDA  \xe2\x80\x94  lo que va al instrumento"), theme::accent)
+      outputMonitor (utf8 ("SALIDA  \xe2\x80\x94  lo que va al instrumento"), theme::accent),
+      preferences (openSettings()),
+      presets (p.getPresetManager(), presetPalette(), preferences.get())
 {
     addAndMakeVisible (transportView);
     addAndMakeVisible (paletteView);
@@ -133,6 +153,10 @@ TidechartMainView::TidechartMainView (TidechartAudioProcessor& p)
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.getParameters(),
                                                                                                 tidechart::params::bypass, bypassButton);
 
+    // Presets (Fase 9). Al final: el navegador y el panel de guardar quedan por encima de todo lo demás.
+    presets.onMessage = [this] (const juce::String& text) { showMessage (text); };
+    presets.addTo (*this);
+
     setSize (pageWidth, pageHeight);
     const auto saved = processor.getParameters().state.getProperty (pageProperty).toString();
     Page initial = Page::create;
@@ -148,8 +172,16 @@ TidechartMainView::~TidechartMainView()
     stopTimer();
 }
 
+void TidechartMainView::showMessage (const juce::String& text)
+{
+    message = text;
+    messageExpiry = juce::Time::getApproximateMillisecondCounter() + messageSeconds * 1000;
+    repaint (guideArea);
+}
+
 void TidechartMainView::setPage (Page newPage)
 {
+    presets.closePanels(); // el navegador estorba en otra pestaña
     page = newPage;
     pageButtons[static_cast<std::size_t> (page)].setToggleState (true, juce::dontSendNotification);
 
@@ -197,7 +229,10 @@ void TidechartMainView::paint (juce::Graphics& g)
         g.fillRoundedRectangle (chordView.getBounds().expanded (10, 6).toFloat(), 6.0f);
         g.setColour (theme::dimText);
         g.setFont (juce::FontOptions (11.0f));
-        g.drawFittedText (utf8 ("Lo que cambies aqu\xc3\xad sigue sonando en Crear. Pasa el rat\xc3\xb3n por un control para ver qu\xc3\xa9 hace."),
+        if (message.isNotEmpty())
+            g.setColour (theme::accent);
+        g.drawFittedText (message.isNotEmpty() ? message
+                                               : utf8 ("Lo que cambies aqu\xc3\xad sigue sonando en Crear. Pasa el rat\xc3\xb3n por un control para ver qu\xc3\xa9 hace."),
                           guideArea, juce::Justification::centredLeft, 1, 0.9f);
         return;
     }
@@ -206,7 +241,7 @@ void TidechartMainView::paint (juce::Graphics& g)
     auto guideBox = guideArea;
     g.setColour (theme::accent);
     g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
-    g.drawFittedText (guide, guideBox.removeFromTop (36), juce::Justification::topLeft, 2, 1.0f);
+    g.drawFittedText (message.isNotEmpty() ? message : guide, guideBox.removeFromTop (36), juce::Justification::topLeft, 2, 1.0f);
     guideBox.removeFromTop (6);
     g.setColour (theme::dimText);
     g.setFont (juce::FontOptions (11.0f));
@@ -299,6 +334,9 @@ void TidechartMainView::resized()
     header.removeFromLeft (150); // el título
     for (auto& button : pageButtons)
         button.setBounds (header.removeFromLeft (110).reduced (0, 12));
+    // Presets (Fase 9): en el hueco del medio de la cabecera; el navegador y el panel de guardar tapan la página entera.
+    presets.setBounds (header.withSizeKeepingCentre (presetBarWidth, header.getHeight()).reduced (0, 11),
+                       getLocalBounds().withTrimmedTop (headerHeight).reduced (16, 8));
 
     switch (page)
     {
@@ -404,6 +442,14 @@ void TidechartMainView::timerCallback()
     {
         seenLinesChanges = changes;
         linesView.setLines (processor.getLines());
+    }
+
+    presets.update(); // nombre del preset y "*" si se tocó algo (también la progresión y las líneas)
+    if (messageExpiry != 0 && juce::Time::getApproximateMillisecondCounter() > messageExpiry)
+    {
+        messageExpiry = 0;
+        message.clear();
+        repaint (guideArea);
     }
 
     if (page == Page::create)
