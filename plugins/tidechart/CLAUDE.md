@@ -227,7 +227,7 @@ plugins/tidechart/
 - [x] Fase 3 — Paleta de acordes por tonalidad y modo; tocar un acorde completo con una sola tecla.
 - [x] Fase 4 — Constructor de progresiones: voicings, inversiones automáticas con buena conducción de voces, patrones
       rítmicos de acordes (incluyendo dembow y variantes), préstamo modal.
-- [ ] Fase 5 — Detección de tonalidad a partir del MIDI entrante.
+- [x] Fase 5 — Detección de tonalidad a partir del MIDI entrante.
 - [ ] Fase 6 — Generador de melodías y líneas de bajo que siguen la progresión, con control de densidad, rango y
       estilo; variaciones a partir de una melodía existente.
 - [ ] Fase 7 — Arrastrar y soltar el MIDI generado al Piano Roll de FL Studio (archivo `.mid` temporal escrito con
@@ -251,7 +251,7 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 5 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (escuchar acordes y melodías, Usar).
+Fase 5 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (escuchar acordes y melodías, Usar): funciona.
 - `libs/theory`: `KeyDetection.h` (perfiles, `profileCorrelation`, `rankKeys`, `keyConfidence`, `sameNotes`,
   `phraseCueIndex`) y `keyEvidence` en `src/KeyDetection.cpp`. `DeepwaterTheoryTests` +1 grupo: perfiles de los 10
   modos, evidencia de notas (duración, bajo, votos), ventanas de frase, relativas sin votos (empate → La menor, luego
@@ -362,4 +362,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 5 en FL; después, Fase 6 (generador de melodías y líneas de bajo).
+Siguiente: Fase 6 (generador de melodías y líneas de bajo).
