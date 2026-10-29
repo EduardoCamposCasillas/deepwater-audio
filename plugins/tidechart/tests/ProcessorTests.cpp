@@ -20,6 +20,7 @@
 #include "deepwater/theory/KeyDetection.h"
 #include "deepwater/theory/Progression.h"
 #include "deepwater/theory/Text.h"
+#include "gui/CircleOfFifthsView.h"
 #include "MidiFileExport.h"
 #include "Parameters.h"
 #include "PluginEditor.h"
@@ -1017,6 +1018,7 @@ void testLinesState()
 // detección después de escuchar i–♭II en Mi frigio (para revisar la GUI sin capturar la pantalla):
 //   TidechartProcessorTests --snapshot gui.png            (la pestaña Crear, la de por defecto)
 //   TidechartProcessorTests --snapshot gui.png settings   (Ajustes; "analysis": Análisis)
+//   TidechartProcessorTests --snapshot gui.png circle     (Fase 8.3: el círculo de quintas, en La menor y en Mi frigio)
 int saveSnapshot (const juce::File& file, const juce::String& page)
 {
     namespace th = deepwater::theory;
@@ -1052,6 +1054,26 @@ int saveSnapshot (const juce::File& file, const juce::String& page)
     setParameter (*processor, tidechart::params::playMelody, 1.0f);
     head.ppq = 4.0;
     rig.position = 0;
+    if (page == "circle")
+    {
+        // Las dos tonalidades lado a lado: la de fábrica y la que escuchó la detección.
+        tidechart::gui::CircleOfFifthsView aMinor ({}), phrygian ({});
+        aMinor.setKey (processor->currentChordSettings (false).key);
+        phrygian.setKey (ePhrygian);
+        juce::Image image (juce::Image::ARGB, aMinor.getWidth() * 2 + 10, aMinor.getHeight(), true);
+        {
+            juce::Graphics g (image); // se destruye antes de guardar: así la imagen queda escrita
+            g.fillAll (juce::Colours::black);
+            g.drawImageAt (aMinor.createComponentSnapshot (aMinor.getLocalBounds()), 0, 0);
+            g.drawImageAt (phrygian.createComponentSnapshot (phrygian.getLocalBounds()), aMinor.getWidth() + 10, 0);
+        }
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        const bool ok = stream.openedOk() && juce::PNGImageFormat().writeImageToStream (image, stream);
+        std::printf ("%s %s\n", ok ? "Circulo guardado en" : "No se pudo guardar", file.getFullPathName().toRawUTF8());
+        processor->setPlayHead (nullptr);
+        return ok ? 0 : 1;
+    }
     if (page.isNotEmpty())
         processor->getParameters().state.setProperty ("page", page, nullptr);
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor->createEditor());
@@ -1083,6 +1105,46 @@ int saveSnapshot (const juce::File& file, const juce::String& page)
 // pasadas a negras, tienen que ser exactamente las del clip. Y el clip como archivo .mid: leído de vuelta, las mismas
 // notas en ticks exactos, cada note-on con su note-off, el note-off primero si coinciden, el fin de pista al final de la
 // vuelta, el nombre, el tempo y el compás.
+// Fase 8.3: el círculo de quintas. Qué tónica elige un clic en cada sitio (C arriba, una quinta más por casilla en el
+// sentido del reloj; adentro la relativa menor) y en qué casilla queda el aro de la tónica según el modo.
+void testCircleOfFifths()
+{
+    std::printf ("Circulo de quintas (Fase 8.3): la tonica bajo cada punto y la casilla de la tonica en 5 tonalidades\n");
+
+    namespace th = deepwater::theory;
+    tidechart::gui::CircleOfFifthsView circle ({});
+    // Mismas cuentas que la vista: 340 × 392, 62 px de texto abajo → centro (170, 167), radio 157; el anillo de afuera
+    // va de 0,66 a 1 del radio y el de adentro de 0,36 a 0,66.
+    const juce::Point<float> centre { 170.0f, 167.0f };
+    const auto at = [&] (float radius, float clockAngle) { return centre.getPointOnCircumference (radius, clockAngle); };
+    constexpr float outer = 130.0f, inner = 80.0f, quarter = juce::MathConstants<float>::halfPi;
+    check (circle.tonicAt (at (outer, 0.0f)) == 0, "arriba, afuera: C");
+    check (circle.tonicAt (at (inner, 0.0f)) == 9, "arriba, adentro: Am (la relativa de C)");
+    check (circle.tonicAt (at (outer, quarter)) == 9, "a las 3: A (C G D A)");
+    check (circle.tonicAt (at (outer, 2.0f * quarter)) == 6, "abajo: F#/Gb");
+    check (circle.tonicAt (at (outer, 3.0f * quarter)) == 3, "a las 9: Eb (C F Bb Eb)");
+    check (circle.tonicAt (at (inner, quarter)) == 6, "a las 3, adentro: F#m (la relativa de A)");
+    check (circle.tonicAt (at (outer, 0.24f)) == 0 && circle.tonicAt (at (outer, 0.30f)) == 7, "el borde entre C y G, a 15 grados");
+    check (circle.tonicAt (centre) == -1 && circle.tonicAt ({ 2.0f, 2.0f }) == -1, "el centro y las esquinas no eligen nada");
+
+    struct Case
+    {
+        th::Key key;
+        int cell;
+        const char* what;
+    };
+    const Case cases[] { { { th::notes::A, th::Mode::aeolian }, 12, "La menor: adentro, arriba (Am)" },
+                         { { th::notes::C, th::Mode::ionian }, 0, "Do mayor: afuera, arriba (C)" },
+                         { { th::notes::E, th::Mode::phrygian }, 13, "Mi frigio: adentro (Em), una casilla a la derecha" },
+                         { { th::notes::G, th::Mode::mixolydian }, 1, "Sol mixolidio: afuera (G), tercera mayor" },
+                         { { th::SpelledNote { 2, -1 }, th::Mode::ionian }, 9, "Mi bemol mayor: afuera, a las 9" } };
+    for (const auto& c : cases)
+    {
+        circle.setKey (c.key);
+        check (circle.tonicCellIndex() == c.cell, juce::String ("aro de la tonica: ") + c.what + " (salio " + juce::String (circle.tonicCellIndex()) + ")");
+    }
+}
+
 void testExport()
 {
     std::printf ("Arrastrar al Piano Roll (Fase 7): cada capa exportada = lo que suena en vivo (4 ajustes x 2 progresiones); "
@@ -1284,6 +1346,7 @@ int main (int argc, char* argv[])
     testLayoutsAndState();
     testLines();
     testLinesState();
+    testCircleOfFifths();
     testExport();
 
     if (failures == 0)

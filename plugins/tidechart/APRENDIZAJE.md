@@ -1097,3 +1097,87 @@ diferencian.
 - **Creer que "fuera de la escala" es "mal".** Una nota naranja es una decisión: es el color. Lo que suena mal es
   ponerla sin que la melodía la acompañe (una melodía con B natural sobre el ♭II con B♭ choca).
 - **Mirar solo las teclas claras.** La tonalidad no es solo la colección: también es la casa (la tecla verde).
+
+## Fase 8.3 — El círculo de quintas
+
+La tónica ya no se elige en un menú: el botón de la tónica (arriba a la izquierda, "A") abre el **círculo de
+quintas**. Un clic en una casilla pone esa tónica, con el modo que tengas, y el círculo se queda abierto para comparar
+(se cierra con un clic fuera o con Esc).
+
+### Conceptos aprendidos
+
+- **Qué es.** Las 12 tónicas ordenadas de a **quintas justas** (7 semitonos): C → G → D → A → E → B → F♯ en el
+  sentido del reloj, y C → F → B♭ → E♭ → A♭ → D♭ en el contrario. Se cierra en un círculo porque 12 quintas dan la vuelta
+  entera (7 × 12 = 84 semitonos = 7 octavas justas).
+- **Por qué de a quintas.** Dos tonalidades vecinas en el círculo comparten **6 de sus 7 notas**: Do mayor (todas
+  blancas) y Sol mayor (cambia F por F♯). Cada paso en el sentido del reloj suma un sostenido a la armadura; en el
+  contrario, un bemol. Por eso el centro dice "sin alteraciones", "1 sostenido", "3 bemoles"...
+- **Las relativas.** El anillo de adentro tiene la **relativa menor** de cada mayor: Am debajo de C. Comparten las 7
+  notas y la armadura; cambia la casa. (Lo mismo que viste en el teclado de la 8.2: mismas teclas claras, otra tecla
+  verde.)
+- **La zona de una tonalidad.** Los 6 acordes mayores y menores de una escala mayor o menor caen en **3 casillas
+  vecinas de cada anillo**: en La menor, F–C–G afuera y Dm–Am–Em adentro. El del medio es la tónica (con el aro), el de
+  la izquierda la subdominante, el de la derecha la dominante. Por eso un acorde vecino suena "cerca" y uno del otro
+  lado del círculo, "lejos". El disminuido (Bdim en La menor) no tiene casilla.
+- **Los prestados en el círculo.** Los de la paleta salen con borde naranja: el ♭II y el ♭vii del frigio quedan **a la
+  izquierda** de la zona (más bemoles = más oscuro); los del dórico y la mayor, **a la derecha** (más sostenidos = más
+  claro). Es una forma de ver cuánta luz o sombra trae un préstamo.
+
+### Qué hace cada control
+
+- **Botón de la tónica**: abre el círculo. Funciona igual en Crear y en Ajustes; "Usar" de la detección y las
+  plantillas la siguen cambiando como antes.
+- **Pasar el ratón por una casilla**: abajo dice qué es ese acorde en tu tonalidad ("Em = v (dominante) en La menor:
+  está en la escala"), si es prestado y de qué modo, o si está lejos.
+- **Clic en una casilla**: esa fundamental pasa a ser la tónica; el **modo se queda** (si estás en frigio, sigues en
+  frigio). Para pasar de Do mayor a La menor, cambia también el modo.
+
+### Ejercicio guiado: modular a un vecino
+
+1. La menor, i–♭VI–♭III–♭VII, play en FL. Abre el círculo: la zona es F–C–G / Dm–Am–Em.
+2. Clic en **Em** (a la derecha de Am): ahora estás en Mi menor. La progresión suena igual de "triste", pero más
+   arriba y con una sola nota distinta (F♯ en vez de F). Mira el teclado de la 8.2: cambió una sola tecla.
+3. Vuelve a Am y clic en **C♯m** (4 casillas a la derecha): cambian 4 notas a la vez. Se oye mucho más el salto.
+4. Ahora clic en **Dm** (a la izquierda de Am): un bemol más, todo un poco más oscuro.
+
+### Receta: el cambio de tonalidad del último coro
+
+Muchas canciones suben la tonalidad en el último coro para darle energía. En el círculo, la forma más suave es ir a un
+**vecino**: de La menor a Mi menor (una casilla a la derecha) comparte casi todo y suena a "subir" sin romper nada.
+Haz el coro en Am, duplícalo en la Playlist, y en la copia cambia la tónica a Em con el círculo (y vuelve a arrastrar
+las capas al Piano Roll). Por qué así: con 6 notas en común, el oído acepta el cambio; con 3 o 4 distintas, suena a
+otra canción.
+
+### Reto (sin receta)
+
+En La menor, encuentra en el círculo **el acorde prestado más lejano** de los que ofrece la paleta, ponlo en la
+progresión y descubre dónde suena bien (¿al final de la vuelta? ¿antes del i?).
+
+<details><summary>Pistas</summary>
+
+- Cuenta casillas desde Am: los bordes naranjas más lejos de la zona.
+- Un acorde lejano suele sonar mejor corto (2 tiempos) y justo antes de volver a la tónica: tensión que se resuelve.
+- Mira en el teclado de la 8.2 cuántas notas naranjas trae: lejos en el círculo = más notas de fuera.
+</details>
+
+### Análisis de canciones
+
+Busca un tema de reggaetón con cambio de tonalidad (muchos suben un tono o una quinta en el último coro, o cambian de
+menor a mayor en el puente). Encuentra las dos tonalidades a oído (o con "Escuchar") y búscalas en el círculo:
+¿están cerca o lejos? ¿Cuántas notas cambian?
+
+### Vocabulario
+
+- **Quinta justa**: el intervalo de 7 semitonos (de C a G); el más estable después de la octava.
+- **Círculo de quintas**: las 12 tonalidades ordenadas de a quintas; las vecinas comparten 6 notas.
+- **Armadura**: los sostenidos o bemoles de una tonalidad (Sol mayor: 1 ♯, F♯).
+- **Relativa (mayor / menor)**: las dos tonalidades con las mismas notas y distinta casa (C y Am).
+- **Modulación**: cambiar de tonalidad dentro de una canción.
+
+### Errores comunes
+
+- **Esperar que el clic cambie a mayor o a menor.** El círculo elige la tónica; el modo se elige al lado.
+- **Leer el círculo como "tonalidades permitidas".** Es un mapa de distancias, no de reglas: lo lejano es un color
+  posible, solo que más fuerte.
+- **Modular a lo lejos sin preparar.** Saltar 4 o 5 casillas de golpe suena a error si no hay un acorde puente (uno que
+  esté en las dos tonalidades) o una pausa.

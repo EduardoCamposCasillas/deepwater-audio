@@ -106,7 +106,8 @@ plugins/tidechart/
     midi/MidiText.h          # nombres de nota como FL (C5 = 60) y descripción de mensajes para el monitor
     gui/                     # tema, reloj del host (TransportView), paleta + prestados (ChordPaletteView), progresión
                              # (ProgressionView, ProgressionTemplates), teclado de la escala bajo la paleta
-                             # (ScaleKeyboard, Fase 8.2), teclado de lo que suena, acorde que suena
+                             # (ScaleKeyboard, Fase 8.2), círculo de quintas al hacer clic en la tónica
+                             # (CircleOfFifthsView, Fase 8.3), teclado de lo que suena, acorde que suena
                              # (ChordView, con libs/theory), teoría en español (TheoryNames), monitor MIDI, detección
                              # de tonalidad (KeyDetectView: escuchar, resultado con su porqué, alternativas, histograma),
                              # melodía y bajo (LinesView: capas, estilo, densidad, rango, capturar, variar, piano roll;
@@ -115,7 +116,8 @@ plugins/tidechart/
   tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte,
                              # progresión, reservas; Fase 7: lo exportado = lo que suena y el .mid leído de vuelta);
                              # --snapshot <png> [settings|analysis] pinta la GUI (Crear, Ajustes o
-                             # Análisis) fuera de pantalla para revisarla
+                             # Análisis) fuera de pantalla para revisarla; "circle": el círculo de quintas
+                             # en La menor y en Mi frigio, lado a lado
 ```
 
 ## Librería de teoría musical (`libs/theory`, namespace `deepwater::theory`)
@@ -365,6 +367,24 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 8.3 IMPLEMENTADA (2026-10-28), pendiente de probar en FL Studio: el círculo de quintas.
+- `gui/CircleOfFifthsView.h` (340 × 392): C arriba, una quinta por casilla en el sentido del reloj; afuera las
+  mayores, adentro las relativas menores (F♯/G♭ y E♭m abajo). Cada casilla = un acorde mayor o menor escrito en la
+  tonalidad (`spellInKey`): de la escala → color de su función y su grado; prestado de los 8 que ofrece la paleta →
+  borde naranja y su grado; el resto, gris. Aro en la tónica (afuera si el modo tiene 3.ª mayor, adentro si no). En el
+  centro, la tonalidad y la armadura; abajo, el resumen (y el disminuido, que no tiene casilla) o, con el ratón encima,
+  qué es ese acorde en la tonalidad. Clic = esa fundamental como tónica, el modo se queda.
+- `ChordPaletteView`: el menú de la tónica pasó a ser un botón (`tonicButton`, con el nombre de la tónica) que abre el
+  círculo en un `CallOutBox` dentro de la vista principal (no en el escritorio: en FL una ventana suelta puede quedar
+  detrás); el clic mueve `keyTonic` con su gesto, el círculo se queda abierto y sigue la tonalidad (también si cambia
+  desde "Usar" o una plantilla). `SafePointer` a la caja y a la vista; el destructor de la paleta la cierra.
+- Tests: `TidechartProcessorTests` +1 (la tónica bajo cada punto: arriba C, adentro Am, a las 3 A, abajo F♯, a las 9
+  E♭, el borde entre C y G; el centro y las esquinas nada; el aro en La menor, Do mayor, Mi frigio, Sol mixolidio y Mi♭
+  mayor). `--snapshot <png> circle`.
+- Release con 0 warnings; ctest de Tidechart y teoría pasan; pluginval strictness 10 ampliado con `--randomise`:
+  SUCCESS. Revisados el círculo (La menor y Mi frigio) y Crear con `--snapshot`. No probado con el ratón (abrir, elegir,
+  cerrar): lo prueba el usuario en FL.
+
 Fase 8.2 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio: funciona. El teclado con la escala.
 - `gui/ScaleKeyboard.h`: 2 octavas (C a B), teclas grises (claras = de la escala, oscuras = fuera; el color queda para
   la tónica, en el verde de la función tónica con su letra, y para los puntos); el acorde mostrado como puntos del color
@@ -591,4 +611,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 8.3 (círculo de quintas).
+Siguiente: probar la Fase 8.3 en FL Studio (con ella termina la Fase 8); después, Fase 9 (presets).

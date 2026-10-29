@@ -10,6 +10,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "deepwater/theory/Text.h"
+#include "gui/CircleOfFifthsView.h"
 #include "gui/ScaleKeyboard.h"
 #include "gui/Theme.h"
 #include "gui/TheoryNames.h"
@@ -29,6 +30,9 @@ namespace tidechart::gui
 // Fase 8.2: abajo, en vez de la escala en texto, un teclado de 2 octavas con la escala (gui/ScaleKeyboard.h) y, al
 // lado, la escala y su carácter; al pasar el ratón por un acorde (o al tocarlo), sus notas en el teclado y en el texto,
 // con las de fuera de la escala marcadas: así se ve qué trae cada prestado.
+// Fase 8.3: la tónica ya no es un menú: es un botón que abre el círculo de quintas (gui/CircleOfFifthsView.h) en una
+// ventana sobre el plugin; un clic en una casilla cambia la tónica (con su gesto, para el host) y el círculo sigue
+// abierto, para ir comparando.
 // Vista simple: arriba solo la tónica y el modo (con el título TONALIDAD; a la derecha queda sitio para la detección);
 // tríadas/séptimas, qué teclas disparan y "+ Bajo" quedan en la vista completa (siguen sonando como estén).
 class ChordPaletteView final : public juce::Component, public juce::TooltipClient
@@ -44,8 +48,8 @@ public:
     ChordPaletteView (juce::AudioProcessorValueTreeState& state, Callbacks callbacksToUse) : callbacks (std::move (callbacksToUse))
     {
         namespace id = tidechart::params;
-        for (int i = 0; i < 12; ++i)
-            tonicBox.addItem (names::tonicChoice (i), i + 1);
+        tonicParameter = state.getParameter (id::keyTonic);
+        tonicButton.onClick = [this] { showCircle(); };
         for (int m = 0; m < deepwater::theory::modeCount; ++m)
             modeBox.addItem (names::modeName (static_cast<deepwater::theory::Mode> (m)), m + 1);
         sizeBox.addItem (names::utf8 ("Tr\xc3\xad" "adas"), 1);
@@ -55,7 +59,8 @@ public:
         bassButton.setButtonText ("+ Bajo");
         bassButton.setClickingTogglesState (true);
 
-        tonicBox.setTooltip (names::utf8 ("La t\xc3\xb3nica: la nota \"de casa\", donde la m\xc3\xbasica descansa."));
+        tonicButton.setTooltip (names::utf8 ("La t\xc3\xb3nica: la nota \"de casa\", donde la m\xc3\xbasica descansa. Clic: el c\xc3\xadrculo de quintas, "
+                                             "para elegirla viendo qu\xc3\xa9 tonalidades son vecinas y d\xc3\xb3nde caen los acordes."));
         modeBox.setTooltip (names::utf8 ("El modo: qu\xc3\xa9 notas forman la escala a partir de la t\xc3\xb3nica. Cambia el color de todos los acordes."));
         sizeBox.setTooltip (names::utf8 ("Tr\xc3\xad" "adas: 3 notas apiladas de 3.\xc2\xaa en 3.\xc2\xaa dentro de la escala. S\xc3\xa9ptimas: una 3.\xc2\xaa m\xc3\xa1s (m\xc3\xa1s rico, "
                             "el sonido del R&B)."));
@@ -64,21 +69,23 @@ public:
                                "fundamental en esa tecla; las de fuera no suenan.");
         bassButton.setTooltip (names::utf8 ("Agrega la fundamental una octava abajo: el acorde suena m\xc3\xa1s lleno y con el bajo claro."));
 
-        for (auto* box : { &tonicBox, &modeBox, &sizeBox, &mappingBox })
+        for (auto* box : { &modeBox, &sizeBox, &mappingBox })
         {
             box->setColour (juce::ComboBox::backgroundColourId, theme::control);
             box->setColour (juce::ComboBox::outlineColourId, theme::panelOutline);
             box->setColour (juce::ComboBox::textColourId, theme::text);
             addAndMakeVisible (*box);
         }
-        bassButton.setColour (juce::TextButton::buttonColourId, theme::control);
-        bassButton.setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.55f));
-        bassButton.setColour (juce::TextButton::textColourOffId, theme::text);
-        addAndMakeVisible (bassButton);
+        for (auto* button : { &bassButton, &tonicButton })
+        {
+            button->setColour (juce::TextButton::buttonColourId, theme::control);
+            button->setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.55f));
+            button->setColour (juce::TextButton::textColourOffId, theme::text);
+            addAndMakeVisible (*button);
+        }
         addAndMakeVisible (keyboard);
 
         using ComboAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
-        tonicAttachment = std::make_unique<ComboAttachment> (state, id::keyTonic, tonicBox);
         modeAttachment = std::make_unique<ComboAttachment> (state, id::keyMode, modeBox);
         sizeAttachment = std::make_unique<ComboAttachment> (state, id::chordSize, sizeBox);
         mappingAttachment = std::make_unique<ComboAttachment> (state, id::keyMapping, mappingBox);
@@ -89,6 +96,8 @@ public:
     {
         if (pressedPad >= 0)
             callbacks.previewDegree (-1);
+        if (circleBox != nullptr)
+            circleBox->dismiss();
     }
 
     // Desde el temporizador del editor: los ajustes que usa el audio y los grados que suenan. Solo repinta si cambió algo.
@@ -100,6 +109,9 @@ public:
         {
             settings = newSettings;
             rebuild();
+            tonicButton.setButtonText (names::tonicChoice (settings.key.tonic.pitchClass()));
+            if (circleView != nullptr)
+                circleView->setKey (settings.key);
         }
         held = newHeld;
         refreshKeyboard();
@@ -137,7 +149,7 @@ public:
         auto area = getLocalBounds();
         auto top = area.removeFromTop (26);
         top.removeFromLeft (simple ? 96 : 74); // el título
-        tonicBox.setBounds (top.removeFromLeft (96));
+        tonicButton.setBounds (top.removeFromLeft (96));
         top.removeFromLeft (8);
         modeBox.setBounds (top.removeFromLeft (170));
         top.removeFromLeft (8);
@@ -365,6 +377,28 @@ private:
         repaint();
     }
 
+    // El círculo, en una ventana junto al botón, dentro del plugin (no en el escritorio: en FL una ventana suelta puede
+    // quedar detrás). Elegir una casilla mueve el parámetro como si se eligiera en el menú.
+    void showCircle()
+    {
+        if (circleBox != nullptr)
+            return;
+        auto* parent = getParentComponent();
+        if (parent == nullptr)
+            return;
+        juce::Component::SafePointer<ChordPaletteView> self (this);
+        auto content = std::make_unique<CircleOfFifthsView> ([self] (int pc) {
+            if (self == nullptr || self->tonicParameter == nullptr)
+                return;
+            self->tonicParameter->beginChangeGesture();
+            self->tonicParameter->setValueNotifyingHost (self->tonicParameter->convertTo0to1 (static_cast<float> (pc)));
+            self->tonicParameter->endChangeGesture();
+        });
+        content->setKey (settings.key);
+        circleView = content.get();
+        circleBox = &juce::CallOutBox::launchAsynchronously (std::move (content), parent->getLocalArea (this, tonicButton.getBounds()), parent);
+    }
+
     // Recalcula los 7 acordes y los prestados con libs/theory cuando cambia la tonalidad, el modo o el tamaño.
     void rebuild()
     {
@@ -420,9 +454,12 @@ private:
 
     Callbacks callbacks;
     ScaleKeyboard keyboard;
-    juce::ComboBox tonicBox, modeBox, sizeBox, mappingBox;
-    juce::TextButton bassButton;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicAttachment, modeAttachment, sizeAttachment, mappingAttachment;
+    juce::ComboBox modeBox, sizeBox, mappingBox;
+    juce::TextButton bassButton, tonicButton;
+    juce::RangedAudioParameter* tonicParameter = nullptr;
+    juce::Component::SafePointer<juce::CallOutBox> circleBox;
+    juce::Component::SafePointer<CircleOfFifthsView> circleView;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttachment, sizeAttachment, mappingAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bassAttachment;
 
     midi::ChordSettings settings;
