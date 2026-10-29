@@ -10,6 +10,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "deepwater/theory/Text.h"
+#include "gui/ScaleKeyboard.h"
 #include "gui/Theme.h"
 #include "gui/TheoryNames.h"
 #include "midi/ChordTrigger.h"
@@ -25,6 +26,9 @@ namespace tidechart::gui
 // Fase 4: debajo, los PRESTADOS: acordes de los modos paralelos (misma tónica) que no están en la escala, con el modo
 // del que vienen. Se escuchan igual, y con "Agregar con clic" (en la progresión) cada clic agrega el acorde a la
 // progresión.
+// Fase 8.2: abajo, en vez de la escala en texto, un teclado de 2 octavas con la escala (gui/ScaleKeyboard.h) y, al
+// lado, la escala y su carácter; al pasar el ratón por un acorde (o al tocarlo), sus notas en el teclado y en el texto,
+// con las de fuera de la escala marcadas: así se ve qué trae cada prestado.
 // Vista simple: arriba solo la tónica y el modo (con el título TONALIDAD; a la derecha queda sitio para la detección);
 // tríadas/séptimas, qué teclas disparan y "+ Bajo" quedan en la vista completa (siguen sonando como estén).
 class ChordPaletteView final : public juce::Component, public juce::TooltipClient
@@ -71,6 +75,7 @@ public:
         bassButton.setColour (juce::TextButton::buttonOnColourId, theme::accent.withAlpha (0.55f));
         bassButton.setColour (juce::TextButton::textColourOffId, theme::text);
         addAndMakeVisible (bassButton);
+        addAndMakeVisible (keyboard);
 
         using ComboAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
         tonicAttachment = std::make_unique<ComboAttachment> (state, id::keyTonic, tonicBox);
@@ -97,6 +102,7 @@ public:
             rebuild();
         }
         held = newHeld;
+        refreshKeyboard();
         repaint();
     }
 
@@ -142,7 +148,9 @@ public:
         bassButton.setBounds (top.removeFromLeft (80));
 
         area.removeFromTop (8);
-        scaleArea = area.removeFromBottom (16);
+        scaleArea = area.removeFromBottom (26);
+        keyboard.setBounds (scaleArea.removeFromLeft (14 * 21));
+        scaleArea.removeFromLeft (12);
         area.removeFromBottom (6);
         auto borrowedRow = area.removeFromBottom (40);
         area.removeFromBottom (6);
@@ -183,7 +191,7 @@ public:
             g.setColour (colour.withAlpha (active ? 0.9f : 0.35f));
             g.fillRoundedRectangle (bounds.withHeight (4.0f).reduced (6.0f, 0.0f).translated (0.0f, 4.0f), 2.0f);
 
-            auto inner = bounds.reduced (8.0f, 8.0f);
+            auto inner = bounds.reduced (8.0f, 5.0f);
             g.setColour (active ? theme::dimText : theme::dimText.withAlpha (0.5f));
             g.setFont (juce::FontOptions (10.5f));
             g.drawText (pad.trigger, inner.removeFromTop (14.0f), juce::Justification::centredLeft);
@@ -232,8 +240,13 @@ public:
                         scaleArea, juce::Justification::centredLeft);
             return;
         }
+        const int shown = shownPad();
         g.setColour (theme::text);
-        g.drawText (scaleLine, scaleArea, juce::Justification::centredLeft);
+        if (shown < 0)
+            g.drawFittedText (scaleLine, scaleArea, juce::Justification::centredLeft, 2, 0.9f);
+        else
+            g.drawFittedText (shown < 7 ? pads[static_cast<std::size_t> (shown)].notesLine : borrowed[static_cast<std::size_t> (shown - 7)].notesLine,
+                              scaleArea, juce::Justification::centredLeft, 2, 0.9f);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -250,24 +263,86 @@ public:
     }
     void mouseDrag (const juce::MouseEvent& e) override { pressPad (padAt (e.getPosition())); }
     void mouseUp (const juce::MouseEvent&) override { pressPad (-1); }
+    void mouseMove (const juce::MouseEvent& e) override { setHovered (padAt (e.getPosition())); }
+    void mouseExit (const juce::MouseEvent&) override { setHovered (-1); }
 
 private:
     static constexpr int maxBorrowed = 8;
 
     struct Pad
     {
-        juce::String roman, symbol, trigger;
+        juce::String roman, symbol, trigger, notesLine;
         deepwater::theory::HarmonicFunction function = deepwater::theory::HarmonicFunction::tonic;
         deepwater::theory::RomanNumeral numeral;
+        deepwater::theory::Chord chord;
         bool valid = false;
     };
 
     struct BorrowedPad
     {
-        juce::String roman, symbol, source, tooltip;
+        juce::String roman, symbol, source, tooltip, notesLine;
         deepwater::theory::HarmonicFunction function = deepwater::theory::HarmonicFunction::tonic;
         deepwater::theory::RomanNumeral numeral;
+        deepwater::theory::Chord chord;
     };
+
+    // El acorde que muestran el teclado y el texto: el pulsado, si no el que está bajo el ratón, si no el primero que
+    // suena (desde el Piano Roll). −1 = ninguno (se ve solo la escala).
+    [[nodiscard]] int shownPad() const
+    {
+        if (pressedPad >= 0)
+            return pressedPad;
+        if (hoveredPad >= 0)
+            return hoveredPad;
+        for (int d = 0; d < 7; ++d)
+            if ((held & (1u << d)) != 0 && pads[static_cast<std::size_t> (d)].valid)
+                return d;
+        return -1;
+    }
+
+    void setHovered (int index)
+    {
+        if (index == hoveredPad)
+            return;
+        hoveredPad = index;
+        refreshKeyboard();
+        repaint (scaleArea);
+    }
+
+    void refreshKeyboard()
+    {
+        keyboard.setKey (settings.key);
+        const int shown = shownPad();
+        if (shown < 0 || (shown < 7 && ! pads[static_cast<std::size_t> (shown)].valid))
+            keyboard.setChord (std::nullopt, theme::accent);
+        else if (shown < 7)
+            keyboard.setChord (pads[static_cast<std::size_t> (shown)].chord, names::functionColour (pads[static_cast<std::size_t> (shown)].function));
+        else
+            keyboard.setChord (borrowed[static_cast<std::size_t> (shown - 7)].chord,
+                               names::functionColour (borrowed[static_cast<std::size_t> (shown - 7)].function));
+    }
+
+    // "♭VI = F:  F  A  C  ·  todas sus notas son de la escala", o "· trae B♭, de fuera de la escala".
+    [[nodiscard]] juce::String notesLineFor (const juce::String& roman, const juce::String& symbol, const deepwater::theory::Chord& chord) const
+    {
+        namespace th = deepwater::theory;
+        const th::Notation notation { true, 5 };
+        auto line = roman + " = " + symbol + ":  ";
+        juce::String outside;
+        for (const auto& tone : chord.tones())
+        {
+            const auto name = juce::String::fromUTF8 (th::noteName (tone, notation).c_str());
+            line << name << "  ";
+            if (! settings.key.contains (tone.pitchClass()))
+                outside << (outside.isEmpty() ? "" : ", ") << name;
+        }
+        line << names::utf8 (" \xc2\xb7  ");
+        if (outside.isEmpty())
+            line << names::utf8 ("todas sus notas son de la escala");
+        else
+            line << "trae " << outside << names::utf8 (", de fuera de la escala: de ah\xc3\xad su color");
+        return line;
+    }
 
     [[nodiscard]] int padAt (juce::Point<int> point) const
     {
@@ -282,6 +357,7 @@ private:
         if (index == pressedPad)
             return;
         pressedPad = index;
+        refreshKeyboard();
         if (index >= 7)
             callbacks.previewNumeral (borrowed[static_cast<std::size_t> (index - 7)].numeral);
         else
@@ -304,8 +380,10 @@ private:
                 continue;
             pad.numeral = th::romanNumeralFor (*chord, settings.key);
             pad.valid = true;
+            pad.chord = *chord;
             pad.roman = u (th::romanNumeralText (pad.numeral, notation));
             pad.symbol = u (th::chordSymbol (*chord, notation));
+            pad.notesLine = notesLineFor (pad.roman, pad.symbol, *chord);
             pad.function = th::harmonicFunction (pad.numeral);
             if (settings.mapping == midi::KeyMapping::whiteKeys)
                 pad.trigger = juce::String ("tecla ") + juce::String::charToString (static_cast<juce::juce_wchar> ("CDEFGAB"[d]));
@@ -322,6 +400,8 @@ private:
             pad.numeral = b.numeral;
             pad.roman = u (th::romanNumeralText (b.numeral, notation));
             pad.symbol = u (th::chordSymbol (b.chord, notation));
+            pad.chord = b.chord;
+            pad.notesLine = notesLineFor (pad.roman, pad.symbol, b.chord);
             pad.source = names::borrowedFrom (b.source);
             pad.function = th::harmonicFunction (b.numeral);
             pad.tooltip = pad.roman + " = " + pad.symbol + names::utf8 (", prestado ") + pad.source + ": no est\xc3\xa1 en "
@@ -335,9 +415,11 @@ private:
             scaleLine << u (th::noteName (settings.key.degree (d), notation)) << "  ";
         scaleLine << juce::String::fromUTF8 (" \xc2\xb7   ") << names::modeCharacter (settings.key.mode);
         hasPads = true;
+        refreshKeyboard();
     }
 
     Callbacks callbacks;
+    ScaleKeyboard keyboard;
     juce::ComboBox tonicBox, modeBox, sizeBox, mappingBox;
     juce::TextButton bassButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tonicAttachment, modeAttachment, sizeAttachment, mappingAttachment;
@@ -347,7 +429,7 @@ private:
     std::uint8_t held = 0;
     bool hasPads = false;
     bool simple = false;
-    int pressedPad = -1;
+    int pressedPad = -1, hoveredPad = -1;
     std::array<Pad, 7> pads;
     std::array<BorrowedPad, maxBorrowed> borrowed;
     int borrowedCount = 0;

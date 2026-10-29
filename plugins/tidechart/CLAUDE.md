@@ -105,7 +105,8 @@ plugins/tidechart/
     midi/EventLog.h          # cola lock-free audio → GUI de los eventos que entran y salen (el monitor)
     midi/MidiText.h          # nombres de nota como FL (C5 = 60) y descripción de mensajes para el monitor
     gui/                     # tema, reloj del host (TransportView), paleta + prestados (ChordPaletteView), progresión
-                             # (ProgressionView, ProgressionTemplates), teclado de lo que suena, acorde que suena
+                             # (ProgressionView, ProgressionTemplates), teclado de la escala bajo la paleta
+                             # (ScaleKeyboard, Fase 8.2), teclado de lo que suena, acorde que suena
                              # (ChordView, con libs/theory), teoría en español (TheoryNames), monitor MIDI, detección
                              # de tonalidad (KeyDetectView: escuchar, resultado con su porqué, alternativas, histograma),
                              # melodía y bajo (LinesView: capas, estilo, densidad, rango, capturar, variar, piano roll;
@@ -364,6 +365,19 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 8.2 IMPLEMENTADA (2026-10-28), pendiente de probar en FL Studio: el teclado con la escala.
+- `gui/ScaleKeyboard.h`: 2 octavas (C a B), teclas grises (claras = de la escala, oscuras = fuera; el color queda para
+  la tónica, en el verde de la función tónica con su letra, y para los puntos); el acorde mostrado como puntos del color
+  de su función, en estado fundamental desde la fundamental en la 1.ª octava (lo que pasa de 2 octavas baja una), con
+  un aro oscuro para verse sobre cualquier tecla; las notas de fuera de la escala en naranja con un aro claro. Tooltip
+  por tecla: nombre en la tonalidad (`spellInKey`), grado o "fuera de la escala", y si está en el acorde.
+- `ChordPaletteView`: el teclado (294 × 26) reemplaza a la línea de texto de la escala; al lado, la escala y su
+  carácter, o el acorde mostrado ("♭II = B♭: B♭ D F · trae B♭, de fuera de la escala: de ahí su color"). Acorde
+  mostrado = el pulsado, si no el que está bajo el ratón (`mouseMove`/`mouseExit`), si no el primer grado que suena.
+  Los pads perdieron 10 px de alto (margen interior 8 → 5 px): caben en Crear y en Ajustes.
+- Release con 0 warnings; ctest de Tidechart y teoría pasan; pluginval strictness 10 ampliado con `--randomise`:
+  SUCCESS. Revisadas Crear y Ajustes con `--snapshot` (y un prestado, el ♭II, con un cambio temporal).
+
 Fase 8.1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio: funciona. La progresión como línea de tiempo.
 - `libs/theory`: `maxProgressionSteps` 8 → 16 y `maxLineNotes` 512 → 1024 (la vuelta más larga, 16 pasos de 16
   tiempos = 64 compases, con 16 notas por compás). `DeepwaterTheoryTests`: la progresión más larga mide
@@ -577,4 +591,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 8.2 (teclado con la escala), después 8.3 (círculo de quintas).
+Siguiente: probar la Fase 8.2 en FL Studio; después, 8.3 (círculo de quintas).

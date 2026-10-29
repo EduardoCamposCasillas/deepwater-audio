@@ -1026,3 +1026,74 @@ cambia el bajo (casi siempre el bajo marca el cambio de acorde). Arma la misma e
   compás y la canción "se desarma". Mira la regla: el final de la vuelta debería caer en una línea de compás.
 - **Acordes de 1 tiempo en todos lados.** Con muchos cambios rápidos la armonía tapa la melodía y el dembow; usa los
   cortos como empujón, no como regla.
+
+## Fase 8.2 — El teclado con la escala
+
+Debajo de los acordes, donde antes estaba la escala escrita, hay un **teclado de 2 octavas**. Las teclas claras son
+las de la escala, las oscuras las que quedan fuera y la tónica va en verde con su letra. Pasa el ratón por un acorde de
+la paleta (o tócalo): sus notas aparecen como puntos del color de su función, apiladas desde la fundamental, y al lado
+se escriben ("♭VI = F: F A C · todas sus notas son de la escala"). Si el acorde es prestado, las notas que trae de
+fuera de la escala salen en **naranja con un aro**.
+
+### Conceptos aprendidos
+
+- **La escala como dibujo.** Una escala mayor o menor siempre tiene 7 teclas claras y 5 oscuras por octava, pero
+  **cuáles** depende de la tónica y el modo. En La menor son justo las blancas; en Mi frigio, también (es la misma
+  colección de notas, con otra casa); en Re dórico, también. Cambia la tónica y mira cómo se corre el dibujo.
+- **Acorde diatónico = todos sus puntos en teclas claras.** Es lo que significa "ser de la tonalidad": se arma solo con
+  notas de la escala.
+- **Lo que trae un prestado.** El ♭II de La menor (B♭ D F) tiene una sola nota de fuera: el B♭, que pisa el B de la
+  escala un semitono más abajo. Esa nota sola es todo el "color" del préstamo: en este caso, el frigio.
+- **Nota común.** Dos acordes que comparten puntos suenan "cerca": Am (A C E) y F (F A C) comparten A y C, por eso
+  pasar de uno a otro es tan suave.
+
+### Qué hace cada control
+
+- **Pasar el ratón por un acorde o tocarlo**: sus notas en el teclado y en el texto. Sin ratón encima, el teclado
+  muestra el acorde de la escala que está sonando (desde el Piano Roll o la progresión), o solo la escala.
+- **Pasar el ratón por una tecla**: su nombre en la tonalidad (B♭, no A♯, en La menor), su grado o "fuera de la
+  escala", y si está en el acorde que se muestra.
+
+### Ejercicio guiado: el mismo dibujo, otra casa
+
+1. La menor: pasa el ratón por los 7 acordes. Todos los puntos en teclas claras.
+2. Cambia a Do mayor. El teclado no cambia de dibujo (las mismas teclas claras), pero la tecla verde pasa a C: misma
+   colección de notas, otra casa. Toca i–♭VI–♭III–♭VII en La menor y I–IV–V en Do mayor: mismas teclas, otra
+   sensación, porque cambia dónde descansa la música.
+3. Cambia a La frigio: ahora la oscura del B♭ es clara y la del B blanco, oscura. Esa tecla es la diferencia entre el
+   eólico y el frigio.
+4. Vuelve a La menor y pasa el ratón por los **prestados**: cuenta los puntos naranjas de cada uno. Los que tienen uno
+   solo suenan "a la vuelta de la esquina"; los que tienen dos o tres, más lejos.
+
+### Receta: elegir un prestado por su nota de color
+
+En La menor quieres un acorde que oscurezca el ♭VI de tu progresión. Mira los prestados: el **♭II (B♭)** trae solo el
+B♭ (el semitono sobre la tónica, el más oscuro de todos). Pon i–♭VI–♭II–i: el B♭ cae justo sobre el A de la tónica al
+volver, y por eso resuelve tan fuerte. Por qué así: elegir un prestado por la nota que trae, no por su nombre, es como
+lo piensa un productor: "quiero ese semitono ahí".
+
+### Reto (sin receta)
+
+En Mi menor, encuentra **dos prestados distintos** que traigan **la misma** nota de fuera, y escucha en qué se
+diferencian.
+
+<details><summary>Pistas</summary>
+
+- Mira los puntos naranjas: busca dos acordes con el naranja en la misma tecla.
+- La nota de fuera más común en una menor es la del 6.º grado subido (la del dórico) o la del 2.º bajado (la del frigio).
+- Lo que los distingue son las otras dos notas: una mayor y una menor sobre la misma nota de color suenan muy distinto.
+</details>
+
+### Vocabulario
+
+- **Diatónico**: hecho solo con notas de la escala.
+- **Colección (de notas)**: las 7 notas de una escala sin importar cuál es la casa (La menor, Do mayor y Mi frigio
+  comparten la colección de las blancas).
+- **Nota de color**: la nota de fuera de la escala que le da su carácter a un acorde prestado.
+- **Nota común**: la que comparten dos acordes seguidos; cuantas más, más suave el paso.
+
+### Errores comunes
+
+- **Creer que "fuera de la escala" es "mal".** Una nota naranja es una decisión: es el color. Lo que suena mal es
+  ponerla sin que la melodía la acompañe (una melodía con B natural sobre el ♭II con B♭ choca).
+- **Mirar solo las teclas claras.** La tonalidad no es solo la colección: también es la casa (la tecla verde).
