@@ -359,6 +359,13 @@ instrumento y a la Playlist; que lo escrito suene igual que en vivo).
   su note-off en el canal 1, las mismas notas y el fin de pista al final de la vuelta. Nota repetida pegada (note-off
   antes del note-on), progresión vacía (nada que arrastrar) y un archivo más corto que reemplaza a uno largo sin restos.
 - Release con 0 warnings; ctest 14/14; pluginval strictness 10 ampliado con `--randomise`: SUCCESS.
+- Probado por el usuario: FL acepta el arrastre. Problema reportado: la vista completa (1360 × 960) no cabía en su
+  pantalla (área útil 1280 × 672 lógicos: 1080p al 150 %). Arreglo: el contenido pasó a `TidechartMainView` (un
+  `Component` a su tamaño lógico) y `TidechartAudioProcessorEditor` lo escala con `setTransform`. Al abrir y al cambiar
+  de vista, escala = la elegida por el usuario (1 por defecto) pero nunca mayor que lo que cabe en el área útil de la
+  pantalla (−40 px de ancho, −110 px de alto para la ventana de FL); esquina para redimensionar con la proporción de la
+  vista fija, del 50 % al 150 %; la escala elegida se guarda (propiedad `scale` del árbol del APVTS, no es parámetro).
+  `--snapshot` sigue pintando a tamaño original. pluginval strictness 10: SUCCESS.
 - Pendiente para más adelante: arrastrar las tres capas juntas (un `.mid` de 3 pistas para la Playlist), exportar
   varias vueltas o en la octava de la tecla, guardar el `.mid` con un diálogo (si un host no acepta arrastres).
 

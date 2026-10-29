@@ -22,6 +22,7 @@
 #include "deepwater/theory/Text.h"
 #include "MidiFileExport.h"
 #include "Parameters.h"
+#include "PluginEditor.h"
 #include "PluginProcessor.h"
 
 // --- Reservas de memoria en el hilo de audio -------------------------------------------------------------------------
@@ -1043,7 +1044,9 @@ int saveSnapshot (const juce::File& file, bool full)
     }
     juce::Thread::sleep (100);
     juce::Timer::callPendingTimersSynchronously();
-    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+    // A tamaño original aunque el editor se haya achicado para caber en la pantalla.
+    const auto* scaled = dynamic_cast<TidechartAudioProcessorEditor*> (editor.get());
+    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, scaled != nullptr ? 1.0f / scaled->currentScale() : 1.0f);
     file.deleteFile();
     juce::FileOutputStream stream (file);
     const bool ok = stream.openedOk() && juce::PNGImageFormat().writeImageToStream (image, stream);

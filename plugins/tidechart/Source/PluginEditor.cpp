@@ -2,6 +2,7 @@
 #include "PluginProcessor.h"
 #include "Parameters.h"
 
+#include <algorithm>
 #include <initializer_list>
 
 namespace theme = tidechart::gui::theme;
@@ -23,12 +24,13 @@ constexpr int simpleWidth = 1180;
 constexpr int simpleLeftWidth = 780;
 constexpr int simpleHeight = 560;
 
-const juce::Identifier viewProperty { "view" }; // "simple" (o nada: por defecto) / "full"
+const juce::Identifier viewProperty { "view" };   // "simple" (o nada: por defecto) / "full"
+const juce::Identifier scaleProperty { "scale" }; // la escala elegida con la esquina (o nada: 1)
+constexpr double minScale = 0.5, maxScale = 1.5;
 } // namespace
 
-TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProcessor& p)
-    : AudioProcessorEditor (&p),
-      processor (p),
+TidechartMainView::TidechartMainView (TidechartAudioProcessor& p)
+    : processor (p),
       paletteView (p.getParameters(),
                    { [&p] (int degree) { p.previewChord (degree); },
                      [&p] (const deepwater::theory::RomanNumeral& numeral) { p.previewNumeral (numeral); },
@@ -121,12 +123,12 @@ TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProc
     startTimerHz (30);
 }
 
-TidechartAudioProcessorEditor::~TidechartAudioProcessorEditor()
+TidechartMainView::~TidechartMainView()
 {
     stopTimer();
 }
 
-void TidechartAudioProcessorEditor::setSimple (bool shouldBeSimple)
+void TidechartMainView::setSimple (bool shouldBeSimple)
 {
     simple = shouldBeSimple;
     viewButton.setButtonText (simple ? "Vista completa" : "Vista simple");
@@ -142,9 +144,11 @@ void TidechartAudioProcessorEditor::setSimple (bool shouldBeSimple)
         setSize (fullWidth, fullHeight);
     resized(); // por si el tamaño no cambió (al abrir)
     repaint();
+    if (onLogicalSizeChanged)
+        onLogicalSizeChanged();
 }
 
-void TidechartAudioProcessorEditor::paint (juce::Graphics& g)
+void TidechartMainView::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
 
@@ -181,7 +185,7 @@ void TidechartAudioProcessorEditor::paint (juce::Graphics& g)
 }
 
 // Qué hacer ahora, según lo que pasa: el siguiente paso para que suene algo, o qué probar con lo que ya suena.
-juce::String TidechartAudioProcessorEditor::guideText() const
+juce::String TidechartMainView::guideText() const
 {
     namespace th = deepwater::theory;
     const auto settings = processor.currentChordSettings (transport.bypassed);
@@ -220,7 +224,7 @@ juce::String TidechartAudioProcessorEditor::guideText() const
                         "nota para ver por qu\xc3\xa9 funciona.");
 }
 
-void TidechartAudioProcessorEditor::paintFull (juce::Graphics& g)
+void TidechartMainView::paintFull (juce::Graphics& g)
 {
     // Paneles detrás del reloj, de la tonalidad y del teclado.
     g.setColour (theme::panel);
@@ -262,7 +266,7 @@ void TidechartAudioProcessorEditor::paintFull (juce::Graphics& g)
                       footer, juce::Justification::centredLeft, 2);
 }
 
-void TidechartAudioProcessorEditor::resized()
+void TidechartMainView::resized()
 {
     auto all = getLocalBounds().reduced (16, 0);
     auto header = all.removeFromTop (52);
@@ -278,7 +282,7 @@ void TidechartAudioProcessorEditor::resized()
         layoutFull();
 }
 
-void TidechartAudioProcessorEditor::layoutSimple()
+void TidechartMainView::layoutSimple()
 {
     // A la derecha: MELODÍA Y BAJO, todo el alto.
     auto right = getLocalBounds().withTrimmedLeft (simpleLeftWidth).withTrimmedTop (56).reduced (0, 6);
@@ -296,7 +300,7 @@ void TidechartAudioProcessorEditor::layoutSimple()
     guideArea = area.withTrimmedBottom (10).reduced (10, 0);
 }
 
-void TidechartAudioProcessorEditor::layoutFull()
+void TidechartMainView::layoutFull()
 {
     // A la derecha, de arriba abajo: MELODÍA Y BAJO.
     auto right = getLocalBounds().withTrimmedLeft (fullLeftWidth).withTrimmedTop (56).reduced (0, 6);
@@ -335,7 +339,7 @@ void TidechartAudioProcessorEditor::layoutFull()
     outputMonitor.setBounds (area);
 }
 
-void TidechartAudioProcessorEditor::timerCallback()
+void TidechartMainView::timerCallback()
 {
     const auto before = std::make_tuple (transport.soundingCount, transport.releases, transport.bypassed, transport.listening, transport.capturing);
     if (processor.readTransport (transport))
@@ -386,4 +390,64 @@ void TidechartAudioProcessorEditor::timerCallback()
     outputMonitor.setNoteCount (processor.notesOut());
     inputMonitor.refresh();
     outputMonitor.refresh();
+}
+
+// --- El editor: el contenido escalado ------------------------------------------------------------------------------
+
+TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProcessor& p)
+    : AudioProcessorEditor (&p), tidechart (p), view (p)
+{
+    userScale = juce::jlimit (minScale, maxScale, static_cast<double> (p.getParameters().state.getProperty (scaleProperty, 1.0)));
+    addAndMakeVisible (view);
+    setResizable (true, true);
+    view.onLogicalSizeChanged = [this] { applyScale(); };
+    applyScale();
+}
+
+void TidechartAudioProcessorEditor::paint (juce::Graphics& g)
+{
+    g.fillAll (theme::background);
+}
+
+// Lo más grande que cabe en el área útil de la pantalla (sin la barra de tareas), dejando sitio a la barra de la ventana
+// del plugin en FL. Sin pantalla (tests sin GUI), 1.
+double TidechartAudioProcessorEditor::fitScale() const
+{
+    const auto& displays = juce::Desktop::getInstance().getDisplays();
+    const auto* display = isShowing() ? displays.getDisplayForRect (getScreenBounds()) : displays.getPrimaryDisplay();
+    if (display == nullptr || view.getWidth() <= 0 || view.getHeight() <= 0)
+        return maxScale;
+    const auto area = display->userArea;
+    return std::min ((area.getWidth() - 40.0) / view.getWidth(), (area.getHeight() - 110.0) / view.getHeight());
+}
+
+void TidechartAudioProcessorEditor::applyScale()
+{
+    const int w = view.getWidth(), h = view.getHeight();
+    if (w <= 0 || h <= 0)
+        return;
+    const double s = juce::jlimit (minScale, maxScale, std::min (userScale, fitScale()));
+    const juce::ScopedValueSetter<bool> setting (applying, true);
+    // Primero los límites (con la proporción de esta vista) y después el tamaño: si no, el constrainer recortaría el
+    // tamaño nuevo con los límites de la vista anterior.
+    getConstrainer()->setFixedAspectRatio (static_cast<double> (w) / h);
+    setResizeLimits (juce::roundToInt (w * minScale), juce::roundToInt (h * minScale), juce::roundToInt (w * maxScale),
+                     juce::roundToInt (h * maxScale));
+    setSize (juce::roundToInt (w * s), juce::roundToInt (h * s));
+    resized(); // por si el tamaño no cambió pero la vista sí
+}
+
+void TidechartAudioProcessorEditor::resized()
+{
+    if (view.getWidth() <= 0)
+        return;
+    scale = static_cast<float> (getWidth()) / static_cast<float> (view.getWidth());
+    view.setTopLeftPosition (0, 0);
+    view.setTransform (juce::AffineTransform::scale (scale));
+    if (! applying)
+    {
+        // El usuario arrastró la esquina (o el host cambió el tamaño): esa es la escala elegida.
+        userScale = juce::jlimit (minScale, maxScale, static_cast<double> (scale));
+        tidechart.getParameters().state.setProperty (scaleProperty, userScale, nullptr);
+    }
 }

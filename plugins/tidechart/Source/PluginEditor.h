@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -40,11 +41,15 @@ class TidechartAudioProcessor;
 //
 // La vista elegida se guarda en el proyecto (propiedad "view" del árbol de parámetros; no es un parámetro).
 // Un temporizador a 30 cuadros por segundo recoge lo que publicó el audio.
-class TidechartAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
+// Es el contenido a su tamaño lógico (el de cada vista); el editor de abajo lo escala para que quepa en la pantalla.
+class TidechartMainView final : public juce::Component, private juce::Timer
 {
 public:
-    explicit TidechartAudioProcessorEditor (TidechartAudioProcessor&);
-    ~TidechartAudioProcessorEditor() override;
+    explicit TidechartMainView (TidechartAudioProcessor&);
+    ~TidechartMainView() override;
+
+    // Al cambiar de vista cambia el tamaño lógico: el editor ajusta la ventana.
+    std::function<void()> onLogicalSizeChanged;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -72,7 +77,6 @@ private:
     juce::TextButton panicButton;
     juce::TextButton bypassButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
-    juce::TooltipWindow tooltips { this, 600 };
 
     bool simple = true;
     TransportSnapshot transport;
@@ -80,6 +84,36 @@ private:
     std::uint32_t seenLinesChanges = 0;
     juce::Rectangle<int> keyboardTitleArea, guideArea;
     juce::String guide;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TidechartMainView)
+};
+
+// El editor que ve el host: el contenido escalado. El dibujo es vectorial, así que escalar no pixela.
+// - Al abrir, la escala es la que el usuario eligió (1 = tamaño original), pero nunca más grande que lo que cabe en la
+//   pantalla: la vista completa (1360 × 960) no entra en una pantalla de 1080 px de alto con la barra de FL encima.
+// - La esquina de abajo a la derecha cambia el tamaño, con la proporción de la vista fija (del 50 % al 150 %). La escala
+//   elegida se guarda en el proyecto (propiedad "scale" del árbol de parámetros) y vale para las dos vistas.
+class TidechartAudioProcessorEditor final : public juce::AudioProcessorEditor
+{
+public:
+    explicit TidechartAudioProcessorEditor (TidechartAudioProcessor&);
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+    // La escala de ahora (tamaño de la ventana / tamaño lógico de la vista).
+    [[nodiscard]] float currentScale() const noexcept { return scale; }
+
+private:
+    void applyScale();
+    [[nodiscard]] double fitScale() const;
+
+    TidechartAudioProcessor& tidechart;
+    TidechartMainView view;
+    juce::TooltipWindow tooltips { this, 600 };
+    double userScale = 1.0;
+    float scale = 1.0f;
+    bool applying = false; // el tamaño lo puso applyScale, no el usuario
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TidechartAudioProcessorEditor)
 };
