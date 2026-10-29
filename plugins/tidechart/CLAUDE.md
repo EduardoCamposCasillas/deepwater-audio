@@ -325,7 +325,7 @@ y encontrar acordes, progresiones y melodías nuevas. Hay dos vistas de los MISM
 - [x] Fase 5 — Detección de tonalidad a partir del MIDI entrante.
 - [x] Fase 6 — Generador de melodías y líneas de bajo que siguen la progresión, con control de densidad, rango y
       estilo; variaciones a partir de una melodía existente.
-- [ ] Fase 7 — Arrastrar y soltar el MIDI generado al Piano Roll de FL Studio (archivo `.mid` temporal escrito con
+- [x] Fase 7 — Arrastrar y soltar el MIDI generado al Piano Roll de FL Studio (archivo `.mid` temporal escrito con
       `juce::MidiFile` y `DragAndDropContainer::performExternalDragDropOfFiles`).
 - [ ] Fase 8 — GUI: teclado con la escala resaltada, círculo de quintas, línea de progresión editable.
 - [ ] Fase 9 — Presets por género y estado de ánimo (reggaetón, oscuro/experimental, R&B, trap) con notas que
@@ -346,8 +346,8 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 7 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (arrastrar cada capa al Piano Roll de un
-instrumento y a la Playlist; que lo escrito suene igual que en vivo).
+Fase 7 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (arrastrar cada capa al Piano Roll, la ventana
+escalada para caber en la pantalla): funciona.
 - Plugin: `MidiExport.h` (`exportClip`), `MidiFileExport.h` (`toMidiFile`, `writeMidiFile`, `exportFolder`),
   `gui/MidiDragButton.h`; `exportClip` en el procesador; en `LinesView`, en las dos vistas, la fila "Al Piano Roll:"
   con Acordes / Bajo / Melodía alineada con la de "Suenan" (la línea de información dice cuántas notas y compases se
@@ -526,4 +526,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 7 en FL; después, Fase 8 (GUI: teclado con la escala, círculo de quintas, progresión editable).
+Siguiente: Fase 8 (GUI: teclado con la escala, círculo de quintas, progresión editable).
