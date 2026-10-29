@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <functional>
 #include <memory>
 
@@ -16,10 +17,10 @@
 
 class TidechartAudioProcessor;
 
-// Dos vistas con los mismos paneles (lo que se cambia en una se ve en la otra):
+// Tres pestañas con los mismos paneles (lo que se cambia en una se ve en las otras), todas del mismo tamaño
+// (1180 × 560): caben enteras en una laptop de 13" (1080p al 150 %: 1280 × 672 útiles) sin achicarlas.
 //
-// SIMPLE (por defecto): lo necesario para que alguien que empieza encuentre acordes, progresiones y melodías.
-//   cabecera:  TIDECHART | vista completa | pánico | bypass
+// CREAR (por defecto): lo necesario para que alguien que empieza encuentre acordes, progresiones y melodías.
 //   izquierda, de arriba abajo, en el orden en que se usa:
 //     TONALIDAD (tónica y modo; a la derecha, Escuchar para detectarla) y los acordes de la escala + los prestados
 //     PROGRESIÓN: qué tocan las teclas, ritmo, ideas ("Otra idea"), armar con clic, los pasos y el patrón
@@ -27,39 +28,42 @@ class TidechartAudioProcessor;
 //   derecha, MELODÍA Y BAJO: capas, estilo y "Otra" de cada línea, piano roll que explica cada nota y, abajo, arrastrar
 //     cada capa al Piano Roll de FL (Fase 7)
 //
-// COMPLETA: todo lo construido en las Fases 1–6.
-//   cabecera:  TIDECHART | vista simple | pánico | bypass
-//   reloj del host (posición, tempo, compás, loop, saltos)
-//   PALETA: tonalidad, modo, tríadas/séptimas, qué teclas disparan los acordes, bajo; los 7 acordes de la escala (Fase 3)
-//           y los prestados de otros modos (Fase 4)
-//   PROGRESIÓN: teclas o progresión, ritmo, voicing, plantillas, texto romano, los pasos y el patrón rítmico (Fase 4)
-//   TONALIDAD: escuchar lo que entra y detectar la tonalidad, con el porqué y las alternativas (Fase 5)
-//   SUENA AHORA: teclado con las notas que suenan en el receptor y cuántas; debajo, el ACORDE que forman (Fase 2)
-//   monitor MIDI: ENTRADA | SALIDA (los últimos eventos de cada lado)
-//   derecha, MELODÍA Y BAJO: además densidad, rango, capturar, fijar y variar (Fase 6)
-//   pie: cómo rutear la salida en FL
+// AJUSTES: el ajuste fino de lo mismo, sin repetir el piano roll.
+//   izquierda: PALETA con tríadas/séptimas, qué teclas disparan los acordes y + Bajo; PROGRESIÓN con voicing y texto
+//     romano; debajo, el ACORDE que suena (para oír y ver el voicing)
+//   derecha: MELODÍA Y BAJO con densidad, rango, capturar, fijar y variar
 //
-// La vista elegida se guarda en el proyecto (propiedad "view" del árbol de parámetros; no es un parámetro).
+// ANÁLISIS: lo que pasa por dentro (Fases 1, 2 y 5).
+//   reloj del host; TONALIDAD detectada con el porqué, el histograma y las alternativas; SUENA AHORA (teclado y acorde);
+//   monitor MIDI: ENTRADA | SALIDA
+//
+// La pestaña elegida se guarda en el proyecto (propiedad "page" del árbol de parámetros; no es un parámetro).
 // Un temporizador a 30 cuadros por segundo recoge lo que publicó el audio.
-// Es el contenido a su tamaño lógico (el de cada vista); el editor de abajo lo escala para que quepa en la pantalla.
+// Es el contenido a su tamaño lógico; el editor de abajo lo escala (esquina para redimensionar, y nunca más grande que
+// la pantalla).
 class TidechartMainView final : public juce::Component, private juce::Timer
 {
 public:
     explicit TidechartMainView (TidechartAudioProcessor&);
     ~TidechartMainView() override;
 
-    // Al cambiar de vista cambia el tamaño lógico: el editor ajusta la ventana.
-    std::function<void()> onLogicalSizeChanged;
+    enum class Page
+    {
+        create,
+        settings,
+        analysis
+    };
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
     void timerCallback() override;
-    void setSimple (bool shouldBeSimple);
-    void layoutSimple();
-    void layoutFull();
-    void paintFull (juce::Graphics&);
+    void setPage (Page newPage);
+    void layoutCreate();
+    void layoutSettings();
+    void layoutAnalysis();
+    void paintAnalysis (juce::Graphics&);
     [[nodiscard]] juce::String guideText() const;
 
     TidechartAudioProcessor& processor;
@@ -73,12 +77,12 @@ private:
     tidechart::gui::ChordView chordView;
     tidechart::gui::MidiMonitorView inputMonitor;
     tidechart::gui::MidiMonitorView outputMonitor;
-    juce::TextButton viewButton;
+    std::array<juce::TextButton, 3> pageButtons;
     juce::TextButton panicButton;
     juce::TextButton bypassButton;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
 
-    bool simple = true;
+    Page page = Page::create;
     TransportSnapshot transport;
     std::uint32_t seenProgressionChanges = 0;
     std::uint32_t seenLinesChanges = 0;
@@ -90,9 +94,9 @@ private:
 
 // El editor que ve el host: el contenido escalado. El dibujo es vectorial, así que escalar no pixela.
 // - Al abrir, la escala es la que el usuario eligió (1 = tamaño original), pero nunca más grande que lo que cabe en la
-//   pantalla: la vista completa (1360 × 960) no entra en una pantalla de 1080 px de alto con la barra de FL encima.
-// - La esquina de abajo a la derecha cambia el tamaño, con la proporción de la vista fija (del 50 % al 150 %). La escala
-//   elegida se guarda en el proyecto (propiedad "scale" del árbol de parámetros) y vale para las dos vistas.
+//   pantalla (con la barra de la ventana de FL encima).
+// - La esquina de abajo a la derecha cambia el tamaño, con la proporción fija (del 50 % al 150 %). La escala elegida se
+//   guarda en el proyecto (propiedad "scale" del árbol de parámetros).
 class TidechartAudioProcessorEditor final : public juce::AudioProcessorEditor
 {
 public:

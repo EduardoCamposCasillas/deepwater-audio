@@ -110,8 +110,8 @@ plugins/tidechart/
   tests/MidiTests.cpp        # etapa MIDI sin JUCE (contra un receptor modelo independiente)
   tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte,
                              # progresión, reservas; Fase 7: lo exportado = lo que suena y el .mid leído de vuelta);
-                             # --snapshot <png> [full] pinta la GUI (vista simple o completa)
-                             # fuera de pantalla para revisarla
+                             # --snapshot <png> [settings|analysis] pinta la GUI (Crear, Ajustes o
+                             # Análisis) fuera de pantalla para revisarla
 ```
 
 ## Librería de teoría musical (`libs/theory`, namespace `deepwater::theory`)
@@ -289,20 +289,28 @@ plugins/tidechart/
   - Descartado: arrastrar la capa al Piano Roll del propio Tidechart (en el modo progresión cada nota volvería a disparar
     la progresión); el tooltip dice que va en el del instrumento.
 
-## GUI: vista simple primero (regla para todas las fases que faltan)
+## GUI: pestañas, Crear primero (regla para todas las fases que faltan)
 Pedido del usuario (2026-10-28): la GUI debe ser minimalista, con lo necesario para que alguien que empieza pueda usarla
-y encontrar acordes, progresiones y melodías nuevas. Hay dos vistas de los MISMOS paneles (`setSimple` en cada vista):
-- **Simple (por defecto):** solo lo que hace falta para crear, en el orden en que se usa (tonalidad → acordes →
-  progresión → melodía y bajo), botones de descubrir ("Otra idea", "Otra"), y una guía de qué hacer ahora. Sin datos de
-  depuración (reloj, monitor MIDI, teclado de lo que suena). Los textos dicen qué hacer, no cómo funciona por dentro;
-  el porqué va en tooltips, en la línea de información y en el piano roll.
-- **Completa:** todo lo construido (lo que se probó en FL en cada fase), detrás de "Vista completa". Nada se pierde.
-- La vista se guarda en el proyecto: propiedad `view` del árbol del APVTS ("simple" o nada / "full"), no es parámetro.
-- Cada fase nueva decide qué va en la simple con esta pregunta: ¿lo necesita alguien que empieza para crear algo? Si
-  sí, entra en la simple (como mucho un control por idea, con un buen valor por defecto); si es ajuste fino, en la
-  completa. Fase 7: arrastrar al Piano Roll es esencial → en la simple, un botón visible por capa. Fase 8: lo que
-  reemplace a un control de la simple lo reemplaza ahí (no se suma). Fase 9: presets = la puerta de entrada de la
-  simple (barra de presets arriba). Fase 10: revisar las dos vistas con `--snapshot` y `--snapshot <png> full`.
+y encontrar acordes, progresiones y melodías nuevas. Y debe caber entera, a tamaño original, en su laptop de 13"
+(1080p al 150 %: 1280 × 672 lógicos útiles; menos la barra de la ventana de FL, ~1240 × 560). Por eso hay tres
+pestañas de los MISMOS paneles (cada vista tiene `setSimple`), todas de 1180 × 560:
+- **Crear (por defecto):** solo lo que hace falta para crear, en el orden en que se usa (tonalidad → acordes →
+  progresión → melodía y bajo), botones de descubrir ("Otra idea", "Otra"), arrastrar al Piano Roll y una guía de qué
+  hacer ahora. Los textos dicen qué hacer, no cómo funciona por dentro; el porqué va en tooltips, en la línea de
+  información y en el piano roll.
+- **Ajustes:** el ajuste fino de los mismos paneles (tríadas/séptimas, teclas, + Bajo, voicing, texto romano, densidad,
+  rango, capturar, fijar, variación) y el ACORDE que suena; sin el piano roll de las líneas (`setShowsRoll (false)`):
+  se ve en Crear.
+- **Análisis:** lo de depuración: reloj del host, detección de tonalidad completa (histograma, porqué, alternativas),
+  SUENA AHORA (teclado + acorde) y el monitor MIDI.
+- La pestaña se guarda en el proyecto: propiedad `page` del árbol del APVTS ("create" o nada / "settings" /
+  "analysis"), no es parámetro. La escala elegida con la esquina, en `scale`.
+- Cada fase nueva decide dónde va lo suyo con esta pregunta: ¿lo necesita alguien que empieza para crear algo? Si sí,
+  entra en Crear (como mucho un control por idea, con un buen valor por defecto); si es ajuste fino, en Ajustes; si es
+  ver qué pasa por dentro, en Análisis. Ninguna pestaña puede pasar de 1180 × 560: si algo no cabe, se quita o se
+  reemplaza, no se agranda la ventana. Fase 8: lo que reemplace a un control de Crear lo reemplaza ahí (no se suma).
+  Fase 9: presets = la puerta de entrada de Crear (barra de presets arriba). Fase 10: revisar las tres pestañas con
+  `--snapshot <png> [settings|analysis]`.
 
 ## Requisitos propios (además de los del raíz)
 - Ninguna nota colgada, en ningún caso (ver arriba).
@@ -346,6 +354,17 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+GUI en pestañas (después de la Fase 7, 2026-10-28; pendiente de probar en FL Studio). Problema reportado: en la laptop
+de 13" del usuario la vista completa (1360 × 960) solo cabía achicada al ~70 % y no se leía. Arreglo: en vez de
+"Vista simple / Vista completa", tres pestañas del mismo tamaño que la simple (1180 × 560, caben al 100 %):
+**Crear** (la vista simple de antes, igual), **Ajustes** (paleta y progresión completas + el ACORDE que suena a la
+izquierda; MELODÍA Y BAJO con todos sus controles, sin piano roll, a la derecha) y **Análisis** (reloj, detección
+completa, SUENA AHORA y el monitor MIDI, a todo el ancho). Propiedad `page` en vez de `view` (un proyecto guardado con
+la vista completa abre en Crear). `LinesView::setShowsRoll`. Salir de Ajustes termina una captura (como antes al
+volver a la simple). Release con 0 warnings (de paso, `userArea` → `userBounds`); `TidechartTests` y
+`TidechartProcessorTests` pasan; pluginval strictness 10 ampliado con `--randomise`: SUCCESS; revisadas las tres pestañas
+  con `--snapshot`.
+
 Fase 7 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (arrastrar cada capa al Piano Roll, la ventana
 escalada para caber en la pantalla): funciona.
 - Plugin: `MidiExport.h` (`exportClip`), `MidiFileExport.h` (`toMidiFile`, `writeMidiFile`, `exportFolder`),

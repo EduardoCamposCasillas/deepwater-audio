@@ -997,9 +997,9 @@ void testLinesState()
 
 // Pinta el editor fuera de pantalla en un PNG, con FL "reproduciendo" la progresión con dembow en el compás 2 y la
 // detección después de escuchar i–♭II en Mi frigio (para revisar la GUI sin capturar la pantalla):
-//   TidechartProcessorTests --snapshot gui.png          (la vista simple, la de por defecto)
-//   TidechartProcessorTests --snapshot gui.png full     (la vista completa)
-int saveSnapshot (const juce::File& file, bool full)
+//   TidechartProcessorTests --snapshot gui.png            (la pestaña Crear, la de por defecto)
+//   TidechartProcessorTests --snapshot gui.png settings   (Ajustes; "analysis": Análisis)
+int saveSnapshot (const juce::File& file, const juce::String& page)
 {
     namespace th = deepwater::theory;
     auto processor = makeProcessor (48000.0, 512);
@@ -1034,8 +1034,8 @@ int saveSnapshot (const juce::File& file, bool full)
     setParameter (*processor, tidechart::params::playMelody, 1.0f);
     head.ppq = 4.0;
     rig.position = 0;
-    if (full)
-        processor->getParameters().state.setProperty ("view", "full", nullptr);
+    if (page.isNotEmpty())
+        processor->getParameters().state.setProperty ("page", page, nullptr);
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor->createEditor());
     for (int block = 0; block < 6; ++block)
     {
@@ -1249,7 +1249,7 @@ int main (int argc, char* argv[])
     const juce::ScopedJuceInitialiser_GUI init;
     if ((argc == 3 || argc == 4) && juce::String (argv[1]) == "--snapshot")
         return saveSnapshot (juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (argv[2])),
-                             argc == 4 && juce::String (argv[3]) == "full");
+                             argc == 4 ? juce::String (argv[3]) : juce::String());
 
     testPassThrough();
     testNoHungNotes();

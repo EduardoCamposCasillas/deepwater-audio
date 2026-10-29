@@ -14,19 +14,19 @@ juce::String utf8 (const char* text)
     return juce::String::fromUTF8 (text);
 }
 
-// Vista completa: la columna de la Fase 5 a la izquierda; a la derecha, MELODÍA Y BAJO.
-constexpr int fullWidth = 1360;
-constexpr int fullLeftWidth = 900;
-constexpr int fullHeight = 960;
+// Las tres pestañas tienen el mismo tamaño: cabe entero en 1280 × 672 útiles (una laptop de 13" a 1080p al 150 %),
+// contando la barra de la ventana de FL.
+constexpr int pageWidth = 1180;
+constexpr int pageHeight = 560;
+constexpr int headerHeight = 52;
+constexpr int createLeftWidth = 780;   // Crear: TONALIDAD y PROGRESIÓN; a la derecha, MELODÍA Y BAJO con el piano roll
+constexpr int settingsLeftWidth = 820; // Ajustes: la fila de arriba de la paleta completa necesita algo más de ancho
 
-// Vista simple.
-constexpr int simpleWidth = 1180;
-constexpr int simpleLeftWidth = 780;
-constexpr int simpleHeight = 560;
-
-const juce::Identifier viewProperty { "view" };   // "simple" (o nada: por defecto) / "full"
+const juce::Identifier pageProperty { "page" };   // "create" (o nada: por defecto) / "settings" / "analysis"
 const juce::Identifier scaleProperty { "scale" }; // la escala elegida con la esquina (o nada: 1)
 constexpr double minScale = 0.5, maxScale = 1.5;
+
+constexpr const char* pageIds[] { "create", "settings", "analysis" };
 } // namespace
 
 TidechartMainView::TidechartMainView (TidechartAudioProcessor& p)
@@ -88,16 +88,30 @@ TidechartMainView::TidechartMainView (TidechartAudioProcessor& p)
     addAndMakeVisible (inputMonitor);
     addAndMakeVisible (outputMonitor);
 
-    viewButton.setTooltip (utf8 ("Vista simple: lo necesario para encontrar acordes, progresiones y melod\xc3\xad" "as. Vista completa: "
-                                 "todos los controles (s\xc3\xa9ptimas, voicing, densidad, rango, capturar, variar), el reloj de FL, "
-                                 "lo que suena y el monitor MIDI. Lo que cambies en una se ve en la otra."));
-    viewButton.setColour (juce::TextButton::buttonColourId, theme::control);
-    viewButton.setColour (juce::TextButton::textColourOffId, theme::text);
-    viewButton.onClick = [this] {
-        setSimple (! simple);
-        processor.getParameters().state.setProperty (viewProperty, simple ? "simple" : "full", nullptr);
+    const char* pageNames[] { "Crear", "Ajustes", "An\xc3\xa1lisis" };
+    const char* pageTips[] {
+        "Lo necesario para crear: tonalidad, acordes, progresi\xc3\xb3n, melod\xc3\xad" "a y bajo, y arrastrarlos al Piano Roll de FL.",
+        "El ajuste fino: s\xc3\xa9ptimas, qu\xc3\xa9 teclas tocan los acordes, voicing, texto romano, densidad, rango, capturar, fijar y "
+        "variar la melod\xc3\xad" "a. Lo que cambies aqu\xc3\xad sigue sonando en Crear.",
+        "Lo que pasa por dentro: el reloj de FL, la tonalidad detectada con su porqu\xc3\xa9, las notas que suenan y el monitor MIDI."
     };
-    addAndMakeVisible (viewButton);
+    for (int i = 0; i < 3; ++i)
+    {
+        auto& button = pageButtons[static_cast<std::size_t> (i)];
+        button.setButtonText (utf8 (pageNames[i]));
+        button.setTooltip (utf8 (pageTips[i]));
+        button.setRadioGroupId (1);
+        button.setConnectedEdges ((i > 0 ? juce::Button::ConnectedOnLeft : 0) | (i < 2 ? juce::Button::ConnectedOnRight : 0));
+        button.setColour (juce::TextButton::buttonColourId, theme::control);
+        button.setColour (juce::TextButton::buttonOnColourId, theme::accent);
+        button.setColour (juce::TextButton::textColourOffId, theme::dimText);
+        button.setColour (juce::TextButton::textColourOnId, theme::background);
+        button.onClick = [this, i] {
+            setPage (static_cast<Page> (i));
+            processor.getParameters().state.setProperty (pageProperty, pageIds[i], nullptr);
+        };
+        addAndMakeVisible (button);
+    }
 
     panicButton.setButtonText (utf8 ("P\xc3\xa1nico"));
     panicButton.setTooltip (utf8 ("Apaga todo lo que suena: un note-off por cada nota que sali\xc3\xb3 de aqu\xc3\xad y no se apag\xc3\xb3, "
@@ -119,7 +133,13 @@ TidechartMainView::TidechartMainView (TidechartAudioProcessor& p)
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.getParameters(),
                                                                                                 tidechart::params::bypass, bypassButton);
 
-    setSimple (processor.getParameters().state.getProperty (viewProperty, "simple").toString() != "full");
+    setSize (pageWidth, pageHeight);
+    const auto saved = processor.getParameters().state.getProperty (pageProperty).toString();
+    Page initial = Page::create;
+    for (int i = 0; i < 3; ++i)
+        if (saved == pageIds[i])
+            initial = static_cast<Page> (i);
+    setPage (initial);
     startTimerHz (30);
 }
 
@@ -128,50 +148,61 @@ TidechartMainView::~TidechartMainView()
     stopTimer();
 }
 
-void TidechartMainView::setSimple (bool shouldBeSimple)
+void TidechartMainView::setPage (Page newPage)
 {
-    simple = shouldBeSimple;
-    viewButton.setButtonText (simple ? "Vista completa" : "Vista simple");
-    for (auto* c : std::initializer_list<juce::Component*> { &transportView, &keyboardView, &chordView, &inputMonitor, &outputMonitor })
-        c->setVisible (! simple);
-    paletteView.setSimple (simple);
-    progressionView.setSimple (simple);
-    keyDetectView.setSimple (simple);
-    linesView.setSimple (simple);
-    if (simple)
-        setSize (simpleWidth, simpleHeight);
-    else
-        setSize (fullWidth, fullHeight);
-    resized(); // por si el tamaño no cambió (al abrir)
+    page = newPage;
+    pageButtons[static_cast<std::size_t> (page)].setToggleState (true, juce::dontSendNotification);
+
+    const bool create = page == Page::create, settings = page == Page::settings, analysis = page == Page::analysis;
+    // Cada panel con el detalle de su pestaña (lo que no se ve sigue sonando como esté).
+    paletteView.setSimple (create);
+    progressionView.setSimple (create);
+    keyDetectView.setSimple (create);
+    linesView.setSimple (! settings); // al salir de Ajustes, si capturaba, la captura termina
+    linesView.setShowsRoll (create);
+
+    paletteView.setVisible (! analysis);
+    progressionView.setVisible (! analysis);
+    linesView.setVisible (! analysis);
+    keyDetectView.setVisible (! settings);
+    chordView.setVisible (! create);
+    for (auto* c : std::initializer_list<juce::Component*> { &transportView, &keyboardView, &inputMonitor, &outputMonitor })
+        c->setVisible (analysis);
+
+    resized();
     repaint();
-    if (onLogicalSizeChanged)
-        onLogicalSizeChanged();
 }
 
 void TidechartMainView::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background);
 
-    auto area = getLocalBounds().reduced (16, 0);
-    auto header = area.removeFromTop (52);
+    auto header = getLocalBounds().reduced (16, 0).removeFromTop (headerHeight);
     g.setColour (theme::text);
     g.setFont (juce::FontOptions (22.0f, juce::Font::bold));
     g.drawText ("TIDECHART", header.removeFromLeft (150), juce::Justification::centredLeft);
-    g.setColour (theme::dimText);
-    g.setFont (juce::FontOptions (12.0f));
-    g.drawText (utf8 ("acordes y melod\xc3\xad" "as por tonalidad"), header, juce::Justification::centredLeft);
 
     g.setColour (theme::panel);
-    for (auto* c : std::initializer_list<juce::Component*> { &paletteView, &progressionView, &linesView })
-        g.fillRoundedRectangle (c->getBounds().expanded (10, 6).toFloat(), 6.0f);
+    for (auto* c : std::initializer_list<juce::Component*> { &paletteView, &progressionView, &linesView, &transportView })
+        if (c->isVisible())
+            g.fillRoundedRectangle (c->getBounds().expanded (10, 6).toFloat(), 6.0f);
 
-    if (! simple)
+    if (page == Page::analysis)
     {
-        paintFull (g);
+        paintAnalysis (g);
+        return;
+    }
+    if (page == Page::settings)
+    {
+        g.fillRoundedRectangle (chordView.getBounds().expanded (10, 6).toFloat(), 6.0f);
+        g.setColour (theme::dimText);
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawFittedText (utf8 ("Lo que cambies aqu\xc3\xad sigue sonando en Crear. Pasa el rat\xc3\xb3n por un control para ver qu\xc3\xa9 hace."),
+                          guideArea, juce::Justification::centredLeft, 1, 0.9f);
         return;
     }
 
-    // La guía: qué hacer ahora; debajo, el ruteo.
+    // Crear: la guía (qué hacer ahora) y, debajo, el ruteo.
     auto guideBox = guideArea;
     g.setColour (theme::accent);
     g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
@@ -224,11 +255,10 @@ juce::String TidechartMainView::guideText() const
                         "nota para ver por qu\xc3\xa9 funciona.");
 }
 
-void TidechartMainView::paintFull (juce::Graphics& g)
+void TidechartMainView::paintAnalysis (juce::Graphics& g)
 {
-    // Paneles detrás del reloj, de la tonalidad y del teclado.
+    // Paneles detrás de la tonalidad y del teclado (el del reloj ya está).
     g.setColour (theme::panel);
-    g.fillRoundedRectangle (transportView.getBounds().expanded (10, 4).toFloat(), 6.0f);
     g.fillRoundedRectangle (keyDetectView.getBounds().expanded (10, 6).toFloat(), 6.0f);
     g.fillRoundedRectangle (keyboardView.getBounds().getUnion (chordView.getBounds()).withTop (keyboardTitleArea.getY()).expanded (10, 6).toFloat(), 6.0f);
 
@@ -257,40 +287,36 @@ void TidechartMainView::paintFull (juce::Graphics& g)
         g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
         g.drawText ("BYPASS", keyboardTitleArea, juce::Justification::centredRight);
     }
-
-    auto footer = getLocalBounds().withWidth (fullLeftWidth).reduced (16, 0).removeFromBottom (34);
-    g.setColour (theme::dimText);
-    g.setFont (juce::FontOptions (11.5f));
-    g.drawFittedText (utf8 ("Ruteo en FL: engranaje de Tidechart \xe2\x86\x92 MIDI \xe2\x86\x92 Output port = 1. En el instrumento que debe sonar "
-                            "(Undertow, FLEX\xe2\x80\xa6): MIDI \xe2\x86\x92 Input port = 1. Las notas van en el Piano Roll de Tidechart."),
-                      footer, juce::Justification::centredLeft, 2);
 }
 
 void TidechartMainView::resized()
 {
-    auto all = getLocalBounds().reduced (16, 0);
-    auto header = all.removeFromTop (52);
+    auto header = getLocalBounds().reduced (16, 0).removeFromTop (headerHeight);
     bypassButton.setBounds (header.removeFromRight (90).reduced (0, 12));
     header.removeFromRight (8);
     panicButton.setBounds (header.removeFromRight (90).reduced (0, 12));
-    header.removeFromRight (8);
-    viewButton.setBounds (header.removeFromRight (130).reduced (0, 12));
 
-    if (simple)
-        layoutSimple();
-    else
-        layoutFull();
+    header.removeFromLeft (150); // el título
+    for (auto& button : pageButtons)
+        button.setBounds (header.removeFromLeft (110).reduced (0, 12));
+
+    switch (page)
+    {
+        case Page::create: layoutCreate(); break;
+        case Page::settings: layoutSettings(); break;
+        case Page::analysis: layoutAnalysis(); break;
+    }
 }
 
-void TidechartMainView::layoutSimple()
+void TidechartMainView::layoutCreate()
 {
     // A la derecha: MELODÍA Y BAJO, todo el alto.
-    auto right = getLocalBounds().withTrimmedLeft (simpleLeftWidth).withTrimmedTop (56).reduced (0, 6);
+    auto right = getLocalBounds().withTrimmedLeft (createLeftWidth).withTrimmedTop (headerHeight + 4).reduced (0, 6);
     right.removeFromRight (16);
     linesView.setBounds (right.reduced (10, 0).withTrimmedBottom (4));
 
-    auto area = getLocalBounds().withWidth (simpleLeftWidth).reduced (16, 0);
-    area.removeFromTop (56);
+    auto area = getLocalBounds().withWidth (createLeftWidth).reduced (16, 0);
+    area.removeFromTop (headerHeight + 4);
     paletteView.setBounds (area.removeFromTop (200).reduced (10, 0));
     // La detección, en la fila de la tonalidad: es la otra forma de elegirla.
     keyDetectView.setBounds (paletteView.freeTopArea() + paletteView.getPosition());
@@ -300,24 +326,30 @@ void TidechartMainView::layoutSimple()
     guideArea = area.withTrimmedBottom (10).reduced (10, 0);
 }
 
-void TidechartMainView::layoutFull()
+void TidechartMainView::layoutSettings()
 {
-    // A la derecha, de arriba abajo: MELODÍA Y BAJO.
-    auto right = getLocalBounds().withTrimmedLeft (fullLeftWidth).withTrimmedTop (56).reduced (0, 6);
+    // A la derecha: MELODÍA Y BAJO con todos sus controles (el piano roll se ve en Crear).
+    auto right = getLocalBounds().withTrimmedLeft (settingsLeftWidth).withTrimmedTop (headerHeight + 4).reduced (0, 6);
     right.removeFromRight (16);
     linesView.setBounds (right.reduced (10, 0).withTrimmedBottom (4));
 
-    auto area = getLocalBounds().withWidth (fullLeftWidth).reduced (16, 0);
-    area.removeFromTop (52);
-
-    area.removeFromTop (4);
-    transportView.setBounds (area.removeFromTop (40).reduced (10, 0));
-    area.removeFromTop (18);
-
+    auto area = getLocalBounds().withWidth (settingsLeftWidth).reduced (16, 0);
+    area.removeFromTop (headerHeight + 4);
     paletteView.setBounds (area.removeFromTop (192).reduced (10, 0));
     area.removeFromTop (18);
-
     progressionView.setBounds (area.removeFromTop (192).reduced (10, 0));
+    area.removeFromTop (18);
+    // El acorde que suena: para oír y ver qué cambian el voicing, las séptimas o el bajo.
+    chordView.setBounds (area.removeFromTop (34).reduced (10, 0));
+    area.removeFromTop (10);
+    guideArea = area.removeFromTop (18).reduced (10, 0);
+}
+
+void TidechartMainView::layoutAnalysis()
+{
+    auto area = getLocalBounds().reduced (16, 0);
+    area.removeFromTop (headerHeight + 4);
+    transportView.setBounds (area.removeFromTop (40).reduced (10, 0));
     area.removeFromTop (18);
 
     keyDetectView.setBounds (area.removeFromTop (108).reduced (10, 0));
@@ -331,8 +363,7 @@ void TidechartMainView::layoutFull()
     keyboardView.setBounds (keyboard);
     area.removeFromTop (18);
 
-    area.removeFromBottom (34);
-    area.removeFromBottom (8);
+    area.removeFromBottom (10);
     auto left = area.removeFromLeft ((area.getWidth() - 12) / 2);
     area.removeFromLeft (12);
     inputMonitor.setBounds (left);
@@ -375,7 +406,7 @@ void TidechartMainView::timerCallback()
         linesView.setLines (processor.getLines());
     }
 
-    if (simple)
+    if (page == Page::create)
         if (auto text = guideText(); text != guide)
         {
             guide = text;
@@ -400,7 +431,6 @@ TidechartAudioProcessorEditor::TidechartAudioProcessorEditor (TidechartAudioProc
     userScale = juce::jlimit (minScale, maxScale, static_cast<double> (p.getParameters().state.getProperty (scaleProperty, 1.0)));
     addAndMakeVisible (view);
     setResizable (true, true);
-    view.onLogicalSizeChanged = [this] { applyScale(); };
     applyScale();
 }
 
@@ -417,7 +447,7 @@ double TidechartAudioProcessorEditor::fitScale() const
     const auto* display = isShowing() ? displays.getDisplayForRect (getScreenBounds()) : displays.getPrimaryDisplay();
     if (display == nullptr || view.getWidth() <= 0 || view.getHeight() <= 0)
         return maxScale;
-    const auto area = display->userArea;
+    const auto area = display->userBounds;
     return std::min ((area.getWidth() - 40.0) / view.getWidth(), (area.getHeight() - 110.0) / view.getHeight());
 }
 

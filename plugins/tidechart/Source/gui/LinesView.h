@@ -33,7 +33,8 @@ namespace tidechart::gui
 // Debajo, un piano roll de una vuelta con los acordes arriba y cada nota coloreada por su papel sobre el acorde que suena:
 // nota del acorde (apoyo), de la escala (de paso, adorno o tensión) o cromática. Pasar el ratón por una nota la explica.
 // Vista simple: las capas, el estilo y "Otra" de cada línea, y el piano roll. Densidad, rango, capturar, fijar y variar
-// quedan en la vista completa (siguen como estén).
+// quedan en la vista completa (siguen como estén). La vista completa (la pestaña Ajustes) va sin piano roll para caber
+// en una pantalla chica: el piano roll se ve en Crear (setShowsRoll).
 // Abajo, en las dos vistas (Fase 7): AL PIANO ROLL, un botón por capa que se arrastra a FL y suelta ahí sus notas (las
 // mismas que suenan en vivo, una vuelta).
 class LinesView final : public juce::Component
@@ -181,6 +182,15 @@ public:
         repaint();
     }
 
+    // Con o sin el piano roll y su leyenda (la información de la línea y el arrastre al Piano Roll quedan siempre).
+    void setShowsRoll (bool shouldShow)
+    {
+        showsRoll = shouldShow;
+        hovered = -1;
+        resized();
+        repaint();
+    }
+
     // Desde el editor: las líneas del procesador (al abrir, al cargar un proyecto, tras cada cambio).
     void setLines (const Lines& newLines)
     {
@@ -321,6 +331,11 @@ public:
         area.removeFromTop (12);
         layoutDragRow (area);
         infoArea = area.removeFromBottom (64);
+        if (! showsRoll)
+        {
+            legendArea = rollArea = {};
+            return;
+        }
         area.removeFromBottom (4);
         legendArea = area.removeFromBottom (16);
         area.removeFromBottom (4);
@@ -370,8 +385,11 @@ public:
                         juce::Justification::centredRight);
         }
 
-        drawRoll (g);
-        drawLegend (g);
+        if (! rollArea.isEmpty())
+        {
+            drawRoll (g);
+            drawLegend (g);
+        }
 
         g.setColour (theme::dimText);
         g.setFont (juce::FontOptions (11.0f));
@@ -767,6 +785,8 @@ private:
 
     [[nodiscard]] int noteAt (juce::Point<int> point) const
     {
+        if (rollArea.isEmpty())
+            return -1;
         for (int i = static_cast<int> (rollNotes.size()) - 1; i >= 0; --i)
             if (noteBounds (rollNotes[static_cast<std::size_t> (i)]).expanded (0.0f, 1.5f).contains (point.toFloat()))
                 return i;
@@ -898,7 +918,7 @@ private:
     midi::ChordSettings settings;
     std::vector<RollNote> rollNotes;
     MelodyCapture capture;
-    bool capturing = false, warnStopped = false, updating = false, simple = false;
+    bool capturing = false, warnStopped = false, updating = false, simple = false, showsRoll = true;
     juce::String statusMessage;
     juce::StringArray infoLines;
     int hovered = -1;
