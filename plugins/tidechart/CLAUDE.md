@@ -285,7 +285,7 @@ plugins/tidechart/
 - [x] Fase 4 — Constructor de progresiones: voicings, inversiones automáticas con buena conducción de voces, patrones
       rítmicos de acordes (incluyendo dembow y variantes), préstamo modal.
 - [x] Fase 5 — Detección de tonalidad a partir del MIDI entrante.
-- [ ] Fase 6 — Generador de melodías y líneas de bajo que siguen la progresión, con control de densidad, rango y
+- [x] Fase 6 — Generador de melodías y líneas de bajo que siguen la progresión, con control de densidad, rango y
       estilo; variaciones a partir de una melodía existente.
 - [ ] Fase 7 — Arrastrar y soltar el MIDI generado al Piano Roll de FL Studio (archivo `.mid` temporal escrito con
       `juce::MidiFile` y `DragAndDropContainer::performExternalDragDropOfFiles`).
@@ -308,8 +308,8 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 6 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (capas, estilos, densidad, rango, Otra, capturar,
-variar y fijar).
+Fase 6 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (capas, estilos, densidad, rango, Otra, capturar,
+variar y fijar): funciona.
 - `libs/theory`: `Melody.h` (`LineNote`, `Line`, `lineLength`, `linePosition`, `chordAt`, `chordChangesAt`, `scaleMask`,
   `chordScaleSource`, `chordScaleMask`, `noteRole`, opciones y estilos) y `src/Melody.cpp` (`generateMelody`,
   `generateBass`, `varyMelody`, `renderLine`); `parallelModeOrder` en `Harmony.h` (lo usa `borrowedChords`, sin cambiar
@@ -448,4 +448,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: que el usuario pruebe la Fase 6 en FL; después, Fase 7 (arrastrar el MIDI al Piano Roll).
+Siguiente: Fase 7 (arrastrar el MIDI generado al Piano Roll de FL Studio).
