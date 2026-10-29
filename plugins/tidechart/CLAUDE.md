@@ -356,12 +356,12 @@ pestañas de los MISMOS paneles (cada vista tiene `setSimple`), todas de 1180 ×
         acorde que suena o bajo el ratón; las que trae un prestado de fuera, en otro color).
   - [x] 8.3 — Círculo de quintas en una ventana al hacer clic en la tónica (reemplaza al menú): elegir la tonalidad,
         la zona de los acordes de la escala, la relativa y dónde caen los prestados.
-- [ ] Fase 9 — Presets por género y estado de ánimo (reggaetón, oscuro/experimental, R&B, trap) con notas que
+- [x] Fase 9 — Presets por género y estado de ánimo (reggaetón, oscuro/experimental, R&B, trap) con notas que
       expliquen por qué funciona cada progresión (formato de `libs/presets`; la progresión como "estado extra"). En dos
       partes (acordado con el usuario al empezarla; también: un preset NO cambia la tónica, sí el modo):
   - [x] 9.1 — El sistema: formato, barra de presets en la cabecera, la progresión y los ajustes de las líneas como
         estado extra, tests; Init y uno por categoría.
-  - [ ] 9.2 — La biblioteca de fábrica completa, con sus notas.
+  - [x] 9.2 — La biblioteca de fábrica completa, con sus notas.
 - [ ] Fase 10 — Pulido y pluginval.
 
 ## Aprendizaje de teoría musical y composición (igual de importante que el código)
@@ -378,7 +378,7 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-Fase 9.2 IMPLEMENTADA (2026-10-29), pendiente de probar en FL Studio: la biblioteca de fábrica completa.
+Fase 9 COMPLETADA (2026-10-29). Fase 9.2 probada por el usuario en FL Studio: funciona. La biblioteca de fábrica completa.
 - 21 presets (16 nuevos), generados una vez con un script y revisados a mano: Reggaetón 5 (Clásico, Romántico IV–I–V–vi,
   Dembow Dominicano de ½ compás, Perreo Andaluz con el V prestado, Mixolidio I–♭VII–IV–I), Oscuro 5 (Perreo Frigio,
   Sombra Cromática ♭II→V, Locrio Inestable, Frigio Dominante, Mediante Cromática i–iii–♭VI), R&B 4 (Dórico, Neo Soul
@@ -661,4 +661,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: probar la Fase 9.2 en FL Studio (con ella termina la Fase 9); después, Fase 10 (pulido y pluginval).
+Siguiente: Fase 10 (pulido y pluginval).

@@ -123,7 +123,7 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
 | 2 | Riptide — saturador (modos cinta/bulbo/transistor, multibanda, auto gain) | Decapitator, Saturn 2 | ✅ Terminado |
 | 3 | Ebb — ducker / modulador de volumen para sidechain (tempo, MIDI y audio; por bandas) | Kickstart 2, LFOTool, ShaperBox (módulo de volumen) | ✅ Terminado |
 | 4 | Fathom — EQ paramétrico con analizador (24 bandas, dinámico, M/S, fase lineal, dinámica espectral) | FabFilter Pro-Q 4 | ✅ Terminado |
-| 5 | Tidechart — herramienta MIDI de acordes y melodías por tonalidad (paleta, progresiones, ritmos como el dembow, melodías y bajos) | Scaler 3, Captain Chords | En curso (Fase 9) |
+| 5 | Tidechart — herramienta MIDI de acordes y melodías por tonalidad (paleta, progresiones, ritmos como el dembow, melodías y bajos) | Scaler 3, Captain Chords | En curso (Fase 10) |
 | 6 | Compresor (estilos limpio y FET/1176) | FabFilter Pro-C 2, 1176 | Pendiente |
 | 7 | Delay (sync, ping-pong, filtros y modulación en el feedback) | Valhalla Delay | Pendiente |
 | 8 | Reverb algorítmica (FDN, difusión, modulación; modos vintage y espacial) | Valhalla VintageVerb, Supermassive | Pendiente |
