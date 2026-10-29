@@ -354,7 +354,7 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
-GUI en pestañas (después de la Fase 7, 2026-10-28; pendiente de probar en FL Studio). Problema reportado: en la laptop
+GUI en pestañas (después de la Fase 7, 2026-10-28). Probada por el usuario en FL Studio: funciona. Problema reportado: en la laptop
 de 13" del usuario la vista completa (1360 × 960) solo cabía achicada al ~70 % y no se leía. Arreglo: en vez de
 "Vista simple / Vista completa", tres pestañas del mismo tamaño que la simple (1180 × 560, caben al 100 %):
 **Crear** (la vista simple de antes, igual), **Ajustes** (paleta y progresión completas + el ACORDE que suena a la
