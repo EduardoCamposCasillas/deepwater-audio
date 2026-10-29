@@ -16,6 +16,8 @@
 #include "deepwater/theory/KeyDetection.h"
 #include "deepwater/theory/Progression.h"
 #include "deepwater/theory/Text.h"
+#include "deepwater/theory/Melody.h"
+#include "Lines.h"
 #include "midi/ChordTrigger.h"
 #include "midi/EventLog.h"
 #include "midi/KeyListener.h"
@@ -980,8 +982,8 @@ void testRhythmOnKeys()
 
 void testTimedRandom()
 {
-    std::printf ("Progresion y ritmo al azar (10 semillas): saltos, paradas, tempo, modos, ritmos, voicings y "
-                 "progresiones cambiando; nunca dos note-on seguidos de una nota y, al soltar todo, silencio\n");
+    std::printf ("Progresion, ritmo y lineas al azar (10 semillas): saltos, paradas, tempo, modos, ritmos, voicings, capas, "
+                 "progresiones y lineas cambiando; nunca dos note-on seguidos de una nota y, al soltar todo, silencio\n");
 
     for (std::uint32_t seed = 1; seed <= 10; ++seed)
     {
@@ -993,14 +995,35 @@ void testTimedRandom()
             settings.playMode = random.upTo (2) == 0 ? PlayMode::keys : PlayMode::progression;
             settings.voicing = static_cast<th::VoicingStyle> (random.upTo (th::voicingStyleCount));
             settings.rhythm = random.upTo (th::rhythmPatternCount);
+            // Fase 6: las capas, y a veces la melodía en el mismo registro que los acordes (notas compartidas).
+            settings.playChords = random.upTo (4) != 0;
+            settings.playBass = random.upTo (2) == 0;
+            settings.playMelody = random.upTo (2) == 0;
         };
         randomize();
         const char* progressions[] { "i bVI bIII bVII", "i bII", "i bVII bVI V", "Imaj7 bVImaj7 iv9", "i", "" };
+        const auto randomLines = [&] {
+            const auto p = progressionOf (progressions[random.upTo (5)]);
+            th::MelodyOptions melody;
+            melody.style = static_cast<th::MelodyStyle> (random.upTo (th::melodyStyleCount));
+            melody.density = random.upTo (101) / 100.0;
+            melody.low = 52 + random.upTo (12); // a veces en el registro de los acordes
+            melody.high = melody.low + 12 + random.upTo (12);
+            melody.seed = static_cast<std::uint32_t> (random.upTo (1000));
+            th::BassOptions bass;
+            bass.style = static_cast<th::BassStyle> (random.upTo (th::bassStyleCount));
+            bass.density = random.upTo (101) / 100.0;
+            rig.stage.setLine (LineKind::melody, th::generateMelody (p, settings.key, melody));
+            rig.stage.setLine (LineKind::bass, th::generateBass (p, settings.key, bass));
+        };
+        randomLines();
         bool matchesTracker = true;
         for (int block = 0; block < 2500; ++block)
         {
             if (random.upTo (60) == 0)
                 randomize();
+            if (random.upTo (90) == 0)
+                randomLines();
             if (random.upTo (200) == 0)
                 settings.enabled = ! settings.enabled;
             if (random.upTo (40) == 0)
@@ -1041,6 +1064,201 @@ void testTimedRandom()
         CHECK (rig.receiver.sounding() == 0);
         CHECK (rig.stage.getSounding().soundingCount() == 0);
     }
+}
+
+// --- Fase 6: las líneas en vivo ----------------------------------------------------------------------------------------
+
+ChordSettings linesSettings (bool chords, bool bass, bool melody)
+{
+    auto s = progressionSettings (th::VoicingStyle::rootPosition, 0);
+    s.playChords = chords;
+    s.playBass = bass;
+    s.playMelody = melody;
+    return s;
+}
+
+void testLinesMatchRender()
+{
+    std::printf ("Lineas en vivo = renderLine: cada note-on y note-off del bajo y la melodia en su muestra exacta, con "
+                 "bloques al azar, en todos los estilos, dos vueltas; la velocidad escala con la de la tecla\n");
+
+    constexpr int sixteenth = 6000;
+    const th::Key aMinor { th::notes::A, th::Mode::aeolian };
+    Random random { 4242 };
+    const char* progressions[] { "i bVI bIII bVII", "i bII" };
+    for (const char* text : progressions)
+        for (int style = 0; style < th::melodyStyleCount; ++style)
+            for (const bool bassToo : { false, true })
+            {
+                const auto progression = progressionOf (text);
+                th::MelodyOptions mo;
+                mo.style = static_cast<th::MelodyStyle> (style);
+                mo.density = 0.4 + 0.2 * style;
+                th::BassOptions bo;
+                bo.style = static_cast<th::BassStyle> (style + 1);
+                const auto melody = th::generateMelody (progression, aMinor, mo);
+                const auto bass = th::generateBass (progression, aMinor, bo);
+                TimedRig rig;
+                rig.stage.setProgression (progression);
+                rig.stage.setLine (LineKind::melody, melody);
+                rig.stage.setLine (LineKind::bass, bass);
+                const long long length = 2LL * melody.length * sixteenth;
+                rig.runUntil (length + 100, linesSettings (false, bassToo, true), random, { on (60, 0, 80), off (60, static_cast<int> (length)) });
+
+                std::vector<Event> expected;
+                for (const auto* line : { &melody, &bass })
+                {
+                    if (line == &bass && ! bassToo)
+                        continue;
+                    for (const auto& e : th::renderLine (*line, 2))
+                    {
+                        const int start = static_cast<int> (e.start * 4 * sixteenth + 0.5);
+                        const int end = static_cast<int> ((e.start + e.length) * 4 * sixteenth + 0.5);
+                        expected.push_back (on (e.note, start, th::accentedVelocity (e.velocity, 80)));
+                        if (end < length)
+                            expected.push_back (off (e.note, end));
+                    }
+                }
+                const auto got = split (rig.out, static_cast<int> (length));
+                const auto want = split (expected, static_cast<int> (length));
+                const bool same = got.ons == want.ons && got.offs == want.offs && ! got.ons.empty();
+                if (! same)
+                    std::printf ("    %s, estilo %d, bajo %d: %d/%d note-on, %d/%d note-off\n", text, style, bassToo ? 1 : 0,
+                                 static_cast<int> (got.ons.size()), static_cast<int> (want.ons.size()), static_cast<int> (got.offs.size()),
+                                 static_cast<int> (want.offs.size()));
+                CHECK (same);
+                CHECK (rig.receiver.sounding() == 0 && rig.maxPerNote <= 1);
+            }
+}
+
+void testLinesFollowHost()
+{
+    std::printf ("Lineas y host: salto a mitad de una nota, loop, parado = silencio, capas que se apagan, la linea cambia "
+                 "mientras suena, notas compartidas con el acorde, soltar, modo teclas, bypass y apagar\n");
+
+    constexpr int sixteenth = 6000;
+    // Una línea a mano en 4 compases: A5 larga en el compás 1 (0–15), C6 en el 2 (16–23), E5 en el 4 (48–63).
+    th::Line melody;
+    melody.length = 64;
+    melody.notes.push_back ({ 0, 16, 69, 100 });
+    melody.notes.push_back ({ 16, 8, 72, 100 });
+    melody.notes.push_back ({ 48, 16, 64, 100 });
+    th::Line bass;
+    bass.length = 64;
+    bass.notes.push_back ({ 0, 64, 33, 100 }); // un pedal de toda la vuelta
+
+    TimedRig rig;
+    rig.stage.setProgression (progressionOf ("i bVI bIII bVII"));
+    rig.stage.setLine (LineKind::melody, melody);
+    rig.stage.setLine (LineKind::bass, bass);
+    const auto both = linesSettings (false, true, true);
+    rig.run (512, both, { on (60, 10) });
+    CHECK ((rig.soundingNotes() == std::vector<int> { 33, 69 }));
+    CHECK (rig.stage.linesSounding() == 0b11);
+
+    // Salto a mitad de la nota del compás 2 (posición 5.0 = semicorchea 20): C6 suena aunque empezó antes.
+    rig.ppq = 5.0;
+    rig.run (512, both);
+    CHECK ((rig.soundingNotes() == std::vector<int> { 33, 72 }));
+    // Compás 3: la melodía calla; el pedal sigue sin re-atacarse.
+    rig.ppq = 9.0;
+    rig.out.clear();
+    rig.run (512, both);
+    CHECK ((rig.soundingNotes() == std::vector<int> { 33 }));
+    CHECK (std::none_of (rig.out.begin(), rig.out.end(), [] (const Event& e) { return e.bytes[0] == 0x90 && e.bytes[1] == 33; }));
+    // Loop al compás 1: el pedal vuelve a empezar (nueva vuelta) y A5 suena.
+    rig.ppq = 0.0;
+    rig.out.clear();
+    rig.run (512, both);
+    CHECK ((rig.soundingNotes() == std::vector<int> { 33, 69 }));
+    CHECK (std::count_if (rig.out.begin(), rig.out.end(), [] (const Event& e) { return e.bytes[0] == 0x90 && e.bytes[1] == 33 && e.bytes[2] > 0; }) == 1);
+
+    // Apagar la capa de la melodía: se suelta en la muestra 0 del bloque siguiente; el bajo sigue.
+    rig.run (512, linesSettings (false, true, false));
+    CHECK ((rig.soundingNotes() == std::vector<int> { 33 }));
+    // La línea cambia mientras suena (otra nota en el mismo sitio): la vieja se suelta, la nueva se ataca.
+    auto other = melody;
+    other.notes[0].note = 71;
+    rig.stage.setLine (LineKind::melody, other);
+    rig.run (512, both);
+    CHECK ((rig.soundingNotes() == std::vector<int> { 33, 71 }));
+    // Con los acordes: Am (A4 C5 E5) y la melodía en C5 (compartida): nunca dos note-on seguidos de C5.
+    auto shared = melody;
+    shared.notes[0].note = 60;
+    rig.stage.setLine (LineKind::melody, shared);
+    rig.run (512, linesSettings (true, true, true));
+    CHECK ((rig.soundingNotes() == std::vector<int> { 33, 57, 60, 64 }));
+    CHECK (rig.maxPerNote <= 1);
+    rig.stage.setLine (LineKind::melody, melody); // la C5 de la melodía se suelta, pero el acorde la sigue usando
+    rig.run (512, linesSettings (true, true, true));
+    CHECK ((rig.soundingNotes() == std::vector<int> { 33, 57, 60, 64, 69 }));
+
+    // Parado: los acordes suenan sostenidos (Fase 4), las líneas callan.
+    rig.playing = false;
+    rig.run (512, linesSettings (true, true, true));
+    CHECK ((rig.soundingNotes() == std::vector<int> { 57, 60, 64 }) && rig.stage.linesSounding() == 0);
+    rig.playing = true;
+    rig.run (512, both);
+    CHECK ((rig.soundingNotes() == std::vector<int> { 33, 69 }));
+
+    // Soltar la tecla: silencio.
+    rig.run (512, both, { off (60, 7) });
+    CHECK (rig.receiver.sounding() == 0);
+    // Modo teclas: las líneas no suenan (cada tecla su acorde).
+    auto keys = both;
+    keys.playMode = PlayMode::keys;
+    rig.run (512, keys, { on (60, 0) });
+    CHECK ((rig.soundingNotes() == std::vector<int> { 57, 60, 64 }));
+    rig.run (512, keys, { off (60, 0) });
+    // Bypass a mitad: lo generado se apaga; apagar (reinicio) también.
+    rig.run (512, both, { on (60, 0) });
+    CHECK (rig.receiver.sounding() == 2);
+    auto bypass = both;
+    bypass.enabled = false;
+    rig.run (512, bypass);
+    CHECK (rig.receiver.sounding() == 0);
+    rig.run (512, both, { on (62, 0) });
+    CHECK (rig.receiver.sounding() == 2);
+    rig.stage.requestRelease();
+    rig.run (512, both);
+    CHECK (rig.receiver.sounding() == 0);
+    rig.out.clear();
+    rig.run (512, both, { off (62, 0) });
+    CHECK (rig.out.empty() && rig.maxPerNote <= 1);
+
+    // Una línea vacía (progresión vacía) no suena ni rompe nada.
+    TimedRig empty;
+    empty.stage.setLine (LineKind::melody, {});
+    empty.run (512, both, { on (60, 0) });
+    CHECK (empty.receiver.sounding() == 0);
+    (void) sixteenth;
+}
+
+void testMelodyCapture()
+{
+    std::printf ("Capturar una melodia: se cuantiza a semicorcheas, se dobla sobre la vuelta (desde el compas 1), la "
+                 "ultima pasada gana y lo tocado con FL parado no cuenta\n");
+
+    tidechart::MelodyCapture capture;
+    capture.noteOn (0, 69, 100, 0.02, true); // casi en el 0
+    capture.noteOff (0, 69, 0.98);
+    capture.noteOn (0, 72, 90, 16.0 + 4.26, true); // compás 5 = compás 1 de la vuelta siguiente, semicorchea 17
+    capture.noteOff (0, 72, 16.0 + 4.5);
+    capture.noteOn (0, 76, 80, 2.0, false); // FL parado: no cuenta
+    capture.noteOff (0, 76, 3.0);
+    capture.noteOff (0, 64, 3.0);           // un note-off sin note-on: nada
+    capture.noteOn (0, 69, 110, 16.0, true); // la misma nota en el mismo sitio, otra pasada: gana esta
+    capture.noteOff (0, 69, 16.0 + 0.5);
+    capture.noteOn (0, 74, 100, 15.9, true); // empieza al final y se pasaría de la vuelta: se recorta
+    capture.noteOff (0, 74, 17.0);
+    CHECK (capture.count() == 4);
+    const auto line = capture.toLine (64);
+    CHECK (line.length == 64 && line.notes.size() == 3);
+    CHECK (line.notes[0] == (th::LineNote { 0, 2, 69, 110 }));
+    CHECK (line.notes[1] == (th::LineNote { 0, 4, 74, 100 })); // 15.9 negras = semicorchea 63.6 → 64 → la 0 de la vuelta
+    CHECK (line.notes[2] == (th::LineNote { 17, 1, 72, 90 }));
+    capture.clear();
+    CHECK (capture.count() == 0 && capture.toLine (64).notes.empty());
 }
 
 // El oyente de la detección de tonalidad con un host de prueba (120 BPM, 48 kHz: una negra = 24000 muestras), en
@@ -1258,6 +1476,9 @@ int main()
     testProgressionFollowsHost();
     testRhythmOnKeys();
     testTimedRandom();
+    testLinesMatchRender();
+    testLinesFollowHost();
+    testMelodyCapture();
     testKeyListener();
     testEventLog();
     testNoteNames();

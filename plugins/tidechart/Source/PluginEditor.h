@@ -7,6 +7,7 @@
 #include "gui/ChordPaletteView.h"
 #include "gui/ChordView.h"
 #include "gui/KeyDetectView.h"
+#include "gui/LinesView.h"
 #include "gui/MidiMonitorView.h"
 #include "gui/ProgressionView.h"
 #include "gui/SoundingKeyboardView.h"
@@ -23,6 +24,7 @@ class TidechartAudioProcessor;
 //   TONALIDAD: escuchar lo que entra y detectar la tonalidad, con el porqué y las alternativas (Fase 5)
 //   SUENA AHORA: teclado con las notas que suenan en el receptor y cuántas; debajo, el ACORDE que forman (Fase 2)
 //   monitor MIDI: ENTRADA | SALIDA (los últimos eventos de cada lado)
+//   derecha, MELODÍA Y BAJO: qué capas suenan, estilo, densidad, rango, capturar y variar; piano roll (Fase 6)
 //   pie: cómo rutear la salida en FL
 // Un temporizador a 30 cuadros por segundo recoge lo que publicó el audio.
 class TidechartAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
@@ -43,6 +45,7 @@ private:
     tidechart::gui::ChordPaletteView paletteView;
     tidechart::gui::ProgressionView progressionView;
     tidechart::gui::KeyDetectView keyDetectView;
+    tidechart::gui::LinesView linesView;
     tidechart::gui::SoundingKeyboardView keyboardView;
     tidechart::gui::ChordView chordView;
     tidechart::gui::MidiMonitorView inputMonitor;
@@ -54,6 +57,7 @@ private:
 
     TransportSnapshot transport;
     std::uint32_t seenProgressionChanges = 0;
+    std::uint32_t seenLinesChanges = 0;
     juce::Rectangle<int> keyboardTitleArea;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TidechartAudioProcessorEditor)

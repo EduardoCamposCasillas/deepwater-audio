@@ -7,10 +7,64 @@
 namespace
 {
 constexpr const char* progressionTag = "Progression";
+constexpr const char* linesTag = "Lines";
 
 // Bytes reservados para el MIDI de salida de un bloque (un mensaje de 3 bytes ocupa 9). Si un bloque trajera más, el
 // MidiBuffer crecería una vez (reservando memoria) y desde ahí conserva esa capacidad.
 constexpr int reservedMidiBytes = 16384;
+
+namespace th = deepwater::theory;
+
+// Una línea en el XML del proyecto, legible: <Note at="0" length="3" note="A2" velocity="100"/> (en semicorcheas desde
+// el principio de la vuelta; la nota con el nombre de FL, C5 = 60). Así un preset o el servidor MCP la pueden escribir.
+void writeLine (juce::XmlElement& parent, const th::Line& line)
+{
+    parent.setAttribute ("length", line.length);
+    for (const auto& n : line.notes)
+    {
+        auto* note = parent.createNewChildElement ("Note");
+        note->setAttribute ("at", n.start);
+        note->setAttribute ("length", n.length);
+        note->setAttribute ("note", juce::String (th::midiNoteName (n.note)));
+        note->setAttribute ("velocity", n.velocity);
+    }
+}
+
+th::Line readLine (const juce::XmlElement& parent)
+{
+    th::Line line;
+    line.length = juce::jlimit (0, th::maxLineSixteenths, parent.getIntAttribute ("length", 0));
+    if (line.length <= 0)
+        return {};
+    std::vector<th::LineNote> notes;
+    for (auto* note : parent.getChildWithTagNameIterator ("Note"))
+    {
+        const auto pitch = th::parseMidiNote (note->getStringAttribute ("note").toStdString());
+        if (! pitch || *pitch < 0 || *pitch > 127)
+            continue;
+        const int start = juce::jlimit (0, line.length - 1, note->getIntAttribute ("at", 0));
+        notes.push_back ({ start, juce::jlimit (1, line.length - start, note->getIntAttribute ("length", 1)), *pitch,
+                           juce::jlimit (1, 127, note->getIntAttribute ("velocity", 100)) });
+    }
+    std::sort (notes.begin(), notes.end(), [] (const th::LineNote& a, const th::LineNote& b) {
+        return a.start != b.start ? a.start < b.start : a.note < b.note;
+    });
+    for (const auto& n : notes)
+        line.notes.push_back (n);
+    return line;
+}
+
+// Un estilo por su nombre ("dembow"); si no se reconoce, por su índice; si tampoco, el de por defecto.
+template <std::size_t N>
+int styleIndex (const std::array<std::string_view, N>& names, const juce::String& text, int fallback)
+{
+    for (std::size_t i = 0; i < N; ++i)
+        if (text == juce::String (std::string (names[i])))
+            return static_cast<int> (i);
+    if (text.isNotEmpty() && text.containsOnly ("0123456789"))
+        return juce::jlimit (0, static_cast<int> (N) - 1, text.getIntValue());
+    return fallback;
+}
 } // namespace
 
 TidechartAudioProcessor::TidechartAudioProcessor()
@@ -27,15 +81,24 @@ TidechartAudioProcessor::TidechartAudioProcessor()
     playModeParam = parameters.getRawParameterValue (id::playMode);
     voicingParam = parameters.getRawParameterValue (id::voicing);
     rhythmParam = parameters.getRawParameterValue (id::rhythm);
+    playChordsParam = parameters.getRawParameterValue (id::playChords);
+    playBassParam = parameters.getRawParameterValue (id::playBass);
+    playMelodyParam = parameters.getRawParameterValue (id::playMelody);
     bypassParameter = dynamic_cast<juce::AudioParameterBool*> (parameters.getParameter (tidechart::params::bypass));
     jassert (bypassParameter != nullptr);
     outputMidi.ensureSize (reservedMidiBytes);
     setProgression (defaultProgression());
+    refreshLines();
+    startTimerHz (10);
+}
+
+TidechartAudioProcessor::~TidechartAudioProcessor()
+{
+    stopTimer();
 }
 
 deepwater::theory::Progression TidechartAudioProcessor::defaultProgression()
 {
-    namespace th = deepwater::theory;
     th::Progression result;
     for (const auto& numeral : { th::RomanNumeral { 1, 0, th::chordType ("m") }, th::RomanNumeral { 6, -1, th::chordType ("") },
                                  th::RomanNumeral { 3, -1, th::chordType ("") }, th::RomanNumeral { 7, -1, th::chordType ("") } })
@@ -45,20 +108,88 @@ deepwater::theory::Progression TidechartAudioProcessor::defaultProgression()
 
 deepwater::theory::Progression TidechartAudioProcessor::getProgression() const
 {
-    const juce::ScopedLock lock (progressionLock);
+    const juce::ScopedLock lock (dataLock);
     return progression;
 }
 
 void TidechartAudioProcessor::setProgression (const deepwater::theory::Progression& newProgression)
 {
     {
-        const juce::ScopedLock lock (progressionLock);
+        const juce::ScopedLock lock (dataLock);
         progression = newProgression;
         for (auto& step : progression.steps)
             step.beats = deepwater::theory::Progression::clampBeats (step.beats);
         progressionBox.write (progression);
     }
     progressionChanges.fetch_add (1, std::memory_order_acq_rel);
+}
+
+tidechart::Lines TidechartAudioProcessor::getLines() const
+{
+    const juce::ScopedLock lock (dataLock);
+    return lines;
+}
+
+void TidechartAudioProcessor::publishLines()
+{
+    bassBox.write (lines.bass);
+    melodyBox.write (lines.melody);
+    lineVersion.fetch_add (1, std::memory_order_acq_rel);
+    linesChanges.fetch_add (1, std::memory_order_acq_rel);
+}
+
+void TidechartAudioProcessor::setBassSettings (const tidechart::BassSettings& settings)
+{
+    const auto key = currentChordSettings (false).key;
+    const juce::ScopedLock lock (dataLock);
+    lines.bassSettings = settings;
+    lines.bass = tidechart::computeBass (settings, progression, key);
+    publishLines();
+}
+
+void TidechartAudioProcessor::setMelodySettings (const tidechart::MelodySettings& settings)
+{
+    const auto key = currentChordSettings (false).key;
+    const juce::ScopedLock lock (dataLock);
+    lines.melodySettings = settings;
+    lines.melody = tidechart::computeMelody (settings, progression, key);
+    publishLines();
+}
+
+void TidechartAudioProcessor::captureMelody (const deepwater::theory::Line& captured)
+{
+    const juce::ScopedLock lock (dataLock);
+    lines.melodySettings.hasSource = true;
+    lines.melodySettings.source = captured;
+    lines.melodySettings.variation = 0.0;
+    lines.melody = captured;
+    publishLines();
+}
+
+void TidechartAudioProcessor::fixMelody()
+{
+    const juce::ScopedLock lock (dataLock);
+    lines.melodySettings.hasSource = true;
+    lines.melodySettings.source = lines.melody;
+    lines.melodySettings.variation = 0.0;
+    publishLines();
+}
+
+void TidechartAudioProcessor::refreshLines()
+{
+    const auto key = currentChordSettings (false).key;
+    const juce::ScopedLock lock (dataLock);
+    const LinesContext now { key, progression };
+    if (now == linesContext && linesPublished)
+        return;
+    linesContext = now;
+    linesPublished = true;
+    lines.bass = tidechart::computeBass (lines.bassSettings, progression, key);
+    // Una melodía fija sin variación es la del usuario: no se toca. Con variación, la variación se rehace sobre la
+    // progresión nueva (los apoyos van a las notas de los acordes nuevos).
+    if (! lines.melodySettings.hasSource || lines.melodySettings.variation > 0.0)
+        lines.melody = tidechart::computeMelody (lines.melodySettings, progression, key);
+    publishLines();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout TidechartAudioProcessor::createParameterLayout()
@@ -97,12 +228,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout TidechartAudioProcessor::cre
                                       "Dembow shifted", "Dembow gaps" };
     jassert (rhythms.size() == deepwater::theory::rhythmPatternCount);
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::rhythm, id::versionHintPhase4 }, "Rhythm", rhythms, 0));
+
+    // Fase 6: las capas del modo progresión (automatizables: quitar el bajo en un puente). Por defecto solo los acordes,
+    // así la salida es la de la Fase 5. Off / On como chordBass (ver arriba).
+    const juce::StringArray offOn { "Off", "On" };
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::playChords, id::versionHintPhase6 }, "Chords layer", offOn, 1));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::playBass, id::versionHintPhase6 }, "Bass layer", offOn, 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::playMelody, id::versionHintPhase6 }, "Melody layer", offOn, 0));
     return layout;
 }
 
 tidechart::midi::ChordSettings TidechartAudioProcessor::currentChordSettings (bool bypassed) const noexcept
 {
-    namespace th = deepwater::theory;
     const auto choice = [] (const std::atomic<float>* p, int count) {
         return juce::jlimit (0, count - 1, juce::roundToInt (p->load (std::memory_order_relaxed)));
     };
@@ -117,6 +254,9 @@ tidechart::midi::ChordSettings TidechartAudioProcessor::currentChordSettings (bo
     settings.playMode = choice (playModeParam, 2) == 0 ? tidechart::midi::PlayMode::keys : tidechart::midi::PlayMode::progression;
     settings.voicing = static_cast<th::VoicingStyle> (choice (voicingParam, th::voicingStyleCount));
     settings.rhythm = choice (rhythmParam, th::rhythmPatternCount);
+    settings.playChords = playChordsParam->load (std::memory_order_relaxed) >= 0.5f;
+    settings.playBass = playBassParam->load (std::memory_order_relaxed) >= 0.5f;
+    settings.playMelody = playMelodyParam->load (std::memory_order_relaxed) >= 0.5f;
     return settings;
 }
 
@@ -165,7 +305,8 @@ void TidechartAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& bu
 }
 
 // En bypass el MIDI pasa tal cual; activo, cada tecla dispara un acorde. Al cambiar de uno a otro, la etapa apaga lo que
-// sonaba del modo anterior en la muestra 0. Escuchando (detección de tonalidad) pasa tal cual, como en bypass.
+// sonaba del modo anterior en la muestra 0. Escuchando (detección de tonalidad) o capturando una melodía pasa tal cual,
+// como en bypass.
 void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, bool bypassed) noexcept
 {
     juce::ScopedNoDenormals noDenormals;
@@ -174,10 +315,21 @@ void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juc
 
     clock.beginBlock (readHostTransport(), numSamples);
 
+    // Las líneas publicadas por la GUI, solo si cambiaron (son 8 KB cada una).
+    if (const auto version = lineVersion.load (std::memory_order_acquire); version != audioLineVersion)
+    {
+        audioLineVersion = version;
+        bassBox.read (audioLine);
+        stage.setLine (tidechart::midi::LineKind::bass, audioLine);
+        melodyBox.read (audioLine);
+        stage.setLine (tidechart::midi::LineKind::melody, audioLine);
+    }
+
     const bool listen = listenRequested.load (std::memory_order_acquire);
     if (listen && ! listening)
         keyListener.reset(); // cada vez que se empieza a escuchar, de cero
     listening = listen;
+    capturing = captureRequested.load (std::memory_order_acquire);
     keyListener.beginBlock (&clock);
 
     outputMidi.clear(); // conserva la capacidad (no libera memoria)
@@ -186,13 +338,13 @@ void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juc
         const auto message = tidechart::midi::readShortMessage (data, size);
         if (message.isNoteOn())
             notesOutCount.fetch_add (1, std::memory_order_relaxed);
-        midiLog.push ({ message, static_cast<std::uint16_t> (size), true, clock.ppqAt (sample) });
+        midiLog.push ({ message, static_cast<std::uint16_t> (size), true, clock.ppqAt (sample), clock.isRunning() });
     };
 
     // La progresión publicada por la GUI (read copia la última aunque no haya nada nuevo: son pocos bytes).
     progressionBox.read (audioProgression);
     stage.setProgression (audioProgression);
-    stage.setChordSettings (currentChordSettings (bypassed || listening));
+    stage.setChordSettings (currentChordSettings (bypassed || listening || capturing));
     stage.beginBlock (sink, &clock);
     const int lastSample = juce::jmax (0, numSamples - 1);
     for (const auto metadata : midi)
@@ -201,7 +353,7 @@ void TidechartAudioProcessor::processMidi (juce::AudioBuffer<float>& buffer, juc
         const auto message = tidechart::midi::readShortMessage (metadata.data, metadata.numBytes);
         if (message.isNoteOn())
             notesInCount.fetch_add (1, std::memory_order_relaxed);
-        midiLog.push ({ message, static_cast<std::uint16_t> (metadata.numBytes), false, clock.ppqAt (sample) });
+        midiLog.push ({ message, static_cast<std::uint16_t> (metadata.numBytes), false, clock.ppqAt (sample), clock.isRunning() });
         if (listening)
             keyListener.observe (message, sample);
         stage.process (metadata.data, metadata.numBytes, sample, sink);
@@ -272,12 +424,14 @@ void TidechartAudioProcessor::publishTransport (int numSamples, bool bypassed) n
     snapshot.listening = listening;
     snapshot.keyEvidence = keyListener.evidence();
     snapshot.heardSeconds = keyListener.heardSeconds();
+    snapshot.capturing = capturing;
+    snapshot.linesSounding = stage.linesSounding();
     transportBox.write (snapshot);
 }
 
 // La progresión va en el estado como un elemento propio, legible: <Progression><Step chord="bVI" beats="4"/>...</Progression>.
 // El grado en texto romano (ida y vuelta probada en libs/theory) y no como índices: así un preset o el servidor MCP la
-// pueden escribir a mano.
+// pueden escribir a mano. Las líneas (Fase 6) igual: <Lines><Bass style="dembow" ...><Note .../></Bass><Melody ...>.
 void TidechartAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     if (const auto xml = parameters.copyState().createXml())
@@ -289,6 +443,30 @@ void TidechartAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
             stepElement->setAttribute ("chord", juce::String (deepwater::theory::romanNumeralText (step.numeral)));
             stepElement->setAttribute ("beats", step.beats);
         }
+
+        // Las líneas: los ajustes (para regenerar) y las notas (lo que suena).
+        const auto current = getLines();
+        auto* linesElement = xml->createNewChildElement (linesTag);
+        auto* bass = linesElement->createNewChildElement ("Bass");
+        const auto& b = current.bassSettings.generator;
+        bass->setAttribute ("style", juce::String (std::string (th::bassStyleNames[static_cast<std::size_t> (b.style)])));
+        bass->setAttribute ("density", b.density);
+        bass->setAttribute ("low", b.low);
+        bass->setAttribute ("high", b.high);
+        bass->setAttribute ("seed", static_cast<int> (b.seed));
+        writeLine (*bass, current.bass);
+        auto* melody = linesElement->createNewChildElement ("Melody");
+        const auto& m = current.melodySettings;
+        melody->setAttribute ("style", juce::String (std::string (th::melodyStyleNames[static_cast<std::size_t> (m.generator.style)])));
+        melody->setAttribute ("density", m.generator.density);
+        melody->setAttribute ("low", m.generator.low);
+        melody->setAttribute ("high", m.generator.high);
+        melody->setAttribute ("seed", static_cast<int> (m.generator.seed));
+        melody->setAttribute ("variation", m.variation);
+        melody->setAttribute ("variationSeed", static_cast<int> (m.variationSeed));
+        if (m.hasSource)
+            writeLine (*melody->createNewChildElement ("Source"), m.source);
+        writeLine (*melody, current.melody);
         copyXmlToBinary (*xml, destData);
     }
 }
@@ -309,7 +487,58 @@ void TidechartAudioProcessor::setStateInformation (const void* data, int sizeInB
                 xml->removeChildElement (element, true); // no es un parámetro: fuera del árbol del APVTS
             }
             setProgression (loaded);
+
+            // Las líneas: si el proyecto las trae, sus notas tal cual (no se regeneran: suena lo que se guardó); si no
+            // (antes de la Fase 6), las de los ajustes por defecto con la progresión y la tonalidad cargadas (sus capas
+            // vienen apagadas, así que no cambia lo que suena).
+            tidechart::Lines loadedLines;
+            bool hasLines = false;
+            if (auto* element = xml->getChildByName (linesTag))
+            {
+                hasLines = true;
+                if (auto* bass = element->getChildByName ("Bass"))
+                {
+                    auto& b = loadedLines.bassSettings.generator;
+                    b.style = static_cast<th::BassStyle> (styleIndex (th::bassStyleNames, bass->getStringAttribute ("style"), static_cast<int> (b.style)));
+                    b.density = juce::jlimit (0.0, 1.0, bass->getDoubleAttribute ("density", b.density));
+                    b.low = juce::jlimit (0, 127, bass->getIntAttribute ("low", b.low));
+                    b.high = juce::jlimit (0, 127, bass->getIntAttribute ("high", b.high));
+                    b.seed = static_cast<std::uint32_t> (bass->getIntAttribute ("seed", 1));
+                    loadedLines.bass = readLine (*bass);
+                }
+                if (auto* melody = element->getChildByName ("Melody"))
+                {
+                    auto& m = loadedLines.melodySettings;
+                    m.generator.style = static_cast<th::MelodyStyle> (
+                        styleIndex (th::melodyStyleNames, melody->getStringAttribute ("style"), static_cast<int> (m.generator.style)));
+                    m.generator.density = juce::jlimit (0.0, 1.0, melody->getDoubleAttribute ("density", m.generator.density));
+                    m.generator.low = juce::jlimit (0, 127, melody->getIntAttribute ("low", m.generator.low));
+                    m.generator.high = juce::jlimit (0, 127, melody->getIntAttribute ("high", m.generator.high));
+                    m.generator.seed = static_cast<std::uint32_t> (melody->getIntAttribute ("seed", 1));
+                    m.variation = juce::jlimit (0.0, 1.0, melody->getDoubleAttribute ("variation", 0.0));
+                    m.variationSeed = static_cast<std::uint32_t> (melody->getIntAttribute ("variationSeed", 1));
+                    if (auto* source = melody->getChildByName ("Source"))
+                    {
+                        m.hasSource = true;
+                        m.source = readLine (*source);
+                    }
+                    loadedLines.melody = readLine (*melody);
+                }
+                xml->removeChildElement (element, true);
+            }
             parameters.replaceState (juce::ValueTree::fromXml (*xml));
+
+            const auto key = currentChordSettings (false).key;
+            const juce::ScopedLock lock (dataLock);
+            if (! hasLines)
+            {
+                loadedLines.bass = tidechart::computeBass (loadedLines.bassSettings, progression, key);
+                loadedLines.melody = tidechart::computeMelody (loadedLines.melodySettings, progression, key);
+            }
+            lines = loadedLines;
+            linesContext = { key, progression };
+            linesPublished = true;
+            publishLines();
         }
     // Cargar un proyecto cambia lo que el plugin hace con las notas (otra tonalidad, otros acordes): lo que suena se apaga.
     stage.requestRelease();

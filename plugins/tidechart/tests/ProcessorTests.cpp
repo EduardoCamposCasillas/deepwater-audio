@@ -787,6 +787,209 @@ void testLayoutsAndState()
     std::unique_ptr<juce::AudioProcessorEditor> editor (p->createEditor());
     check (editor != nullptr && editor->getWidth() > 0, "editor");
 }
+
+void testLines()
+{
+    std::printf ("Lineas (Fase 6): bajo y melodia con un host = renderLine en su muestra, a 4 sample rates y bloques 1-4096, "
+                 "sin reservas; cambiarlas mientras suenan; capturar deja pasar el MIDI\n");
+
+    namespace th = deepwater::theory;
+    namespace id = tidechart::params;
+    const double sampleRates[] { 44100.0, 48000.0, 88200.0, 96000.0 };
+    const int blockSizes[] { 1, 7, 64, 512, 4096, 0 };
+    juce::Random random (606);
+    for (const double sampleRate : sampleRates)
+        for (const int blockSize : blockSizes)
+        {
+            const int maxBlock = blockSize == 0 ? 4096 : blockSize;
+            auto processor = makeProcessor (sampleRate, maxBlock);
+            setParameter (*processor, id::playMode, 1.0f);
+            setParameter (*processor, id::playChords, 0.0f);
+            setParameter (*processor, id::playBass, 1.0f);
+            setParameter (*processor, id::playMelody, 1.0f);
+            TestHead head;
+            processor->setPlayHead (&head);
+            Rig rig (*processor, 2, maxBlock);
+
+            const auto lines = processor->getLines();
+            const double beatsPerSample = head.bpm / (60.0 * sampleRate);
+            const auto loopSamples = static_cast<juce::int64> (std::ceil (2.0 * lines.melody.length / 4.0 / beatsPerSample));
+            const std::vector<Event> input { { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), 0 },
+                                             { juce::MidiMessage::noteOff (1, 60), loopSamples } };
+            std::vector<Event> output;
+            while (rig.position < loopSamples + 100)
+            {
+                head.ppq = static_cast<double> (rig.position) * beatsPerSample;
+                const int n = blockSize == 0 ? 1 + random.nextInt (4096) : blockSize;
+                for (auto& e : rig.run (input, n))
+                    output.push_back (std::move (e));
+            }
+
+            const auto tickAt = [&] (juce::int64 s) { return static_cast<juce::int64> (std::floor (static_cast<double> (s) * beatsPerSample * 4.0 + 1.0e-6)); };
+            const auto sampleOfTick = [&] (juce::int64 k) {
+                auto s = static_cast<juce::int64> (static_cast<double> (k) / (4.0 * beatsPerSample));
+                while (tickAt (s) < k)
+                    ++s;
+                while (s > 0 && tickAt (s - 1) >= k)
+                    --s;
+                return s;
+            };
+            std::vector<std::array<int, 3>> expected, got;
+            for (const auto* line : { &lines.bass, &lines.melody })
+                for (const auto& e : th::renderLine (*line, 2))
+                    expected.push_back ({ static_cast<int> (sampleOfTick (juce::roundToInt (e.start * 4.0))), e.note, e.velocity });
+            for (const auto& e : output)
+                if (e.message.isNoteOn() && e.sample < loopSamples)
+                    got.push_back ({ static_cast<int> (e.sample), e.message.getNoteNumber(), e.message.getVelocity() });
+            std::sort (expected.begin(), expected.end());
+            std::sort (got.begin(), got.end());
+
+            const auto tag = juce::String (sampleRate / 1000.0, 1) + " kHz, bloque " + (blockSize == 0 ? juce::String ("variable") : juce::String (blockSize));
+            check (! expected.empty() && got == expected, tag + ": las lineas no salieron como renderLine (" + juce::String (static_cast<int> (got.size()))
+                                                              + " de " + juce::String (static_cast<int> (expected.size())) + " note-on)");
+            check (snapshotOf (*processor).soundingCount == 0, tag + ": quedaron notas sonando");
+            check (rig.allocations == 0, tag + ": processBlock reservo memoria " + juce::String (rig.allocations) + " veces");
+            processor->setPlayHead (nullptr);
+        }
+
+    // Cambiar la melodía mientras suena (desde el hilo de la GUI): el bloque siguiente toca la nueva, sin reservar memoria.
+    auto processor = makeProcessor (48000.0, 512);
+    setParameter (*processor, id::playMode, 1.0f);
+    setParameter (*processor, id::playMelody, 1.0f);
+    TestHead head;
+    processor->setPlayHead (&head);
+    Rig rig (*processor, 2, 512);
+    rig.run ({ { juce::MidiMessage::noteOn (1, 60, static_cast<juce::uint8> (100)), 0 } }, 512);
+    check ((snapshotOf (*processor).linesSounding & 0b10) != 0, "la melodia suena (snapshot)");
+    auto melody = processor->getLines().melodySettings;
+    melody.generator.style = th::MelodyStyle::sung;
+    melody.generator.seed = 9;
+    processor->setMelodySettings (melody);
+    check (processor->getLines().melody == th::generateMelody (processor->getProgression(), processor->currentChordSettings (false).key, melody.generator),
+           "setMelodySettings genera con la progresion y la tonalidad de ahora");
+    for (int block = 0; block < 40; ++block)
+    {
+        head.ppq += 512.0 * 2.0 / 48000.0;
+        rig.run ({}, 512);
+    }
+    head.ppq += 512.0 * 2.0 / 48000.0;
+    rig.run ({ { juce::MidiMessage::noteOff (1, 60), rig.position + 3 } }, 512);
+    check (snapshotOf (*processor).soundingCount == 0, "soltar la tecla apaga las lineas");
+    check (rig.allocations == 0, "cambiar la melodia: reservas de memoria: " + juce::String (rig.allocations));
+
+    // Cambiar la progresión o la tonalidad regenera las líneas (las fijas sin variación no se tocan).
+    const auto before = processor->getLines();
+    auto progression = processor->getProgression();
+    progression.steps[1].numeral = { 2, -1, th::chordType ("") }; // ♭II
+    processor->setProgression (progression);
+    processor->refreshLines();
+    check (! (processor->getLines().bass == before.bass) && processor->getLines().bass == th::generateBass (progression, th::Key { th::notes::A, th::Mode::aeolian }, before.bassSettings.generator),
+           "la progresion cambio: el bajo se regenera");
+    th::Line written;
+    written.length = 64;
+    written.notes.push_back ({ 0, 8, 71, 100 });
+    processor->captureMelody (written);
+    setParameter (*processor, id::keyTonic, 4.0f);
+    processor->refreshLines();
+    check (processor->getLines().melody == written && processor->getLines().melodySettings.hasSource, "una melodia capturada no se regenera");
+
+    // Capturando, el MIDI pasa tal cual (como escuchando) y el monitor sabe si FL reproducía.
+    processor->setCapturing (true);
+    rig.allocations = 0;
+    while (processor->drainMidiLog ([] (const tidechart::midi::LoggedEvent&) {}) > 0) {}
+    const auto passed = rig.run ({ { juce::MidiMessage::noteOn (1, 64, static_cast<juce::uint8> (90)), rig.position + 5 } }, 512);
+    check (passed.size() == 1 && passed[0].message.isNoteOn() && passed[0].message.getNoteNumber() == 64, "capturando, la nota pasa tal cual");
+    check (snapshotOf (*processor).capturing, "el snapshot dice que captura");
+    bool sawPlaying = false;
+    processor->drainMidiLog ([&] (const tidechart::midi::LoggedEvent& e) { sawPlaying = sawPlaying || (! e.output && e.playing); });
+    check (sawPlaying, "el monitor marca que FL reproducia");
+    processor->setCapturing (false);
+    rig.run ({}, 512);
+    check (snapshotOf (*processor).soundingCount == 0 && ! snapshotOf (*processor).capturing, "al dejar de capturar se apaga lo que paso");
+    processor->setPlayHead (nullptr);
+}
+
+void testLinesState()
+{
+    std::printf ("Lineas en el proyecto: ajustes y notas viajan, legibles; las notas guardadas mandan al cargar; un proyecto "
+                 "sin lineas genera las de fabrica\n");
+
+    namespace th = deepwater::theory;
+    namespace id = tidechart::params;
+    TidechartAudioProcessor processor;
+    tidechart::BassSettings bass;
+    bass.generator.style = th::BassStyle::walking;
+    bass.generator.density = 0.8;
+    bass.generator.low = 30;
+    bass.generator.high = 48;
+    bass.generator.seed = 7;
+    processor.setBassSettings (bass);
+    tidechart::MelodySettings melody;
+    melody.generator.style = th::MelodyStyle::rnb;
+    melody.generator.seed = 5;
+    melody.variation = 0.4;
+    melody.variationSeed = 3;
+    processor.setMelodySettings (melody);
+    setParameter (processor, id::playBass, 1.0f);
+    juce::MemoryBlock state;
+    processor.getStateInformation (state);
+
+    TidechartAudioProcessor reloaded;
+    const auto changes = reloaded.linesChangeCount();
+    reloaded.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    const auto a = processor.getLines(), b = reloaded.getLines();
+    check (b.bassSettings == a.bassSettings && b.melodySettings == a.melodySettings, "los ajustes de las lineas viajan con el proyecto");
+    check (b.bass == a.bass && b.melody == a.melody && ! b.melody.notes.empty(), "las notas de las lineas viajan con el proyecto");
+    check (reloaded.linesChangeCount() != changes, "la GUI se entera de las lineas cargadas");
+    check (reloaded.currentChordSettings (false).playBass && ! reloaded.currentChordSettings (false).playMelody, "las capas viajan con el proyecto");
+    const auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), static_cast<int> (state.getSize()));
+    check (xml != nullptr && xml->toString().contains ("<Bass style=\"walking\"") && xml->toString().contains ("style=\"rnb\"")
+               && xml->toString().contains ("note=\"A2\""),
+           "lineas legibles en el XML");
+
+    // Las notas guardadas mandan: se edita una a mano en el XML y al cargar suena esa (aunque el generador diera otra).
+    auto edited = std::make_unique<juce::XmlElement> (*xml);
+    auto* melodyElement = edited->getChildByName ("Lines")->getChildByName ("Melody");
+    melodyElement->getChildByName ("Note")->setAttribute ("note", "G#7");
+    juce::MemoryBlock editedState;
+    juce::AudioProcessor::copyXmlToBinary (*edited, editedState);
+    reloaded.setStateInformation (editedState.getData(), static_cast<int> (editedState.getSize()));
+    check (reloaded.getLines().melody.notes[0].note == 92, "la nota escrita a mano (G#7 = 92, con C5 = 60) es la que queda");
+    reloaded.refreshLines();
+    check (reloaded.getLines().melody.notes[0].note == 92, "y no se regenera mientras no cambien la progresion ni la tonalidad");
+    setParameter (reloaded, id::keyMode, 1.0f); // dórico
+    reloaded.refreshLines();
+    check (reloaded.getLines().melody.notes[0].note != 92, "cambiar la tonalidad la regenera");
+
+    // Una melodía capturada viaja con su base.
+    th::Line written;
+    written.length = 64;
+    written.notes.push_back ({ 0, 4, 69, 100 });
+    written.notes.push_back ({ 6, 2, 72, 90 });
+    processor.captureMelody (written);
+    juce::MemoryBlock captured;
+    processor.getStateInformation (captured);
+    reloaded.setStateInformation (captured.getData(), static_cast<int> (captured.getSize()));
+    check (reloaded.getLines().melodySettings.hasSource && reloaded.getLines().melodySettings.source == written
+               && reloaded.getLines().melody == written,
+           "la melodia capturada viaja como base");
+
+    // Un proyecto sin líneas (Fase 5): las de fábrica con su progresión y tonalidad, y las capas apagadas.
+    juce::XmlElement old (*xml);
+    old.removeChildElement (old.getChildByName ("Lines"), true);
+    for (auto* param : old.getChildIterator())
+        if (param->getStringAttribute ("id").startsWith ("play") && param->getStringAttribute ("id") != "playMode")
+            param->setAttribute ("value", param->getStringAttribute ("id") == "playChords" ? 1.0 : 0.0);
+    juce::MemoryBlock oldState;
+    juce::AudioProcessor::copyXmlToBinary (old, oldState);
+    TidechartAudioProcessor fresh;
+    fresh.setStateInformation (oldState.getData(), static_cast<int> (oldState.getSize()));
+    const auto key = fresh.currentChordSettings (false).key;
+    check (fresh.getLines().melody == th::generateMelody (fresh.getProgression(), key, th::MelodyOptions {})
+               && fresh.getLines().bass == th::generateBass (fresh.getProgression(), key, th::BassOptions {}),
+           "proyecto sin lineas: las de fabrica");
+    check (! fresh.currentChordSettings (false).playBass && ! fresh.currentChordSettings (false).playMelody, "proyecto sin lineas: capas apagadas");
+}
 } // namespace
 
 // Pinta el editor fuera de pantalla en un PNG, con FL "reproduciendo" la progresión con dembow en el compás 2 y la
@@ -822,6 +1025,8 @@ int saveSnapshot (const juce::File& file)
     setParameter (*processor, tidechart::params::playMode, 1.0f);
     setParameter (*processor, tidechart::params::rhythm, 4.0f);
     setParameter (*processor, tidechart::params::voicing, 1.0f);
+    setParameter (*processor, tidechart::params::playBass, 1.0f); // Fase 6: el bajo y la melodía también
+    setParameter (*processor, tidechart::params::playMelody, 1.0f);
     head.ppq = 4.0;
     rig.position = 0;
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor->createEditor());
@@ -855,6 +1060,8 @@ int main (int argc, char* argv[])
     testProgression();
     testKeyDetection();
     testLayoutsAndState();
+    testLines();
+    testLinesState();
 
     if (failures == 0)
         std::printf ("\nTodos los tests del procesador de Tidechart pasaron.\n");

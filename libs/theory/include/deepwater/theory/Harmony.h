@@ -142,15 +142,25 @@ struct BorrowedChord
     Mode source = Mode::aeolian;
 };
 
+// Los modos paralelos (misma tónica) en el orden en que se suele tomar prestado de ellos: de una tonalidad mayor (3.ª
+// mayor), el eólico primero; de una menor, el dórico, el frigio y la armónica. Incluye el propio modo (quien lo use lo
+// salta si hace falta).
+namespace detail
+{
+inline constexpr std::array<Mode, 9> borrowFromMajor { Mode::aeolian, Mode::mixolydian, Mode::dorian, Mode::phrygian, Mode::harmonicMinor,
+                                                       Mode::lydian, Mode::melodicMinor, Mode::locrian, Mode::ionian };
+inline constexpr std::array<Mode, 9> borrowFromMinor { Mode::dorian, Mode::phrygian, Mode::harmonicMinor, Mode::ionian, Mode::mixolydian,
+                                                       Mode::melodicMinor, Mode::lydian, Mode::locrian, Mode::aeolian };
+} // namespace detail
+
+[[nodiscard]] constexpr const std::array<Mode, 9>& parallelModeOrder (const Key& key) noexcept
+{
+    return modeInfo (key.mode).semitones[2] == 4 ? detail::borrowFromMajor : detail::borrowFromMinor;
+}
+
 [[nodiscard]] constexpr StaticVector<BorrowedChord, 64> borrowedChords (const Key& key, ChordSize size = ChordSize::triad) noexcept
 {
-    // La tonalidad es "mayor" si su 3.ª es mayor.
-    const bool majorFamily = modeInfo (key.mode).semitones[2] == 4;
-    constexpr std::array<Mode, 9> fromMajor { Mode::aeolian, Mode::mixolydian, Mode::dorian, Mode::phrygian, Mode::harmonicMinor,
-                                              Mode::lydian, Mode::melodicMinor, Mode::locrian, Mode::ionian };
-    constexpr std::array<Mode, 9> fromMinor { Mode::dorian, Mode::phrygian, Mode::harmonicMinor, Mode::ionian, Mode::mixolydian,
-                                              Mode::melodicMinor, Mode::lydian, Mode::locrian, Mode::aeolian };
-    const auto& order = majorFamily ? fromMajor : fromMinor;
+    const auto& order = parallelModeOrder (key);
 
     const auto unstable = [] (const Chord& c) {
         for (const auto& tone : c.info().tones)

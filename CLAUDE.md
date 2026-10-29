@@ -105,11 +105,13 @@ tools/pluginval/pluginval.exe --strictness-level 10 --sample-rates 44100,48000,8
   la lista de acordes prestados), `Voicing.h` (conducción de voces: estado fundamental, cerrado y drop 2),
   `Rhythm.h` (patrones de acordes en semicorcheas: dembow y variantes), `Progression.h` (pasos = grado + tiempos, el paso
   en cada semicorchea, voicing de toda la progresión), `KeyDetection.h` (detección de tonalidad: perfiles por modo,
-  correlación, votos de "casa" al empezar cada frase, ranking de las 120 tonalidades y su confianza),
-  `StaticVector.h`. En `src/`: `Text.h` (texto ida y vuelta de notas, tonalidades, acordes, romanos y progresiones),
-  `ChordFinder.h` (reconocer acordes por sus notas), `keyEvidence` (la evidencia de tonalidad de una lista de notas) y
-  `renderProgression` (la progresión como notas en el tiempo: lo mismo que toca Tidechart en vivo).
-- El orden del catálogo de acordes y de `rhythmPatterns` es parte del formato: no reordenar ni insertar en medio (lo
+  correlación, votos de "casa" al empezar cada frase, ranking de las 120 tonalidades y su confianza), `Melody.h` (líneas:
+  la escala de cada acorde —la del modo prestado sobre un préstamo—, el papel de una nota sobre su acorde, la vuelta de
+  una línea, y los generadores de melodía, bajo y variaciones con semilla), `StaticVector.h`. En `src/`: `Text.h` (texto ida y vuelta de notas, tonalidades, acordes, romanos y progresiones),
+  `ChordFinder.h` (reconocer acordes por sus notas), `keyEvidence` (la evidencia de tonalidad de una lista de notas),
+  `renderProgression` (la progresión como notas en el tiempo: lo mismo que toca Tidechart en vivo) y `Melody.cpp`
+  (`generateMelody`, `generateBass`, `varyMelody`, `renderLine`).
+- El orden del catálogo de acordes, de `rhythmPatterns` y de los estilos de melodía y bajo es parte del formato: no reordenar ni insertar en medio (lo
   nuevo, al final).
 
 ## Plan de plugins (orden acordado)

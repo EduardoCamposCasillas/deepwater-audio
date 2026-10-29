@@ -55,6 +55,9 @@ tests de estilo y los presets usan estos casos.
 3. En el instrumento que debe sonar (Undertow, FLEX, un sampler): **Settings → MIDI → Input port**: el mismo número.
    Varios instrumentos pueden escuchar el mismo puerto (acordes a un pad y a un pluck a la vez); con puertos distintos
    y varias instancias se separan acordes, bajo y melodía.
+   Para separar las capas (Fase 6): clonar el canal de Tidechart en el Channel Rack (clic derecho → Clone: copia el
+   estado, con la progresión y las líneas), darle otro Output port y dejar encendida solo su capa (Acordes / Bajo /
+   Melodía). Cada clon guarda su copia: lo que se edite después en uno no pasa al otro.
 4. Alternativa: dentro de **Patcher**, conectar la salida MIDI de Tidechart a la entrada del instrumento.
 5. En el Piano Roll o en los patrones va el canal de Tidechart, no el del instrumento.
 - Verificar en la Fase 1 que FL recibe notas, velocidades y note-offs por VST3 (los CC por VST3 van como
@@ -83,9 +86,12 @@ plugins/tidechart/
     PluginEditor.h/.cpp      # GUI
     Parameters.h             # IDs de parámetros (NO cambiarlos: los proyectos guardados dependen de ellos)
     TransportSnapshot.h      # lo que el audio publica para la GUI en cada bloque (TripleBuffer): reloj y notas que suenan
+    Lines.h                  # Fase 6: las líneas como datos del proyecto (ajustes + notas), computeBass/computeMelody y
+                             # MelodyCapture (cuantizar y doblar sobre la vuelta lo que se tocó); sin JUCE
     midi/NoteTracker.h       # mensajes cortos y la cuenta de lo que suena por canal y nota (releaseAll = los note-off que faltan)
     midi/MidiStage.h         # la etapa MIDI sin JUCE: todo lo que sale pasa por emit (contado); apagar y pánico pedidos
-                             # desde cualquier hilo y atendidos en la muestra 0 del bloque siguiente; bypass ↔ acordes
+                             # desde cualquier hilo y atendidos en la muestra 0 del bloque siguiente; bypass ↔ acordes;
+                             # Fase 6: las líneas (bajo y melodía) en el modo progresión, una voz por nota
     midi/ChordTrigger.h      # Fase 3: qué acorde dispara cada tecla (teclas blancas = grados / notas de la escala) y los
                              # acordes que suenan, cada uno con SUS notas, con cuenta de notas compartidas. Fase 4:
                              # cualquier grado escrito (chordForNumeral), voicing (withVoicing), códigos de la paleta
@@ -96,7 +102,8 @@ plugins/tidechart/
     gui/                     # tema, reloj del host (TransportView), paleta + prestados (ChordPaletteView), progresión
                              # (ProgressionView, ProgressionTemplates), teclado de lo que suena, acorde que suena
                              # (ChordView, con libs/theory), teoría en español (TheoryNames), monitor MIDI, detección
-                             # de tonalidad (KeyDetectView: escuchar, resultado con su porqué, alternativas, histograma)
+                             # de tonalidad (KeyDetectView: escuchar, resultado con su porqué, alternativas, histograma),
+                             # melodía y bajo (LinesView: capas, estilo, densidad, rango, capturar, variar, piano roll)
   tests/MidiTests.cpp        # etapa MIDI sin JUCE (contra un receptor modelo independiente)
   tests/ProcessorTests.cpp   # procesador completo con JUCE (passthrough exacto, notas colgadas, bypass, transporte,
                              # progresión, reservas); --snapshot <png> pinta la GUI fuera de pantalla para revisarla
@@ -209,6 +216,56 @@ plugins/tidechart/
     evidencia en el snapshot; la GUI ordena las tonalidades (`rankKeys`, 120 × 12, solo si cambió). "Usar" pone
     `keyTonic` y `keyMode` con su gesto.
 
+- Decisiones de la Fase 6:
+  - `libs/theory`: `Melody.h` + `src/Melody.cpp`. Una línea = notas en semicorcheas desde el principio de su vuelta
+    (`LineNote`: inicio, duración, nota, velocidad; hasta 512, tamaño fijo) que se repite desde el compás 1. La vuelta =
+    la progresión repetida hasta tener al menos 4 compases (`lineLength`): con i–♭II de un compás cada uno, 2 vueltas.
+  - Escala de cada acorde (`chordScaleMask`): la de la tonalidad; sobre un prestado, la del primer modo paralelo que lo
+    contiene en el orden de `parallelModeOrder` (el mismo de `borrowedChords`: ♭VI en Do mayor canta en Do menor); si
+    ninguno, cada tono del acorde reemplaza la nota de su letra. `noteRole`: nota del acorde / de la escala / cromática.
+  - Melodía (`generateMelody`), 4 estilos (gancho, cantada, arpegio, R&B; el orden es formato). Ritmo: un motivo de un
+    compás sorteado con pesos por semicorchea y estilo (cuántas notas, por la densidad), en frases de 4 compases A A' A
+    cierre (A' = una nota menos o una más; el cierre = la primera mitad del motivo y una nota larga en el tiempo 3; el
+    último compás de la línea siempre cierra). Duración hasta la nota siguiente con un tope por estilo. Alturas: de todas
+    las notas del rango que están en la escala del acorde, la de menor costo: apoyo (tiempo 1 o 3, cambio de acorde,
+    nota larga) fuera del acorde = tensión o "nota a evitar" (un semitono sobre una nota del acorde), salto (tabla por
+    semitonos; más de una octava, prohibido), seguir subiendo tras un salto grande, gravedad al centro del rango, imitar
+    el intervalo (en grados) del motivo en la misma semicorchea del compás 1 (secuencia; con el mismo acorde, la misma
+    nota), el final de la frase en la tónica o la fundamental, y un ruido con semilla (la variedad). El arpegio recorre
+    las notas del acorde en una ventana de ~una octava con una figura sorteada (arriba, abajo, arriba-abajo, 1-5-3-5).
+  - Bajo (`generateBass`), 5 estilos (fundamental, dembow, octavas, caminante, pedal). Golpes por compás según estilo y
+    densidad (3 niveles); cada cambio de acorde empieza un golpe (salvo el pedal). La fundamental en la octava más
+    cercana a la anterior dentro del rango (sin anterior, la más grave). Aproximaciones: un semitono o un grado de la
+    escala del acorde que suena hacia la fundamental siguiente (la última de la vuelta, hacia la primera).
+  - Variación (`varyMelody`): por nota, con probabilidad cantidad × factor del compás en la frase (0.3, 0.8, 0.6, 1.0),
+    una de: vecina, adelantar una semicorchea, partir, unir con la siguiente, invertir el intervalo, nota de paso entre
+    una 3.ª. Solo lo que cambió vuelve al rango y, si cae en un apoyo, a una nota del acorde (una apoyatura capturada
+    a propósito no se "corrige"). Cantidad 0 = la misma línea.
+  - Aleatorio con un generador propio (splitmix64, sin `std::*_distribution` ni funciones trascendentes): misma semilla =
+    mismas notas en cualquier compilador (para el MCP).
+  - Plugin: `Lines.h` (ajustes + notas). Las NOTAS mandan: el proyecto guarda los ajustes y las notas, y al cargar suenan
+    las guardadas (un generador futuro no cambia un proyecto viejo). Se regeneran solo cuando el usuario cambia un ajuste
+    o cuando cambian la progresión o la tonalidad (`refreshLines`, temporizador del procesador a 10 Hz en el hilo de
+    mensajes; la tonalidad cargada y la progresión se marcan como vistas al cargar). Una melodía fija (capturada o
+    fijada) sin variación no se regenera nunca; con variación, la variación se rehace sobre la progresión nueva.
+  - En el estado: `<Lines><Bass style="dembow" density low high seed length><Note at length note="A2" velocity/>...`
+    y `<Melody style ... variation variationSeed length>` con `<Source>` si es fija. Estilos por nombre (`hook`,
+    `walking`...), notas con el nombre de FL: legible y escribible por presets y el MCP. Proyecto sin `<Lines>` → las de
+    los ajustes por defecto con su progresión y tonalidad (las capas vienen apagadas: no cambia lo que suena).
+  - Parámetros nuevos (versionHint 4, Off / On como `chordBass`): `playChords` (por defecto On), `playBass`,
+    `playMelody` (Off). Con los valores por defecto la salida es la de la Fase 5.
+  - En vivo (`MidiStage::evaluateLines`): en el modo progresión, con una tecla abajo y el host reproduciendo. En cada
+    semicorchea se sueltan las notas que ya no tocan (terminó, otra nota en ese lugar porque la línea cambió, otro canal,
+    o la misma nota que empieza otra vez en la vuelta siguiente: `tickSerial`, porque un loop vuelve a la misma
+    semicorchea absoluta) y se atacan las que tocan y no suenan (también a mitad de nota tras un salto). Una voz por nota:
+    16 slots más en el `ChordTrigger` (2 líneas × 8), así comparten la cuenta de notas con los acordes. Canal = el de la
+    tecla; velocidad = la de la nota × la de la tecla / 100. Host parado = las líneas callan (los acordes siguen
+    sostenidos). Modo teclas = solo acordes. Las líneas llegan al audio por dos `TripleBuffer<Line>` y un contador: el
+    audio solo las copia (8 KB cada una) cuando cambian.
+  - Capturar: como Escuchar (atómico, no se guarda; el MIDI pasa tal cual). La GUI recoge del monitor (`LoggedEvent`
+    ahora trae `playing`) los note-on/off con su posición; al terminar, `MelodyCapture` cuantiza a semicorcheas, dobla
+    sobre la vuelta (la última pasada gana) y descarta lo tocado con FL parado; `captureMelody` la deja como base.
+
 ## Requisitos propios (además de los del raíz)
 - Ninguna nota colgada, en ningún caso (ver arriba).
 - Un acorde por tecla: la tecla que dispara un acorde no suena además sola, salvo que se pida (modo "con la nota").
@@ -251,6 +308,35 @@ vocabulario), el `APRENDIZAJE.md` de esta carpeta se completa al final de cada f
   oscuro): grados, modo, ritmo de acordes y qué las hace funcionar.
 
 ## Estado actual
+Fase 6 HECHA (2026-10-28); falta que el usuario la pruebe en FL Studio (capas, estilos, densidad, rango, Otra, capturar,
+variar y fijar).
+- `libs/theory`: `Melody.h` (`LineNote`, `Line`, `lineLength`, `linePosition`, `chordAt`, `chordChangesAt`, `scaleMask`,
+  `chordScaleSource`, `chordScaleMask`, `noteRole`, opciones y estilos) y `src/Melody.cpp` (`generateMelody`,
+  `generateBass`, `varyMelody`, `renderLine`); `parallelModeOrder` en `Harmony.h` (lo usa `borrowedChords`, sin cambiar
+  su orden). `DeepwaterTheoryTests` +4 grupos: escalas de acorde y papeles (♭VI en Do mayor, ♭II frigio, un aumentado
+  cromático), largo de la vuelta; melodías en 7 progresiones × 12 tónicas × 4 modos × 4 estilos × 3 densidades (rango,
+  escala del acorde, saltos, apoyos en notas del acorde: 100 % gancho, cantada y arpegio, 84 % R&B; cierre en el acorde,
+  deterministas, otra semilla = otra melodía, más densidad = más notas; motivo repetido y compás de cierre); bajos en 5
+  progresiones × 12 tónicas × 5 estilos × 3 densidades (fundamental en cada cambio, pedal en la tónica, cromáticas solo
+  como aproximación, dembow 0 3 6 8 11 14, A2 → F2 baja una 3.ª); variaciones (cantidad 0 = igual, deterministas, apoyos
+  cambiados en notas del acorde, el primer compás conserva el 69 % con cantidad 1, una apoyatura no tocada se queda).
+- Plugin: `Lines.h`; `MidiStage` con `setLine`, `evaluateLines`, `linesSounding`; 3 parámetros (versionHint 4); el
+  procesador con las líneas en el estado y en dos `TripleBuffer`, `refreshLines` (temporizador), `setCapturing`; GUI
+  1360 × 960 con la columna MELODÍA Y BAJO (`gui/LinesView.h`): capas, estilo/densidad/rango/Otra por línea, Capturar,
+  Fijar, Variación y Otra variación, piano roll de una vuelta con los acordes y cada nota coloreada por su papel (pasar
+  el ratón la explica: "Melodía · E6 · 5 de Am · nota del acorde en un apoyo (compás 2, tiempo 1)"). Revisada con
+  `--snapshot` (FL en el compás 2 con dembow, bajo y gancho).
+- Tests: `TidechartTests` +3 (líneas en vivo = `renderLine` muestra a muestra con bloques al azar en 2 progresiones × 4
+  estilos × con y sin bajo; salto a mitad de nota, loop que re-ataca el pedal, capas, línea que cambia sonando, nota
+  compartida con el acorde, parado, soltar, modo teclas, bypass, apagar; captura) y el aleatorio de la Fase 4 ahora con
+  capas y líneas cambiando. `TidechartProcessorTests` +2 (líneas con un host = `renderLine` a 4 sample rates × bloques
+  1/7/64/512/4096/variable sin reservas; cambiarlas sonando; regenerar al cambiar la progresión y no tocar la capturada;
+  capturar deja pasar el MIDI; estado: ajustes y notas viajan legibles, las notas guardadas mandan, proyecto sin líneas).
+- Release con 0 warnings; pluginval strictness 10 ampliado con `--randomise`: SUCCESS. ctest: todo pasa salvo `UndertowTests` por su test de CPU del resonador (20,0 % contra un
+  límite de < 20 %, depende de la carga de la máquina; Undertow no usa nada de lo que cambió).
+- Pendiente para más adelante: canales MIDI por capa (para separar en Patcher sin clonar), editar notas a mano en el
+  piano roll (Fase 8), melodías que no sean de 4/4, variar también el bajo.
+
 Fase 5 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (escuchar acordes y melodías, Usar): funciona.
 - `libs/theory`: `KeyDetection.h` (perfiles, `profileCorrelation`, `rankKeys`, `keyConfidence`, `sameNotes`,
   `phraseCueIndex`) y `keyEvidence` en `src/KeyDetection.cpp`. `DeepwaterTheoryTests` +1 grupo: perfiles de los 10
@@ -362,4 +448,4 @@ Fase 1 COMPLETADA (2026-10-28). Probada por el usuario en FL Studio (ruteo por p
   pánico; bypass y processBlockBypassed; transporte con un PlayHead de prueba; buses, estado y editor).
 - Release con 0 warnings; ctest 13/13; pluginval strictness 10 ampliado: SUCCESS.
 
-Siguiente: Fase 6 (generador de melodías y líneas de bajo).
+Siguiente: que el usuario pruebe la Fase 6 en FL; después, Fase 7 (arrastrar el MIDI al Piano Roll).

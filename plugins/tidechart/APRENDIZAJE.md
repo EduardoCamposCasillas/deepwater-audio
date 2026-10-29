@@ -625,3 +625,171 @@ constante fija la casa aunque el ♭III suene tanto como la i.
   suenan los acordes", mira si dice ESCUCHANDO en SUENA AHORA.
 - **Mezclar dos canciones.** Lo escuchado se acumula. Si cambias de sample o de sección (o la canción modula), apaga y
   vuelve a encender Escuchar para empezar de cero.
+
+## Fase 6 — Melodías y bajos que siguen la progresión
+
+Hasta aquí Tidechart tocaba acordes. Ahora escribe también las otras dos voces de un beat: **el bajo** y **la
+melodía**. Las dos siguen la progresión (en cada compás saben qué acorde suena), se generan con criterio musical (no al
+azar) y suenan sincronizadas con FL igual que los acordes. Y si la melodía la escribes tú, Tidechart la **captura** y te
+propone **variaciones** de ella. El piano roll del panel te enseña, nota por nota, por qué cada una encaja.
+
+### Conceptos aprendidos
+
+- **Notas del acorde y notas de paso.** La regla más importante de una melodía: en los **apoyos** (el tiempo 1 y el 3,
+  el momento en que cambia el acorde, las notas largas) van **notas del acorde**; entre medio, cualquier nota de la
+  escala que **una** esas notas: **de paso** (camina de una a otra por grados: C–D–E sobre C) o **de adorno** (sale y
+  vuelve: C–D–C). Por eso una melodía "encaja": se apoya donde el oído escucha el acorde y se mueve donde no importa
+  tanto. En el piano roll: lila = nota del acorde, turquesa = de la escala, naranja = cromática.
+- **Tensiones y notas a evitar.** No todas las notas de la escala son iguales en un apoyo. La **9.ª** (B sobre Am), la
+  **11.ª** sobre un menor (D sobre Am) y la **13.ª** dan color: el R&B y el neo-soul viven de ellas. Pero la nota que
+  está **un semitono por encima** de una nota del acorde (F sobre C mayor, B♭ sobre Am) choca con ella si se queda
+  sonando: es una **nota a evitar** en un apoyo largo (de paso, sin problema). El generador las penaliza mucho más que
+  las tensiones; el estilo R&B acepta las tensiones en los apoyos y los demás casi nunca.
+- **Motivo y repetición.** Una melodía que se recuerda **repite**. El generador inventa un **motivo** de un compás (el
+  ritmo y el dibujo) y arma frases de 4 compases: **A A' A cierre**. A' es A con un cambio pequeño (una nota más o una
+  menos); el cierre empieza como A y termina con una **nota larga** en el tiempo 3 (la frase "respira"). Cuando el
+  acorde cambia, el motivo se repite **adaptado**: el mismo dibujo (subir dos grados, bajar uno) desde otra nota. Eso se
+  llama **secuencia**. Si el acorde es el mismo que en el compás 1, vuelven las mismas notas.
+- **Grados conjuntos y saltos.** Moverse a la nota vecina de la escala (grado conjunto) es fácil de cantar y suena
+  fluido; un salto llama la atención. La costumbre de los compositores (y del generador): **después de un salto grande,
+  volver por grados en la dirección contraria** (rellenar el hueco). Más de una octava, nunca.
+- **La escala de cada acorde.** Sobre un acorde **prestado** la melodía cambia de escala: sobre ♭VI en Do mayor (A♭,
+  prestado de Do menor) canta en Do menor (E♭, A♭, B♭); si no, un La natural chocaría con el La♭ del acorde. Es el
+  préstamo modal aplicado a la melodía. Sobre el ♭II frigio en La menor (B♭), la melodía usa La frigio: el Si natural
+  sale naranja (cromático) en el piano roll.
+- **Cadencia.** El final de cada frase busca **casa**: la tónica si el acorde la tiene, o la fundamental del acorde. La
+  última nota de la vuelta siempre es del acorde.
+- **El bajo.** Dice qué acorde suena: en cada **cambio de acorde, la fundamental**. Lo demás es ritmo y caminos: en el
+  2 del 3+3+2 la 5.ª, la octava o una **aproximación** (una nota a un semitono o a un grado de la fundamental siguiente,
+  que "empuja" hacia ella). La fundamental va a la **octava más cercana** a la anterior: de La a Fa el bajo baja una 3.ª
+  en vez de subir una 6.ª (conducción de voces, ahora en el bajo).
+- **Pedal.** El bajo se queda en la tónica mientras los acordes cambian encima. Cuando el acorde no tiene esa nota (♭II
+  sobre un pedal de La), la tensión no se resuelve hasta que vuelve la i: es el sonido del perreo oscuro y del trap.
+- **Variación.** Para variar sin perder la identidad: cambiar una nota por su **vecina**, **partir** una nota larga en
+  dos, **unir** dos cortas, **adelantar** una nota una semicorchea (el "empuje" del reggaetón: la nota cae antes del
+  tiempo), **invertir** un intervalo (subir en vez de bajar), meter una **nota de paso** entre una 3.ª. El primer compás
+  de cada frase cambia poco (es el que la hace reconocible) y lo que cae en un apoyo vuelve a una nota del acorde.
+- **Semilla.** Todo lo aleatorio sale de una **semilla**: un número. La misma semilla con los mismos ajustes da siempre
+  la misma línea (por eso "Otra" sube la semilla y puedes volver atrás bajándola, y por eso el futuro servidor MCP podrá
+  pedir "la melodía n.º 7"). Lo aleatorio solo desempata entre opciones buenas: el generador mira **todas** las notas del
+  rango, le pone un **puntaje** a cada una (apoyo fuera del acorde, salto grande, alejarse del centro... suman) y se
+  queda con la mejor, con un poco de ruido para que no salga siempre la misma.
+
+### Qué hace cada control
+
+- **Suenan: Acordes / Bajo / Melodía.** Las capas del modo **Progresión** (en el modo Teclas solo suenan los acordes).
+  Son parámetros: puedes automatizarlos en FL (quitar el bajo en un puente, que entre la melodía en el coro). Las líneas
+  suenan con FL **reproduciendo** y una tecla abajo, como la progresión; con FL parado callan.
+- **Estilo del bajo.** *Fundamental* (la nota del acorde, larga), *Dembow* (el 3+3+2 con la 5.ª, la octava o una
+  aproximación en el 2), *Octavas* (fundamental y octava alternadas), *Caminante* (un paso por tiempo y una aproximación
+  antes de cada cambio), *Pedal de tónica*.
+- **Estilo de la melodía.** *Gancho* (notas cortas y repetidas sobre el dembow, pocas notas distintas), *Cantada* (notas
+  largas por grados), *Arpegio* (las notas del acorde en una cuadrícula fija), *R&B* (síncopas y tensiones).
+- **Densidad.** Cuántas notas por compás. En el arpegio elige la cuadrícula (negras, corcheas, semicorcheas); en el bajo,
+  entre 3 niveles de golpes.
+- **Rango.** De qué nota a qué nota puede ir la línea (al menos una octava). El bajo muestra los hercios: por debajo de
+  ~40 Hz casi no se oye en parlantes chicos.
+- **Otra.** Otra línea con los mismos ajustes (otra semilla). Tocar el estilo, la densidad, el rango u Otra de la melodía
+  vuelve a la melodía **generada** (si era capturada).
+- **Capturar.** Enciéndelo, dale play en FL y toca, o deja sonar lo que escribiste en el Piano Roll de Tidechart. Mientras
+  captura, el MIDI pasa tal cual (oyes lo que tocas). Al apagarlo, lo tocado se cuantiza a semicorcheas, se "dobla" sobre
+  la vuelta de la línea (desde el compás 1) y pasa a ser **la base**. Lo tocado con FL parado no cuenta.
+- **Fijar.** La melodía de ahora (con su variación) pasa a ser la base: las variaciones siguientes salen de ella. Así se
+  encadenan variaciones de variaciones.
+- **Variación / Otra variación.** Cuánto se aparta la melodía de su base, y otra variación con la misma cantidad.
+- **El piano roll.** Una vuelta de la línea (la progresión repetida hasta tener 4 compases), los acordes arriba con su
+  color de función, la melodía arriba y el bajo abajo, la posición de FL. Pasa el ratón por una nota: te dice qué es
+  ("E6 · 5 de Am · nota del acorde en un apoyo (compás 2, tiempo 1)").
+- Si cambias la progresión o la tonalidad, el bajo y la melodía generada **se rehacen solos** para los acordes nuevos.
+  Una melodía capturada (sin variación) no se toca nunca: es tuya.
+
+### Ejercicio guiado: armar el beat por capas
+
+1. Rutea Tidechart a un instrumento polifónico (Undertow con un pluck sirve para todo). Progresión i–♭VI–♭III–♭VII en
+   La menor, modo **Progresión**, ritmo **Dembow**, voicing **Conducción de voces**. Una nota larga en el Piano Roll de
+   Tidechart (4 compases), loop, play.
+2. Apaga **Acordes** y enciende solo **Bajo**, estilo **Fundamental**, densidad baja. Escucha cómo el bajo solo ya "dice"
+   la progresión. Cambia a **Dembow** y sube la densidad: el bajo ahora tiene ritmo. Mira el piano roll: cada cambio de
+   acorde empieza con la fundamental (lila); las notas turquesa o naranja justo antes de un cambio son aproximaciones.
+3. Cambia a **Pedal de tónica**. Vuelve a encender **Acordes**: en el ♭VI y el ♭VII el La del bajo choca con el acorde
+   (F/A, G/A). Esa fricción es el pedal. Compara con Fundamental: más estable, menos oscuro.
+4. Enciende **Melodía**, estilo **Gancho**, densidad 50 %. Pasa el ratón por las notas de los tiempos 1 y 3: casi todas
+   lilas. Pulsa **Otra** varias veces: cambian las notas, pero la forma A A' A cierre se mantiene (mira los compases 1 y
+   3: mismo ritmo).
+5. Cambia a **Cantada** y luego a **R&B** con la misma semilla. En R&B aparecen notas turquesa en los apoyos: tensiones.
+   Escucha si te suenan a "color" o a "error" (con un pad de séptimas, Tríadas → Séptimas en la paleta, suenan mejor).
+6. Para separar en instrumentos: clic derecho en el canal de Tidechart → **Clone** (copia la progresión y las líneas).
+   En el clon, Output port 2 y solo **Bajo** encendido; en el original, solo Acordes y Melodía. Un 808 con Input port 2.
+
+### Receta: perreo oscuro con pedal y un gancho de dos notas
+
+Mi frigio, progresión **i–♭II** (un compás cada uno), ritmo de acordes **Dembow a contratiempo**, voicing abierto.
+**Bajo**: Pedal de tónica, densidad media (0 6 8 14), rango E2–D4 (el Mi en 41 Hz: un 808 con glide). **Melodía**: Gancho,
+densidad 30 %, rango estrecho (B5–B6). Pulsa Otra hasta que el gancho se quede en 2 o 3 notas. Por qué funciona: el
+♭II (F) encima del pedal de Mi es una 2.ª menor en el grave, la tensión más oscura que hay; el gancho repetido y con
+pocas notas deja el protagonismo al ritmo, y los acordes a contratiempo contestan al bajo en vez de pisarlo. Sube la
+**Variación** a 20 % para que el segundo compás de cada vuelta no sea idéntico.
+
+### Reto (sin receta)
+
+Escribe **a mano**, en el Piano Roll de Tidechart, una melodía de 4 compases sobre i–♭VI–♭III–♭VII en La menor. Antes de
+escribirla, decide en papel qué nota va en el tiempo 1 de cada compás. Captúrala y mira los colores: ¿cuántos apoyos
+quedaron en notas del acorde? Después compárala con 3 melodías generadas (Gancho, Cantada, R&B) y con 2 variaciones de
+la tuya. Pistas: 1) Las notas comunes ayudan: A y C están en Am y en F; C y G en C y en G. 2) Una melodía que repite su
+primer compás en el tercero se recuerda mejor. 3) Si quieres tensión en el final, termina en la 9.ª (B) sobre el G y
+deja que la vuelta la resuelva en el Am.
+
+### Teoría aplicada: por qué una melodía "encaja" con los acordes
+
+El oído escucha la armonía en los momentos fuertes: el principio del compás, la mitad, el cambio de acorde. Si ahí la
+melodía toca una nota del acorde, melodía y acorde se confirman mutuamente: **consonancia**. Si toca otra nota, el oído
+espera que se mueva a una del acorde: **disonancia que pide resolver**. Las disonancias en tiempos débiles (de paso, de
+adorno) son el pegamento de la melodía; en tiempos fuertes son expresivas (una apoyatura, una suspensión) y hay que
+usarlas a propósito. Con la **repetición** pasa algo parecido: repetir crea expectativa, y el cambio en el compás de
+cierre (la nota larga, la vuelta a la tónica) la cumple. Un gancho de reggaetón casi nunca tiene más de 4 o 5 notas
+distintas: la identidad está en el ritmo y en la repetición, no en la variedad de alturas.
+
+### Análisis de canciones
+
+- **Coros de reggaetón** ("Gasolina", "Despacito", "Tusa"): escucha el gancho del coro y cuenta cuántas notas distintas
+  usa y cuántas veces repite la primera frase. Compáralo con el estilo **Gancho**: notas cortas y repetidas sobre el
+  3+3+2, saltos chicos, la frase que vuelve.
+- **El bajo del dembow**: en casi todo el reggaetón, el bajo (o el 808) toca la fundamental de cada acorde en el bombo y
+  rellena el 3+3+2. Pon el bajo de Tidechart en Dembow y compáralo a oído con un tema que te guste: ¿toca la 5.ª o la
+  octava en el "chick"? ¿se adelanta al acorde siguiente?
+- **Perreo oscuro y trap**: muchos beats dejan el bajo en la tónica mientras los acordes cambian arriba (pedal). Busca
+  uno y comprueba con el Piano Roll: si el bajo no cambia de nota en 4 compases y los acordes sí, es un pedal.
+- **R&B / neo-soul**: las melodías se apoyan en 9.ª y 11.ª (el color "suave"). Con la paleta en séptimas y la melodía en
+  R&B, escucha la diferencia contra la Cantada sobre los mismos acordes.
+
+### Vocabulario
+
+- **Nota del acorde / de paso / de adorno**: la que forma el acorde; la que camina entre dos por grados; la que sale y
+  vuelve a la misma.
+- **Apoyo (tiempo fuerte)**: donde el oído escucha el acorde: el tiempo 1 y el 3, el cambio de acorde, las notas largas.
+- **Tensión**: una nota de la escala fuera del acorde que le da color (9.ª, 11.ª, 13.ª).
+- **Nota a evitar**: la que está un semitono por encima de una nota del acorde; choca si se queda sonando.
+- **Motivo**: la idea mínima de una melodía (un compás de ritmo y dibujo) que se repite y se transforma.
+- **Secuencia**: el mismo dibujo melódico repetido desde otra nota.
+- **Grado conjunto / salto**: moverse a la nota vecina de la escala / a una más lejana.
+- **Cadencia**: cómo termina una frase (en la tónica = final; en otra nota = queda abierta).
+- **Aproximación**: una nota a un semitono o un grado de la siguiente que la anuncia (cromática o diatónica).
+- **Pedal**: una nota que se queda (en el bajo, casi siempre la tónica) mientras la armonía cambia encima.
+- **Anticipación ("empuje")**: tocar una nota una semicorchea antes del tiempo en que "debería" caer.
+
+### Errores comunes
+
+- **Melodía y bajo en el mismo registro que los acordes.** Se tapan. La melodía por encima (rango de E5 hacia arriba) y
+  el bajo por debajo (bajo C4) se distinguen; si la melodía baja al registro de los acordes, sube su rango o el voicing
+  de los acordes a otra octava (la tecla que dispara la progresión elige su octava).
+- **Todo con mucha densidad.** Un bajo denso, una melodía densa y acordes con dembow denso compiten. Elige quién se
+  mueve: si la melodía es densa, el bajo largo (Fundamental o Pedal), y al revés.
+- **Esperar que suene con FL parado.** Las líneas necesitan el tiempo de FL (la posición en la canción). Con FL parado
+  solo suenan los acordes, sostenidos.
+- **Capturar sin play.** Lo tocado con FL parado no tiene posición y se descarta (la GUI te avisa). Dale play desde el
+  compás 1 y toca encima del loop.
+- **Olvidar que la captura es la base.** Después de capturar, mover el estilo o la densidad de la melodía vuelve a la
+  generada (la capturada se pierde, salvo con deshacer en el proyecto). Para probar cosas sobre tu melodía, usa
+  Variación, y Fijar cuando una te guste.
+- **Clonar y editar en el original.** Cada clon guarda su copia de la progresión y las líneas: si cambias la progresión
+  en uno, cámbiala también en el otro (o vuelve a clonar).

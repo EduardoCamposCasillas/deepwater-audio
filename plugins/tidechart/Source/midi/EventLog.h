@@ -17,6 +17,7 @@ struct LoggedEvent
     std::uint16_t size = 0;  // bytes del mensaje original
     bool output = false;     // false = entró al plugin; true = salió
     double ppq = 0.0;        // posición en negras de la muestra del evento (host parado: donde está el cursor)
+    bool playing = false;    // el host estaba reproduciendo (para capturar una melodía hace falta la posición)
 };
 
 // Cola de un productor (el audio) y un consumidor (la GUI), sin locks ni reservas: un anillo de tamaño fijo con dos

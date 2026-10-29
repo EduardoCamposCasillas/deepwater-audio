@@ -18,6 +18,7 @@
 #include "deepwater/theory/ChordFinder.h"
 #include "deepwater/theory/Harmony.h"
 #include "deepwater/theory/KeyDetection.h"
+#include "deepwater/theory/Melody.h"
 #include "deepwater/theory/Pitch.h"
 #include "deepwater/theory/Progression.h"
 #include "deepwater/theory/Rhythm.h"
@@ -991,6 +992,354 @@ void testKeyDetection()
     const auto melodyRanking = rankKeys (evidence);
     CHECK (melodyRanking[0].key == key ("C major") && keyConfidence (evidence, melodyRanking) != KeyConfidence::none);
 }
+
+// --- Fase 6: melodías, bajos y variaciones ----------------------------------------------------------------------------
+
+// Comprobaciones comunes a cualquier línea: ordenada, dentro de la vuelta y del rango; 'mono' = sin notas encimadas.
+bool wellFormed (const Line& line, int low, int high, bool mono)
+{
+    bool ok = line.length > 0;
+    for (std::size_t i = 0; i < line.notes.size(); ++i)
+    {
+        const auto& n = line.notes[i];
+        ok = ok && n.start >= 0 && n.length >= 1 && n.start + n.length <= line.length && n.note >= low && n.note <= high && n.velocity >= 1
+             && n.velocity <= 127;
+        if (i + 1 < line.notes.size())
+        {
+            const auto& m = line.notes[i + 1];
+            ok = ok && (m.start > n.start || (m.start == n.start && m.note > n.note));
+            ok = ok && (! mono || m.start >= n.start + n.length);
+        }
+    }
+    return ok;
+}
+
+bool isStrongPosition (const Progression& p, int t)
+{
+    return t % 8 == 0 || chordChangesAt (p, t);
+}
+
+void testChordScales()
+{
+    std::printf ("Escala de cada acorde: la de la tonalidad, la del modo prestado (bVI en Do mayor canta en Do menor) o la "
+                 "cromatica; el papel de cada nota; el largo de una linea\n");
+
+    const Key cMajor = key ("C major"), aMinor = key ("A minor");
+    const Chord flatSix = chordFor ({ 6, -1, chordType ("") }, cMajor); // A♭
+    CHECK (chordScaleSource (flatSix, cMajor) == Mode::aeolian);
+    const auto mask = chordScaleMask (flatSix, cMajor);
+    for (const int pc : { 0, 2, 3, 5, 7, 8, 10 })
+        CHECK ((mask >> pc) & 1);
+    for (const int pc : { 4, 9, 11 })
+        CHECK (! ((mask >> pc) & 1));
+    CHECK (chordScaleSource (chord ("Am"), aMinor) == std::nullopt && chordScaleMask (chord ("Am"), aMinor) == scaleMask (aMinor));
+    const Chord flatTwo = chordFor ({ 2, -1, chordType ("") }, aMinor); // B♭, del frigio
+    CHECK (chordScaleSource (flatTwo, aMinor) == Mode::phrygian);
+    CHECK (noteRole (64, chord ("Am"), aMinor) == NoteRole::chordTone); // E
+    CHECK (noteRole (71, chord ("Am"), aMinor) == NoteRole::scaleTone); // B: la 9.ª
+    CHECK (noteRole (70, chord ("Am"), aMinor) == NoteRole::chromatic); // B♭
+    CHECK (noteRole (70, flatTwo, aMinor) == NoteRole::chordTone);
+    CHECK (noteRole (71, flatTwo, aMinor) == NoteRole::chromatic);      // B natural sobre B♭: fuera del frigio
+    // Un acorde que ningún modo paralelo tiene (D♭aug en Do mayor): cada tono reemplaza la nota de su letra.
+    const auto odd = chordScaleMask (chord ("Dbaug"), cMajor);
+    CHECK (((odd >> 1) & 1) && ! ((odd >> 2) & 1) && ((odd >> 9) & 1) && ! ((odd >> 8) & 1));
+
+    CHECK (lineLength (progressionOf ("i bVI bIII bVII")) == 64);
+    CHECK (lineLength (progressionOf ("i bII")) == 64);                 // 2 compases → 2 vueltas
+    CHECK (lineLength (progressionOf ("i bII i", { 2, 2, 2 })) == 72); // 6 tiempos → 3 vueltas
+    CHECK (lineLength (progressionOf ("i bVI bIII bVII i bVI bIII bVII", { 16, 16, 16, 16, 16, 16, 16, 16 })) == maxLineSixteenths);
+    CHECK (lineLength (Progression {}) == 0 && generateMelody (Progression {}, aMinor, {}).length == 0);
+    CHECK (chordChangesAt (progressionOf ("i bII", { 4, 2 }), 16) && ! chordChangesAt (progressionOf ("i bII", { 4, 2 }), 8));
+    CHECK (chordChangesAt (progressionOf ("i bII", { 4, 2 }), 24)); // la vuelta siguiente
+}
+
+void testMelodies()
+{
+    std::printf ("Melodias: deterministas, dentro del rango y de la escala de cada acorde, sin saltos de mas de una octava, "
+                 "apoyos en notas del acorde, la frase cierra en el acorde; densidad, motivo y estilos (12 tonicas x 4 modos)\n");
+
+    const char* progressions[] { "i bVI bIII bVII", "i bII", "i bVII bVI V", "I V vi IV", "Imaj7 bVImaj7 iv9", "i iv", "i bII i bVII" };
+    const Mode modes[] { Mode::aeolian, Mode::phrygian, Mode::ionian, Mode::dorian };
+    std::array<int, melodyStyleCount> strongNotes {}, strongChordTones {};
+    bool formed = true, inScale = true, leaps = true, endings = true, deterministic = true, denser = true, arpeggioTones = true;
+    int differentSeeds = 0, comparisons = 0;
+    for (const char* text : progressions)
+        for (const Mode mode : modes)
+            for (int tonic = 0; tonic < 12; ++tonic)
+            {
+                const auto progression = progressionOf (text);
+                const Key k = standardKey (tonic, mode);
+                for (int style = 0; style < melodyStyleCount; ++style)
+                {
+                    std::size_t sparseCount = 0;
+                    for (const double density : { 0.0, 0.5, 1.0 })
+                    {
+                        MelodyOptions options;
+                        options.style = static_cast<MelodyStyle> (style);
+                        options.density = density;
+                        options.seed = static_cast<std::uint32_t> (1 + tonic);
+                        const auto line = generateMelody (progression, k, options);
+                        formed = formed && wellFormed (line, options.low, options.high, true) && line.length == lineLength (progression)
+                                 && ! line.notes.empty();
+                        if (line.notes.empty())
+                            continue;
+                        for (std::size_t i = 0; i < line.notes.size(); ++i)
+                        {
+                            const auto& n = line.notes[i];
+                            const auto c = *chordAt (progression, k, n.start);
+                            const auto role = noteRole (n.note, c, k);
+                            inScale = inScale && role != NoteRole::chromatic;
+                            if (options.style == MelodyStyle::arpeggio)
+                                arpeggioTones = arpeggioTones && role == NoteRole::chordTone;
+                            if (i > 0)
+                                leaps = leaps && std::abs (n.note - line.notes[i - 1].note) <= (options.style == MelodyStyle::arpeggio ? 20 : 12);
+                            if (isStrongPosition (progression, n.start))
+                            {
+                                ++strongNotes[static_cast<std::size_t> (style)];
+                                strongChordTones[static_cast<std::size_t> (style)] += role == NoteRole::chordTone ? 1 : 0;
+                            }
+                        }
+                        const auto& last = line.notes[line.notes.size() - 1];
+                        endings = endings && noteRole (last.note, *chordAt (progression, k, last.start), k) == NoteRole::chordTone;
+
+                        if (density == 0.0)
+                            sparseCount = line.notes.size();
+                        if (density == 1.0)
+                            denser = denser && line.notes.size() > sparseCount;
+                        if (density == 0.5)
+                        {
+                            deterministic = deterministic && generateMelody (progression, k, options) == line;
+                            auto other = options;
+                            other.seed += 100;
+                            ++comparisons;
+                            differentSeeds += generateMelody (progression, k, other) == line ? 0 : 1;
+                        }
+                    }
+                }
+            }
+    CHECK (formed);
+    CHECK (inScale);
+    CHECK (leaps);
+    CHECK (endings);
+    CHECK (deterministic);
+    std::printf ("    %d de %d semillas distintas dieron otra melodia\n", differentSeeds, comparisons);
+    CHECK (differentSeeds * 10 >= comparisons * 7); // el arpegio solo tiene 4 figuras: puede repetirse
+    CHECK (denser);
+    CHECK (arpeggioTones);
+    for (int style = 0; style < melodyStyleCount; ++style)
+    {
+        const auto i = static_cast<std::size_t> (style);
+        const double share = strongNotes[i] > 0 ? static_cast<double> (strongChordTones[i]) / strongNotes[i] : 0.0;
+        std::printf ("    estilo %s: %.0f%% de los apoyos en notas del acorde\n", std::string (melodyStyleNames[i]).c_str(), 100.0 * share);
+        CHECK (share >= (style == static_cast<int> (MelodyStyle::rnb) ? 0.6 : 0.85));
+    }
+
+    // El motivo se repite: en el gancho, el compás 3 tiene el mismo ritmo que el 1, y el 4 cierra con una nota larga
+    // en el tiempo 3 (y nada después).
+    const auto reggaeton = progressionOf ("i bVI bIII bVII");
+    const Key aMinor = key ("A minor");
+    const auto line = generateMelody (reggaeton, aMinor, MelodyOptions {});
+    std::vector<int> bar1, bar3, bar4;
+    for (const auto& n : line.notes)
+    {
+        if (n.start < 16)
+            bar1.push_back (n.start);
+        else if (n.start >= 32 && n.start < 48)
+            bar3.push_back (n.start - 32);
+        else if (n.start >= 48)
+            bar4.push_back (n.start - 48);
+    }
+    CHECK (! bar1.empty() && bar1 == bar3);
+    CHECK (! bar4.empty() && bar4.back() == 8);
+    CHECK (line.notes[line.notes.size() - 1].length >= 4);
+    // Mismo acorde que en el compás 1 (i bII i bVII: el compás 3 = i): el motivo vuelve con las mismas notas.
+    const auto phrygian = progressionOf ("i bII i bVII");
+    MelodyOptions sung;
+    sung.style = MelodyStyle::sung;
+    const auto repeated = generateMelody (phrygian, key ("E phrygian"), sung);
+    int same = 0, total = 0;
+    for (const auto& n : repeated.notes)
+        if (n.start < 16)
+        {
+            ++total;
+            for (const auto& m : repeated.notes)
+                same += m.start == n.start + 32 && m.note == n.note ? 1 : 0;
+        }
+    CHECK (total > 0 && same * 2 >= total);
+
+    // El rango se respeta aunque venga al revés o sea de menos de una octava (se amplía a una).
+    MelodyOptions narrow;
+    narrow.low = 72;
+    narrow.high = 70;
+    CHECK (wellFormed (generateMelody (reggaeton, aMinor, narrow), 70, 82, true));
+
+    // renderLine: dos vueltas, en negras.
+    const auto events = renderLine (line, 2);
+    CHECK (events.size() == 2 * line.notes.size());
+    CHECK (std::abs (events[line.notes.size()].start - (16.0 + line.notes[0].start / 4.0)) < 1e-9);
+    CHECK (renderLine (Line {}, 3).empty());
+}
+
+void testBassLines()
+{
+    std::printf ("Bajos: la fundamental en cada cambio de acorde, el 3+3+2 del dembow, la octava, el walking con "
+                 "aproximaciones, el pedal de tonica; dentro del rango, moviendose poco\n");
+
+    const Key aMinor = key ("A minor");
+    const auto reggaeton = progressionOf ("i bVI bIII bVII");
+    bool formed = true, rootsOnChanges = true, pedalTonic = true, deterministic = true, approaches = true;
+    const char* progressions[] { "i bVI bIII bVII", "i bII", "i bVII bVI V", "I V vi IV", "i bII i bVII" };
+    for (const char* text : progressions)
+        for (int tonic = 0; tonic < 12; ++tonic)
+            for (int style = 0; style < bassStyleCount; ++style)
+                for (const double density : { 0.0, 0.5, 1.0 })
+                {
+                    const auto progression = progressionOf (text, { 4, 2, 2, 8 });
+                    const Key k = standardKey (tonic, Mode::aeolian);
+                    BassOptions options;
+                    options.style = static_cast<BassStyle> (style);
+                    options.density = density;
+                    options.seed = static_cast<std::uint32_t> (tonic + 1);
+                    const auto line = generateBass (progression, k, options);
+                    formed = formed && wellFormed (line, options.low, options.high, true) && line.length == lineLength (progression);
+                    deterministic = deterministic && generateBass (progression, k, options) == line;
+                    for (std::size_t i = 0; i < line.notes.size(); ++i)
+                    {
+                        const auto& n = line.notes[i];
+                        const auto c = *chordAt (progression, k, n.start);
+                        if (options.style == BassStyle::pedal)
+                            pedalTonic = pedalTonic && wrap12 (n.note) == k.tonic.pitchClass();
+                        else if (chordChangesAt (progression, n.start))
+                            rootsOnChanges = rootsOnChanges && wrap12 (n.note) == c.root.pitchClass();
+                        // Lo que no es de la escala del acorde solo puede ser una aproximación cromática al siguiente.
+                        if (noteRole (n.note, c, k) == NoteRole::chromatic)
+                        {
+                            const auto& next = line.notes[(i + 1) % line.notes.size()];
+                            approaches = approaches && std::abs (next.note - n.note) == 1;
+                        }
+                    }
+                    if (options.style != BassStyle::pedal)
+                        for (int base = 0; base < line.length; base += progression.totalBeats() * 4)
+                            for (int s = 0; s < static_cast<int> (progression.steps.size()); ++s)
+                            {
+                                const int change = base + progression.stepStart (s);
+                                rootsOnChanges = rootsOnChanges && std::any_of (line.notes.begin(), line.notes.end(), [change] (const LineNote& n) {
+                                                     return n.start == change;
+                                                 });
+                            }
+                }
+    CHECK (formed);
+    CHECK (rootsOnChanges);
+    CHECK (pedalTonic);
+    CHECK (deterministic);
+    CHECK (approaches);
+
+    // Dembow denso en la del reggaetón: golpes en 0 3 6 8 11 14 de cada compás; la fundamental de La en A2 (33, 55 Hz,
+    // con los nombres de FL) y de Am a F baja una 3.ª (F2 = 29) en vez de subir una 6.ª.
+    BassOptions dembow;
+    dembow.density = 1.0;
+    const auto line = generateBass (reggaeton, aMinor, dembow);
+    std::vector<int> firstBar;
+    for (const auto& n : line.notes)
+        if (n.start < 16)
+            firstBar.push_back (n.start);
+    CHECK ((firstBar == std::vector<int> { 0, 3, 6, 8, 11, 14 }));
+    CHECK (line.notes[0].note == 33);
+    const auto atBar2 = std::find_if (line.notes.begin(), line.notes.end(), [] (const LineNote& n) { return n.start == 16; });
+    CHECK (atBar2 != line.notes.end() && atBar2->note == 29);
+    // Fundamental con poca densidad: una nota por compás que dura el compás.
+    BassOptions root;
+    root.style = BassStyle::root;
+    root.density = 0.0;
+    const auto roots = generateBass (reggaeton, aMinor, root);
+    CHECK (roots.notes.size() == 4 && roots.notes[0].length == 16 && roots.notes[3].start == 48);
+    // Octavas: fundamental y octava alternadas.
+    BassOptions octaves;
+    octaves.style = BassStyle::octaves;
+    const auto oct = generateBass (reggaeton, aMinor, octaves);
+    CHECK (oct.notes.size() >= 2 && oct.notes[1].note == oct.notes[0].note + 12);
+}
+
+void testVariations()
+{
+    std::printf ("Variaciones: cantidad 0 = la misma; deterministas; dentro del rango; los apoyos cambiados en notas del "
+                 "acorde; el primer compas casi igual; mas cantidad = mas cambios\n");
+
+    const Key aMinor = key ("A minor");
+    const auto reggaeton = progressionOf ("i bVI bIII bVII");
+    bool zero = true, deterministic = true, formed = true, strongFit = true, seedsDiffer = true;
+    long long changedLow = 0, changedHigh = 0, firstBarKept = 0, firstBarTotal = 0;
+    for (int style = 0; style < melodyStyleCount; ++style)
+        for (std::uint32_t seed = 1; seed <= 12; ++seed)
+        {
+            MelodyOptions options;
+            options.style = static_cast<MelodyStyle> (style);
+            options.seed = seed;
+            const auto source = generateMelody (reggaeton, aMinor, options);
+            VariationOptions none;
+            none.amount = 0.0;
+            zero = zero && varyMelody (source, reggaeton, aMinor, none) == source;
+
+            const auto countChanged = [&] (const Line& varied) {
+                long long changed = 0;
+                for (const auto& n : varied.notes)
+                    changed += std::none_of (source.notes.begin(), source.notes.end(), [&n] (const LineNote& m) { return m == n; }) ? 1 : 0;
+                return changed;
+            };
+            for (const double amount : { 0.2, 1.0 })
+            {
+                VariationOptions vary;
+                vary.amount = amount;
+                vary.seed = seed * 3;
+                vary.low = options.low;
+                vary.high = options.high;
+                const auto varied = varyMelody (source, reggaeton, aMinor, vary);
+                deterministic = deterministic && varyMelody (source, reggaeton, aMinor, vary) == varied;
+                formed = formed && wellFormed (varied, options.low, options.high, false) && varied.length == source.length;
+                auto otherSeed = vary;
+                otherSeed.seed += 1;
+                seedsDiffer = seedsDiffer && (amount < 1.0 || varyMelody (source, reggaeton, aMinor, otherSeed) != varied);
+                for (const auto& n : varied.notes)
+                {
+                    const bool original = std::any_of (source.notes.begin(), source.notes.end(), [&n] (const LineNote& m) {
+                        return m.start == n.start && m.note == n.note;
+                    });
+                    if (! original && isStrongPosition (reggaeton, n.start))
+                        strongFit = strongFit && noteRole (n.note, *chordAt (reggaeton, aMinor, n.start), aMinor) == NoteRole::chordTone;
+                }
+                (amount < 0.5 ? changedLow : changedHigh) += countChanged (varied);
+                if (amount >= 1.0)
+                    for (const auto& n : source.notes)
+                        if (n.start < 16)
+                        {
+                            ++firstBarTotal;
+                            firstBarKept += std::any_of (varied.notes.begin(), varied.notes.end(), [&n] (const LineNote& m) { return m == n; }) ? 1 : 0;
+                        }
+            }
+        }
+    CHECK (zero);
+    CHECK (deterministic);
+    CHECK (formed);
+    CHECK (strongFit);
+    CHECK (seedsDiffer);
+    CHECK (changedHigh > 2 * changedLow && changedLow > 0);
+    std::printf ("    con cantidad 1, el primer compas conserva el %.0f%% de sus notas\n",
+                 100.0 * static_cast<double> (firstBarKept) / static_cast<double> (std::max (1LL, firstBarTotal)));
+    CHECK (firstBarKept * 2 >= firstBarTotal);
+
+    // Una melodía "capturada" (escrita a mano) se varía igual, y lo que no se toca queda igual aunque no sea del acorde.
+    Line written;
+    written.length = 64;
+    for (int bar = 0; bar < 4; ++bar)
+        for (const auto& [slot, note] : { std::pair { 0, 71 }, std::pair { 4, 72 }, std::pair { 8, 76 }, std::pair { 12, 74 } })
+            written.notes.push_back ({ bar * 16 + slot, 4, note, 100 });
+    VariationOptions light;
+    light.amount = 0.0001;
+    light.low = 60;
+    light.high = 84;
+    const auto kept = varyMelody (written, reggaeton, aMinor, light);
+    CHECK (kept.notes[0].note == 71); // B sobre Am en el tiempo 1 (una apoyatura): no se tocó, no se "corrige"
+}
 } // namespace
 
 int main()
@@ -1011,6 +1360,10 @@ int main()
     testProgressions();
     testBorrowedChords();
     testKeyDetection();
+    testChordScales();
+    testMelodies();
+    testBassLines();
+    testVariations();
 
     if (failures == 0)
         std::printf ("\nTodos los tests de teoria pasaron.\n");

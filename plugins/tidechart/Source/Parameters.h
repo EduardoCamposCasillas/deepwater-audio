@@ -19,8 +19,14 @@ inline constexpr const char* playMode = "playMode"; // 0 = cada tecla su acorde,
 inline constexpr const char* voicing = "voicing";   // el orden de deepwater::theory::VoicingStyle
 inline constexpr const char* rhythm = "rhythm";     // el orden de deepwater::theory::rhythmPatterns
 
+// Fase 6: qué capas suenan en el modo progresión (Off / On).
+inline constexpr const char* playChords = "playChords";
+inline constexpr const char* playBass = "playBass";
+inline constexpr const char* playMelody = "playMelody";
+
 // Versión en la que apareció cada parámetro (VST3 la usa para ordenar los parámetros entre versiones del plugin).
 inline constexpr int versionHintPhase1 = 1;
 inline constexpr int versionHintPhase3 = 2;
 inline constexpr int versionHintPhase4 = 3;
+inline constexpr int versionHintPhase6 = 4;
 } // namespace tidechart::params

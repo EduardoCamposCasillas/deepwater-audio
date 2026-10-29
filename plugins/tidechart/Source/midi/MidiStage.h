@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "deepwater/dsp/HostClock.h"
+#include "deepwater/theory/Melody.h"
 #include "deepwater/theory/Progression.h"
 #include "deepwater/theory/Rhythm.h"
 #include "midi/ChordTrigger.h"
@@ -48,7 +49,21 @@ namespace tidechart::midi
 // Así un salto, un loop o un cambio de tempo dan solos el acorde de esa posición, sin historia que se desincronice.
 // Con el host parado no hay ritmo: el acorde suena sostenido (para escuchar lo que hay en esa posición).
 //
+// LAS LÍNEAS (Fase 6): el bajo y la melodía generados (o capturados) suenan en el modo progresión, con la misma idea: en
+// cada semicorchea, las notas de la línea que caen en esa posición de su vuelta deberían sonar; las que suenan y ya no
+// (terminó la nota, salto, loop, la línea cambió) se sueltan, y las que deberían y no suenan se atacan (también a mitad
+// de nota tras un salto, como los acordes). Cada nota va en una "voz" (un slot del ChordTrigger), así comparten la
+// cuenta de notas con los acordes: si la melodía toca una nota que ya suena en el acorde, el instrumento nunca recibe
+// dos note-on seguidos. Con el host parado las líneas callan (sin tiempo, una melodía no tiene sentido). Las capas
+// (acordes, bajo, melodía) se encienden por separado; en el modo teclas solo suenan los acordes.
+//
 // Sink: sink (const std::uint8_t* data, int size, int sample), el que escribe en el MidiBuffer de salida.
+enum class LineKind
+{
+    bass,
+    melody,
+};
+
 class MidiStage
 {
 public:
@@ -80,6 +95,11 @@ public:
         voicedValid = false;
     }
     [[nodiscard]] const deepwater::theory::Progression& getProgression() const noexcept { return progression; }
+
+    // Hilo de audio, antes de beginBlock: una línea (Fase 6) que publicó la GUI. Copia ~8 KB: llamarlo solo cuando cambió.
+    // Lo que suene de la línea anterior se suelta o se mantiene en la evaluación siguiente (si la nota sigue igual).
+    void setLine (LineKind which, const deepwater::theory::Line& line) noexcept { lines[static_cast<std::size_t> (which)] = line; }
+    [[nodiscard]] const deepwater::theory::Line& getLine (LineKind which) const noexcept { return lines[static_cast<std::size_t> (which)]; }
 
     // Al principio de cada bloque, antes de los eventos: atiende las peticiones pendientes en la muestra 0. 'blockClock'
     // es el reloj del host ya avanzado a este bloque (nullptr = sin tiempo: todo sostenido, como en la Fase 3).
@@ -148,6 +168,8 @@ public:
         const long long tick = tickAt (0);
         const bool newTick = tick != lastTick;
         lastTick = tick;
+        if (newTick)
+            ++tickSerial;
         evaluate (0, newTick, sink);
     }
 
@@ -174,7 +196,10 @@ public:
             if (message.isNoteOff())
             {
                 if (isTrigger && --triggerCount == 0)
+                {
                     chords.release (ChordTrigger::progressionSlot, out);
+                    releaseLines (out);
+                }
                 isTrigger = false;
                 return;
             }
@@ -217,6 +242,16 @@ public:
     [[nodiscard]] bool progressionSounding() const noexcept { return chords.isHeld (ChordTrigger::progressionSlot); }
     // La semicorchea del patrón rítmico en la posición actual (−1 sin ritmo o con el host parado).
     [[nodiscard]] int rhythmStep() const noexcept { return rhythmAt (lastTick).step; }
+    // Qué líneas tienen alguna nota sonando (bit 0 = bajo, bit 1 = melodía).
+    [[nodiscard]] std::uint8_t linesSounding() const noexcept
+    {
+        std::uint8_t mask = 0;
+        for (int kind = 0; kind < ChordTrigger::lineCount; ++kind)
+            for (int v = 0; v < ChordTrigger::lineVoices; ++v)
+                if (chords.isHeld (ChordTrigger::lineSlot (kind, v)))
+                    mask = static_cast<std::uint8_t> (mask | (1u << kind));
+        return mask;
+    }
 
     static constexpr int previewVelocity = 100;
     static constexpr int maxHeldKeys = 64;
@@ -234,6 +269,15 @@ private:
     {
         int slot = -1;
         int channel = 0, note = 0, velocity = 0;
+    };
+
+    // Qué nota de una línea suena en una voz (vale mientras su slot del ChordTrigger esté sonando).
+    struct LineVoice
+    {
+        int index = -1;                     // en line.notes
+        deepwater::theory::LineNote note;   // copia: si la línea cambia, se nota que ya no es la misma
+        int channel = 0;
+        std::uint64_t attackSerial = 0;     // en qué semicorchea (tickSerial) se atacó
     };
 
     // La semicorchea absoluta de una muestra del bloque (desde el principio de la canción). El margen absorbe errores de
@@ -285,6 +329,7 @@ private:
             if (const long long t = tickAt (s); t != lastTick)
             {
                 lastTick = t;
+                ++tickSerial;
                 evaluate (s, true, sink);
             }
         cursor = target;
@@ -304,23 +349,26 @@ private:
         {
             const int step = progression.stepAt (lastTick);
             const bool soundingNow = chords.isHeld (ChordTrigger::progressionSlot);
-            if (triggerCount == 0 || step < 0 || ! r.gate)
+            if (triggerCount == 0 || step < 0 || ! r.gate || ! settings.playChords)
             {
                 if (soundingNow)
                     chords.release (ChordTrigger::progressionSlot, out);
-                return;
             }
-            ensureVoiced (trigger.note - trigger.note % 12);
-            const auto& wanted = voicedSteps[static_cast<std::size_t> (step)];
-            if (! soundingNow || step != playingStep || ! (wanted.notes == playingNotes) || trigger.channel != playingChannel
-                || (isTick && r.hitStart))
+            else
             {
-                chords.press (ChordTrigger::progressionSlot, trigger.channel, deepwater::theory::accentedVelocity (trigger.velocity, r.accent),
-                              wanted, out);
-                playingStep = step;
-                playingNotes = wanted.notes;
-                playingChannel = trigger.channel;
+                ensureVoiced (trigger.note - trigger.note % 12);
+                const auto& wanted = voicedSteps[static_cast<std::size_t> (step)];
+                if (! soundingNow || step != playingStep || ! (wanted.notes == playingNotes) || trigger.channel != playingChannel
+                    || (isTick && r.hitStart))
+                {
+                    chords.press (ChordTrigger::progressionSlot, trigger.channel,
+                                  deepwater::theory::accentedVelocity (trigger.velocity, r.accent), wanted, out);
+                    playingStep = step;
+                    playingNotes = wanted.notes;
+                    playingChannel = trigger.channel;
+                }
             }
+            evaluateLines (sample, isTick, sink);
             return;
         }
 
@@ -333,6 +381,76 @@ private:
             else if (! r.gate && soundingNow)
                 chords.release (key.slot, out);
         }
+    }
+
+    // Las líneas en esta muestra (modo progresión): suelta las notas que ya no tocan y ataca las que faltan.
+    template <typename Sink>
+    void evaluateLines (int sample, bool isTick, Sink& sink)
+    {
+        auto out = [&] (ShortMessage m) { emit (m, sample, sink); };
+        const bool running = clock != nullptr && clock->isRunning() && lastTick != LLONG_MIN && triggerCount > 0;
+        for (int kind = 0; kind < ChordTrigger::lineCount; ++kind)
+        {
+            const auto& line = lines[static_cast<std::size_t> (kind)];
+            const bool enabled = kind == static_cast<int> (LineKind::bass) ? settings.playBass : settings.playMelody;
+            const long long position = running && enabled ? deepwater::theory::linePosition (line, lastTick) : -1;
+            auto& voices = lineVoices[static_cast<std::size_t> (kind)];
+            const auto wants = [&] (const deepwater::theory::LineNote& n) {
+                return position >= n.start && position < n.start + n.length;
+            };
+
+            // 1. Lo que suena y ya no toca: la nota terminó, la línea cambió (otra nota en ese lugar), otro canal, o la
+            //    misma nota vuelve a empezar (la vuelta siguiente de una nota que dura toda la vuelta).
+            for (int v = 0; v < ChordTrigger::lineVoices; ++v)
+            {
+                const int slot = ChordTrigger::lineSlot (kind, v);
+                if (! chords.isHeld (slot))
+                    continue;
+                const auto& voice = voices[static_cast<std::size_t> (v)];
+                const bool same = voice.index < static_cast<int> (line.notes.size())
+                                  && line.notes[static_cast<std::size_t> (voice.index)] == voice.note;
+                const bool restart = isTick && position == voice.note.start && voice.attackSerial != tickSerial;
+                if (position < 0 || ! same || ! wants (voice.note) || voice.channel != trigger.channel || restart)
+                    chords.release (slot, out);
+            }
+            if (position < 0)
+                continue;
+
+            // 2. Lo que debería sonar y no suena. Las notas están ordenadas por inicio: desde la primera que empieza
+            //    después de la posición, ninguna toca.
+            for (int i = 0; i < static_cast<int> (line.notes.size()); ++i)
+            {
+                const auto& n = line.notes[static_cast<std::size_t> (i)];
+                if (n.start > position)
+                    break;
+                if (! wants (n))
+                    continue;
+                int free = -1;
+                bool playing = false;
+                for (int v = 0; v < ChordTrigger::lineVoices && ! playing; ++v)
+                {
+                    if (! chords.isHeld (ChordTrigger::lineSlot (kind, v)))
+                        free = free < 0 ? v : free;
+                    else
+                        playing = voices[static_cast<std::size_t> (v)].index == i;
+                }
+                if (playing || free < 0)
+                    continue; // ya suena, o no quedan voces (más de 8 notas a la vez: se ignora la que sobra)
+                TriggeredChord single { -1, {}, {}, n.note, n.note, false };
+                single.notes.push_back (n.note);
+                chords.press (ChordTrigger::lineSlot (kind, free), trigger.channel, deepwater::theory::accentedVelocity (n.velocity, trigger.velocity),
+                              single, out);
+                voices[static_cast<std::size_t> (free)] = { i, n, trigger.channel, tickSerial };
+            }
+        }
+    }
+
+    template <typename Emit>
+    void releaseLines (Emit&& out)
+    {
+        for (int kind = 0; kind < ChordTrigger::lineCount; ++kind)
+            for (int v = 0; v < ChordTrigger::lineVoices; ++v)
+                chords.release (ChordTrigger::lineSlot (kind, v), out);
     }
 
     // Hace sonar el acorde de una tecla abajo con los ajustes de ahora y el voicing que menos mueve las voces.
@@ -458,10 +576,15 @@ private:
     int playingChannel = 0;
     deepwater::theory::StaticVector<int, 9> playingNotes;
 
+    // Las líneas (Fase 6): el bajo y la melodía, y la nota de cada voz.
+    std::array<deepwater::theory::Line, ChordTrigger::lineCount> lines {};
+    std::array<std::array<LineVoice, ChordTrigger::lineVoices>, ChordTrigger::lineCount> lineVoices {};
+
     // El tiempo del bloque.
     const deepwater::dsp::HostClock* clock = nullptr;
     long long lastTick = LLONG_MIN; // la semicorchea de la última muestra mirada
     int cursor = 0;                 // la última muestra mirada del bloque
+    std::uint64_t tickSerial = 1;   // sube con cada semicorchea nueva (un loop a la misma posición también cuenta)
 };
 
 } // namespace tidechart::midi

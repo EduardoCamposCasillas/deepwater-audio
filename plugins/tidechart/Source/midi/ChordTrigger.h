@@ -46,6 +46,10 @@ struct ChordSettings
     PlayMode playMode = PlayMode::keys;
     deepwater::theory::VoicingStyle voicing = deepwater::theory::VoicingStyle::rootPosition;
     int rhythm = 0; // índice de deepwater::theory::rhythmPatterns (0 = sostenido)
+    // Fase 6: qué capas suenan en el modo progresión (en el modo teclas, siempre los acordes y nada más).
+    bool playChords = true;
+    bool playBass = false;
+    bool playMelody = false;
 
     bool operator== (const ChordSettings&) const = default;
 };
@@ -194,10 +198,16 @@ inline constexpr int numeralCodeBase = 1000;
 class ChordTrigger
 {
 public:
-    // Un "slot" por tecla de entrada (canal × nota), uno para la paleta de la GUI y uno para la progresión (Fase 4).
+    // Un "slot" por tecla de entrada (canal × nota), uno para la paleta de la GUI, uno para la progresión (Fase 4) y uno
+    // por voz de cada línea (Fase 6: el bajo y la melodía, cada nota en su voz).
     static constexpr int previewSlot = numChannels * numNotes;
     static constexpr int progressionSlot = previewSlot + 1;
-    static constexpr int slotCount = progressionSlot + 1;
+    static constexpr int lineCount = 2;
+    static constexpr int lineVoices = 8;
+    static constexpr int firstLineSlot = progressionSlot + 1;
+    static constexpr int slotCount = firstLineSlot + lineCount * lineVoices;
+
+    [[nodiscard]] static constexpr int lineSlot (int line, int voice) noexcept { return firstLineSlot + line * lineVoices + voice; }
 
     [[nodiscard]] static constexpr int keySlot (int channel, int note) noexcept { return (channel & 0x0f) * numNotes + (note & 0x7f); }
 

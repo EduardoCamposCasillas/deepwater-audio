@@ -37,4 +37,8 @@ struct TransportSnapshot
     bool listening = false;
     deepwater::theory::KeyEvidence keyEvidence;
     double heardSeconds = 0.0; // cuánto tiempo sonó algo
+
+    // Fase 6: capturando una melodía (el MIDI pasa tal cual) y qué líneas suenan (bit 0 = bajo, bit 1 = melodía).
+    bool capturing = false;
+    std::uint8_t linesSounding = 0;
 };

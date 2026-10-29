@@ -7,6 +7,7 @@
 
 #include "deepwater/dsp/HostClock.h"
 #include "deepwater/dsp/TripleBuffer.h"
+#include "Lines.h"
 #include "midi/EventLog.h"
 #include "midi/KeyListener.h"
 #include "midi/MidiStage.h"
@@ -18,13 +19,14 @@
 // host (HostClock) para mostrarla en la GUI. Fase 3: cada tecla dispara un acorde de la tonalidad elegida (en bypass,
 // el MIDI pasa tal cual), y la paleta de la GUI hace sonar los acordes con el ratón. Fase 4: la progresión (guardada en
 // el proyecto), sincronizada con el host, con voicing y ritmo. Fase 5: escuchar el MIDI que entra para detectar la
-// tonalidad (mientras escucha, el MIDI pasa tal cual).
+// tonalidad (mientras escucha, el MIDI pasa tal cual). Fase 6: el bajo y la melodía que siguen la progresión (generados
+// fuera del audio y publicados como la progresión) y capturar una melodía tocada para variarla.
 // El MIDI está en tidechart::midi (sin JUCE); aquí solo se conectan los buffers de JUCE, los parámetros y la GUI.
-class TidechartAudioProcessor final : public juce::AudioProcessor
+class TidechartAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
 public:
     TidechartAudioProcessor();
-    ~TidechartAudioProcessor() override = default;
+    ~TidechartAudioProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -92,6 +94,25 @@ public:
     void setListening (bool shouldListen) noexcept { listenRequested.store (shouldListen, std::memory_order_release); }
     bool isListening() const noexcept { return listenRequested.load (std::memory_order_acquire); }
 
+    // Las líneas (Fase 6): el bajo y la melodía, datos del proyecto como la progresión. Hilo de mensajes. Cambiar unos
+    // ajustes regenera esa línea con la progresión y la tonalidad de ahora y la publica al audio. linesChangeCount sube
+    // con cada cambio (también al cargar un proyecto y al regenerar porque cambió la progresión o la tonalidad).
+    tidechart::Lines getLines() const;
+    void setBassSettings (const tidechart::BassSettings&);
+    void setMelodySettings (const tidechart::MelodySettings&);
+    // La melodía capturada pasa a ser la base (sin variación); fijar = la melodía de ahora (con su variación) es la base.
+    void captureMelody (const deepwater::theory::Line&);
+    void fixMelody();
+    std::uint32_t linesChangeCount() const noexcept { return linesChanges.load (std::memory_order_acquire); }
+    // Si cambiaron la progresión o la tonalidad desde la última vez, regenera las líneas (las fijas sin variación no se
+    // tocan). Lo llama un temporizador del procesador (10 veces por segundo, en el hilo de mensajes) y los tests.
+    void refreshLines();
+
+    // Capturar una melodía (Fase 6). Como escuchar: mientras captura, el MIDI pasa tal cual (se oye lo que se toca) y la
+    // GUI recoge las notas del monitor. Cualquier hilo; no se guarda.
+    void setCapturing (bool shouldCapture) noexcept { captureRequested.store (shouldCapture, std::memory_order_release); }
+    bool isCapturing() const noexcept { return captureRequested.load (std::memory_order_acquire); }
+
     // Contadores de notas (note-on) que entraron y salieron, para comprobar el ruteo en FL.
     std::uint32_t notesIn() const noexcept { return notesInCount.load (std::memory_order_relaxed); }
     std::uint32_t notesOut() const noexcept { return notesOutCount.load (std::memory_order_relaxed); }
@@ -102,6 +123,8 @@ private:
     void processMidi (juce::AudioBuffer<float>&, juce::MidiBuffer&, bool bypassed) noexcept;
     deepwater::dsp::TransportInfo readHostTransport() noexcept;
     void publishTransport (int numSamples, bool bypassed) noexcept;
+    void timerCallback() override { refreshLines(); }
+    void publishLines(); // con dataLock tomado
 
     juce::AudioProcessorValueTreeState parameters;
     std::atomic<float>* bypassParam = nullptr;
@@ -113,20 +136,43 @@ private:
     std::atomic<float>* playModeParam = nullptr;
     std::atomic<float>* voicingParam = nullptr;
     std::atomic<float>* rhythmParam = nullptr;
+    std::atomic<float>* playChordsParam = nullptr;
+    std::atomic<float>* playBassParam = nullptr;
+    std::atomic<float>* playMelodyParam = nullptr;
     juce::AudioParameterBool* bypassParameter = nullptr;
 
     // La progresión: la copia del hilo de mensajes (con su lock, que el audio nunca toma: solo serializa a la GUI con
     // setStateInformation, que algunos hosts llaman desde otro hilo), el buzón y la copia del audio.
-    juce::CriticalSection progressionLock;
+    juce::CriticalSection dataLock; // la progresión y las líneas
     deepwater::theory::Progression progression;
     deepwater::dsp::TripleBuffer<deepwater::theory::Progression> progressionBox;
     deepwater::theory::Progression audioProgression;
     std::atomic<std::uint32_t> progressionChanges { 0 };
 
+    // Las líneas: la copia del hilo de mensajes (con dataLock), con qué tonalidad y progresión se generaron, y los
+    // buzones al audio. lineVersion sube después de escribir los dos buzones: el audio solo los lee (8 KB cada uno)
+    // cuando cambia.
+    struct LinesContext
+    {
+        deepwater::theory::Key key;
+        deepwater::theory::Progression progression;
+        bool operator== (const LinesContext&) const = default;
+    };
+    tidechart::Lines lines;
+    LinesContext linesContext;
+    bool linesPublished = false; // ya se generaron (o cargaron) las líneas al menos una vez
+    deepwater::dsp::TripleBuffer<deepwater::theory::Line> bassBox, melodyBox;
+    std::atomic<std::uint32_t> lineVersion { 0 };
+    std::uint32_t audioLineVersion = 0;
+    deepwater::theory::Line audioLine;
+    std::atomic<std::uint32_t> linesChanges { 0 };
+    std::atomic<bool> captureRequested { false };
+
     tidechart::midi::MidiStage stage;
     tidechart::midi::KeyListener keyListener;
     std::atomic<bool> listenRequested { false };
     bool listening = false; // lo que el audio está haciendo (cambia al principio de un bloque)
+    bool capturing = false; // ídem con la captura de una melodía
     deepwater::dsp::HostClock clock;
     // Aquí se arma la salida de cada bloque, que después se copia al buffer del host.
     juce::MidiBuffer outputMidi;
